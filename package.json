@@ -1,0 +1,16 @@
+{
+  "name": "agentic-corporations",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Your Personal Corporation — a self-growing organization of AI agents that work FOR you",
+  "license": "MIT",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "type-check": "pnpm -r type-check"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
