@@ -151,7 +151,7 @@ export class MessageRouter {
 
     // Dispatch to each target
     for (const targetId of targetIds) {
-      this.dispatchToTarget(msg, channel, targetId, members);
+      this.dispatchToTarget(msg, channel, targetId, members, sender);
     }
   }
 
@@ -160,18 +160,24 @@ export class MessageRouter {
     channel: Channel,
     targetId: string,
     members: Member[],
+    sender: Member,
   ): Promise<void> {
-    // Dedup guard
-    const dedupKey = `${msg.originId}:${targetId}`;
-    if (this.dispatched.has(dedupKey)) {
-      return;
+    // Dedup guard (only for agent-to-agent, not user messages)
+    if (sender.type === 'agent') {
+      const dedupKey = `${msg.originId}:${targetId}`;
+      if (this.dispatched.has(dedupKey)) {
+        return;
+      }
+      this.dispatched.add(dedupKey);
     }
 
-    // Cooldown guard
-    const lastTime = this.lastDispatch.get(targetId) ?? 0;
-    if (Date.now() - lastTime < COOLDOWN_MS) {
-      console.log(`[router] Cooldown active for ${targetId}, skipping`);
-      return;
+    // Cooldown guard (only for agent-to-agent, user messages always go through)
+    if (sender.type === 'agent') {
+      const lastTime = this.lastDispatch.get(targetId) ?? 0;
+      if (Date.now() - lastTime < COOLDOWN_MS) {
+        console.log(`[router] Cooldown active for ${targetId}, skipping`);
+        return;
+      }
     }
 
     const agentProc = this.daemon.processManager.getAgent(targetId);
@@ -182,16 +188,14 @@ export class MessageRouter {
     const target = members.find((m) => m.id === targetId);
     if (!target) return;
 
-    // Mark as dispatched
-    this.dispatched.add(dedupKey);
+    // Track cooldown for all dispatches
     this.lastDispatch.set(targetId, Date.now());
 
     // Build context
     const context = this.buildContext(target, channel, members);
 
     // Prefix message with sender name so the agent knows who's talking
-    const sender = members.find((m) => m.id === msg.senderId);
-    const senderLabel = sender?.displayName ?? 'Unknown';
+    const senderLabel = sender.displayName;
     const messageContent = `[${senderLabel}]: ${msg.content}`;
 
     try {
