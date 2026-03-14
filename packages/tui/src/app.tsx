@@ -13,6 +13,7 @@ import { Daemon } from '@agentcorp/daemon';
 import { join } from 'node:path';
 import { OnboardingView } from './views/onboarding.js';
 import { ChatView } from './views/chat.js';
+import { ChannelSwitcher } from './views/channel-switcher.js';
 import { DaemonClient } from './lib/daemon-client.js';
 
 export function App() {
@@ -29,11 +30,19 @@ export function App() {
 function ResumeView({ corpPath }: { corpPath: string }) {
   const [daemon, setDaemon] = useState<Daemon | null>(null);
   const [client, setClient] = useState<DaemonClient | null>(null);
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [messagesPath, setMessagesPath] = useState('');
   const [status, setStatus] = useState('Starting daemon...');
   const [error, setError] = useState('');
+  const [showSwitcher, setShowSwitcher] = useState(false);
+
+  const switchToChannel = (ch: Channel) => {
+    setChannel(ch);
+    setMessagesPath(join(corpPath, ch.path, 'messages.jsonl'));
+    setShowSwitcher(false);
+  };
 
   useEffect(() => {
     let d: Daemon | null = null;
@@ -59,26 +68,28 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         // Start the message router
         d.startRouter();
 
-        // Find the CEO DM channel
+        // Load all channels and members
         const allMembers = readConfig<Member[]>(join(corpPath, MEMBERS_JSON));
         const allChannels = readConfig<Channel[]>(join(corpPath, CHANNELS_JSON));
+        setMembers(allMembers);
+        setChannels(allChannels);
+
+        // Default to CEO DM
         const founder = allMembers.find((m) => m.rank === 'owner');
         const ceo = allMembers.find((m) => m.rank === 'master');
 
-        let dm = allChannels.find(
+        let defaultChannel = allChannels.find(
           (c) => c.kind === 'direct' && founder && ceo &&
           c.memberIds.includes(founder.id) && c.memberIds.includes(ceo.id),
         );
 
         // Fallback to #general
-        if (!dm) {
-          dm = allChannels.find((c) => c.name === 'general');
+        if (!defaultChannel) {
+          defaultChannel = allChannels.find((c) => c.name === 'general');
         }
 
-        if (dm) {
-          setChannel(dm);
-          setMembers(allMembers);
-          setMessagesPath(join(corpPath, dm.path, 'messages.jsonl'));
+        if (defaultChannel) {
+          switchToChannel(defaultChannel);
         } else {
           setError('No channels found');
         }
@@ -101,12 +112,26 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   }
 
   if (channel && client && messagesPath) {
+    if (showSwitcher) {
+      return (
+        <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+          <ChannelSwitcher
+            channels={channels}
+            currentChannelId={channel.id}
+            onSelect={switchToChannel}
+            onClose={() => setShowSwitcher(false)}
+          />
+        </Box>
+      );
+    }
+
     return (
       <ChatView
         channel={channel}
         members={members}
         messagesPath={messagesPath}
         daemonClient={client}
+        onSwitchChannel={() => setShowSwitcher(true)}
       />
     );
   }

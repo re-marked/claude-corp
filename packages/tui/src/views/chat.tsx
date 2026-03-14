@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import Spinner from 'ink-spinner';
 import type { Channel, Member } from '@agentcorp/shared';
 import { MessageList } from '../components/message-list.js';
@@ -12,9 +12,10 @@ interface Props {
   members: Member[];
   messagesPath: string;
   daemonClient: DaemonClient;
+  onSwitchChannel?: () => void;
 }
 
-export function ChatView({ channel, members, messagesPath, daemonClient }: Props) {
+export function ChatView({ channel, members, messagesPath, daemonClient, onSwitchChannel }: Props) {
   const messages = useMessages(messagesPath);
   const [sending, setSending] = useState(false);
 
@@ -22,6 +23,12 @@ export function ChatView({ channel, members, messagesPath, daemonClient }: Props
   const lastMsg = messages[messages.length - 1];
   const founder = members.find((m) => m.rank === 'owner');
   const waiting = lastMsg && founder && lastMsg.senderId === founder.id;
+
+  useInput((input, key) => {
+    if (key.ctrl && input === 'k') {
+      onSwitchChannel?.();
+    }
+  });
 
   const handleSend = useCallback(async (text: string) => {
     setSending(true);
@@ -37,6 +44,7 @@ export function ChatView({ channel, members, messagesPath, daemonClient }: Props
     <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle="single" borderColor="blue" paddingX={1}>
         <Text bold color="blue"># {channel.name}</Text>
+        <Text dimColor>  Ctrl+K to switch</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
         <MessageList messages={messages} members={members} />
