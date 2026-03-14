@@ -206,8 +206,17 @@ export class MessageRouter {
     // Build context with history
     const context = this.buildContext(target, channel, members, recentHistory);
 
-    // Send the triggering message content (history is in system message)
-    const messageContent = msg.content;
+    // If message is just a bare @mention, use the previous message as content
+    const strippedContent = msg.content.replace(/@"[^"]+"|@\S+/g, '').trim();
+    let messageContent = msg.content;
+    if (!strippedContent && recent.length >= 2) {
+      // Find the last message before the bare mention
+      const prev = recent[recent.length - 2];
+      if (prev) {
+        const prevSender = members.find((mem) => mem.id === prev.senderId);
+        messageContent = `[${prevSender?.displayName ?? 'Unknown'}]: ${prev.content}`;
+      }
+    }
 
     try {
       const result = await dispatchToAgent(
