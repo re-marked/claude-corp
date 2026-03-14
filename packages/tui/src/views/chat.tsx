@@ -19,10 +19,10 @@ export function ChatView({ channel, members, messagesPath, daemonClient, onSwitc
   const messages = useMessages(messagesPath);
   const [sending, setSending] = useState(false);
 
-  // Check if the last message is from the user (agent is thinking)
+  // Show thinking indicator only in DM channels when last message is from user
   const lastMsg = messages[messages.length - 1];
   const founder = members.find((m) => m.rank === 'owner');
-  const waiting = lastMsg && founder && lastMsg.senderId === founder.id;
+  const waiting = channel.kind === 'direct' && lastMsg && founder && lastMsg.senderId === founder.id;
 
   useInput((input, key) => {
     if (key.ctrl && input === 'k') {
