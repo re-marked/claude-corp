@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import {
@@ -157,22 +157,11 @@ export class Daemon {
     channel: Channel,
     members: Member[],
   ): DispatchContext {
-    // Read the agent's role prompt from its SOUL.md + AGENTS.md in the corp
-    let rolePrompt = '';
-    if (targetAgent.agentDir) {
-      const agentDir = join(this.corpRoot, targetAgent.agentDir);
-      const soulPath = join(agentDir, 'SOUL.md');
-      const agentsPath = join(agentDir, 'AGENTS.md');
-      try {
-        if (existsSync(soulPath)) rolePrompt += readFileSync(soulPath, 'utf-8');
-        if (existsSync(agentsPath)) rolePrompt += '\n\n' + readFileSync(agentsPath, 'utf-8');
-      } catch {
-        // Fall back to empty
-      }
-    }
-
-    // Normalize corp root to forward slashes for display
+    // Normalize paths to forward slashes for display
     const corpRootDisplay = this.corpRoot.replace(/\\/g, '/');
+    const agentDirDisplay = targetAgent.agentDir
+      ? join(this.corpRoot, targetAgent.agentDir).replace(/\\/g, '/')
+      : corpRootDisplay;
 
     // Channel members by name
     const channelMembers = channel.memberIds
@@ -189,7 +178,7 @@ export class Daemon {
     }));
 
     return {
-      rolePrompt,
+      agentDir: agentDirDisplay,
       corpRoot: corpRootDisplay,
       channelName: channel.name,
       channelMembers,

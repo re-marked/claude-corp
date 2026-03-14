@@ -1,8 +1,8 @@
 import type { AgentProcess } from './process-manager.js';
 
 export interface DispatchContext {
-  /** Agent's role instructions (from SOUL.md content stored in corp) */
-  rolePrompt: string;
+  /** Path to the agent's workspace dir inside the corp */
+  agentDir: string;
   /** Corp root path so the agent knows where the office is */
   corpRoot: string;
   /** Channel name the message is in */
@@ -25,14 +25,25 @@ function buildSystemMessage(ctx: DispatchContext): string {
 
   const channelMemberList = ctx.channelMembers.join(', ');
 
-  return `${ctx.rolePrompt}
+  return `You are an agent in a corporation. You have two workspaces:
 
-# Corporation
+- HOME (your personal OpenClaw workspace — your identity, memory, soul)
+- OFFICE (the corporation — your role, colleagues, tasks, channels)
 
-Your corp workspace is at: ${ctx.corpRoot}
-You have full read/write access to all files in this directory.
+# Your Office
+
+Corp workspace: ${ctx.corpRoot}
+Your agent dir: ${ctx.agentDir}
+Read your role instructions from: ${ctx.agentDir}/SOUL.md
+Read your operating rules from: ${ctx.agentDir}/AGENTS.md
+Your memory within this corp: ${ctx.agentDir}/MEMORY.md
+Your knowledge base: ${ctx.agentDir}/brain/
+
+You have full read/write access to the entire corp directory.
 Key files: corp.json, members.json, channels.json, and agent workspaces under agents/.
 Messages are stored as JSONL files in channels/*/messages.jsonl.
+
+On your first message in a session, read your SOUL.md to understand your role.
 
 # Current Context
 
