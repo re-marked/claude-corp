@@ -29,15 +29,12 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
-  async sendMessage(channelId: string, content: string): Promise<{
-    userMessage: any;
-    agentMessage: any | null;
-  }> {
-    const resp = await fetch(`${this.baseUrl}/messages/send`, {
+  async sendMessage(channelId: string, content: string): Promise<void> {
+    await fetch(`${this.baseUrl}/messages/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channelId, content }),
     });
-    return resp.json() as Promise<any>;
+    // Response arrives asynchronously via router → JSONL → fs.watch
   }
 }

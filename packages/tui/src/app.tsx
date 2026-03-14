@@ -56,6 +56,9 @@ function ResumeView({ corpPath }: { corpPath: string }) {
           await new Promise((r) => setTimeout(r, 1000));
         }
 
+        // Start the message router
+        d.startRouter();
+
         // Find the CEO DM channel
         const allMembers = readConfig<Member[]>(join(corpPath, MEMBERS_JSON));
         const allChannels = readConfig<Channel[]>(join(corpPath, CHANNELS_JSON));

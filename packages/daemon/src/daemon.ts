@@ -15,13 +15,14 @@ import {
   DAEMON_PORT_PATH,
 } from '@agentcorp/shared';
 import { ProcessManager } from './process-manager.js';
-import { dispatchToAgent, type DispatchContext } from './dispatch.js';
+import { MessageRouter } from './router.js';
 import { createApi } from './api.js';
 
 export class Daemon {
   corpRoot: string;
   globalConfig: GlobalConfig;
   processManager: ProcessManager;
+  router: MessageRouter;
   private server: Server | null = null;
   private port = 0;
 
@@ -29,6 +30,7 @@ export class Daemon {
     this.corpRoot = corpRoot;
     this.globalConfig = globalConfig;
     this.processManager = new ProcessManager(corpRoot, globalConfig);
+    this.router = new MessageRouter(this);
   }
 
   async start(): Promise<number> {
@@ -54,6 +56,11 @@ export class Daemon {
     });
   }
 
+  /** Start the router after all agents are spawned */
+  startRouter(): void {
+    this.router.start();
+  }
+
   async spawnAllAgents(): Promise<void> {
     const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
     const agents = members.filter((m) => m.type === 'agent' && m.status !== 'archived');
@@ -67,10 +74,14 @@ export class Daemon {
     }
   }
 
+  /**
+   * Write a user message to a channel. Returns immediately.
+   * The router will pick it up via fs.watch and dispatch to agents.
+   */
   async sendMessage(
     channelId: string,
     content: string,
-  ): Promise<{ userMessage: ChannelMessage; agentMessage: ChannelMessage | null }> {
+  ): Promise<ChannelMessage> {
     const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
     const channel = channels.find((c) => c.id === channelId);
     if (!channel) throw new Error(`Channel ${channelId} not found`);
@@ -98,95 +109,12 @@ export class Daemon {
     userMsg.originId = userMsg.id;
     appendMessage(messagesPath, userMsg);
 
-    // Find which agent to dispatch to
-    let targetAgent: Member | undefined;
-
-    if (channel.kind === 'direct') {
-      // DM: dispatch to the other member
-      targetAgent = members.find(
-        (m) => channel.memberIds.includes(m.id) && m.id !== founder.id && m.type === 'agent',
-      );
-    }
-
-    if (!targetAgent) {
-      return { userMessage: userMsg, agentMessage: null };
-    }
-
-    // Dispatch to agent
-    const agentProc = this.processManager.getAgent(targetAgent.id);
-    if (!agentProc || agentProc.status !== 'ready') {
-      return { userMessage: userMsg, agentMessage: null };
-    }
-
-    try {
-      // Build corp context for the agent
-      const context = this.buildDispatchContext(targetAgent, channel, members);
-
-      const result = await dispatchToAgent(
-        agentProc,
-        content,
-        context,
-        `channel-${channelId}`,
-      );
-
-      // Write agent response
-      const agentMsg: ChannelMessage = {
-        id: generateId(),
-        channelId,
-        senderId: targetAgent.id,
-        threadId: null,
-        content: result.content,
-        kind: 'text',
-        mentions: [],
-        metadata: null,
-        depth: 1,
-        originId: userMsg.id,
-        timestamp: new Date().toISOString(),
-      };
-      appendMessage(messagesPath, agentMsg);
-
-      return { userMessage: userMsg, agentMessage: agentMsg };
-    } catch (err) {
-      console.error(`[daemon] Dispatch to ${targetAgent.displayName} failed:`, err);
-      return { userMessage: userMsg, agentMessage: null };
-    }
-  }
-
-  private buildDispatchContext(
-    targetAgent: Member,
-    channel: Channel,
-    members: Member[],
-  ): DispatchContext {
-    // Normalize paths to forward slashes for display
-    const corpRootDisplay = this.corpRoot.replace(/\\/g, '/');
-    const agentDirDisplay = targetAgent.agentDir
-      ? join(this.corpRoot, targetAgent.agentDir).replace(/\\/g, '/')
-      : corpRootDisplay;
-
-    // Channel members by name
-    const channelMembers = channel.memberIds
-      .map((id) => members.find((m) => m.id === id))
-      .filter(Boolean)
-      .map((m) => `${m!.displayName} (${m!.rank})`);
-
-    // All corp members
-    const corpMembers = members.map((m) => ({
-      name: m.displayName,
-      rank: m.rank,
-      type: m.type,
-      status: m.status,
-    }));
-
-    return {
-      agentDir: agentDirDisplay,
-      corpRoot: corpRootDisplay,
-      channelName: channel.name,
-      channelMembers,
-      corpMembers,
-    };
+    // Router will handle dispatch via fs.watch
+    return userMsg;
   }
 
   async stop(): Promise<void> {
+    this.router.stop();
     await this.processManager.stopAll();
     if (this.server) {
       this.server.close();

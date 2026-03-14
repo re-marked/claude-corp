@@ -26,6 +26,8 @@ export {
   appendMessage,
   readMessages,
   tailMessages,
+  readNewLines,
+  getFileSize,
   parseFrontmatter,
   stringifyFrontmatter,
   readConfig,
