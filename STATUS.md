@@ -7,18 +7,19 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ## What WORKS today
 
-Nothing. Fresh start.
+Layer 1 foundation: types, parsers, corp scaffolding, git integration.
 
 ---
 
 ## Layer 1: Foundation
 
-- [ ] Monorepo setup (pnpm workspaces, packages/shared + daemon + tui)
-- [ ] Type definitions (Member, Channel, Message, Task, Team, Corp)
-- [ ] File format parsers (JSONL reader/writer, markdown+frontmatter, JSON config)
-- [ ] Corp directory structure creation (mkdir, init files)
-- [ ] global-config.json (API keys, default model, preferences)
-- [ ] SimpleGit integration (init, commit, diff, revert)
+- [x] Monorepo setup (pnpm workspaces, packages/shared + daemon + tui)
+- [x] Type definitions (Member, Channel, Message, Task, Team, Corp, Project, AgentConfig, GlobalConfig)
+- [x] File format parsers (JSONL reader/writer, markdown+frontmatter, JSON config)
+- [x] Corp directory structure creation (scaffoldCorp — mkdir, init files, git init, first commit)
+- [x] global-config.json (API keys, default model, preferences)
+- [x] SimpleGit integration (init, commitAll, log, diff, status)
+- [x] Utilities (ULID generation, @mention extraction, path helpers, constants)
 
 ## Layer 2: CEO
 

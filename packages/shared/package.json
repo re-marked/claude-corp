@@ -9,5 +9,10 @@
     "build": "tsup src/index.ts --format esm --dts",
     "dev": "tsup src/index.ts --format esm --dts --watch",
     "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "simple-git": "^3.33.0",
+    "ulid": "^3.0.2"
   }
 }

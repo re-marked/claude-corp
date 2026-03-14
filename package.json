@@ -12,5 +12,13 @@
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
   }
 }
