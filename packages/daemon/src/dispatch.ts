@@ -51,6 +51,10 @@ Messages are stored as JSONL files in channels/*/messages.jsonl.
 
 On your first message in a session, read your SOUL.md to understand your role.
 
+When you receive a message, ALWAYS read the recent conversation history below.
+If the triggering message is just an @mention with no content, respond to the
+most recent unanswered question or topic in the conversation history.
+
 # Current Context
 
 Channel: #${ctx.channelName}
