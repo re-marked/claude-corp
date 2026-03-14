@@ -1,13 +1,14 @@
 # AgentCorp — Status
 
-Nothing is built yet. This file tracks what exists vs what's planned.
 Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
 ## What WORKS today
 
-Layer 1 foundation: types, parsers, corp scaffolding, git integration.
+- Layer 1: types, parsers, corp scaffolding, git integration
+- Layer 2: CEO connects to user's existing OpenClaw, TUI onboarding + chat
+- Layer 3 (partial): async router with fs.watch, @mention dispatch, channel switching
 
 ---
 
@@ -23,27 +24,33 @@ Layer 1 foundation: types, parsers, corp scaffolding, git integration.
 
 ## Layer 2: CEO
 
-- [ ] OpenClaw process spawning via execa (single agent)
-- [ ] Port assignment and tracking
-- [ ] API key injection (global-config -> auth-profiles.json)
-- [ ] TUI onboarding wizard (name your corp)
-- [ ] CEO SOUL.md and starter config
-- [ ] Basic TUI chat view (send/receive via JSONL + fs.watch)
-- [ ] CEO onboarding interview flow
+- [x] Two-tier architecture: CEO = user's OpenClaw, workers = shared corp gateway (future)
+- [x] Auto-detect user's OpenClaw gateway from ~/.openclaw/openclaw.json
+- [x] Remote agent mode (connect to existing gateway, no process spawning)
+- [x] Local agent mode (spawn OpenClaw via execa, port allocation, health check)
+- [x] CEO workspace files (SOUL.md, AGENTS.md, HEARTBEAT.md, IDENTITY.md, USER.md)
+- [x] Corp context injection (system message with agent dir, corp path, members)
+- [x] File-reference context (point agent to SOUL.md/AGENTS.md, don't inline)
+- [x] TUI onboarding wizard (name yourself, name your corp, connect to OpenClaw)
+- [x] Basic TUI chat view (send/receive via JSONL + fs.watch)
+- [ ] CEO onboarding interview flow (emergent from SOUL.md, not hardcoded)
 - [ ] CEO bootstraps corp structure from conversation
 
 ## Layer 3: Messaging
 
-- [ ] Daemon: fs.watch on JSONL files
-- [ ] @mention extraction (regex: @Name, @"Multi Word Name")
-- [ ] Member resolution via members.json
-- [ ] Webhook dispatch to OpenClaw /hooks/agent
-- [ ] DM auto-routing (every message in DM wakes the other member)
-- [ ] Guards: depth (max 5), dedup, cooldown
-- [ ] Multiple channel support
-- [ ] Channel switching (Ctrl+K fuzzy finder)
+- [x] Daemon router: fs.watch on all channel JSONL files with byte-offset tracking
+- [x] Async dispatch (sendMessage writes to JSONL, router dispatches via fs.watch)
+- [x] DM auto-routing (every message in DM wakes the other member)
+- [x] @mention routing in broadcast/team/system channels
+- [x] Guards: depth (max 5), dedup, cooldown (agent-to-agent only, user bypasses)
+- [x] Recent channel history (last 50 messages) included in every dispatch
+- [x] Smart thinking spinner (shows only when dispatch expected, 30s timeout)
+- [x] Channel switching (Tab key, fuzzy search, arrow navigation)
+- [x] Auto-watch new channel directories
+- [x] Dispatch prediction (sendMessage returns { dispatching: boolean })
 - [ ] Member sidebar in channel view
 - [ ] Thread support (threadId in messages)
+- [ ] Fix: old messages replayed on daemon restart
 
 ## Layer 4: Tasks
 
@@ -57,12 +64,13 @@ Layer 1 foundation: types, parsers, corp scaffolding, git integration.
 
 ## Layer 5: Autonomy
 
-- [ ] Rank-based agent creation (write files + signal daemon to spawn)
+- [ ] Shared corp gateway (one OpenClaw process, agents.list for all workers)
+- [ ] Agent hiring flow (create workspace + add to corp gateway)
+- [ ] Rank-based agent creation (write files + signal daemon)
 - [ ] Agent-to-agent @mention chaining (recursive dispatch)
 - [ ] Git commit after each prompt loop
 - [ ] Git Janitor agent (conflict resolution, clean commits)
 - [ ] Starter pack: CEO bootstraps HR, Adviser, Git Janitor, project + leader
-- [ ] Agents write freely to filesystem
 - [ ] Agent suspension/resume
 - [ ] Agent archival
 
@@ -100,9 +108,9 @@ Layer 1 foundation: types, parsers, corp scaffolding, git integration.
 
 The shortest path to "agents acting autonomously in a visible workspace":
 
-1. **Foundation** — file formats, corp structure, git integration
-2. **CEO chat** — spawn one OpenClaw, talk to it in TUI
-3. **Daemon router** — fs.watch + @mention dispatch = agents talk to each other
+1. ~~**Foundation** — file formats, corp structure, git integration~~
+2. ~~**CEO chat** — connect to OpenClaw, talk to it in TUI~~
+3. ~~**Daemon router** — fs.watch + @mention dispatch = agents talk to each other~~
 4. **Tasks + heartbeat** — agents discover work on their own
 5. **Agent creation** — agents create agents, corporation grows
 
