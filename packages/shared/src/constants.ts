@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 export const AGENTCORP_HOME = join(homedir(), '.agentcorp');
+export const OPENCLAW_HOME = join(homedir(), '.openclaw');
 export const GLOBAL_CONFIG_PATH = join(AGENTCORP_HOME, 'global-config.json');
 export const CORPS_INDEX_PATH = join(AGENTCORP_HOME, 'corps', 'index.json');
 export const DAEMON_PID_PATH = join(AGENTCORP_HOME, '.daemon.pid');

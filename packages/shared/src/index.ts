@@ -53,3 +53,17 @@ export {
 
 // Corp management
 export { scaffoldCorp, listCorps, findCorp } from './corp.js';
+
+// Agent setup
+export {
+  setupAgentWorkspace,
+  createDmChannel,
+  addMemberToRegistry,
+  addChannelToRegistry,
+  addMemberToChannel,
+} from './agent-setup.js';
+export type { AgentSetupOpts, AgentSetupResult } from './agent-setup.js';
+
+// CEO
+export { setupCeo } from './ceo.js';
+export type { CeoSetupResult } from './ceo.js';

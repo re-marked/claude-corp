@@ -12,4 +12,9 @@ export interface GlobalConfig {
     model: string;
     provider: string;
   };
+  /** Auto-detected from ~/.openclaw/openclaw.json — not persisted to disk */
+  userGateway?: {
+    port: number;
+    token: string;
+  };
 }

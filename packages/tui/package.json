@@ -7,12 +7,21 @@
     "agentcorp": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
-    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "build": "tsup src/index.tsx --format esm",
+    "dev": "tsup src/index.tsx --format esm --watch",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentcorp/daemon": "workspace:*",
     "@agentcorp/shared": "workspace:*",
-    "@agentcorp/daemon": "workspace:*"
+    "ink": "^6.8.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.4",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/ws": "^8.18.1"
   }
 }
