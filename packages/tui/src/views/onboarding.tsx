@@ -100,6 +100,9 @@ export function OnboardingView() {
         await new Promise((r) => setTimeout(r, 1000));
       }
 
+      // Start the message router
+      d.startRouter();
+
       if (!ready) {
         if (globalConfig.userGateway) {
           setError('Cannot reach your OpenClaw gateway. Make sure it is running: openclaw gateway run');

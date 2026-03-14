@@ -11,6 +11,8 @@ export interface DispatchContext {
   channelMembers: string[];
   /** All corp members with their roles */
   corpMembers: { name: string; rank: string; type: string; status: string }[];
+  /** Recent messages in the channel, formatted as "[Name (rank)] HH:MM: content" */
+  recentHistory: string[];
 }
 
 export interface DispatchResult {
@@ -24,6 +26,10 @@ function buildSystemMessage(ctx: DispatchContext): string {
     .join('\n');
 
   const channelMemberList = ctx.channelMembers.join(', ');
+
+  const history = ctx.recentHistory.length > 0
+    ? `\n\n# Recent Conversation in #${ctx.channelName}\n\n${ctx.recentHistory.join('\n')}`
+    : '';
 
   return `You are an agent in a corporation. You have two workspaces:
 
@@ -52,7 +58,7 @@ Members in this channel: ${channelMemberList}
 
 # All Members
 
-${memberList}`;
+${memberList}${history}`;
 }
 
 export async function dispatchToAgent(

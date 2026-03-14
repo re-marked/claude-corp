@@ -29,15 +29,13 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
-  async sendMessage(channelId: string, content: string): Promise<{
-    userMessage: any;
-    agentMessage: any | null;
-  }> {
+  async sendMessage(channelId: string, content: string): Promise<{ dispatching: boolean }> {
     const resp = await fetch(`${this.baseUrl}/messages/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channelId, content }),
     });
-    return resp.json() as Promise<any>;
+    const data = await resp.json() as { dispatching?: boolean };
+    return { dispatching: data.dispatching ?? false };
   }
 }
