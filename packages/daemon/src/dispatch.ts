@@ -1,20 +1,65 @@
 import type { AgentProcess } from './process-manager.js';
 
+export interface DispatchContext {
+  /** Agent's role instructions (from SOUL.md content stored in corp) */
+  rolePrompt: string;
+  /** Corp root path so the agent knows where the office is */
+  corpRoot: string;
+  /** Channel name the message is in */
+  channelName: string;
+  /** Names of members in this channel */
+  channelMembers: string[];
+  /** All corp members with their roles */
+  corpMembers: { name: string; rank: string; type: string; status: string }[];
+}
+
 export interface DispatchResult {
   content: string;
   model: string;
 }
 
+function buildSystemMessage(ctx: DispatchContext): string {
+  const memberList = ctx.corpMembers
+    .map((m) => `- ${m.name} (${m.rank}, ${m.type}, ${m.status})`)
+    .join('\n');
+
+  const channelMemberList = ctx.channelMembers.join(', ');
+
+  return `${ctx.rolePrompt}
+
+# Corporation
+
+Your corp workspace is at: ${ctx.corpRoot}
+You have full read/write access to all files in this directory.
+Key files: corp.json, members.json, channels.json, and agent workspaces under agents/.
+Messages are stored as JSONL files in channels/*/messages.jsonl.
+
+# Current Context
+
+Channel: #${ctx.channelName}
+Members in this channel: ${channelMemberList}
+
+# All Members
+
+${memberList}`;
+}
+
 export async function dispatchToAgent(
   agent: AgentProcess,
   message: string,
+  context: DispatchContext,
   sessionUser?: string,
 ): Promise<DispatchResult> {
   const url = `http://127.0.0.1:${agent.port}/v1/chat/completions`;
 
+  const systemMessage = buildSystemMessage(context);
+
   const body: Record<string, unknown> = {
     model: agent.model,
-    messages: [{ role: 'user', content: message }],
+    messages: [
+      { role: 'system', content: systemMessage },
+      { role: 'user', content: message },
+    ],
   };
 
   // Use stable session key for conversation continuity

@@ -1,4 +1,4 @@
-import { writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import {
@@ -15,7 +15,7 @@ import {
   DAEMON_PORT_PATH,
 } from '@agentcorp/shared';
 import { ProcessManager } from './process-manager.js';
-import { dispatchToAgent } from './dispatch.js';
+import { dispatchToAgent, type DispatchContext } from './dispatch.js';
 import { createApi } from './api.js';
 
 export class Daemon {
@@ -119,9 +119,13 @@ export class Daemon {
     }
 
     try {
+      // Build corp context for the agent
+      const context = this.buildDispatchContext(targetAgent, channel, members);
+
       const result = await dispatchToAgent(
         agentProc,
         content,
+        context,
         `channel-${channelId}`,
       );
 
@@ -146,6 +150,51 @@ export class Daemon {
       console.error(`[daemon] Dispatch to ${targetAgent.displayName} failed:`, err);
       return { userMessage: userMsg, agentMessage: null };
     }
+  }
+
+  private buildDispatchContext(
+    targetAgent: Member,
+    channel: Channel,
+    members: Member[],
+  ): DispatchContext {
+    // Read the agent's role prompt from its SOUL.md + AGENTS.md in the corp
+    let rolePrompt = '';
+    if (targetAgent.agentDir) {
+      const agentDir = join(this.corpRoot, targetAgent.agentDir);
+      const soulPath = join(agentDir, 'SOUL.md');
+      const agentsPath = join(agentDir, 'AGENTS.md');
+      try {
+        if (existsSync(soulPath)) rolePrompt += readFileSync(soulPath, 'utf-8');
+        if (existsSync(agentsPath)) rolePrompt += '\n\n' + readFileSync(agentsPath, 'utf-8');
+      } catch {
+        // Fall back to empty
+      }
+    }
+
+    // Normalize corp root to forward slashes for display
+    const corpRootDisplay = this.corpRoot.replace(/\\/g, '/');
+
+    // Channel members by name
+    const channelMembers = channel.memberIds
+      .map((id) => members.find((m) => m.id === id))
+      .filter(Boolean)
+      .map((m) => `${m!.displayName} (${m!.rank})`);
+
+    // All corp members
+    const corpMembers = members.map((m) => ({
+      name: m.displayName,
+      rank: m.rank,
+      type: m.type,
+      status: m.status,
+    }));
+
+    return {
+      rolePrompt,
+      corpRoot: corpRootDisplay,
+      channelName: channel.name,
+      channelMembers,
+      corpMembers,
+    };
   }
 
   async stop(): Promise<void> {
