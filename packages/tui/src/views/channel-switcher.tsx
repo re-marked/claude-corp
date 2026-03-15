@@ -19,7 +19,7 @@ export function ChannelSwitcher({ channels, currentChannelId, onSelect, onClose 
   );
 
   useInput((input, key) => {
-    if (key.escape) {
+    if (key.escape || key.tab || input === '\t') {
       onClose();
       return;
     }

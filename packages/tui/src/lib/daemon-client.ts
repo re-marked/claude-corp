@@ -29,6 +29,25 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  async hireAgent(opts: {
+    creatorId: string;
+    agentName: string;
+    displayName: string;
+    rank: string;
+    scope?: string;
+    scopeId?: string;
+    soulContent?: string;
+    model?: string;
+    provider?: string;
+  }): Promise<{ ok: boolean; member: unknown; dmChannel: unknown }> {
+    const resp = await fetch(`${this.baseUrl}/agents/hire`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    });
+    return resp.json() as Promise<any>;
+  }
+
   async sendMessage(channelId: string, content: string): Promise<{ dispatching: boolean }> {
     const resp = await fetch(`${this.baseUrl}/messages/send`, {
       method: 'POST',

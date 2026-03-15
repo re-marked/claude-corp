@@ -69,3 +69,6 @@ export type { AgentSetupOpts, AgentSetupResult } from './agent-setup.js';
 // CEO
 export { setupCeo } from './ceo.js';
 export type { CeoSetupResult } from './ceo.js';
+
+// Ranks
+export { canHire } from './ranks.js';

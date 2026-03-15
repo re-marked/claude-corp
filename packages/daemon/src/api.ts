@@ -1,5 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Daemon } from './daemon.js';
+import { hireAgent } from './hire.js';
 
 export function createApi(daemon: Daemon): Server {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -49,6 +50,31 @@ export function createApi(daemon: Daemon): Server {
         const memberId = decodeURIComponent(stopMatch[1]!);
         await daemon.processManager.stopAgent(memberId);
         json(res, { ok: true });
+        return;
+      }
+
+      // POST /agents/hire
+      if (method === 'POST' && path === '/agents/hire') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const { creatorId, agentName, displayName, rank } = body;
+        if (!creatorId || !agentName || !displayName || !rank) {
+          json(res, { error: 'creatorId, agentName, displayName, and rank are required' }, 400);
+          return;
+        }
+        const result = await hireAgent(daemon, {
+          creatorId: creatorId as string,
+          agentName: agentName as string,
+          displayName: displayName as string,
+          rank: rank as any,
+          scope: (body.scope as any) ?? undefined,
+          scopeId: (body.scopeId as string) ?? undefined,
+          soulContent: (body.soulContent as string) ?? undefined,
+          agentsContent: (body.agentsContent as string) ?? undefined,
+          heartbeatContent: (body.heartbeatContent as string) ?? undefined,
+          model: (body.model as string) ?? undefined,
+          provider: (body.provider as string) ?? undefined,
+        });
+        json(res, { ok: true, member: result.member, dmChannel: result.dmChannel });
         return;
       }
 

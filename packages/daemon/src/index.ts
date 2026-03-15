@@ -1,6 +1,9 @@
 export { Daemon, isDaemonRunning } from './daemon.js';
 export { ProcessManager } from './process-manager.js';
 export type { AgentProcess, AgentProcessStatus } from './process-manager.js';
+export { CorpGateway } from './corp-gateway.js';
 export { MessageRouter } from './router.js';
+export { hireAgent } from './hire.js';
+export type { HireOpts, HireResult } from './hire.js';
 export { dispatchToAgent } from './dispatch.js';
 export type { DispatchResult, DispatchContext } from './dispatch.js';

@@ -88,7 +88,7 @@ export class MessageRouter {
     }
   }
 
-  private watchChannel(channel: Channel): void {
+  watchChannel(channel: Channel): void {
     const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
     if (!existsSync(msgPath)) return;
     if (this.watchers.has(channel.id)) return;

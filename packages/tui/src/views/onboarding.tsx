@@ -16,6 +16,7 @@ import {
 import { Daemon } from '@agentcorp/daemon';
 import { join } from 'node:path';
 import { ChatView } from './chat.js';
+import { ChannelSwitcher } from './channel-switcher.js';
 import { DaemonClient } from '../lib/daemon-client.js';
 
 type Step = 'your-name' | 'corp-name' | 'spawning' | 'ready';
@@ -28,9 +29,12 @@ export function OnboardingView() {
   const [statusText, setStatusText] = useState('');
   const [daemon, setDaemon] = useState<Daemon | null>(null);
   const [daemonClient, setDaemonClient] = useState<DaemonClient | null>(null);
+  const [channels, setChannels] = useState<Channel[]>([]);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [messagesPath, setMessagesPath] = useState('');
+  const [corpRoot, setCorpRoot] = useState('');
+  const [showSwitcher, setShowSwitcher] = useState(false);
 
   const handleUserNameSubmit = (name: string) => {
     const trimmed = name.trim();
@@ -118,7 +122,9 @@ export function OnboardingView() {
       const dm = allChannels.find((c) => c.id === dmChannel.id) ?? dmChannel;
 
       setMembers(allMembers);
+      setChannels(allChannels);
       setChannel(dm);
+      setCorpRoot(root);
       setMessagesPath(join(root, dm.path, 'messages.jsonl'));
       setStep('ready');
     } catch (err) {
@@ -211,14 +217,34 @@ export function OnboardingView() {
     );
   }
 
+  const switchToChannel = (ch: Channel) => {
+    setChannel(ch);
+    setMessagesPath(join(corpRoot, ch.path, 'messages.jsonl'));
+    setShowSwitcher(false);
+  };
+
   // step === 'ready'
   if (channel && daemonClient && messagesPath) {
+    if (showSwitcher) {
+      return (
+        <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+          <ChannelSwitcher
+            channels={channels}
+            currentChannelId={channel.id}
+            onSelect={switchToChannel}
+            onClose={() => setShowSwitcher(false)}
+          />
+        </Box>
+      );
+    }
+
     return (
       <ChatView
         channel={channel}
         members={members}
         messagesPath={messagesPath}
         daemonClient={daemonClient}
+        onSwitchChannel={() => setShowSwitcher(true)}
       />
     );
   }

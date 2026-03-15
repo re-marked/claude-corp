@@ -63,6 +63,9 @@ export class Daemon {
   }
 
   async spawnAllAgents(): Promise<void> {
+    // Initialize the shared corp gateway before spawning agents
+    await this.processManager.initCorpGateway();
+
     const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
     const agents = members.filter((m) => m.type === 'agent' && m.status !== 'archived');
 
