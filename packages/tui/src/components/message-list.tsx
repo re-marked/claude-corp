@@ -7,16 +7,31 @@ interface Props {
   members: Member[];
 }
 
-const RAINBOW = ['red', 'yellow', 'green', 'cyan', 'blue', 'magenta'] as const;
-
 function RainbowText({ children }: { children: string }) {
+  // Use hex colors for a smooth gradient that looks good at any length
+  const chars = children.split('');
+  const len = Math.max(chars.length, 1);
   return (
     <Text bold>
-      {children.split('').map((char, i) => (
-        <Text key={i} color={RAINBOW[i % RAINBOW.length]}>{char}</Text>
-      ))}
+      {chars.map((char, i) => {
+        const hue = (i / len) * 300; // 0-300 range (red → magenta, skip wrapping back to red)
+        const hex = hslToHex(hue, 80, 65);
+        return <Text key={i} color={hex}>{char}</Text>;
+      })}
     </Text>
   );
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  s /= 100;
+  l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
 }
 
 /** Split message content into plain text and @mention segments. */
