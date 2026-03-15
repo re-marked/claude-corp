@@ -8,6 +8,7 @@ import {
   writeConfig,
   MEMBERS_JSON,
 } from '@agentcorp/shared';
+import { CorpGateway } from './corp-gateway.js';
 
 export type AgentProcessStatus = 'starting' | 'ready' | 'stopped' | 'crashed';
 
@@ -18,8 +19,8 @@ export interface AgentProcess {
   status: AgentProcessStatus;
   gatewayToken: string;
   process: ResultPromise | null;
-  /** 'remote' = connected to external gateway (e.g. CEO on user's OpenClaw), 'local' = daemon-spawned */
-  mode: 'local' | 'remote';
+  /** 'remote' = CEO on user's OpenClaw, 'gateway' = worker on shared corp gateway, 'local' = standalone process */
+  mode: 'local' | 'remote' | 'gateway';
   /** Model identifier for dispatch (e.g. 'openclaw:main', 'openclaw:hr-manager') */
   model: string;
 }
@@ -31,6 +32,7 @@ export class ProcessManager {
   private corpRoot: string;
   private globalConfig: GlobalConfig;
   private openclawBinary: string;
+  corpGateway: CorpGateway | null = null;
 
   constructor(corpRoot: string, globalConfig: GlobalConfig) {
     this.corpRoot = corpRoot;
@@ -53,6 +55,40 @@ export class ProcessManager {
     return port;
   }
 
+  /** Initialize the shared corp gateway. Call before spawnAgent(). */
+  async initCorpGateway(): Promise<void> {
+    const gw = new CorpGateway(this.corpRoot, this.globalConfig);
+    gw.initialize();
+    this.corpGateway = gw;
+
+    // Reserve the gateway port from the allocation pool
+    this.nextPort = gw.getPort() + 1;
+
+    // Populate agents.list from existing non-CEO agent members
+    const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+    const workers = members.filter(
+      (m) => m.type === 'agent' && m.rank !== 'master' && m.status !== 'archived' && m.agentDir,
+    );
+
+    for (const worker of workers) {
+      const agentName = worker.agentDir!.replace(/^agents\//, '').replace(/\/$/, '');
+      const workspace = join(this.corpRoot, worker.agentDir!).replace(/\\/g, '/');
+      const agentDir = join(this.corpRoot, '.gateway', 'agents', agentName, 'agent').replace(/\\/g, '/');
+
+      gw.addAgent({
+        id: agentName,
+        name: worker.displayName,
+        workspace,
+        agentDir,
+      });
+    }
+
+    // Start the gateway if there are agents
+    if (gw.hasAgents()) {
+      await gw.start();
+    }
+  }
+
   async spawnAgent(memberId: string, gatewayToken?: string): Promise<AgentProcess> {
     if (this.agents.has(memberId)) {
       const existing = this.agents.get(memberId)!;
@@ -68,17 +104,49 @@ export class ProcessManager {
     if (member.type !== 'agent') throw new Error(`Member ${memberId} is not an agent`);
     if (!member.agentDir) throw new Error(`Member ${memberId} has no agentDir`);
 
-    const agentAbsDir = join(this.corpRoot, member.agentDir);
-    const openclawStateDir = join(agentAbsDir, '.openclaw');
-
-    // Detect remote agents: no .openclaw/openclaw.json means they use an external gateway
-    const isRemote = !existsSync(join(openclawStateDir, 'openclaw.json'));
-
-    if (isRemote) {
+    // CEO (rank master) with user's OpenClaw → remote
+    if (member.rank === 'master' && this.globalConfig.userGateway) {
       return this.connectRemoteAgent(memberId, member);
     }
 
-    return this.spawnLocalAgent(memberId, member, agentAbsDir, openclawStateDir, gatewayToken);
+    // CEO without user's OpenClaw → local fallback
+    if (member.rank === 'master') {
+      const agentAbsDir = join(this.corpRoot, member.agentDir);
+      const openclawStateDir = join(agentAbsDir, '.openclaw');
+      return this.spawnLocalAgent(memberId, member, agentAbsDir, openclawStateDir, gatewayToken);
+    }
+
+    // All other agents → shared corp gateway
+    return this.registerGatewayAgent(memberId, member);
+  }
+
+  /** Register an agent that runs on the shared corp gateway. */
+  registerGatewayAgent(memberId: string, member?: Member): AgentProcess {
+    if (!this.corpGateway) {
+      throw new Error('Corp gateway not initialized. Call initCorpGateway() first.');
+    }
+
+    if (!member) {
+      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+      member = members.find((m) => m.id === memberId);
+      if (!member) throw new Error(`Member ${memberId} not found`);
+    }
+
+    const agentName = member.agentDir!.replace(/^agents\//, '').replace(/\/$/, '');
+
+    const agentProc: AgentProcess = {
+      memberId,
+      displayName: member.displayName,
+      port: this.corpGateway.getPort(),
+      status: this.corpGateway.getStatus() === 'ready' ? 'ready' : 'starting',
+      gatewayToken: this.corpGateway.getToken(),
+      process: null,
+      mode: 'gateway',
+      model: `openclaw:${agentName}`,
+    };
+
+    this.agents.set(memberId, agentProc);
+    return agentProc;
   }
 
   private async connectRemoteAgent(memberId: string, member: Member): Promise<AgentProcess> {
@@ -102,7 +170,7 @@ export class ProcessManager {
 
     // Health check the user's gateway
     try {
-      await this.healthCheck(agentProc, 5); // 5 attempts, not 30
+      await this.healthCheck(agentProc, 5);
       console.log(`[daemon] CEO connected to OpenClaw gateway on port ${gw.port}`);
     } catch {
       agentProc.status = 'crashed';
@@ -124,7 +192,6 @@ export class ProcessManager {
   ): Promise<AgentProcess> {
     const port = this.allocatePort();
 
-    // Read gateway token from openclaw config if not provided
     if (!gatewayToken) {
       const openclawConfig = readConfig<{ gateway: { auth: { token: string } } }>(
         join(openclawStateDir, 'openclaw.json'),
@@ -145,10 +212,8 @@ export class ProcessManager {
 
     this.agents.set(memberId, agentProc);
 
-    // Normalize paths to forward slashes (OpenClaw on Windows/MSYS2 needs this)
     const normalizedStateDir = openclawStateDir.replace(/\\/g, '/');
 
-    // Write allocated port into openclaw.json (CLI --port flag is ignored when config exists)
     const openclawConfigPath = join(openclawStateDir, 'openclaw.json');
     const ocConfig = readConfig<Record<string, unknown>>(openclawConfigPath);
     const gw = (ocConfig.gateway ?? {}) as Record<string, unknown>;
@@ -156,7 +221,6 @@ export class ProcessManager {
     ocConfig.gateway = gw;
     writeConfig(openclawConfigPath, ocConfig);
 
-    // Spawn OpenClaw gateway
     const proc = execa(this.openclawBinary, [
       'gateway', 'run',
       '--port', String(port),
@@ -173,7 +237,6 @@ export class ProcessManager {
 
     agentProc.process = proc;
 
-    // Capture stdout/stderr for debugging
     proc.stdout?.on('data', (chunk: Buffer) => {
       const line = chunk.toString().trim();
       if (line) console.log(`[${member.displayName}] ${line}`);
@@ -183,15 +246,12 @@ export class ProcessManager {
       if (line) console.error(`[${member.displayName}] ${line}`);
     });
 
-    // Update member port in members.json
     this.updateMemberPort(memberId, port);
 
-    // Health check
     this.healthCheck(agentProc, 30).catch(() => {
       agentProc.status = 'crashed';
     });
 
-    // Handle process exit
     proc.then((result) => {
       if (agentProc.status !== 'stopped') {
         agentProc.status = 'crashed';
@@ -227,7 +287,6 @@ export class ProcessManager {
           }),
           signal: AbortSignal.timeout(2000),
         });
-        // Any response means the server is up (even 400 for empty messages)
         if (resp.status < 500) {
           agent.status = 'ready';
           return;
@@ -278,6 +337,10 @@ export class ProcessManager {
   async stopAll(): Promise<void> {
     const ids = [...this.agents.keys()];
     await Promise.all(ids.map((id) => this.stopAgent(id)));
+    // Stop the corp gateway process
+    if (this.corpGateway) {
+      await this.corpGateway.stop();
+    }
   }
 
   private updateMemberPort(memberId: string, port: number | null): void {
