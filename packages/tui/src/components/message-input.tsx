@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
+import { Box, Text, useInput } from 'ink';
 
 interface Props {
   onSend: (text: string) => void;
@@ -33,80 +32,155 @@ function AnimatedRainbow({ children, offset }: { children: string; offset: numbe
   );
 }
 
-/** Check if text has any @mentions */
-function hasMentions(text: string): boolean {
-  return /@\S+/.test(text);
-}
-
-/** Render text with animated rainbow @mentions */
-function renderPreview(text: string, hueOffset: number) {
-  const parts: React.ReactNode[] = [];
+function renderInputText(text: string, cursorPos: number, hueOffset: number, showCursor: boolean) {
+  // Build segments: plain text and @mentions
+  const segments: { text: string; isMention: boolean; start: number }[] = [];
   const mentionRegex = /@"([^"]+)"|@(\S+)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = mentionRegex.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push(<Text key={`t${lastIndex}`}>{text.slice(lastIndex, match.index)}</Text>);
+      segments.push({ text: text.slice(lastIndex, match.index), isMention: false, start: lastIndex });
     }
-    parts.push(
-      <AnimatedRainbow key={`m${match.index}`} offset={hueOffset}>
-        {match[0]}
-      </AnimatedRainbow>,
-    );
+    segments.push({ text: match[0], isMention: true, start: match.index });
     lastIndex = match.index + match[0].length;
   }
-
   if (lastIndex < text.length) {
-    parts.push(<Text key={`t${lastIndex}`}>{text.slice(lastIndex)}</Text>);
+    segments.push({ text: text.slice(lastIndex), isMention: false, start: lastIndex });
+  }
+  if (segments.length === 0 && text.length === 0) {
+    // Empty — just show cursor
+    return showCursor ? <Text inverse> </Text> : null;
   }
 
-  return parts;
+  const parts: React.ReactNode[] = [];
+
+  for (const seg of segments) {
+    const segEnd = seg.start + seg.text.length;
+    const cursorInSeg = cursorPos >= seg.start && cursorPos < segEnd;
+    const cursorAtEnd = cursorPos === segEnd;
+
+    if (seg.isMention) {
+      if (cursorInSeg && showCursor) {
+        // Split mention around cursor
+        const before = seg.text.slice(0, cursorPos - seg.start);
+        const atCursor = seg.text[cursorPos - seg.start]!;
+        const after = seg.text.slice(cursorPos - seg.start + 1);
+        const fullLen = Math.max(seg.text.length, 1);
+        parts.push(
+          <Text key={`m${seg.start}`} bold>
+            {before.split('').map((c, i) => (
+              <Text key={i} color={hslToHex(((i / fullLen) * 300 + hueOffset) % 360, 80, 65)}>{c}</Text>
+            ))}
+            <Text inverse color={hslToHex((((cursorPos - seg.start) / fullLen) * 300 + hueOffset) % 360, 80, 65)}>
+              {atCursor}
+            </Text>
+            {after.split('').map((c, i) => {
+              const idx = cursorPos - seg.start + 1 + i;
+              return <Text key={`a${i}`} color={hslToHex(((idx / fullLen) * 300 + hueOffset) % 360, 80, 65)}>{c}</Text>;
+            })}
+          </Text>,
+        );
+      } else {
+        parts.push(
+          <AnimatedRainbow key={`m${seg.start}`} offset={hueOffset}>
+            {seg.text}
+          </AnimatedRainbow>,
+        );
+      }
+    } else {
+      if (cursorInSeg && showCursor) {
+        const before = seg.text.slice(0, cursorPos - seg.start);
+        const atCursor = seg.text[cursorPos - seg.start]!;
+        const after = seg.text.slice(cursorPos - seg.start + 1);
+        parts.push(
+          <Text key={`t${seg.start}`}>
+            {before}
+            <Text inverse>{atCursor}</Text>
+            {after}
+          </Text>,
+        );
+      } else {
+        parts.push(<Text key={`t${seg.start}`}>{seg.text}</Text>);
+      }
+    }
+  }
+
+  // Cursor at the very end of the text
+  if (showCursor && cursorPos >= text.length) {
+    parts.push(<Text key="cursor" inverse> </Text>);
+  }
+
+  return <>{parts}</>;
 }
 
 export function MessageInput({ onSend, disabled, placeholder }: Props) {
   const [value, setValue] = useState('');
+  const [cursor, setCursor] = useState(0);
   const [hueOffset, setHueOffset] = useState(0);
 
-  const showPreview = !disabled && hasMentions(value);
+  const hasMentions = /@\S/.test(value);
 
-  // Animate rainbow when there's a mention in the input
   useEffect(() => {
-    if (!showPreview) return;
+    if (!hasMentions || disabled) return;
     const timer = setInterval(() => {
       setHueOffset((prev) => (prev + 20) % 360);
     }, 100);
     return () => clearInterval(timer);
-  }, [showPreview]);
+  }, [hasMentions, disabled]);
 
-  const handleSubmit = (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
-    setValue('');
-  };
+  useInput((input, key) => {
+    if (disabled) return;
+    // Don't handle tab — let it bubble to channel switcher
+    if (key.tab || input === '\t') return;
+
+    if (key.return) {
+      const trimmed = value.trim();
+      if (trimmed) {
+        onSend(trimmed);
+        setValue('');
+        setCursor(0);
+      }
+      return;
+    }
+    if (key.backspace || key.delete) {
+      if (cursor > 0) {
+        setValue((v) => v.slice(0, cursor - 1) + v.slice(cursor));
+        setCursor((c) => c - 1);
+      }
+      return;
+    }
+    if (key.leftArrow) {
+      setCursor((c) => Math.max(0, c - 1));
+      return;
+    }
+    if (key.rightArrow) {
+      setCursor((c) => Math.min(value.length, c + 1));
+      return;
+    }
+    // Ignore control keys
+    if (key.ctrl || key.meta || key.upArrow || key.downArrow || key.escape) return;
+
+    if (input) {
+      setValue((v) => v.slice(0, cursor) + input + v.slice(cursor));
+      setCursor((c) => c + input.length);
+    }
+  });
 
   return (
-    <Box flexDirection="column">
-      {showPreview && (
-        <Box paddingX={2} marginBottom={0}>
-          <Text dimColor>{'  '}</Text>
-          {renderPreview(value, hueOffset)}
-        </Box>
+    <Box borderStyle="single" borderColor={disabled ? 'gray' : 'white'} paddingX={1}>
+      <Text bold color="green">&gt; </Text>
+      {disabled ? (
+        <Text dimColor>{placeholder ?? 'Waiting...'}</Text>
+      ) : value.length === 0 ? (
+        <>
+          <Text inverse> </Text>
+          <Text dimColor>{placeholder ?? 'Type a message...'}</Text>
+        </>
+      ) : (
+        renderInputText(value, cursor, hueOffset, true)
       )}
-      <Box borderStyle="single" borderColor={disabled ? 'gray' : 'white'} paddingX={1}>
-        <Text bold color="green">&gt; </Text>
-        {disabled ? (
-          <Text dimColor>{placeholder ?? 'Waiting...'}</Text>
-        ) : (
-          <TextInput
-            value={value}
-            onChange={setValue}
-            onSubmit={handleSubmit}
-            placeholder={placeholder ?? 'Type a message...'}
-          />
-        )}
-      </Box>
     </Box>
   );
 }

@@ -8,8 +8,8 @@ interface Props {
 }
 
 function RainbowText({ children }: { children: string }) {
-  // Use hex colors for a smooth gradient that looks good at any length
-  const chars = children.split('');
+  const text = typeof children === 'string' ? children : String(children);
+  const chars = text.split('');
   const len = Math.max(chars.length, 1);
   return (
     <Text bold>
