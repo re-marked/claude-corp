@@ -66,6 +66,39 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
   });
 
   const handleSend = useCallback(async (text: string) => {
+    // Handle /hire command: /hire <agentName> "<displayName>" <rank> [description]
+    const hireMatch = text.match(/^\/hire\s+(\S+)\s+"([^"]+)"\s+(leader|worker|subagent)(?:\s+(.+))?$/);
+    if (hireMatch) {
+      setSending(true);
+      const founder = members.find((m) => m.rank === 'owner');
+      if (!founder) {
+        setSending(false);
+        return;
+      }
+      try {
+        const [, agentName, displayName, rank, description] = hireMatch;
+        const soulContent = description
+          ? `# Identity\n\nYou are ${displayName}. ${description}\n\n# Communication Style\n\nClear, professional, focused on results.`
+          : undefined;
+        await daemonClient.hireAgent({
+          creatorId: founder.id,
+          agentName: agentName!,
+          displayName: displayName!,
+          rank: rank!,
+          soulContent,
+        });
+        // Refresh members
+        try {
+          const fresh = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+          setMembers(fresh);
+        } catch {}
+      } catch (err) {
+        console.error('[tui] Hire failed:', err);
+      }
+      setSending(false);
+      return;
+    }
+
     setSending(true);
     try {
       const { dispatching } = await daemonClient.sendMessage(channel.id, text);
@@ -76,7 +109,7 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       // Message send failed
     }
     setSending(false);
-  }, [channel.id, daemonClient]);
+  }, [channel.id, daemonClient, members, corpRoot]);
 
   return (
     <Box flexDirection="column" flexGrow={1}>
