@@ -8,7 +8,8 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 - Layer 1: types, parsers, corp scaffolding, git integration
 - Layer 2: CEO connects to user's existing OpenClaw, TUI onboarding + chat
-- Layer 3 (partial): async router with fs.watch, @mention dispatch, channel switching
+- Layer 3: async router, @mention dispatch, channel history, channel switching
+- Layer 5 (partial): shared corp gateway, /hire command, CEO-initiated hiring, multi-agent chat
 
 ---
 
@@ -24,7 +25,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ## Layer 2: CEO
 
-- [x] Two-tier architecture: CEO = user's OpenClaw, workers = shared corp gateway (future)
+- [x] Two-tier architecture: CEO = user's OpenClaw, workers = shared corp gateway
 - [x] Auto-detect user's OpenClaw gateway from ~/.openclaw/openclaw.json
 - [x] Remote agent mode (connect to existing gateway, no process spawning)
 - [x] Local agent mode (spawn OpenClaw via execa, port allocation, health check)
@@ -44,13 +45,16 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] @mention routing in broadcast/team/system channels
 - [x] Guards: depth (max 5), dedup, cooldown (agent-to-agent only, user bypasses)
 - [x] Recent channel history (last 50 messages) included in every dispatch
-- [x] Smart thinking spinner (shows only when dispatch expected, 30s timeout)
+- [x] Named typing indicator ("CEO is typing..." not generic "Thinking...")
 - [x] Channel switching (Tab key, fuzzy search, arrow navigation)
 - [x] Auto-watch new channel directories
-- [x] Dispatch prediction (sendMessage returns { dispatching: boolean })
+- [x] Dispatch prediction with agent names
+- [x] Mention regex handles trailing punctuation (@CEO! resolves correctly)
+- [x] Bare @mention substitutes previous message as content
+- [x] Unique session keys per dispatch (no OpenClaw concurrency conflicts)
+- [x] 15-minute dispatch + spinner timeouts (agents can work long)
 - [ ] Member sidebar in channel view
 - [ ] Thread support (threadId in messages)
-- [ ] Fix: old messages replayed on daemon restart
 
 ## Layer 4: Tasks
 
@@ -64,13 +68,22 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ## Layer 5: Autonomy
 
-- [ ] Shared corp gateway (one OpenClaw process, agents.list for all workers)
-- [ ] Agent hiring flow (create workspace + add to corp gateway)
-- [ ] Rank-based agent creation (write files + signal daemon)
-- [ ] Agent-to-agent @mention chaining (recursive dispatch)
+- [x] Shared corp gateway (one OpenClaw process, agents.list for all workers)
+- [x] Corp gateway hot-reload (OpenClaw detects agents.list changes dynamically)
+- [x] Corp gateway adopts existing process that survived Ctrl+C
+- [x] Agent hiring flow (create workspace + add to corp gateway + DM channel)
+- [x] /hire TUI wizard (interactive: name → rank select → description)
+- [x] /hire command preview hint while typing
+- [x] System message confirmation after hiring
+- [x] Rank validation (canHire — owner > master > leader > worker > subagent)
+- [x] CEO-initiated hiring (curl to daemon API from system message instructions)
+- [x] Agent-to-agent @mention chaining (CEO → Researcher → CEO, verified working)
+- [x] Multi-agent fan-out dispatch (@CEO @Researcher in one message)
+- [x] Rainbow @mentions (static in chat, animated in input bar)
+- [x] Member list auto-refresh when new agents are hired
 - [ ] Git commit after each prompt loop
 - [ ] Git Janitor agent (conflict resolution, clean commits)
-- [ ] Starter pack: CEO bootstraps HR, Adviser, Git Janitor, project + leader
+- [ ] Starter pack: CEO bootstraps agents from onboarding conversation
 - [ ] Agent suspension/resume
 - [ ] Agent archival
 
@@ -111,7 +124,5 @@ The shortest path to "agents acting autonomously in a visible workspace":
 1. ~~**Foundation** — file formats, corp structure, git integration~~
 2. ~~**CEO chat** — connect to OpenClaw, talk to it in TUI~~
 3. ~~**Daemon router** — fs.watch + @mention dispatch = agents talk to each other~~
-4. **Tasks + heartbeat** — agents discover work on their own
-5. **Agent creation** — agents create agents, corporation grows
-
-Without #3, agents are isolated chatbots. With it, the corporation comes alive.
+4. ~~**Agent creation** — agents create agents, corporation grows~~
+5. **Tasks + heartbeat** — agents discover work on their own
