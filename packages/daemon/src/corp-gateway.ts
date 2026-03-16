@@ -135,6 +135,11 @@ export class CorpGateway {
       return;
     }
 
+    // Check if a gateway is already running on our port (e.g. survived a Ctrl+C)
+    if (await this.tryAdoptExisting()) {
+      return;
+    }
+
     this._status = 'starting';
 
     const normalizedStateDir = this.gatewayDir.replace(/\\/g, '/');
@@ -209,6 +214,30 @@ export class CorpGateway {
     await this.stop();
     this._status = 'stopped';
     await this.start();
+  }
+
+  /** Check if an existing gateway is already running on our port and adopt it. */
+  private async tryAdoptExisting(): Promise<boolean> {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${this._port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this._token}`,
+        },
+        body: JSON.stringify({ model: 'openclaw:main', messages: [] }),
+        signal: AbortSignal.timeout(2000),
+      });
+      if (resp.status < 500) {
+        // Gateway is alive — adopt it
+        this._status = 'ready';
+        console.log(`[gateway] Adopted existing gateway on port ${this._port} with ${this.listAgents().length} agents`);
+        return true;
+      }
+    } catch {
+      // Not running — need to spawn
+    }
+    return false;
   }
 
   private async healthCheck(): Promise<void> {
