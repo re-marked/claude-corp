@@ -169,22 +169,51 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
   });
 
   // Show command hints
-  const trimmedValue = value.trim();
+  const trimmedValue = value.trim().toLowerCase();
   const isTypingHire = !disabled && /^\/(h(i(r(e)?)?)?)?$/i.test(trimmedValue);
-  const isTypingTask = !disabled && /^\/(t(a(s(k)?)?)?)?$/i.test(trimmedValue) && !isTypingHire;
+  const isTypingTask = !disabled && /^\/(t(a(s(k(s)?)?)?)?)?$/i.test(trimmedValue) && !isTypingHire;
+  const isTypingHierarchy = !disabled && trimmedValue === '/h';
+  const isTypingTasks = !disabled && trimmedValue === '/t';
+  const isTypingAgents = !disabled && trimmedValue === '/a';
+  const showNavHint = !disabled && trimmedValue === '/' && !isTypingHire && !isTypingTask;
 
   return (
     <Box flexDirection="column">
+      {showNavHint && (
+        <Box paddingX={2} flexDirection="column">
+          <Text color="#E17055" bold>/hire</Text>
+          <Text color="#FDCB6E" bold>/task</Text>
+          <Text color="#B2BEC3" bold>/h <Text color="#636E72">hierarchy</Text>  /t <Text color="#636E72">tasks</Text>  /a <Text color="#636E72">agents</Text></Text>
+        </Box>
+      )}
       {isTypingHire && (
         <Box paddingX={2}>
           <Text color="#E17055" bold>/hire</Text>
-          <Text color="#636E72"> — open the agent hiring wizard (Enter to confirm)</Text>
+          <Text color="#636E72"> — open the agent hiring wizard</Text>
         </Box>
       )}
       {isTypingTask && (
         <Box paddingX={2}>
           <Text color="#FDCB6E" bold>/task</Text>
-          <Text color="#636E72"> — create a new task (Enter to confirm)</Text>
+          <Text color="#636E72"> — create a new task</Text>
+        </Box>
+      )}
+      {isTypingHierarchy && !isTypingHire && (
+        <Box paddingX={2}>
+          <Text color="#B2BEC3" bold>/h</Text>
+          <Text color="#636E72"> — view org hierarchy</Text>
+        </Box>
+      )}
+      {isTypingTasks && !isTypingTask && (
+        <Box paddingX={2}>
+          <Text color="#B2BEC3" bold>/t</Text>
+          <Text color="#636E72"> — view task board</Text>
+        </Box>
+      )}
+      {isTypingAgents && (
+        <Box paddingX={2}>
+          <Text color="#B2BEC3" bold>/a</Text>
+          <Text color="#636E72"> — view agents</Text>
         </Box>
       )}
       <Box borderStyle="round" borderColor={disabled ? '#636E72' : '#636E72'} paddingX={1}>

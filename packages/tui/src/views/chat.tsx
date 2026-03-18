@@ -125,6 +125,22 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
 
+    // Navigation commands
+    const cmd = text.trim().toLowerCase();
+    if (cmd === '/h' || cmd === '/hierarchy') {
+      onNavigate?.({ type: 'hierarchy' });
+      return;
+    }
+    if (cmd === '/t' || cmd === '/tasks') {
+      onNavigate?.({ type: 'task-board' });
+      return;
+    }
+    if (cmd === '/a' || cmd === '/agents') {
+      // Show hierarchy as agent picker
+      onNavigate?.({ type: 'hierarchy' });
+      return;
+    }
+
     setSending(true);
     try {
       const { dispatching, dispatchTargets } = await daemonClient.sendMessage(channel.id, text);
