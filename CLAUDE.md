@@ -154,12 +154,32 @@ pnpm build            # Build all
 pnpm type-check       # Type-check all
 ```
 
+## Branching Strategy
+
+- **`main`** = stable production. Do NOT push directly.
+- **`dev`** = integration branch. All work merges here.
+- **`feature/*`** = short-lived branches off `dev`.
+
+**Merge flow**: `feature/xyz` → rebase onto `dev` → merge with `--no-ff` → delete feature branch.
+
+```bash
+git checkout feature/xyz
+git rebase dev                    # Linearize commits on top of dev
+git checkout dev
+git merge --no-ff feature/xyz     # Merge commit marks the join point
+git branch -d feature/xyz         # Clean up
+```
+
+This gives: linear commit history within each feature + merge commits marking where features landed. Individual commits are preserved (no squash). Merge commits act as phase markers.
+
+When `dev` is stable and tested, merge into `main` the same way.
+
 ## Key Conventions
 
 - **Commit frequently**: Small focused commits, multiple per prompt
 - **Always add co-authors**: Include both in every commit:
   - `Co-Authored-By: Mark <psyhik17@gmail.com>`
-  - `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
+  - `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
 - **No cloud dependencies**: Everything runs locally. No Supabase, no Fly.io, no Docker.
 - **File-first**: When in doubt, make it a file. Files are git-tracked, human-readable, agent-accessible.
 - **Agents write freely**: Don't gate filesystem access behind commands. Only process management (spawning agents) goes through the daemon.
