@@ -55,16 +55,47 @@ function detectUserGateway(): GlobalConfig['userGateway'] {
   if (!existsSync(openclawConfigPath)) return undefined;
 
   try {
-    const oc = readConfig<{ gateway?: { port?: number; auth?: { token?: string } } }>(openclawConfigPath);
-    const port = oc.gateway?.port;
-    const token = oc.gateway?.auth?.token;
+    const oc = readConfig<Record<string, unknown>>(openclawConfigPath);
+    const gw = oc.gateway as Record<string, unknown> | undefined;
+    const port = gw?.port as number | undefined;
+    const auth = gw?.auth as Record<string, unknown> | undefined;
+    const token = auth?.token as string | undefined;
+
     if (port && token) {
+      // Patch verbose + streaming settings for AgentCorp
+      patchOpenClawVerbose(openclawConfigPath, oc);
       return { port, token };
     }
   } catch {
     // Malformed config — ignore
   }
   return undefined;
+}
+
+/** Ensure user's OpenClaw has verbose full + streaming off for AgentCorp. */
+function patchOpenClawVerbose(configPath: string, oc: Record<string, unknown>): void {
+  try {
+    const agents = (oc.agents ?? {}) as Record<string, unknown>;
+    const defaults = (agents.defaults ?? {}) as Record<string, unknown>;
+
+    let changed = false;
+    if (defaults.verboseDefault !== 'full') {
+      defaults.verboseDefault = 'full';
+      changed = true;
+    }
+    if (defaults.blockStreamingDefault !== 'off') {
+      defaults.blockStreamingDefault = 'off';
+      changed = true;
+    }
+
+    if (changed) {
+      agents.defaults = defaults;
+      oc.agents = agents;
+      writeConfig(configPath, oc);
+    }
+  } catch {
+    // Non-fatal — don't break startup if we can't patch
+  }
 }
 
 export function readGlobalConfig(): GlobalConfig {
