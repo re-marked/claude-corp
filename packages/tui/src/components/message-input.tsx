@@ -168,8 +168,10 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
     }
   });
 
-  // Show command hint when typing something that looks like /hire
-  const isTypingHire = !disabled && /^\/(h(i(r(e)?)?)?)?$/i.test(value.trim());
+  // Show command hints
+  const trimmedValue = value.trim();
+  const isTypingHire = !disabled && /^\/(h(i(r(e)?)?)?)?$/i.test(trimmedValue);
+  const isTypingTask = !disabled && /^\/(t(a(s(k)?)?)?)?$/i.test(trimmedValue) && !isTypingHire;
 
   return (
     <Box flexDirection="column">
@@ -177,6 +179,12 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
         <Box paddingX={2}>
           <Text color="magenta" bold>/hire</Text>
           <Text dimColor> — open the agent hiring wizard (Enter to confirm)</Text>
+        </Box>
+      )}
+      {isTypingTask && (
+        <Box paddingX={2}>
+          <Text color="yellow" bold>/task</Text>
+          <Text dimColor> — create a new task (Enter to confirm)</Text>
         </Box>
       )}
       <Box borderStyle="single" borderColor={disabled ? 'gray' : 'white'} paddingX={1}>

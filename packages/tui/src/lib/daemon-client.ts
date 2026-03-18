@@ -48,6 +48,29 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  async createTask(opts: {
+    title: string;
+    description?: string;
+    priority?: string;
+    assignedTo?: string;
+    createdBy: string;
+  }): Promise<{ ok: boolean; task: unknown }> {
+    const resp = await fetch(`${this.baseUrl}/tasks/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  async listTasks(filter?: { status?: string; assignedTo?: string }): Promise<unknown[]> {
+    const params = new URLSearchParams();
+    if (filter?.status) params.set('status', filter.status);
+    if (filter?.assignedTo) params.set('assignedTo', filter.assignedTo);
+    const resp = await fetch(`${this.baseUrl}/tasks?${params}`);
+    return resp.json() as Promise<any>;
+  }
+
   async sendMessage(channelId: string, content: string): Promise<{ dispatching: boolean; dispatchTargets: string[] }> {
     const resp = await fetch(`${this.baseUrl}/messages/send`, {
       method: 'POST',

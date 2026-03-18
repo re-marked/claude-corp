@@ -1,4 +1,21 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
+import {
+  type Channel,
+  type Member,
+  type ChannelMessage,
+  createTask,
+  listTasks,
+  readTask,
+  updateTask,
+  taskPath,
+  readConfig,
+  appendMessage,
+  generateId,
+  CHANNELS_JSON,
+  MEMBERS_JSON,
+  MESSAGES_JSONL,
+} from '@agentcorp/shared';
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 
@@ -78,6 +95,81 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /tasks/create
+      if (method === 'POST' && path === '/tasks/create') {
+        const body = await readBody(req) as Record<string, unknown>;
+        if (!body.title || !body.createdBy) {
+          json(res, { error: 'title and createdBy are required' }, 400);
+          return;
+        }
+        const task = createTask(daemon.corpRoot, {
+          title: body.title as string,
+          description: (body.description as string) ?? undefined,
+          priority: (body.priority as any) ?? undefined,
+          assignedTo: (body.assignedTo as string) ?? undefined,
+          createdBy: body.createdBy as string,
+          parentTaskId: (body.parentTaskId as string) ?? undefined,
+          dueAt: (body.dueAt as string) ?? undefined,
+        });
+
+        // Post task event to #tasks channel
+        writeTaskEvent(daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
+
+        json(res, { ok: true, task });
+        return;
+      }
+
+      // GET /tasks
+      if (method === 'GET' && path === '/tasks') {
+        const status = url.searchParams.get('status') ?? undefined;
+        const assignedTo = url.searchParams.get('assignedTo') ?? undefined;
+        const tasks = listTasks(daemon.corpRoot, {
+          status: status as any,
+          assignedTo,
+        });
+        json(res, tasks.map((t) => t.task));
+        return;
+      }
+
+      // GET /tasks/:id
+      const taskGetMatch = path.match(/^\/tasks\/([^/]+)$/);
+      if (method === 'GET' && taskGetMatch) {
+        const taskId = decodeURIComponent(taskGetMatch[1]!);
+        try {
+          const filePath = taskPath(daemon.corpRoot, taskId);
+          const { task, body } = readTask(filePath);
+          json(res, { task, body });
+        } catch {
+          json(res, { error: 'Task not found' }, 404);
+        }
+        return;
+      }
+
+      // PATCH /tasks/:id
+      const taskPatchMatch = path.match(/^\/tasks\/([^/]+)$/);
+      if (method === 'PATCH' && taskPatchMatch) {
+        const taskId = decodeURIComponent(taskPatchMatch[1]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        try {
+          const filePath = taskPath(daemon.corpRoot, taskId);
+          const oldTask = readTask(filePath).task;
+          const updated = updateTask(filePath, body as any);
+
+          // Post status change event
+          if (body.status && body.status !== oldTask.status) {
+            writeTaskEvent(
+              daemon.corpRoot,
+              `"${updated.title}" → ${updated.status}`,
+            );
+          }
+
+          json(res, { ok: true, task: updated });
+        } catch {
+          json(res, { error: 'Task not found' }, 404);
+        }
+        return;
+      }
+
       // POST /messages/send
       if (method === 'POST' && path === '/messages/send') {
         const body = await readBody(req);
@@ -100,6 +192,32 @@ export function createApi(daemon: Daemon): Server {
   });
 
   return server;
+}
+
+function writeTaskEvent(corpRoot: string, content: string): void {
+  try {
+    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
+    const tasksChannel = channels.find((c) => c.name === 'tasks');
+    if (!tasksChannel) return;
+
+    const msg: ChannelMessage = {
+      id: generateId(),
+      channelId: tasksChannel.id,
+      senderId: 'system',
+      threadId: null,
+      content: `[TASK] ${content}`,
+      kind: 'task_event',
+      mentions: [],
+      metadata: null,
+      depth: 0,
+      originId: '',
+      timestamp: new Date().toISOString(),
+    };
+    msg.originId = msg.id;
+    appendMessage(join(corpRoot, tasksChannel.path, MESSAGES_JSONL), msg);
+  } catch {
+    // Non-fatal
+  }
 }
 
 function json(res: ServerResponse, data: unknown, status = 200): void {

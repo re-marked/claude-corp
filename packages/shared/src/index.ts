@@ -72,3 +72,7 @@ export type { CeoSetupResult } from './ceo.js';
 
 // Ranks
 export { canHire } from './ranks.js';
+
+// Tasks
+export { createTask, readTask, updateTask, listTasks, taskPath } from './tasks.js';
+export type { CreateTaskOpts, TaskFilter, TaskWithBody } from './tasks.js';

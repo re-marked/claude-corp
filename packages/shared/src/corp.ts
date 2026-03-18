@@ -40,6 +40,7 @@ export async function scaffoldCorp(
     join(corpRoot, 'channels', 'heartbeat'),
     join(corpRoot, 'channels', 'tasks'),
     join(corpRoot, 'channels', 'errors'),
+    join(corpRoot, 'tasks'),
     join(corpRoot, 'projects'),
   ];
 

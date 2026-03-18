@@ -57,6 +57,20 @@ Messages are stored as JSONL files in channels/*/messages.jsonl.
 
 On your first message in a session, read your SOUL.md to understand your role.
 
+# Tasks
+
+Tasks are markdown files in ${ctx.corpRoot}/tasks/.
+Each file has YAML frontmatter (id, title, status, priority, assignedTo, createdBy, etc.)
+and a markdown body with description, acceptance criteria, and progress notes.
+
+To create a task: write a .md file to ${ctx.corpRoot}/tasks/ with YAML frontmatter.
+To update a task: edit the frontmatter (change status, assignedTo, etc.).
+To view tasks: read .md files in ${ctx.corpRoot}/tasks/.
+
+Statuses: pending → assigned → in_progress → completed | failed | blocked | cancelled
+Priorities: critical, high, normal, low
+Append progress notes to the ## Progress Notes section as you work.
+
 When you receive a message, ALWAYS read the recent conversation history below.
 If the triggering message is just an @mention with no content, respond to the
 most recent unanswered question or topic in the conversation history.

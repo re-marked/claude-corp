@@ -16,6 +16,7 @@ import { MessageList } from '../components/message-list.js';
 import { MessageInput } from '../components/message-input.js';
 import { useMessages } from '../hooks/use-messages.js';
 import { HireWizard } from './hire-wizard.js';
+import { TaskWizard } from './task-wizard.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
 
 const THINKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes — agents can work long
@@ -36,6 +37,7 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
   const [thinkingAgents, setThinkingAgents] = useState<string[]>([]);
   const [members, setMembers] = useState(initialMembers);
   const [showHireWizard, setShowHireWizard] = useState(false);
+  const [showTaskWizard, setShowTaskWizard] = useState(false);
   const lastMsgCount = useRef(messages.length);
 
   // Refresh members when new messages arrive (new agents may have been hired)
@@ -115,6 +117,12 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
 
+    // /task opens the task wizard
+    if (text.trim().toLowerCase() === '/task') {
+      setShowTaskWizard(true);
+      return;
+    }
+
     setSending(true);
     try {
       const { dispatching, dispatchTargets } = await daemonClient.sendMessage(channel.id, text);
@@ -129,6 +137,25 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
   }, [channel.id, daemonClient]);
 
   const founder = members.find((m) => m.rank === 'owner');
+
+  const handleTaskCreated = (title: string) => {
+    writeSystemMessage(`Task "${title}" created. Check #tasks for details.`);
+    setTimeout(() => setShowTaskWizard(false), 1500);
+  };
+
+  if (showTaskWizard) {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+        <TaskWizard
+          daemonClient={daemonClient}
+          founderId={founder?.id ?? ''}
+          members={members}
+          onClose={() => setShowTaskWizard(false)}
+          onCreated={handleTaskCreated}
+        />
+      </Box>
+    );
+  }
 
   if (showHireWizard) {
     return (
@@ -147,7 +174,7 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle="single" borderColor="blue" paddingX={1}>
         <Text bold color="blue"># {channel.name}</Text>
-        <Text dimColor>  Tab to switch  /hire to add agents</Text>
+        <Text dimColor>  Tab to switch  /hire  /task</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
         <MessageList messages={messages} members={members} />
