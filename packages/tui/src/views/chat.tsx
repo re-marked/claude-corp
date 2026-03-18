@@ -16,6 +16,7 @@ import { MessageList } from '../components/message-list.js';
 import { MessageInput } from '../components/message-input.js';
 import { useMessages } from '../hooks/use-messages.js';
 import { HireWizard } from './hire-wizard.js';
+import { COLORS, BORDER_STYLE } from '../theme.js';
 import { TaskWizard } from './task-wizard.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
 
@@ -172,16 +173,16 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Box borderStyle="single" borderColor="blue" paddingX={1}>
-        <Text bold color="blue"># {channel.name}</Text>
-        <Text dimColor>  Tab to switch  /hire  /task</Text>
+      <Box borderStyle="round" borderColor={COLORS.border} paddingX={1}>
+        <Text bold color={COLORS.primary}># {channel.name}</Text>
+        <Text color={COLORS.muted}>  Tab to switch  /hire  /task</Text>
       </Box>
       <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
         <MessageList messages={messages} members={members} />
         {thinking && (
           <Box gap={1} marginTop={1}>
-            <Text color="cyan"><Spinner type="dots" /></Text>
-            <Text dimColor>
+            <Text color={COLORS.primary}><Spinner type="dots" /></Text>
+            <Text color={COLORS.subtle}>
               {thinkingAgents.length > 0
                 ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
                 : 'Thinking...'}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { ChannelMessage, Member } from '@agentcorp/shared';
+import { COLORS } from '../theme.js';
 
 interface Props {
   messages: ChannelMessage[];
@@ -14,7 +15,7 @@ function RainbowText({ children }: { children: string }) {
   return (
     <Text bold>
       {chars.map((char, i) => {
-        const hue = (i / len) * 300; // 0-300 range (red → magenta, skip wrapping back to red)
+        const hue = (i / len) * 300;
         const hex = hslToHex(hue, 80, 65);
         return <Text key={i} color={hex}>{char}</Text>;
       })}
@@ -22,7 +23,7 @@ function RainbowText({ children }: { children: string }) {
   );
 }
 
-function hslToHex(h: number, s: number, l: number): string {
+export function hslToHex(h: number, s: number, l: number): string {
   s /= 100;
   l /= 100;
   const a = s * Math.min(l, 1 - l);
@@ -34,7 +35,6 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-/** Split message content into plain text and @mention segments. */
 function renderContent(content: string | undefined | null, members: Map<string, Member>) {
   if (!content) return <Text wrap="wrap">{''}</Text>;
   const parts: React.ReactNode[] = [];
@@ -43,7 +43,6 @@ function renderContent(content: string | undefined | null, members: Map<string, 
   let match: RegExpExecArray | null;
 
   while ((match = mentionRegex.exec(content)) !== null) {
-    // Text before the mention
     if (match.index > lastIndex) {
       parts.push(<Text key={`t${lastIndex}`} wrap="wrap">{content.slice(lastIndex, match.index)}</Text>);
     }
@@ -57,18 +56,25 @@ function renderContent(content: string | undefined | null, members: Map<string, 
     if (isCeo) {
       parts.push(<RainbowText key={`m${match.index}`}>@{mentionName}</RainbowText>);
     } else {
-      parts.push(<Text key={`m${match.index}`} bold color="yellow">@{mentionName}</Text>);
+      parts.push(<Text key={`m${match.index}`} bold color={COLORS.secondary}>@{mentionName}</Text>);
     }
 
     lastIndex = match.index + match[0].length;
   }
 
-  // Remaining text
   if (lastIndex < content.length) {
     parts.push(<Text key={`t${lastIndex}`} wrap="wrap">{content.slice(lastIndex)}</Text>);
   }
 
   return parts.length > 0 ? parts : <Text wrap="wrap">{content}</Text>;
+}
+
+/** Get sender display color based on type/rank. */
+function senderColor(sender: Member | undefined, senderId: string): string | undefined {
+  if (!sender || senderId === 'system') return COLORS.system;
+  if (sender.rank === 'master') return undefined; // rainbow handled separately
+  if (sender.type === 'agent') return COLORS.agent;
+  return COLORS.user;
 }
 
 export function MessageList({ messages, members }: Props) {
@@ -83,8 +89,18 @@ export function MessageList({ messages, members }: Props) {
           hour: '2-digit',
           minute: '2-digit',
         });
-        const isAgent = sender?.type === 'agent';
         const isCeo = sender?.rank === 'master';
+        const isSystem = msg.senderId === 'system' || msg.kind === 'system' || msg.kind === 'task_event';
+
+        // System messages: dim, indented with ┊
+        if (isSystem) {
+          return (
+            <Box key={msg.id} flexDirection="column" marginBottom={0}>
+              <Text color={COLORS.muted}> ┊ {name} {time}</Text>
+              <Text color={COLORS.muted}> ┊ {msg.content}</Text>
+            </Box>
+          );
+        }
 
         return (
           <Box key={msg.id} flexDirection="column" marginBottom={1}>
@@ -92,11 +108,11 @@ export function MessageList({ messages, members }: Props) {
               {isCeo ? (
                 <RainbowText>{name}</RainbowText>
               ) : (
-                <Text bold color={isAgent ? 'cyan' : 'green'}>
+                <Text bold color={senderColor(sender, msg.senderId)}>
                   {name}
                 </Text>
               )}
-              <Text dimColor>{time}</Text>
+              <Text color={COLORS.subtle}>{time}</Text>
             </Box>
             <Text wrap="wrap">{renderContent(msg.content, memberMap)}</Text>
           </Box>
