@@ -1,7 +1,6 @@
 import { execa, type ResultPromise } from 'execa';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import {
   type Member,
   type GlobalConfig,
@@ -106,9 +105,9 @@ export class ProcessManager {
     if (member.type !== 'agent') throw new Error(`Member ${memberId} is not an agent`);
     if (!member.agentDir) throw new Error(`Member ${memberId} has no agentDir`);
 
-    // CEO (rank master) with user's OpenClaw → spawn from ~/.openclaw (own the process)
+    // CEO (rank master) with user's OpenClaw → connect remotely
     if (member.rank === 'master' && this.globalConfig.userGateway) {
-      return this.spawnCeoFromUserConfig(memberId, member);
+      return this.connectRemoteAgent(memberId, member);
     }
 
     // CEO without user's OpenClaw → local fallback
@@ -151,41 +150,10 @@ export class ProcessManager {
     return agentProc;
   }
 
-  /** Spawn the CEO by taking over the user's OpenClaw gateway process.
-   *  Kills the existing gateway, respawns from ~/.openclaw so we own the process
-   *  and can pipe stdout for tool call streaming. Same personal AI, same config. */
-  private async spawnCeoFromUserConfig(memberId: string, member: Member): Promise<AgentProcess> {
+  private async connectRemoteAgent(memberId: string, member: Member): Promise<AgentProcess> {
     const gw = this.globalConfig.userGateway;
     if (!gw) {
-      throw new Error(`No user OpenClaw gateway detected`);
-    }
-
-    const openclawHome = join(homedir(), '.openclaw').replace(/\\/g, '/');
-
-    // Force-kill the existing gateway so we can take over the port
-    log(`[daemon] Stopping existing OpenClaw gateway to take over port ${gw.port}...`);
-    try {
-      await execa('openclaw', ['gateway', 'stop'], { reject: false, timeout: 5000 });
-      await new Promise((r) => setTimeout(r, 1000));
-
-      // Check if port still in use — force kill the PID
-      try {
-        const check = await execa('cmd', ['/c', `netstat -ano | findstr :${gw.port} | findstr LISTENING`], { reject: false, timeout: 5000 });
-        if (check.stdout) {
-          const match = check.stdout.trim().match(/\s(\d+)\s*$/m);
-          if (match?.[1]) {
-            log(`[daemon] Force-killing old gateway PID ${match[1]} on port ${gw.port}`);
-            await execa('taskkill', ['/F', '/PID', match[1]], { reject: false, timeout: 5000 });
-            await new Promise((r) => setTimeout(r, 2000));
-          }
-        }
-      } catch {}
-
-      // Remove scheduled task to prevent auto-restart
-      await execa('schtasks', ['/End', '/TN', 'OpenClaw Gateway'], { reject: false, timeout: 3000 }).catch(() => {});
-      await execa('schtasks', ['/Delete', '/TN', 'OpenClaw Gateway', '/F'], { reject: false, timeout: 3000 }).catch(() => {});
-    } catch {
-      // Best effort
+      throw new Error(`Agent ${member.displayName} is remote but no user OpenClaw gateway detected`);
     }
 
     const agentProc: AgentProcess = {
@@ -195,64 +163,22 @@ export class ProcessManager {
       status: 'starting',
       gatewayToken: gw.token,
       process: null,
-      mode: 'local',
+      mode: 'remote',
       model: 'openclaw:main',
     };
 
     this.agents.set(memberId, agentProc);
 
-    // Spawn from user's OpenClaw config — same personal AI, we just own the process
-    const proc = execa(this.openclawBinary, [
-      'gateway', 'run',
-      '--port', String(gw.port),
-      '--bind', 'loopback',
-      '--allow-unconfigured',
-    ], {
-      env: {
-        ...process.env,
-        OPENCLAW_STATE_DIR: openclawHome,
-      },
-      stdio: 'pipe',
-      reject: false,
-    });
-
-    agentProc.process = proc;
-
-    // Pipe stdout — this is how tool calls get into the chat
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      const lines = chunk.toString().split('\n');
-      for (const raw of lines) {
-        const line = raw.trim();
-        if (!line) continue;
-        log(`[CEO] ${line}`);
-      }
-    });
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      const line = chunk.toString().trim();
-      if (line) logError(`[CEO] ${line}`);
-    });
-
-    // Health check
     try {
-      await this.healthCheck(agentProc, 30);
-      log(`[daemon] CEO spawned from ~/.openclaw on port ${gw.port}`);
+      await this.healthCheck(agentProc, 5);
+      log(`[daemon] CEO connected to OpenClaw gateway on port ${gw.port}`);
     } catch {
       agentProc.status = 'crashed';
-      logError(`[daemon] CEO failed to start from ~/.openclaw on port ${gw.port}`);
-      throw new Error(`CEO failed to start from ~/.openclaw on port ${gw.port}`);
+      throw new Error(
+        `Cannot reach OpenClaw gateway at 127.0.0.1:${gw.port}. ` +
+        'Make sure OpenClaw is running: openclaw gateway run',
+      );
     }
-
-    // Handle exit
-    proc.then((result) => {
-      if (agentProc.status !== 'stopped') {
-        agentProc.status = 'crashed';
-        logError(`[daemon] CEO exited with code ${result.exitCode}`);
-      }
-      agentProc.process = null;
-    }).catch(() => {
-      agentProc.status = 'crashed';
-      agentProc.process = null;
-    });
 
     return agentProc;
   }
