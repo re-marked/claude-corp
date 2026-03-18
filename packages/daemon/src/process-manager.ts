@@ -210,13 +210,13 @@ export class ProcessManager {
       for (const raw of lines) {
         const line = raw.trim();
         if (!line) continue;
-        console.log(`[CEO] ${line}`);
+        log(`[CEO] ${line}`);
         if (this.onCeoOutput) this.onCeoOutput(line);
       }
     });
     proc.stderr?.on('data', (chunk: Buffer) => {
       const line = chunk.toString().trim();
-      if (line) console.error(`[CEO] ${line}`);
+      if (line) logError(`[CEO] ${line}`);
     });
 
     // Health check
