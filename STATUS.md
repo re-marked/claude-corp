@@ -125,6 +125,22 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## MUST BUILD — Corporation Themes (after Layer 6)
+
+Onboarding theme picker: Corporate / Mafia / Military / Custom.
+Changes ALL display text (rank names, channels, SOULs, system messages, TUI colors).
+Internal rank system unchanged — purely cosmetic layer. See `docs/building-plan/future-themes.md`.
+
+| Internal rank | Corporate | Mafia | Military |
+|---|---|---|---|
+| owner | Founder | Godfather | Commander |
+| master | CEO | Underboss | General |
+| leader | Director | Capo | Captain |
+| worker | Employee | Soldier | Private |
+| subagent | Contractor | Associate | Recruit |
+
+---
+
 ## Future / Deferred
 
 - [ ] Agent forking (copy SOUL.md + BRAIN, let it evolve)
