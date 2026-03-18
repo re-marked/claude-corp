@@ -73,6 +73,10 @@ export type { CeoSetupResult } from './ceo.js';
 // Ranks
 export { canHire } from './ranks.js';
 
+// Hierarchy
+export { buildHierarchy } from './hierarchy.js';
+export type { HierarchyNode } from './hierarchy.js';
+
 // Tasks
 export { createTask, readTask, updateTask, listTasks, taskPath } from './tasks.js';
 export type { CreateTaskOpts, TaskFilter, TaskWithBody } from './tasks.js';
