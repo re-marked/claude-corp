@@ -3,19 +3,25 @@ import {
   type Channel,
   type Member,
   type ChannelMessage,
+  type Corporation,
   readConfig,
   appendMessage,
   generateId,
+  getTheme,
+  type ThemeId,
   CHANNELS_JSON,
   MEMBERS_JSON,
   MESSAGES_JSONL,
+  CORP_JSON,
 } from '@agentcorp/shared';
 
 /** Write a task event message to the #tasks channel (not dispatched — info only). */
 export function writeTaskEvent(corpRoot: string, content: string): void {
   try {
     const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
-    const tasksChannel = channels.find((c) => c.name === 'tasks');
+    const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
+    const theme = getTheme((corp.theme || 'corporate') as ThemeId);
+    const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
     if (!tasksChannel) return;
 
     const msg: ChannelMessage = {
@@ -51,7 +57,9 @@ export function notifyTaskAssignment(
     const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
     const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
 
-    const tasksChannel = channels.find((c) => c.name === 'tasks');
+    const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
+    const theme = getTheme((corp.theme || 'corporate') as ThemeId);
+    const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
     if (!tasksChannel) return;
 
     const assignee = members.find((m) => m.id === assigneeId);

@@ -2,11 +2,14 @@ import { join } from 'node:path';
 import {
   type Member,
   type Channel,
+  type Corporation,
   type MemberRank,
   type MemberScope,
   type GlobalConfig,
   readConfig,
   canHire,
+  getTheme,
+  type ThemeId,
   setupAgentWorkspace,
   createDmChannel,
   addMemberToRegistry,
@@ -14,6 +17,7 @@ import {
   addMemberToChannel,
   MEMBERS_JSON,
   CHANNELS_JSON,
+  CORP_JSON,
 } from '@agentcorp/shared';
 import type { Daemon } from './daemon.js';
 
@@ -110,13 +114,15 @@ export async function hireAgent(
     addChannelToRegistry(corpRoot, dmChannel);
   }
 
-  // 5. Add to #general and #tasks
+  // 5. Add to #general and #tasks (themed names)
   const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
-  const general = channels.find((c) => c.name === 'general');
+  const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
+  const theme = getTheme((corp.theme || 'corporate') as ThemeId);
+  const general = channels.find((c) => c.name === theme.channels.general);
   if (general) {
     addMemberToChannel(corpRoot, general.id, member.id);
   }
-  const tasksChannel = channels.find((c) => c.name === 'tasks');
+  const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
   if (tasksChannel) {
     addMemberToChannel(corpRoot, tasksChannel.id, member.id);
   }
