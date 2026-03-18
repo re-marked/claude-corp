@@ -8,6 +8,7 @@ export class TaskWatcher {
   private daemon: Daemon;
   private watcher: FSWatcher | null = null;
   private taskCache = new Map<string, { status: TaskStatus; assignedTo: string | null }>();
+  private recentApiCreates = new Set<string>(); // Suppress duplicates from API + fs.watch
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -28,6 +29,13 @@ export class TaskWatcher {
     });
 
     console.log(`[task-watcher] Watching tasks/ (${this.taskCache.size} tasks cached)`);
+  }
+
+  /** Mark a task file as already announced by the API (prevents duplicate events). */
+  suppressNextCreate(filePath: string): void {
+    this.recentApiCreates.add(filePath);
+    // Clean up after 5 seconds in case fs.watch never fires
+    setTimeout(() => this.recentApiCreates.delete(filePath), 5000);
   }
 
   stop(): void {
@@ -65,8 +73,12 @@ export class TaskWatcher {
       const cached = this.taskCache.get(filePath);
 
       if (!cached) {
-        // New task file created by an agent
+        // New task file — but skip if API already posted the event
         this.taskCache.set(filePath, { status: task.status, assignedTo: task.assignedTo });
+        if (this.recentApiCreates.has(filePath)) {
+          this.recentApiCreates.delete(filePath);
+          return;
+        }
         writeTaskEvent(this.daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
         return;
       }

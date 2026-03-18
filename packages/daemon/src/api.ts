@@ -103,8 +103,9 @@ export function createApi(daemon: Daemon): Server {
           dueAt: (body.dueAt as string) ?? undefined,
         });
 
-        // Post task event to #tasks channel
+        // Post task event + suppress TaskWatcher duplicate
         writeTaskEvent(daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
+        daemon.taskWatcher.suppressNextCreate(taskPath(daemon.corpRoot, task.id));
 
         json(res, { ok: true, task });
         return;
