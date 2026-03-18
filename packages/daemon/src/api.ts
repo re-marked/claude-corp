@@ -103,9 +103,10 @@ export function createApi(daemon: Daemon): Server {
           dueAt: (body.dueAt as string) ?? undefined,
         });
 
-        // Post task event + suppress TaskWatcher duplicate
+        // Post task event + suppress TaskWatcher duplicate + refresh TASKS.md
         writeTaskEvent(daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
         daemon.taskWatcher.suppressNextCreate(taskPath(daemon.corpRoot, task.id));
+        daemon.heartbeat.refreshAll();
 
         json(res, { ok: true, task });
         return;
@@ -147,13 +148,14 @@ export function createApi(daemon: Daemon): Server {
           const oldTask = readTask(filePath).task;
           const updated = updateTask(filePath, body as any);
 
-          // Post status change event
+          // Post status change event + refresh TASKS.md
           if (body.status && body.status !== oldTask.status) {
             writeTaskEvent(
               daemon.corpRoot,
               `"${updated.title}" → ${updated.status}`,
             );
           }
+          daemon.heartbeat.refreshAll();
 
           json(res, { ok: true, task: updated });
         } catch {

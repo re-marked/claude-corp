@@ -99,8 +99,9 @@ export class TaskWatcher {
         );
       }
 
-      // Update cache
+      // Update cache + refresh TASKS.md files
       this.taskCache.set(filePath, { status: task.status, assignedTo: task.assignedTo });
+      this.daemon.heartbeat.refreshAll();
     } catch {
       // File might be partially written, ignore
     }
