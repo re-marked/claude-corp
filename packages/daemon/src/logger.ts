@@ -1,5 +1,5 @@
 import { appendFileSync } from 'node:fs';
-import { DAEMON_LOG_PATH } from '@agentcorp/shared';
+import { DAEMON_LOG_PATH } from '@claudecorp/shared';
 
 /** Simple logger that writes to both console and daemon log file. */
 export function log(message: string): void {

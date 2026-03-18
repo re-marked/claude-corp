@@ -17,8 +17,8 @@ export function corpGit(corpPath: string): CorpGit {
 
     async init() {
       await git.init();
-      await git.addConfig('user.name', 'AgentCorp');
-      await git.addConfig('user.email', 'agentcorp@local');
+      await git.addConfig('user.name', 'Claude Corp');
+      await git.addConfig('user.email', 'claudecorp@local');
     },
 
     async commitAll(message: string) {

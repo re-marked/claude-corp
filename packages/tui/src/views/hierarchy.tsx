@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { type Member, readConfig, buildHierarchy, type HierarchyNode, MEMBERS_JSON } from '@agentcorp/shared';
+import { type Member, readConfig, buildHierarchy, type HierarchyNode, MEMBERS_JSON } from '@claudecorp/shared';
 import { join } from 'node:path';
 import { COLORS, STATUS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';

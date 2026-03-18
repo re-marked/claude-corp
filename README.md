@@ -1,11 +1,11 @@
-# AgentCorp
+# Claude Corp
 
 **Your Personal Corporation** — a self-growing organization of AI agents that works FOR you, running entirely on your machine.
 
 You are the Founder. Your personal AI becomes CEO. The CEO hires agents, delegates work, manages projects. You set direction — the corporation executes.
 
 ```
-$ agentcorp
+$ claudecorp
 > What's your name? Mark
 > Name your corporation? acme
 > Choose your style?
@@ -34,8 +34,8 @@ $ agentcorp
 ### Install
 
 ```bash
-git clone https://github.com/re-marked/agentic-corporations.git
-cd agentic-corporations
+git clone https://github.com/re-marked/claude-corp.git
+cd claude-corp
 pnpm install
 pnpm build
 ```
@@ -86,7 +86,7 @@ Type these in the chat input:
 ## The Corporation
 
 ```
-~/.agentcorp/my-corp/
+~/.claudecorp/my-corp/
   corp.json              # Corporation metadata + theme
   members.json           # All members (human + agents)
   channels.json          # All channels

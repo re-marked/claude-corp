@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import type { GlobalConfig } from './types/index.js';
 import { readConfig, readConfigOr, writeConfig } from './parsers/config.js';
 import {
-  AGENTCORP_HOME,
+  CLAUDECORP_HOME,
   GLOBAL_CONFIG_PATH,
   CORPS_INDEX_PATH,
   OPENCLAW_HOME,
@@ -25,13 +25,13 @@ const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
   },
 };
 
-export function ensureAgentCorpHome(): void {
-  mkdirSync(AGENTCORP_HOME, { recursive: true });
+export function ensureClaudeCorpHome(): void {
+  mkdirSync(CLAUDECORP_HOME, { recursive: true });
   mkdirSync(dirname(CORPS_INDEX_PATH), { recursive: true });
 }
 
 export function ensureGlobalConfig(): GlobalConfig {
-  ensureAgentCorpHome();
+  ensureClaudeCorpHome();
 
   let config: GlobalConfig;
   if (!existsSync(GLOBAL_CONFIG_PATH)) {
@@ -62,7 +62,7 @@ function detectUserGateway(): GlobalConfig['userGateway'] {
     const token = auth?.token as string | undefined;
 
     if (port && token) {
-      // Patch verbose + streaming settings for AgentCorp
+      // Patch verbose + streaming settings for Claude Corp
       patchOpenClawVerbose(openclawConfigPath, oc);
       return { port, token };
     }
@@ -72,7 +72,7 @@ function detectUserGateway(): GlobalConfig['userGateway'] {
   return undefined;
 }
 
-/** Ensure user's OpenClaw has verbose full + streaming off for AgentCorp. */
+/** Ensure user's OpenClaw has verbose full + streaming off for Claude Corp. */
 function patchOpenClawVerbose(configPath: string, oc: Record<string, unknown>): void {
   try {
     const agents = (oc.agents ?? {}) as Record<string, unknown>;
@@ -106,6 +106,6 @@ export function readGlobalConfig(): GlobalConfig {
 }
 
 export function writeGlobalConfig(config: GlobalConfig): void {
-  ensureAgentCorpHome();
+  ensureClaudeCorpHome();
   writeConfig(GLOBAL_CONFIG_PATH, config);
 }

@@ -8,8 +8,8 @@ import {
   type Member,
   MEMBERS_JSON,
   CHANNELS_JSON,
-} from '@agentcorp/shared';
-import { Daemon } from '@agentcorp/daemon';
+} from '@claudecorp/shared';
+import { Daemon } from '@claudecorp/daemon';
 import { join } from 'node:path';
 import { ViewStack, type View } from './navigation.js';
 import { OnboardingView } from './views/onboarding.js';

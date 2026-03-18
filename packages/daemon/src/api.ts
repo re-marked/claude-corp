@@ -5,7 +5,7 @@ import {
   readTask,
   updateTask,
   taskPath,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 import { writeTaskEvent, notifyTaskAssignment } from './task-events.js';

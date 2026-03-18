@@ -2,7 +2,7 @@
 import React from 'react';
 import { render } from 'ink';
 import { App } from './app.js';
-import { ensureAgentCorpHome } from '@agentcorp/shared';
+import { ensureClaudeCorpHome } from '@claudecorp/shared';
 
-ensureAgentCorpHome();
+ensureClaudeCorpHome();
 render(<App />);

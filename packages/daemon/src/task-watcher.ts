@@ -1,6 +1,6 @@
 import { watch, type FSWatcher, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { type TaskStatus, readTask } from '@agentcorp/shared';
+import { type TaskStatus, readTask } from '@claudecorp/shared';
 import { writeTaskEvent } from './task-events.js';
 import type { Daemon } from './daemon.js';
 

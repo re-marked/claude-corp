@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { ChannelMessage, Member } from '@agentcorp/shared';
+import type { ChannelMessage, Member } from '@claudecorp/shared';
 import { COLORS } from '../theme.js';
 
 interface Props {

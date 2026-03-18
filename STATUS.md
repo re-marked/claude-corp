@@ -1,4 +1,4 @@
-# AgentCorp — Status
+# Claude Corp — Status
 
 Cross items off as they ship. Reference: `docs/` for full vision specs.
 

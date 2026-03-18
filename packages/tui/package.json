@@ -1,10 +1,10 @@
 {
-  "name": "@agentcorp/tui",
+  "name": "@claudecorp/tui",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "bin": {
-    "agentcorp": "./dist/index.js"
+    "claudecorp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup src/index.tsx --format esm",
@@ -12,8 +12,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentcorp/daemon": "workspace:*",
-    "@agentcorp/shared": "workspace:*",
+    "@claudecorp/daemon": "workspace:*",
+    "@claudecorp/shared": "workspace:*",
     "ink": "^6.8.0",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",

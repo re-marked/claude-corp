@@ -1,4 +1,4 @@
-# AgentCorp — Codebase Guide
+# Claude Corp — Codebase Guide
 
 Your Personal Corporation — a self-growing organization of AI agents that work FOR you, running locally.
 User = Founder, AI CEO = runs the corp. Not a chatbot. A company you own on your machine.
@@ -12,7 +12,7 @@ Read it before starting ANY new work. Cross items off as they ship.
 
 **`docs/`** is the authoritative design spec (Obsidian vault).
 Read it before building anything new. It contains:
-- `vision/` — what AgentCorp is, positioning, principles
+- `vision/` — what Claude Corp is, positioning, principles
 - `concepts/` — corporation hierarchy, agenticity, heartbeat, BRAIN, git-corporation
 - `primitives/` — Members, Channels, Messages, Tasks, Teams
 - `architecture/` — stack, daemon, router, TUI, file system, agent runtime
@@ -39,7 +39,7 @@ When in doubt about a design decision, check `docs/` first.
 packages/
   shared/       # Types, file format parsers (JSONL, frontmatter, JSON), constants
   daemon/       # Router (fs.watch + webhook dispatch), process manager (execa), git manager
-  tui/          # Ink app — views, components, hooks. Entry point: `agentcorp` command
+  tui/          # Ink app — views, components, hooks. Entry point: `claudecorp` command
 docs/           # Design spec (Obsidian vault)
 ```
 
@@ -56,7 +56,7 @@ Three formats, all git-tracked:
 ## Corp Folder Structure
 
 ```
-~/.agentcorp/
+~/.claudecorp/
   global-config.json              # API keys, default model, preferences
   corp-name/                      # Corporation (git repo)
     corp.json                     # Corp metadata

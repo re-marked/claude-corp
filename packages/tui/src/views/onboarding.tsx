@@ -14,8 +14,8 @@ import {
   type Member,
   MEMBERS_JSON,
   CHANNELS_JSON,
-} from '@agentcorp/shared';
-import { Daemon } from '@agentcorp/daemon';
+} from '@claudecorp/shared';
+import { Daemon } from '@claudecorp/daemon';
 import { join } from 'node:path';
 import { ChatView } from './chat.js';
 import { CommandPalette } from './command-palette.js';
@@ -136,7 +136,7 @@ export function OnboardingView() {
       setMessagesPath(join(root, dm.path, 'messages.jsonl'));
 
       // Send system message to trigger CEO onboarding interview
-      const { appendMessage: append, generateId: genId } = await import('@agentcorp/shared');
+      const { appendMessage: append, generateId: genId } = await import('@claudecorp/shared');
       const dmPath = join(root, dm.path, 'messages.jsonl');
       const kickoff = {
         id: genId(),

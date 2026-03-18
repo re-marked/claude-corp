@@ -10,7 +10,7 @@ import {
   generateId,
   MEMBERS_JSON,
   MESSAGES_JSONL,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 import { join } from 'node:path';
 import { MessageList } from '../components/message-list.js';
 import { MessageInput } from '../components/message-input.js';
@@ -130,7 +130,7 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     if (cmd === '/logs') {
       try {
         const { readFileSync, existsSync } = await import('node:fs');
-        const { DAEMON_LOG_PATH } = await import('@agentcorp/shared');
+        const { DAEMON_LOG_PATH } = await import('@claudecorp/shared');
         if (existsSync(DAEMON_LOG_PATH)) {
           const content = readFileSync(DAEMON_LOG_PATH, 'utf-8');
           const lines = content.trim().split('\n').slice(-30);

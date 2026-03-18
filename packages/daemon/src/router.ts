@@ -16,7 +16,7 @@ import {
   MESSAGES_JSONL,
   MAX_DEPTH,
   COOLDOWN_MS,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 import { dispatchToAgent, type DispatchContext } from './dispatch.js';
 import type { Daemon } from './daemon.js';
 

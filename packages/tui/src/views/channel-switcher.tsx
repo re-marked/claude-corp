@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import type { Channel } from '@agentcorp/shared';
+import type { Channel } from '@claudecorp/shared';
 
 interface Props {
   channels: Channel[];

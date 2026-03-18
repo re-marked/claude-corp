@@ -20,7 +20,7 @@ importers:
 
   packages/daemon:
     dependencies:
-      '@agentcorp/shared':
+      '@claudecorp/shared':
         specifier: workspace:*
         version: link:../shared
       execa:
@@ -41,10 +41,10 @@ importers:
 
   packages/tui:
     dependencies:
-      '@agentcorp/daemon':
+      '@claudecorp/daemon':
         specifier: workspace:*
         version: link:../daemon
-      '@agentcorp/shared':
+      '@claudecorp/shared':
         specifier: workspace:*
         version: link:../shared
       ink:

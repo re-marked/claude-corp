@@ -1,5 +1,5 @@
 {
-  "name": "@agentcorp/daemon",
+  "name": "@claudecorp/daemon",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentcorp/shared": "workspace:*",
+    "@claudecorp/shared": "workspace:*",
     "execa": "^9.6.1"
   }
 }

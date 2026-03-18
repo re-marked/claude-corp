@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import type { Channel, Member } from '@agentcorp/shared';
+import type { Channel, Member } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
 

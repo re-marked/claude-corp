@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { watch } from 'node:fs';
-import { type ChannelMessage, tailMessages, readMessages } from '@agentcorp/shared';
+import { type ChannelMessage, tailMessages, readMessages } from '@claudecorp/shared';
 
 export function useMessages(messagesPath: string, initialCount = 50) {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);

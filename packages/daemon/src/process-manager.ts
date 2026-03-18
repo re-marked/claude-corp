@@ -7,7 +7,7 @@ import {
   readConfig,
   writeConfig,
   MEMBERS_JSON,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 import { CorpGateway } from './corp-gateway.js';
 import { log, logError } from './logger.js';
 

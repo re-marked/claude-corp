@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text, useInput } from 'ink';
-import { type Member, readTask, taskPath } from '@agentcorp/shared';
+import { type Member, readTask, taskPath } from '@claudecorp/shared';
 import { COLORS, TASK_STATUS, PRIORITY, BORDER_STYLE } from '../theme.js';
 
 interface Props {

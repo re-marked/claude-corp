@@ -1,13 +1,13 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-export const AGENTCORP_HOME = join(homedir(), '.agentcorp');
+export const CLAUDECORP_HOME = join(homedir(), '.claudecorp');
 export const OPENCLAW_HOME = join(homedir(), '.openclaw');
-export const GLOBAL_CONFIG_PATH = join(AGENTCORP_HOME, 'global-config.json');
-export const CORPS_INDEX_PATH = join(AGENTCORP_HOME, 'corps', 'index.json');
-export const DAEMON_PID_PATH = join(AGENTCORP_HOME, '.daemon.pid');
-export const DAEMON_PORT_PATH = join(AGENTCORP_HOME, '.daemon.port');
-export const DAEMON_LOG_PATH = join(AGENTCORP_HOME, '.daemon.log');
+export const GLOBAL_CONFIG_PATH = join(CLAUDECORP_HOME, 'global-config.json');
+export const CORPS_INDEX_PATH = join(CLAUDECORP_HOME, 'corps', 'index.json');
+export const DAEMON_PID_PATH = join(CLAUDECORP_HOME, '.daemon.pid');
+export const DAEMON_PORT_PATH = join(CLAUDECORP_HOME, '.daemon.port');
+export const DAEMON_LOG_PATH = join(CLAUDECORP_HOME, '.daemon.log');
 
 export const DEFAULT_PORT_RANGE: [number, number] = [18800, 18999];
 export const DEFAULT_MODEL = 'claude-sonnet-4-20250514';

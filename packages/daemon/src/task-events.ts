@@ -13,7 +13,7 @@ import {
   MEMBERS_JSON,
   MESSAGES_JSONL,
   CORP_JSON,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 
 /** Write a task event message to the #tasks channel (not dispatched — info only). */
 export function writeTaskEvent(corpRoot: string, content: string): void {

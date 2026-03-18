@@ -5,7 +5,7 @@ import {
   readConfig,
   listTasks,
   MEMBERS_JSON,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // Refresh every 5 minutes

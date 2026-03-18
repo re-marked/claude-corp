@@ -14,7 +14,7 @@ import {
   CHANNELS_JSON,
   DAEMON_PID_PATH,
   DAEMON_PORT_PATH,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 import { ProcessManager } from './process-manager.js';
 import { MessageRouter } from './router.js';
 import { GitManager } from './git-manager.js';

@@ -1,4 +1,4 @@
-import { corpGit, type CorpGit } from '@agentcorp/shared';
+import { corpGit, type CorpGit } from '@claudecorp/shared';
 
 const DEBOUNCE_MS = 10_000; // Wait 10s of quiet before committing
 const JANITOR_INTERVAL_MS = 60_000; // Safety net: check every 60s

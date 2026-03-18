@@ -6,7 +6,7 @@ import {
   readConfig,
   writeConfig,
   generateId,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 
 export interface CorpGatewayAgent {
   id: string;

@@ -47,7 +47,7 @@ export type { CorpGit } from './git.js';
 
 // Global config
 export {
-  ensureAgentCorpHome,
+  ensureClaudeCorpHome,
   ensureGlobalConfig,
   readGlobalConfig,
   writeGlobalConfig,

@@ -1,8 +1,8 @@
 import { join } from 'node:path';
-import { AGENTCORP_HOME } from './constants.js';
+import { CLAUDECORP_HOME } from './constants.js';
 
 export function corpPath(corpName: string): string {
-  return join(AGENTCORP_HOME, corpName);
+  return join(CLAUDECORP_HOME, corpName);
 }
 
 export function agentPath(corpRoot: string, agentDir: string): string {

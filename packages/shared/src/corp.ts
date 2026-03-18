@@ -8,7 +8,7 @@ import { generateId } from './id.js';
 import { writeConfig } from './parsers/config.js';
 import { corpGit } from './git.js';
 import {
-  AGENTCORP_HOME,
+  CLAUDECORP_HOME,
   CORPS_INDEX_PATH,
   CORP_JSON,
   MEMBERS_JSON,
@@ -27,7 +27,7 @@ export async function scaffoldCorp(
   userName: string,
   themeId: ThemeId = 'corporate',
 ): Promise<string> {
-  const corpRoot = join(AGENTCORP_HOME, corpName);
+  const corpRoot = join(CLAUDECORP_HOME, corpName);
 
   if (existsSync(corpRoot)) {
     throw new Error(`Corporation "${corpName}" already exists at ${corpRoot}`);
@@ -142,7 +142,7 @@ function makeChannel(
 }
 
 function registerCorp(name: string, path: string): void {
-  mkdirSync(join(AGENTCORP_HOME, 'corps'), { recursive: true });
+  mkdirSync(join(CLAUDECORP_HOME, 'corps'), { recursive: true });
 
   const index = readConfigOr<CorpsIndex>(CORPS_INDEX_PATH, { corps: [] });
 

@@ -18,7 +18,7 @@ import {
   MEMBERS_JSON,
   CHANNELS_JSON,
   CORP_JSON,
-} from '@agentcorp/shared';
+} from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 
 export interface HireOpts {

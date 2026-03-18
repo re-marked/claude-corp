@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { type Member, type Channel, listTasks, MEMBERS_JSON } from '@agentcorp/shared';
+import { type Member, type Channel, listTasks, MEMBERS_JSON } from '@claudecorp/shared';
 import { COLORS, STATUS, TASK_STATUS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
 
