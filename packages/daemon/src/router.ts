@@ -125,7 +125,21 @@ export class MessageRouter {
 
     const members = this.loadMembers();
     const sender = members.find((m) => m.id === msg.senderId);
-    if (!sender) return;
+    // Allow 'system' sender for automated notifications (task assignments, etc.)
+    const senderOrSystem: Member = sender ?? {
+      id: msg.senderId,
+      displayName: 'system',
+      rank: 'owner',
+      status: 'active',
+      type: 'user',
+      scope: 'corp',
+      scopeId: '',
+      agentDir: null,
+      port: null,
+      spawnedBy: null,
+      createdAt: '',
+    };
+    if (!sender && msg.senderId !== 'system') return;
 
     // Find dispatch targets
     let targetIds: string[] = [];
@@ -152,7 +166,7 @@ export class MessageRouter {
 
     // Dispatch to each target
     for (const targetId of targetIds) {
-      this.dispatchToTarget(msg, channel, targetId, members, sender);
+      this.dispatchToTarget(msg, channel, targetId, members, senderOrSystem);
     }
   }
 
