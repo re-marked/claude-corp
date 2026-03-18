@@ -172,7 +172,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
           onCommand={(cmd) => {
             setShowSwitcher(false);
             // Commands handled by ChatView when it renders
-            if (cmd === 'hire' || cmd === 'task') {
+            if (cmd === 'hire' || cmd === 'task' || cmd === 'project' || cmd === 'team') {
               // Navigate to chat first, then the command will be handled
             }
           }}

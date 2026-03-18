@@ -172,6 +172,8 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
   const trimmedValue = value.trim().toLowerCase();
   const isTypingHire = !disabled && /^\/(h(i(r(e)?)?)?)?$/i.test(trimmedValue);
   const isTypingTask = !disabled && /^\/(t(a(s(k(s)?)?)?)?)?$/i.test(trimmedValue) && !isTypingHire;
+  const isTypingProject = !disabled && /^\/(p(r(o(j(e(c(t)?)?)?)?)?)?)?$/i.test(trimmedValue);
+  const isTypingTeam = !disabled && /^\/(t(e(a(m)?)?)?)?$/i.test(trimmedValue) && !isTypingTask;
   const isTypingHierarchy = !disabled && trimmedValue === '/h';
   const isTypingTasks = !disabled && trimmedValue === '/t';
   const isTypingAgents = !disabled && trimmedValue === '/a';
@@ -183,6 +185,8 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
         <Box paddingX={2} flexDirection="column">
           <Text color="#E17055" bold>/hire</Text>
           <Text color="#FDCB6E" bold>/task</Text>
+          <Text color="#E17055" bold>/project</Text>
+          <Text color="#FFEAA7" bold>/team</Text>
           <Text color="#B2BEC3" bold>/h <Text color="#636E72">hierarchy</Text>  /t <Text color="#636E72">tasks</Text>  /a <Text color="#636E72">agents</Text></Text>
         </Box>
       )}
@@ -214,6 +218,18 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
         <Box paddingX={2}>
           <Text color="#B2BEC3" bold>/a</Text>
           <Text color="#636E72"> — view agents</Text>
+        </Box>
+      )}
+      {isTypingProject && !isTypingHire && (
+        <Box paddingX={2}>
+          <Text color="#E17055" bold>/project</Text>
+          <Text color="#636E72"> — create a new project</Text>
+        </Box>
+      )}
+      {isTypingTeam && !isTypingTask && (
+        <Box paddingX={2}>
+          <Text color="#FFEAA7" bold>/team</Text>
+          <Text color="#636E72"> — create a new team</Text>
         </Box>
       )}
       <Box borderStyle="round" borderColor={disabled ? '#636E72' : '#636E72'} paddingX={1}>

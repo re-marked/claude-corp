@@ -71,6 +71,49 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  async createProject(opts: {
+    name: string;
+    type: string;
+    path?: string;
+    lead?: string;
+    description?: string;
+    createdBy: string;
+  }): Promise<{ ok: boolean; project: unknown }> {
+    const resp = await fetch(`${this.baseUrl}/projects/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  async listProjects(): Promise<unknown[]> {
+    const resp = await fetch(`${this.baseUrl}/projects`);
+    return resp.json() as Promise<any>;
+  }
+
+  async createTeam(opts: {
+    projectId: string;
+    name: string;
+    description?: string;
+    leaderId: string;
+    createdBy: string;
+  }): Promise<{ ok: boolean; team: unknown }> {
+    const resp = await fetch(`${this.baseUrl}/teams/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  async listTeams(projectId?: string): Promise<unknown[]> {
+    const params = new URLSearchParams();
+    if (projectId) params.set('projectId', projectId);
+    const resp = await fetch(`${this.baseUrl}/teams?${params}`);
+    return resp.json() as Promise<any>;
+  }
+
   async sendMessage(channelId: string, content: string): Promise<{ dispatching: boolean; dispatchTargets: string[] }> {
     const resp = await fetch(`${this.baseUrl}/messages/send`, {
       method: 'POST',

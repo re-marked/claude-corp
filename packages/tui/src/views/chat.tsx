@@ -18,6 +18,8 @@ import { useMessages } from '../hooks/use-messages.js';
 import { HireWizard } from './hire-wizard.js';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import { TaskWizard } from './task-wizard.js';
+import { ProjectWizard } from './project-wizard.js';
+import { TeamWizard } from './team-wizard.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
 
 const THINKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes — agents can work long
@@ -40,6 +42,8 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
   const [members, setMembers] = useState(initialMembers);
   const [showHireWizard, setShowHireWizard] = useState(false);
   const [showTaskWizard, setShowTaskWizard] = useState(false);
+  const [showProjectWizard, setShowProjectWizard] = useState(false);
+  const [showTeamWizard, setShowTeamWizard] = useState(false);
   const lastMsgCount = useRef(messages.length);
 
   // Refresh members when new messages arrive (new agents may have been hired)
@@ -125,6 +129,18 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
 
+    // /project opens the project wizard
+    if (text.trim().toLowerCase() === '/project') {
+      setShowProjectWizard(true);
+      return;
+    }
+
+    // /team opens the team wizard
+    if (text.trim().toLowerCase() === '/team') {
+      setShowTeamWizard(true);
+      return;
+    }
+
     // /logs — show recent daemon logs
     const cmd = text.trim().toLowerCase();
     if (cmd === '/logs') {
@@ -176,6 +192,43 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     writeSystemMessage(`Task "${title}" created. Check #tasks for details.`);
     setTimeout(() => setShowTaskWizard(false), 1500);
   };
+
+  const handleProjectCreated = (name: string) => {
+    writeSystemMessage(`Project "${name}" created. New channels are now available.`);
+    setTimeout(() => setShowProjectWizard(false), 1500);
+  };
+
+  const handleTeamCreated = (name: string) => {
+    writeSystemMessage(`Team "${name}" created. A team channel has been added.`);
+    setTimeout(() => setShowTeamWizard(false), 1500);
+  };
+
+  if (showProjectWizard) {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+        <ProjectWizard
+          daemonClient={daemonClient}
+          founderId={founder?.id ?? ''}
+          onClose={() => setShowProjectWizard(false)}
+          onCreated={handleProjectCreated}
+        />
+      </Box>
+    );
+  }
+
+  if (showTeamWizard) {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+        <TeamWizard
+          daemonClient={daemonClient}
+          founderId={founder?.id ?? ''}
+          members={members}
+          onClose={() => setShowTeamWizard(false)}
+          onCreated={handleTeamCreated}
+        />
+      </Box>
+    );
+  }
 
   if (showTaskWizard) {
     return (
