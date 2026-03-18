@@ -134,6 +134,29 @@ export function OnboardingView() {
       setChannels(allChannels);
       setChannel(dm);
       setMessagesPath(join(root, dm.path, 'messages.jsonl'));
+
+      // Send initial message to kick off the CEO onboarding interview
+      const { appendMessage: append, generateId: genId } = await import('@agentcorp/shared');
+      const dmPath = join(root, dm.path, 'messages.jsonl');
+      const founder = allMembers.find((m) => m.rank === 'owner');
+      if (founder) {
+        const kickoff = {
+          id: genId(),
+          channelId: dm.id,
+          senderId: founder.id,
+          threadId: null,
+          content: `Hey! I just created ${corpName}. This is our first conversation. Interview me — ask me what I want this corporation to do, what I'm working on, and what kind of help I need. Then propose a plan and start building the team.`,
+          kind: 'text' as const,
+          mentions: [],
+          metadata: null,
+          depth: 0,
+          originId: '',
+          timestamp: new Date().toISOString(),
+        };
+        kickoff.originId = kickoff.id;
+        append(dmPath, kickoff);
+      }
+
       setStep('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
