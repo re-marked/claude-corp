@@ -97,8 +97,10 @@ export function CommandPalette({ channels, members, onNavigate, onSelectChannel,
       flexDirection="column"
       borderStyle={BORDER_STYLE}
       borderColor={COLORS.primary}
-      paddingX={1}
-      width={55}
+      paddingX={2}
+      paddingY={1}
+      width={60}
+      alignSelf="center"
     >
       <Box>
         <Text bold color={COLORS.primary}>&gt; </Text>
