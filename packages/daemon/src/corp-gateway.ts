@@ -162,14 +162,32 @@ export class CorpGateway {
 
     this.process = proc;
 
-    // Log output + forward agent messages to callback
+    // Log output + forward agent activity to callback (filtered)
     proc.stdout?.on('data', (chunk: Buffer) => {
       const lines = chunk.toString().split('\n');
       for (const raw of lines) {
         const line = raw.trim();
         if (!line) continue;
         console.log(`[gateway] ${line}`);
-        if (this.onAgentOutput) this.onAgentOutput(line);
+        if (this.onAgentOutput) {
+          const isNoise = line.includes('[gateway]') ||
+            line.includes('[heartbeat]') ||
+            line.includes('[bonjour]') ||
+            line.includes('[browser') ||
+            line.includes('[canvas]') ||
+            line.includes('[reload]') ||
+            line.includes('[health-monitor]') ||
+            line.includes('[hooks') ||
+            line.includes('[telegram]') ||
+            line.includes('update available') ||
+            line.includes('listening on') ||
+            line.includes('agent model') ||
+            line.includes('log file') ||
+            line.includes('Doctor warnings') ||
+            line.includes('│') || line.includes('├') ||
+            line.includes('◇') || line.includes('╮') || line.includes('╯');
+          if (!isNoise) this.onAgentOutput(line);
+        }
       }
     });
     proc.stderr?.on('data', (chunk: Buffer) => {

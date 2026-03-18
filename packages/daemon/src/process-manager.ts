@@ -250,7 +250,7 @@ export class ProcessManager {
           line.includes('╮') ||
           line.includes('╯');
         if (!isNoise) log(`[CEO] ${line}`);
-        if (this.onCeoOutput) this.onCeoOutput(line);
+        if (!isNoise && this.onCeoOutput) this.onCeoOutput(line);
       }
     });
     proc.stderr?.on('data', (chunk: Buffer) => {
