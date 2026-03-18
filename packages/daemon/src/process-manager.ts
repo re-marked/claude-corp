@@ -164,14 +164,30 @@ export class ProcessManager {
 
     const openclawHome = join(homedir(), '.openclaw').replace(/\\/g, '/');
 
-    // Stop the existing gateway so we can take over the port
-    log(`[daemon] Stopping existing OpenClaw gateway to take over...`);
+    // Force-kill the existing gateway so we can take over the port
+    log(`[daemon] Stopping existing OpenClaw gateway to take over port ${gw.port}...`);
     try {
-      await execa('openclaw', ['gateway', 'stop'], { reject: false, timeout: 10000 });
-      // Wait a moment for port to free up
-      await new Promise((r) => setTimeout(r, 2000));
+      await execa('openclaw', ['gateway', 'stop'], { reject: false, timeout: 5000 });
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // Check if port still in use — force kill the PID
+      try {
+        const check = await execa('cmd', ['/c', `netstat -ano | findstr :${gw.port} | findstr LISTENING`], { reject: false, timeout: 5000 });
+        if (check.stdout) {
+          const match = check.stdout.trim().match(/\s(\d+)\s*$/m);
+          if (match?.[1]) {
+            log(`[daemon] Force-killing old gateway PID ${match[1]} on port ${gw.port}`);
+            await execa('taskkill', ['/F', '/PID', match[1]], { reject: false, timeout: 5000 });
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
+      } catch {}
+
+      // Remove scheduled task to prevent auto-restart
+      await execa('schtasks', ['/End', '/TN', 'OpenClaw Gateway'], { reject: false, timeout: 3000 }).catch(() => {});
+      await execa('schtasks', ['/Delete', '/TN', 'OpenClaw Gateway', '/F'], { reject: false, timeout: 3000 }).catch(() => {});
     } catch {
-      // Might not be running, that's fine
+      // Best effort
     }
 
     const agentProc: AgentProcess = {
