@@ -8,7 +8,7 @@ import type { View } from '../navigation.js';
 interface PaletteItem {
   id: string;
   label: string;
-  kind: 'channel' | 'agent' | 'view' | 'command';
+  kind: 'channel' | 'agent' | 'view' | 'command' | 'project';
   icon: string;
   action: () => void;
 }
@@ -36,6 +36,8 @@ export function CommandPalette({ channels, members, onNavigate, onSelectChannel,
     // Commands
     { id: 'c-hire', label: '/hire', kind: 'command', icon: '▸', action: () => onCommand('hire') },
     { id: 'c-task', label: '/task', kind: 'command', icon: '▸', action: () => onCommand('task') },
+    { id: 'c-project', label: '/project', kind: 'project', icon: '▸', action: () => onCommand('project') },
+    { id: 'c-team', label: '/team', kind: 'command', icon: '▸', action: () => onCommand('team') },
     // Channels
     ...channels.map((ch) => ({
       id: `ch-${ch.id}`,
@@ -90,6 +92,7 @@ export function CommandPalette({ channels, members, onNavigate, onSelectChannel,
     agent: COLORS.secondary,
     view: COLORS.subtle,
     command: COLORS.success,
+    project: COLORS.info,
   };
 
   return (

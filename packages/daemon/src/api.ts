@@ -5,6 +5,10 @@ import {
   readTask,
   updateTask,
   taskPath,
+  createProject,
+  listProjects,
+  createTeam,
+  listTeams,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
@@ -166,6 +170,58 @@ export function createApi(daemon: Daemon): Server {
         } catch {
           json(res, { error: 'Task not found' }, 404);
         }
+        return;
+      }
+
+      // POST /projects/create
+      if (method === 'POST' && path === '/projects/create') {
+        const body = await readBody(req) as Record<string, unknown>;
+        if (!body.name || !body.type || !body.createdBy) {
+          json(res, { error: 'name, type, and createdBy are required' }, 400);
+          return;
+        }
+        const project = createProject(daemon.corpRoot, {
+          name: body.name as string,
+          type: body.type as any,
+          path: (body.path as string) ?? undefined,
+          lead: (body.lead as string) ?? undefined,
+          description: (body.description as string) ?? undefined,
+          createdBy: body.createdBy as string,
+        });
+        json(res, { ok: true, project });
+        return;
+      }
+
+      // GET /projects
+      if (method === 'GET' && path === '/projects') {
+        const projects = listProjects(daemon.corpRoot);
+        json(res, projects);
+        return;
+      }
+
+      // POST /teams/create
+      if (method === 'POST' && path === '/teams/create') {
+        const body = await readBody(req) as Record<string, unknown>;
+        if (!body.projectId || !body.name || !body.leaderId || !body.createdBy) {
+          json(res, { error: 'projectId, name, leaderId, and createdBy are required' }, 400);
+          return;
+        }
+        const team = createTeam(daemon.corpRoot, {
+          projectId: body.projectId as string,
+          name: body.name as string,
+          description: (body.description as string) ?? undefined,
+          leaderId: body.leaderId as string,
+          createdBy: body.createdBy as string,
+        });
+        json(res, { ok: true, team });
+        return;
+      }
+
+      // GET /teams
+      if (method === 'GET' && path === '/teams') {
+        const projectId = url.searchParams.get('projectId') ?? undefined;
+        const teams = listTeams(daemon.corpRoot, projectId);
+        json(res, teams);
         return;
       }
 

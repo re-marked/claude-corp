@@ -17,6 +17,7 @@ export type {
   TeamStatus,
   Corporation,
   Project,
+  ProjectType,
   AgentConfig,
   GlobalConfig,
 } from './types/index.js';
@@ -76,6 +77,14 @@ export { canHire } from './ranks.js';
 // Hierarchy
 export { buildHierarchy } from './hierarchy.js';
 export type { HierarchyNode } from './hierarchy.js';
+
+// Projects
+export { createProject, listProjects, getProject, getProjectByName } from './projects.js';
+export type { CreateProjectOpts } from './projects.js';
+
+// Teams
+export { createTeam, listTeams, getTeam, addMemberToTeam } from './teams.js';
+export type { CreateTeamOpts } from './teams.js';
 
 // Themes
 export { getTheme, getAllThemes, rankLabel } from './themes.js';

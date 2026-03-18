@@ -10,6 +10,7 @@ export interface CreateTaskOpts {
   priority?: TaskPriority;
   assignedTo?: string | null;
   createdBy: string;
+  projectId?: string | null;
   parentTaskId?: string | null;
   dueAt?: string | null;
 }
@@ -17,6 +18,7 @@ export interface CreateTaskOpts {
 export interface TaskFilter {
   status?: TaskStatus;
   assignedTo?: string;
+  projectId?: string;
   priority?: TaskPriority;
   createdBy?: string;
 }
@@ -42,6 +44,7 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
     priority: opts.priority ?? 'normal',
     assignedTo: opts.assignedTo ?? null,
     createdBy: opts.createdBy,
+    projectId: opts.projectId ?? null,
     parentTaskId: opts.parentTaskId ?? null,
     teamId: null,
     dueAt: opts.dueAt ?? null,
@@ -100,6 +103,7 @@ export function listTasks(corpRoot: string, filter?: TaskFilter): TaskWithBody[]
         if (filter.status && task.status !== filter.status) continue;
         if (filter.assignedTo && task.assignedTo !== filter.assignedTo) continue;
         if (filter.priority && task.priority !== filter.priority) continue;
+        if (filter.projectId && task.projectId !== filter.projectId) continue;
         if (filter.createdBy && task.createdBy !== filter.createdBy) continue;
       }
 

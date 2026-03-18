@@ -29,6 +29,6 @@ export type {
 } from './team.js';
 
 export type { Corporation } from './corp.js';
-export type { Project } from './project.js';
+export type { Project, ProjectType } from './project.js';
 export type { AgentConfig } from './agent-config.js';
 export type { GlobalConfig } from './global-config.js';
