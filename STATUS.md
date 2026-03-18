@@ -9,9 +9,10 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - Layer 1: types, parsers, corp scaffolding, git integration
 - Layer 2: CEO connects to user's existing OpenClaw, TUI onboarding + chat
 - Layer 3: async router, @mention dispatch, channel history, channel switching
-- Layer 4 (Phase A): task file primitives, /task wizard, API, event messages
-- Layer 5 (partial): shared corp gateway, /hire wizard, CEO-initiated hiring, multi-agent chat
+- Layer 4: task files, /task wizard, API, TASKS.md live inbox, auto-assignment dispatch
+- Layer 5: shared corp gateway, /hire wizard, CEO-initiated hiring, multi-agent chat
 - Git tracking: auto-commit after agent actions (10s debounce)
+- Autonomous task loop VERIFIED: /task → @mention assignee → agent reads TASKS.md → works → updates status → completed
 
 ---
 
@@ -33,7 +34,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] Local agent mode (spawn OpenClaw via execa, port allocation, health check)
 - [x] CEO workspace files (SOUL.md, AGENTS.md, HEARTBEAT.md, IDENTITY.md, USER.md)
 - [x] Corp context injection (system message with agent dir, corp path, members)
-- [x] File-reference context (point agent to SOUL.md/AGENTS.md, don't inline)
+- [x] File-reference context (point agent to SOUL.md/AGENTS.md/TASKS.md, don't inline)
 - [x] TUI onboarding wizard (name yourself, name your corp, connect to OpenClaw)
 - [x] Basic TUI chat view (send/receive via JSONL + fs.watch)
 - [ ] CEO onboarding interview flow (emergent from SOUL.md, not hardcoded)
@@ -45,6 +46,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] Async dispatch (sendMessage writes to JSONL, router dispatches via fs.watch)
 - [x] DM auto-routing (every message in DM wakes the other member)
 - [x] @mention routing in broadcast/team/system channels
+- [x] Router handles 'system' sender for automated notifications
 - [x] Guards: depth (max 5), dedup, cooldown (agent-to-agent only, user bypasses)
 - [x] Recent channel history (last 50 messages) included in every dispatch
 - [x] Named typing indicator ("CEO is typing..." not generic "Thinking...")
@@ -60,7 +62,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ## Layer 4: Tasks
 
-### Phase A (done)
+### Phase A — Task primitives (done)
 - [x] Task file format (markdown + YAML frontmatter in tasks/)
 - [x] Task primitives (createTask, readTask, updateTask, listTasks)
 - [x] Task CRUD API (POST /tasks/create, GET /tasks, GET /tasks/:id, PATCH /tasks/:id)
@@ -70,11 +72,14 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] Task instructions in agent system message
 - [x] tasks/ directory in corp scaffolding
 
-### Phase B (not started)
-- [ ] Heartbeat dispatch (periodic wake-up, task summary per agent)
-- [ ] HEARTBEAT.md regeneration with assigned tasks + channel activity
-- [ ] Stale task detection (10min assigned, 30min in_progress, 2hr escalation)
-- [ ] fs.watch on tasks/ for agent-created/modified task files
+### Phase B — Task automation (done)
+- [x] TASKS.md live inbox per agent (refreshed on every change + every 5 min)
+- [x] Auto @mention assignee in #tasks on task creation (immediate dispatch)
+- [x] Agents auto-join #tasks channel on hire
+- [x] TaskWatcher: fs.watch on tasks/ for agent-created/modified task files
+- [x] Duplicate event suppression (API create + TaskWatcher don't double-post)
+- [x] OpenClaw native heartbeat configured on corp gateway (every 10 min)
+- [x] Stale task detection in TASKS.md (10min assigned, 2hr in_progress warnings)
 
 ### Phase C (deferred to Layer 6)
 - [ ] Task board TUI view (list with filters and keyboard shortcuts)
@@ -135,11 +140,10 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ## Critical Path
 
-The shortest path to "agents acting autonomously in a visible workspace":
-
 1. ~~**Foundation** — file formats, corp structure, git integration~~
 2. ~~**CEO chat** — connect to OpenClaw, talk to it in TUI~~
 3. ~~**Daemon router** — fs.watch + @mention dispatch = agents talk to each other~~
 4. ~~**Agent creation** — agents create agents, corporation grows~~
-5. ~~**Task primitives** — tasks as files, API, /task command~~
-6. **Heartbeat** — agents discover work on their own (Layer 4 Phase B)
+5. ~~**Tasks** — file-based tasks, auto-assignment, TASKS.md live inbox~~
+6. ~~**Autonomous loop** — /task → auto-dispatch → agent works → completed~~
+7. **Views** — corp home, agent inspector, task board (Layer 6)
