@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
 import {
@@ -42,6 +42,8 @@ export function OnboardingView() {
   const [messagesPath, setMessagesPath] = useState('');
   const [corpRoot, setCorpRoot] = useState('');
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const { stdout } = useStdout();
+  const termHeight = stdout?.rows ?? 40;
 
   const handleUserNameSubmit = (name: string) => {
     const trimmed = name.trim();
@@ -169,7 +171,7 @@ export function OnboardingView() {
 
   if (step === 'your-name') {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
         <Text color={COLORS.primary}>{CLAUDE_CORP_LOGO}</Text>
         <Box flexDirection="column" borderStyle={BORDER_STYLE} borderColor={COLORS.primary} paddingX={3} paddingY={1} width={50} marginTop={1}>
           <Box marginBottom={1}>
@@ -192,7 +194,7 @@ export function OnboardingView() {
 
   if (step === 'corp-name') {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
         <Box flexDirection="column" borderStyle={BORDER_STYLE} borderColor={COLORS.primary} paddingX={3} paddingY={1} width={50}>
           <Box marginBottom={1}>
             <Text bold color={COLORS.primary}>Name your corporation</Text>
@@ -218,7 +220,7 @@ export function OnboardingView() {
   if (step === 'theme') {
     const selected = THEMES[themeIndex]!;
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
         <Box flexDirection="column" borderStyle={BORDER_STYLE} borderColor={COLORS.primary} paddingX={3} paddingY={1} width={60}>
           <Box marginBottom={1}>
             <Text bold color={COLORS.primary}>Choose your style</Text>
@@ -257,7 +259,7 @@ export function OnboardingView() {
 
   if (step === 'spawning') {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
         <Text color={COLORS.primary}>{asciiName(corpName)}</Text>
         <Box flexDirection="column" borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={3} paddingY={1} width={50} marginTop={1}>
           <Box gap={1}>
@@ -279,7 +281,7 @@ export function OnboardingView() {
   if (channel && daemonClient && messagesPath) {
     if (showSwitcher) {
       return (
-        <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
+        <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
           <CommandPalette
             channels={channels}
             members={members}
