@@ -29,9 +29,10 @@ interface Props {
   daemonClient: DaemonClient;
   corpRoot: string;
   onSwitchChannel?: () => void;
+  onNavigate?: (view: import('../navigation.js').View) => void;
 }
 
-export function ChatView({ channel, members: initialMembers, messagesPath, daemonClient, corpRoot, onSwitchChannel }: Props) {
+export function ChatView({ channel, members: initialMembers, messagesPath, daemonClient, corpRoot, onSwitchChannel, onNavigate }: Props) {
   const messages = useMessages(messagesPath);
   const [sending, setSending] = useState(false);
   const [thinking, setThinking] = useState(false);
