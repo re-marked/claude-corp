@@ -16,6 +16,7 @@ export interface Task {
   priority: TaskPriority;
   assignedTo: string | null;
   createdBy: string;
+  projectId: string | null;
   parentTaskId: string | null;
   teamId: string | null;
   dueAt: string | null;

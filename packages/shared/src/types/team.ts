@@ -4,6 +4,7 @@ export interface Team {
   id: string;
   name: string;
   description: string;
+  projectId: string;
   leaderMemberId: string;
   parentId: string | null;
   status: TeamStatus;
