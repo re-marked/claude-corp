@@ -145,6 +145,9 @@ export async function hireAgent(
     const status = gw.getStatus();
     if (status === 'stopped' || status === 'starting') {
       await gw.start();
+    } else {
+      // Give OpenClaw a moment to hot-reload the new agent config
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 

@@ -229,20 +229,19 @@ export class CorpGateway {
         body: JSON.stringify({ model: 'openclaw:main', messages: [] }),
         signal: AbortSignal.timeout(2000),
       });
-      // Only adopt if auth passes (not 401)
+      // Auth passes — adopt the running gateway
       if (resp.status < 400) {
         this._status = 'ready';
         this.startHealthMonitor();
         console.log(`[gateway] Adopted existing gateway on port ${this._port} with ${this.listAgents().length} agents`);
         return true;
       }
-      // 401 = stale gateway with wrong token — kill it and respawn
-      if (resp.status === 401) {
-        console.log(`[gateway] Stale gateway on port ${this._port} (wrong token), killing...`);
-        await this.killPortHolder();
-      }
+      // Something is running on our port but auth fails — kill it and respawn
+      console.log(`[gateway] Stale gateway on port ${this._port} (status ${resp.status}), killing...`);
+      await this.killPortHolder();
     } catch {
-      // Not running — need to spawn
+      // Port not reachable — but check if something is still holding it (Windows port release delay)
+      await this.killPortHolder();
     }
     return false;
   }
