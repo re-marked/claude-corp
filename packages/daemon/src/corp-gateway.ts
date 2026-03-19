@@ -93,7 +93,7 @@ export class CorpGateway {
     const agentDir = join(this.gatewayDir, 'agents', agentId, 'agent');
     mkdirSync(agentDir, { recursive: true });
 
-    // Copy auth from user's OpenClaw (the source of truth for API keys)
+    // Copy auth from user's OpenClaw (source of truth for API keys)
     const userAuthPath = join(homedir(), '.openclaw', 'agents', 'main', 'agent', 'auth-profiles.json');
     if (existsSync(userAuthPath)) {
       const userAuth = readConfig<Record<string, unknown>>(userAuthPath);
@@ -229,14 +229,14 @@ export class CorpGateway {
         body: JSON.stringify({ model: 'openclaw:main', messages: [] }),
         signal: AbortSignal.timeout(2000),
       });
-      // Only adopt if auth passes (not 401/403)
+      // Only adopt if auth passes (not 401)
       if (resp.status < 400) {
         this._status = 'ready';
         this.startHealthMonitor();
         console.log(`[gateway] Adopted existing gateway on port ${this._port} with ${this.listAgents().length} agents`);
         return true;
       }
-      // 401 = wrong token, stale gateway — kill it
+      // 401 = stale gateway with wrong token — kill it and respawn
       if (resp.status === 401) {
         console.log(`[gateway] Stale gateway on port ${this._port} (wrong token), killing...`);
         await this.killPortHolder();

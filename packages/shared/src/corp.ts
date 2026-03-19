@@ -29,8 +29,15 @@ export async function scaffoldCorp(
 ): Promise<string> {
   const corpRoot = join(CLAUDECORP_HOME, corpName);
 
+  // If directory exists but is broken (no members.json), clean it up
   if (existsSync(corpRoot)) {
-    throw new Error(`Corporation "${corpName}" already exists at ${corpRoot}`);
+    if (!existsSync(join(corpRoot, MEMBERS_JSON))) {
+      // Stale remnant — nuke and recreate
+      const { rmSync } = await import('node:fs');
+      rmSync(corpRoot, { recursive: true, force: true });
+    } else {
+      throw new Error(`Corporation "${corpName}" already exists at ${corpRoot}`);
+    }
   }
 
   const theme = getTheme(themeId);
