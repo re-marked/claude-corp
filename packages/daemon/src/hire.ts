@@ -127,7 +127,7 @@ export async function hireAgent(
     addMemberToChannel(corpRoot, tasksChannel.id, member.id);
   }
 
-  // 6. Add to corp gateway + restart
+  // 6. Add to corp gateway — start if first agent, hot-reload if running
   const gw = daemon.processManager.corpGateway;
   if (gw) {
     const workspace = join(corpRoot, agentDir).replace(/\\/g, '/');
@@ -140,7 +140,10 @@ export async function hireAgent(
       agentDir: gwAgentDir,
     });
 
-    await gw.restart();
+    const status = gw.getStatus();
+    if (status === 'stopped' || status === 'starting') {
+      await gw.start();
+    }
   }
 
   // 7. Register in process manager
