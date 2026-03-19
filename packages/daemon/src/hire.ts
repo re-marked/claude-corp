@@ -127,7 +127,7 @@ export async function hireAgent(
     addMemberToChannel(corpRoot, tasksChannel.id, member.id);
   }
 
-  // 6. Add to corp gateway + restart
+  // 6. Add to corp gateway (OpenClaw hot-reloads agents.list — no restart needed)
   const gw = daemon.processManager.corpGateway;
   if (gw) {
     const workspace = join(corpRoot, agentDir).replace(/\\/g, '/');
@@ -139,8 +139,6 @@ export async function hireAgent(
       workspace,
       agentDir: gwAgentDir,
     });
-
-    await gw.restart();
   }
 
   // 7. Register in process manager
