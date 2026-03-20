@@ -149,6 +149,12 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
 
+    // /ping responds with pong!
+    if (text.trim().toLowerCase() === '/ping') {
+      writeSystemMessage('pong!');
+      return;
+    }
+
     // /who, /m, /members — show member roster with status
     const cmd = text.trim().toLowerCase();
     if (cmd === '/who' || cmd === '/m' || cmd === '/members') {
