@@ -112,7 +112,8 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
         }
       } catch {}
     };
-    const interval = setInterval(poll, 1000); // Poll every second
+    poll(); // Poll immediately on mount
+    const interval = setInterval(poll, 500); // Fast poll for streaming
     return () => clearInterval(interval);
   }, [daemonClient, channel.id]);
 

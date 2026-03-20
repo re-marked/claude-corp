@@ -297,6 +297,9 @@ export class MessageRouter {
         context,
         `channel-${channel.id}-${msg.id}`,
         (accumulated) => {
+          if (accumulated.length % 50 === 0 || accumulated.length < 5) {
+            console.log(`[stream] ${target.displayName}: ${accumulated.length} chars`);
+          }
           this.daemon.streaming.set(targetId, {
             agentName: target.displayName,
             content: accumulated,
