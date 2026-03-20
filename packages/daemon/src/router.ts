@@ -266,13 +266,28 @@ export class MessageRouter {
     try {
       this.activeDispatches.add(target.displayName);
 
+      // Stream tokens into daemon.streaming so the TUI can show live preview
+      this.daemon.streaming.set(targetId, {
+        agentName: target.displayName,
+        content: '',
+        channelId: channel.id,
+      });
+
       const result = await dispatchToAgent(
         agentProc,
         messageContent,
         context,
         `channel-${channel.id}-${msg.id}`,
+        (accumulated) => {
+          this.daemon.streaming.set(targetId, {
+            agentName: target.displayName,
+            content: accumulated,
+            channelId: channel.id,
+          });
+        },
       );
 
+      this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
 
       // Write agent response to JSONL
@@ -298,6 +313,7 @@ export class MessageRouter {
       // Mark corp as dirty for git commit
       this.daemon.gitManager.markDirty(target.displayName);
     } catch (err) {
+      this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
       console.error(`[router] Dispatch to ${target.displayName} failed:`, err);
     }

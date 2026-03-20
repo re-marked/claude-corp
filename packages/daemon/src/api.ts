@@ -37,6 +37,16 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // GET /streaming — live partial responses from agents
+      if (method === 'GET' && path === '/streaming') {
+        const streams: Record<string, { agentName: string; content: string; channelId: string }> = {};
+        for (const [id, data] of daemon.streaming) {
+          streams[id] = data;
+        }
+        json(res, streams);
+        return;
+      }
+
       // GET /uptime
       if (method === 'GET' && path === '/uptime') {
         const uptimeInfo = daemon.getUptimeInfo();

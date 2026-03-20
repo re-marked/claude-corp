@@ -32,6 +32,8 @@ export class Daemon {
   heartbeat: HeartbeatManager;
   taskWatcher: TaskWatcher;
   readonly startedAt: number = Date.now();
+  /** Per-agent partial streaming content — updated as SSE tokens arrive. */
+  streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
   private server: Server | null = null;
   private port = 0;
 

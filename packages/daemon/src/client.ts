@@ -128,4 +128,9 @@ export class DaemonClient {
     const resp = await fetch(`${this.baseUrl}/uptime`);
     return resp.json() as Promise<{ uptime: string; totalMessages: number; startedAt: number }>;
   }
+
+  async getStreaming(): Promise<Record<string, { agentName: string; content: string; channelId: string }>> {
+    const resp = await fetch(`${this.baseUrl}/streaming`);
+    return resp.json() as Promise<Record<string, { agentName: string; content: string; channelId: string }>>;
+  }
 }

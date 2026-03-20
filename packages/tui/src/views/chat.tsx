@@ -80,19 +80,33 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     lastMsgCount.current = messages.length;
   }, [messages.length]);
 
-  // Poll daemon for active dispatches (agent-to-agent typing indicators)
+  // Poll daemon for streaming content + active dispatches
   const [dispatchingAgents, setDispatchingAgents] = useState<string[]>([]);
+  const [streamPreview, setStreamPreview] = useState<{ agentName: string; content: string } | null>(null);
   useEffect(() => {
     const poll = async () => {
       try {
+        // Get active dispatches
         const status = await daemonClient.status();
         const dispatching = (status as any).dispatching as string[] | undefined;
         setDispatchingAgents(dispatching ?? []);
+
+        // Get streaming content for this channel
+        const streams = await daemonClient.getStreaming();
+        let found = false;
+        for (const data of Object.values(streams)) {
+          if (data.channelId === channel.id && data.content) {
+            setStreamPreview({ agentName: data.agentName, content: data.content });
+            found = true;
+            break;
+          }
+        }
+        if (!found) setStreamPreview(null);
       } catch {}
     };
-    const interval = setInterval(poll, 3000);
+    const interval = setInterval(poll, 800); // Fast poll for smooth streaming
     return () => clearInterval(interval);
-  }, [daemonClient]);
+  }, [daemonClient, channel.id]);
 
   // Timeout the spinner
   useEffect(() => {
@@ -517,7 +531,22 @@ Always consider what happens when things go wrong.`,
       <Box flexDirection="row" flexGrow={1}>
         <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
           <MessageList messages={messages} members={members} />
-          {(thinking || dispatchingAgents.length > 0) && (
+          {streamPreview && (
+            <Box flexDirection="column" marginTop={1}>
+              <Box gap={1}>
+                <Text color={COLORS.primary}><Spinner type="dots" /></Text>
+                <Text color={COLORS.agent} bold>{streamPreview.agentName}</Text>
+              </Box>
+              <Box paddingLeft={3}>
+                <Text color={COLORS.subtle} wrap="wrap">
+                  {streamPreview.content.length > 500
+                    ? streamPreview.content.slice(-500)
+                    : streamPreview.content}
+                </Text>
+              </Box>
+            </Box>
+          )}
+          {!streamPreview && (thinking || dispatchingAgents.length > 0) && (
             <Box gap={1} marginTop={1}>
               <Text color={COLORS.primary}><Spinner type="dots" /></Text>
               <Text color={COLORS.subtle}>

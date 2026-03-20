@@ -146,16 +146,90 @@ After hiring, the agent appears in #general and you can @mention them.
 Only hire when the Founder asks you to, or when it's clearly needed for a task.`;
 }
 
+/** SSE chunk shape from OpenAI-compatible streaming */
+interface StreamChunk {
+  model?: string;
+  choices: Array<{
+    index: number;
+    delta: { role?: string; content?: string | null };
+    finish_reason: string | null;
+  }>;
+}
+
+/**
+ * Consume an OpenAI-compatible SSE stream and return accumulated content.
+ * Calls onToken for each token so the caller can update live preview state.
+ */
+async function consumeSSEStream(
+  resp: Response,
+  agentName: string,
+  onToken?: (accumulated: string) => void,
+): Promise<{ content: string; model: string }> {
+  if (!resp.body) throw new Error(`Agent ${agentName} returned no response body`);
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let accumulated = '';
+  let model = '';
+  let done = false;
+
+  try {
+    while (!done) {
+      const { value, done: streamDone } = await reader.read();
+      done = streamDone;
+
+      if (value) {
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      }
+
+      // Split on SSE message boundary (\n\n)
+      const messages = buffer.split('\n\n');
+      buffer = messages.pop() ?? '';
+
+      for (const message of messages) {
+        for (const line of message.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6);
+          if (payload === '[DONE]') { done = true; break; }
+
+          try {
+            const chunk = JSON.parse(payload) as StreamChunk;
+            if (chunk.model && !model) model = chunk.model;
+            const delta = chunk.choices?.[0]?.delta?.content;
+            if (delta) {
+              accumulated += delta;
+              onToken?.(accumulated);
+            }
+          } catch {
+            // Malformed chunk — skip
+          }
+        }
+        if (done) break;
+      }
+    }
+    // Flush decoder
+    const tail = decoder.decode();
+    if (tail) buffer += tail;
+  } finally {
+    reader.releaseLock();
+  }
+
+  return { content: accumulated, model };
+}
+
 export async function dispatchToAgent(
   agent: AgentProcess,
   message: string,
   context: DispatchContext,
   sessionUser?: string,
+  onToken?: (accumulated: string) => void,
 ): Promise<DispatchResult> {
   const systemMessage = buildSystemMessage(context);
 
   const body: Record<string, unknown> = {
     model: agent.model,
+    stream: true,
     messages: [
       { role: 'system', content: systemMessage },
       { role: 'user', content: message },
@@ -183,12 +257,8 @@ export async function dispatchToAgent(
       });
 
       if (resp.ok) {
-        const data = (await resp.json()) as {
-          choices: { message: { content: string } }[];
-          model: string;
-        };
-        const content = data.choices?.[0]?.message?.content ?? '';
-        return { content, model: data.model ?? agent.model };
+        const { content, model } = await consumeSSEStream(resp, agent.displayName, onToken);
+        return { content, model: model || agent.model };
       }
 
       // Retryable HTTP errors
