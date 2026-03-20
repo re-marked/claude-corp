@@ -148,8 +148,51 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
 
-    // /logs — show recent daemon logs
+    // /who, /m, /members — show member roster with status
     const cmd = text.trim().toLowerCase();
+    if (cmd === '/who' || cmd === '/m' || cmd === '/members') {
+      try {
+        // Get live agent statuses from daemon API
+        const agents = await daemonClient.listAgents();
+        const agentStatusMap = new Map<string, string>();
+        for (const agent of agents) {
+          agentStatusMap.set(agent.memberId, agent.status);
+        }
+
+        // Build member roster
+        const lines: string[] = ['--- Members Online ---'];
+        for (const member of members) {
+          let statusIcon = '◇'; // offline by default
+          let statusColor = 'muted';
+          
+          if (member.type === 'user') {
+            statusIcon = '◆';
+            statusColor = 'success';
+          } else if (member.type === 'agent') {
+            const agentStatus = agentStatusMap.get(member.id);
+            if (agentStatus === 'running' || agentStatus === 'active') {
+              statusIcon = '◆'; // online
+              statusColor = 'success';
+            } else {
+              statusIcon = '◇'; // offline
+              statusColor = 'muted';
+            }
+          }
+
+          const statusText = member.type === 'user' ? 'user' : 
+                           (agentStatusMap.get(member.id) === 'running' || agentStatusMap.get(member.id) === 'active') ? 'online' : 'offline';
+          
+          lines.push(`${statusIcon} ${member.displayName} (${member.rank}) - ${statusText}`);
+        }
+        
+        writeSystemMessage(lines.join('\n'));
+      } catch (err) {
+        writeSystemMessage(`Failed to fetch member status: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // /logs — show recent daemon logs
     if (cmd === '/logs') {
       try {
         const { readFileSync, existsSync } = await import('node:fs');
