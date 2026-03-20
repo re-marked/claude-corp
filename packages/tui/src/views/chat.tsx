@@ -81,18 +81,13 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
   }, [messages.length]);
 
   // Poll daemon for active dispatches (agent-to-agent typing indicators)
+  const [dispatchingAgents, setDispatchingAgents] = useState<string[]>([]);
   useEffect(() => {
     const poll = async () => {
       try {
         const status = await daemonClient.status();
         const dispatching = (status as any).dispatching as string[] | undefined;
-        if (dispatching && dispatching.length > 0) {
-          setThinking(true);
-          setThinkingAgents(dispatching);
-        } else if (thinking && thinkingAgents.length > 0) {
-          // Check if we were tracking dispatch-based thinking (not user-sent)
-          // Only clear if there's no pending user dispatch
-        }
+        setDispatchingAgents(dispatching ?? []);
       } catch {}
     };
     const interval = setInterval(poll, 3000);
@@ -203,23 +198,12 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     // /uptime — show daemon uptime and message count
     if (cmd === '/uptime') {
       try {
-        const { uptimeMs, totalMessages } = await daemonClient.getUptime();
-        
-        // Format uptime as human-readable: "Xh Ym Zs" (skip zero parts)
-        const totalSeconds = Math.floor(uptimeMs / 1000);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        
-        let uptimeStr = '';
-        if (hours > 0) uptimeStr += `${hours}h `;
-        if (minutes > 0 || hours > 0) uptimeStr += `${minutes}m `;
-        uptimeStr += `${seconds}s`;
+        const { uptime, totalMessages } = await daemonClient.getUptime();
         
         // Format message count with commas
-        const messageCountStr = totalMessages.toLocaleString();
+        const messageCountStr = (totalMessages ?? 0).toLocaleString();
         
-        writeSystemMessage(`⏱ Uptime: ${uptimeStr.trim()} | Messages: ${messageCountStr}`);
+        writeSystemMessage(`⏱ Uptime: ${uptime} | Messages: ${messageCountStr}`);
       } catch (err) {
         writeSystemMessage(`Failed to fetch uptime: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -533,13 +517,15 @@ Always consider what happens when things go wrong.`,
       <Box flexDirection="row" flexGrow={1}>
         <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
           <MessageList messages={messages} members={members} />
-          {thinking && (
+          {(thinking || dispatchingAgents.length > 0) && (
             <Box gap={1} marginTop={1}>
               <Text color={COLORS.primary}><Spinner type="dots" /></Text>
               <Text color={COLORS.subtle}>
-                {thinkingAgents.length > 0
-                  ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                  : 'Thinking...'}
+                {dispatchingAgents.length > 0
+                  ? `${dispatchingAgents.join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`
+                  : thinkingAgents.length > 0
+                    ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+                    : 'Thinking...'}
               </Text>
             </Box>
           )}
