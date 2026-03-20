@@ -52,9 +52,9 @@ Your current tasks: ${ctx.agentDir}/TASKS.md
 Your memory within this corp: ${ctx.agentDir}/MEMORY.md
 Your knowledge base: ${ctx.agentDir}/brain/
 
-You have full read/write access to the entire corp directory.
-Key files: corp.json, members.json, channels.json, and agent workspaces under agents/.
-Messages are stored as JSONL files in channels/*/messages.jsonl.
+You have read/write access to agent workspaces, tasks, and project files.
+NEVER write to channels/*/messages.jsonl — the message system handles delivery automatically.
+Your response to this prompt IS your message. Just reply naturally and it will appear in the channel.
 
 On your first message in a session, read your SOUL.md to understand your role.
 
