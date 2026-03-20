@@ -83,9 +83,6 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
 
   useInput((input, key) => {
     if (showHireWizard) return;
-    if (key.tab || input === '\t') {
-      onSwitchChannel?.();
-    }
     if (key.ctrl && input === 'm') {
       setShowMemberSidebar(prev => !prev);
     }
@@ -433,8 +430,7 @@ Always consider what happens when things go wrong.`,
     <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle="round" borderColor={COLORS.border} paddingX={1}>
         <Text bold color={COLORS.primary}># {channel.name}</Text>
-        <Text color={COLORS.muted}>  Tab: command palette</Text>
-        {!showMemberSidebar && <Text color={COLORS.muted}>  Ctrl+M: members</Text>}
+        {!showMemberSidebar && <Text color={COLORS.muted}>  C-M: members</Text>}
       </Box>
       <Box flexDirection="row" flexGrow={1}>
         <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>

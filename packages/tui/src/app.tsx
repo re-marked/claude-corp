@@ -104,29 +104,43 @@ function ResumeView({ corpPath }: { corpPath: string }) {
     forceRender((n) => n + 1);
   }, [viewStack]);
 
-  // Global key handler for view navigation
+  // Find CEO DM channel for Ctrl+D
+  const ceoDmChannel = useMemo(() => {
+    const founder = members.find((m) => m.rank === 'owner');
+    const ceo = members.find((m) => m.rank === 'master');
+    if (!founder || !ceo) return null;
+    return channels.find(
+      (c) => c.kind === 'direct' && c.memberIds.includes(founder.id) && c.memberIds.includes(ceo.id),
+    );
+  }, [members, channels]);
+
+  // Global key handler — Ctrl combos work in ALL views including chat
   useInput((input, key) => {
     if (!ready || showSwitcher) return;
-    const current = viewStack.current();
-    if (!current) return;
 
-    // Don't intercept keys when in chat (let chat handle its own input)
-    if (current.type === 'chat') return;
-
-    if (key.escape || input === 'q') {
-      if (viewStack.depth() > 1) goBack();
-      return;
-    }
-    if (input === 'c') {
+    // Ctrl+K — command palette (always)
+    if (key.ctrl && input === 'k') {
       setShowSwitcher(true);
       return;
     }
-    if (input === 't' && current.type !== 'task-board') {
+    // Ctrl+H — corp home (always)
+    if (key.ctrl && input === 'h') {
+      navigate({ type: 'corp-home' });
+      return;
+    }
+    // Ctrl+T — task board (always)
+    if (key.ctrl && input === 't') {
       navigate({ type: 'task-board' });
       return;
     }
-    if (input === 'h' && current.type !== 'hierarchy') {
-      navigate({ type: 'hierarchy' });
+    // Ctrl+D — CEO DM (always)
+    if (key.ctrl && input === 'd') {
+      if (ceoDmChannel) navigate({ type: 'chat', channelId: ceoDmChannel.id });
+      return;
+    }
+    // Escape — go back (always)
+    if (key.escape) {
+      if (viewStack.depth() > 1) goBack();
       return;
     }
   });
@@ -254,13 +268,14 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   if (!current) return null;
 
   // Hints for status bar
+  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-D:ceo  Esc:back';
   const hints: Record<string, string> = {
-    'chat': 'Tab:switch  t:tasks  h:hierarchy',
-    'task-board': 'n:new  f:filter  Enter:detail  q:back',
-    'hierarchy': 'Enter:inspect  q:back',
-    'agent-inspector': 'd:dm  q:back',
-    'task-detail': 's:status  q:back',
-    'corp-home': 'Enter:open  d:ceo  t:tasks  h:hierarchy  c:palette',
+    'chat': globalHints,
+    'task-board': `Enter:detail  Tab:filter  ${globalHints}`,
+    'hierarchy': `Enter:inspect  ${globalHints}`,
+    'agent-inspector': globalHints,
+    'task-detail': globalHints,
+    'corp-home': `Enter:open  ${globalHints}`,
   };
 
   const renderView = () => {

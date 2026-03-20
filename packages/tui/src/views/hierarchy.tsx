@@ -40,7 +40,7 @@ export function HierarchyView({ corpRoot, onNavigate, onBack }: Props) {
   const tree = buildHierarchy(members);
   const flat = tree ? flattenTree(tree) : [];
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.upArrow) {
       setSelectedIndex((i) => Math.max(0, i - 1));
     } else if (key.downArrow) {
@@ -50,8 +50,6 @@ export function HierarchyView({ corpRoot, onNavigate, onBack }: Props) {
       if (node && node.member.type === 'agent') {
         onNavigate({ type: 'agent-inspector', memberId: node.member.id });
       }
-    } else if (key.escape || input === 'q') {
-      onBack();
     }
   });
 

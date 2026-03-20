@@ -163,11 +163,11 @@ export function CorpHome({ corpRoot, daemonClient, initialMembers, initialChanne
     return () => clearInterval(interval);
   }, [refresh]);
 
-  useInput((input, key) => {
-    if (key.upArrow || input === 'k') {
+  useInput((_input, key) => {
+    if (key.upArrow) {
       setCursor((i) => Math.max(0, i - 1));
     }
-    if (key.downArrow || input === 'j') {
+    if (key.downArrow) {
       setCursor((i) => Math.min(activity.length - 1, i + 1));
     }
     if (key.return) {
@@ -176,20 +176,7 @@ export function CorpHome({ corpRoot, daemonClient, initialMembers, initialChanne
         onNavigate({ type: 'chat', channelId: item.channelId });
       }
     }
-    if (input === 'd') {
-      // Jump to CEO DM
-      const ceo = members.find((m) => m.rank === 'master');
-      const founder = members.find((m) => m.rank === 'owner');
-      if (ceo && founder) {
-        const dm = channels.find(
-          (ch) =>
-            ch.kind === 'direct' &&
-            ch.memberIds.includes(ceo.id) &&
-            ch.memberIds.includes(founder.id),
-        );
-        if (dm) onNavigate({ type: 'chat', channelId: dm.id });
-      }
-    }
+    // Ctrl+D, Ctrl+K, Ctrl+T, Ctrl+H, Escape handled globally in app.tsx
   });
 
   const { stdout } = useStdout();

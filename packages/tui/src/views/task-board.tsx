@@ -32,7 +32,7 @@ export function TaskBoard({ corpRoot, members, daemonClient, onNavigate, onBack 
 
   const memberMap = new Map(members.map((m) => [m.id, m]));
 
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.upArrow) {
       setSelectedIndex((i) => Math.max(0, i - 1));
     } else if (key.downArrow) {
@@ -42,11 +42,9 @@ export function TaskBoard({ corpRoot, members, daemonClient, onNavigate, onBack 
       if (task) {
         onNavigate({ type: 'task-detail', taskId: task.task.id });
       }
-    } else if (input === 'f') {
+    } else if (key.tab) {
       setFilterIndex((i) => (i + 1) % FILTERS.length);
       setSelectedIndex(0);
-    } else if (key.escape || input === 'q') {
-      onBack();
     }
   });
 
