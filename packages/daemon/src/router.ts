@@ -64,6 +64,7 @@ export class MessageRouter {
     // Clear dedup set every 5 minutes
     this.dedupClearInterval = setInterval(() => {
       this.dispatched.clear();
+      this.processedMsgIds.clear();
     }, 5 * 60 * 1000);
 
     console.log(`[router] Watching ${channels.length} channels`);
@@ -112,23 +113,20 @@ export class MessageRouter {
     this.watchers.set(channel.id, watcher);
   }
 
-  /** Debounce guard — Windows fs.watch fires multiple times per write */
-  private processing = new Set<string>();
+  /** Message-level dedup — prevents double dispatch regardless of fs.watch timing */
+  private processedMsgIds = new Set<string>();
 
   private onFileChange(channel: Channel, msgPath: string): void {
-    if (this.processing.has(msgPath)) return;
-    this.processing.add(msgPath);
-
     const currentOffset = this.offsets.get(msgPath) ?? 0;
     const { messages, newOffset } = readNewLines(msgPath, currentOffset);
+    if (newOffset === currentOffset) return; // No new bytes
     this.offsets.set(msgPath, newOffset);
 
     for (const msg of messages) {
+      if (this.processedMsgIds.has(msg.id)) continue;
+      this.processedMsgIds.add(msg.id);
       this.processMessage(msg, channel);
     }
-
-    // Allow re-processing after a short delay
-    setTimeout(() => this.processing.delete(msgPath), 200);
   }
 
   private processMessage(msg: ChannelMessage, channel: Channel): void {
