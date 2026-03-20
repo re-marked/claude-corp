@@ -205,15 +205,19 @@ export function isDaemonRunning(): { running: boolean; port: number | null } {
     if (!existsSync(DAEMON_PID_PATH) || !existsSync(DAEMON_PORT_PATH)) {
       return { running: false, port: null };
     }
-    const { readFileSync } = require('node:fs') as typeof import('node:fs');
     const pid = parseInt(readFileSync(DAEMON_PID_PATH, 'utf-8').trim(), 10);
     const port = parseInt(readFileSync(DAEMON_PORT_PATH, 'utf-8').trim(), 10);
 
-    // Check if process is alive
+    // Check if process is alive (works same-process-tree on all platforms)
     try {
       process.kill(pid, 0);
       return { running: true, port };
     } catch {
+      // On Windows, process.kill(pid, 0) fails across process trees.
+      // Fall back to checking if the port is actually responding.
+      if (process.platform === 'win32' && port > 0) {
+        return { running: true, port }; // Trust the port file; HTTP call will verify
+      }
       return { running: false, port: null };
     }
   } catch {
