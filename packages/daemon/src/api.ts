@@ -32,7 +32,15 @@ export function createApi(daemon: Daemon): Server {
             port: a.port,
             status: a.status,
           })),
+          dispatching: [...daemon.router.activeDispatches],
         });
+        return;
+      }
+
+      // GET /uptime
+      if (method === 'GET' && path === '/uptime') {
+        const uptimeInfo = daemon.getUptimeInfo();
+        json(res, uptimeInfo);
         return;
       }
 

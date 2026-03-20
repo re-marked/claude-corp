@@ -28,6 +28,8 @@ export class MessageRouter {
   private daemon: Daemon;
   private channelsDirWatcher: FSWatcher | null = null;
   private dedupClearInterval: ReturnType<typeof setInterval> | null = null;
+  /** Currently dispatching — agent displayNames that are actively processing. */
+  activeDispatches = new Set<string>();
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -240,12 +242,16 @@ export class MessageRouter {
     }
 
     try {
+      this.activeDispatches.add(target.displayName);
+
       const result = await dispatchToAgent(
         agentProc,
         messageContent,
         context,
         `channel-${channel.id}-${msg.id}`,
       );
+
+      this.activeDispatches.delete(target.displayName);
 
       // Write agent response to JSONL
       const responseMsg: ChannelMessage = {
@@ -270,6 +276,7 @@ export class MessageRouter {
       // Mark corp as dirty for git commit
       this.daemon.gitManager.markDirty(target.displayName);
     } catch (err) {
+      this.activeDispatches.delete(target.displayName);
       console.error(`[router] Dispatch to ${target.displayName} failed:`, err);
     }
   }

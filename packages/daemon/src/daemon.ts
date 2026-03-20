@@ -12,6 +12,7 @@ import {
   resolveMentions,
   MEMBERS_JSON,
   CHANNELS_JSON,
+  MESSAGES_JSONL,
   DAEMON_PID_PATH,
   DAEMON_PORT_PATH,
 } from '@claudecorp/shared';
@@ -32,6 +33,7 @@ export class Daemon {
   taskWatcher: TaskWatcher;
   private server: Server | null = null;
   private port = 0;
+  private startedAt: number;
 
   constructor(corpRoot: string, globalConfig: GlobalConfig) {
     this.corpRoot = corpRoot;
@@ -41,6 +43,7 @@ export class Daemon {
     this.gitManager = new GitManager(corpRoot);
     this.heartbeat = new HeartbeatManager(this);
     this.taskWatcher = new TaskWatcher(this);
+    this.startedAt = Date.now();
   }
 
   async start(): Promise<number> {
@@ -185,6 +188,33 @@ export class Daemon {
 
   getPort(): number {
     return this.port;
+  }
+
+  /**
+   * Get daemon uptime and total message count across all channels
+   */
+  getUptimeInfo(): { uptimeMs: number; totalMessages: number } {
+    const uptimeMs = Date.now() - this.startedAt;
+    
+    // Count total messages by reading all channels/*/messages.jsonl files
+    let totalMessages = 0;
+    try {
+      const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
+      for (const channel of channels) {
+        const messagesPath = join(this.corpRoot, channel.path, 'messages.jsonl');
+        try {
+          const content = readFileSync(messagesPath, 'utf-8');
+          const lines = content.trim().split('\n').filter(line => line.trim());
+          totalMessages += lines.length;
+        } catch {
+          // File doesn't exist or is empty, skip
+        }
+      }
+    } catch {
+      // Failed to read channels.json
+    }
+    
+    return { uptimeMs, totalMessages };
   }
 
   /** Patch .gitignore to exclude .gateway/ if not already present. */
