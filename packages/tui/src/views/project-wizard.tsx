@@ -103,7 +103,7 @@ export function ProjectWizard({ daemonClient, founderId, onClose, onCreated }: P
       {step === 'type' && (
         <Box flexDirection="column">
           <Text>Name: <Text bold>{name}</Text></Text>
-          <Text marginTop={1}>Select type:</Text>
+          <Box marginTop={1}><Text>Select type:</Text></Box>
           {PROJECT_TYPES.map((t, i) => (
             <Box key={t} gap={1}>
               <Text color={i === typeIndex ? COLORS.primary : undefined} bold={i === typeIndex}>
@@ -115,14 +115,14 @@ export function ProjectWizard({ daemonClient, founderId, onClose, onCreated }: P
               </Text>
             </Box>
           ))}
-          <Text dimColor marginTop={1}>up/down to select, Enter to confirm</Text>
+          <Box marginTop={1}><Text dimColor>up/down to select, Enter to confirm</Text></Box>
         </Box>
       )}
 
       {step === 'path' && (
         <Box flexDirection="column">
           <Text>Name: <Text bold>{name}</Text>  Type: <Text bold>{PROJECT_TYPES[typeIndex]}</Text></Text>
-          <Text marginTop={1}>Codebase path (Enter to skip):</Text>
+          <Box marginTop={1}><Text>Codebase path (Enter to skip):</Text></Box>
           <Box>
             <Text bold color={COLORS.success}>&gt; </Text>
             <TextInput
@@ -140,7 +140,7 @@ export function ProjectWizard({ daemonClient, founderId, onClose, onCreated }: P
           <Text>Name: <Text bold>{name}</Text>  Type: <Text bold>{PROJECT_TYPES[typeIndex]}</Text>
             {path ? <Text>  Path: <Text bold>{path}</Text></Text> : null}
           </Text>
-          <Text marginTop={1}>Description (optional, Enter to skip):</Text>
+          <Box marginTop={1}><Text>Description (optional, Enter to skip):</Text></Box>
           <Box>
             <Text bold color={COLORS.success}>&gt; </Text>
             <TextInput

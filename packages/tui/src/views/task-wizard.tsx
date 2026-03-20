@@ -109,7 +109,7 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
       {step === 'priority' && (
         <Box flexDirection="column">
           <Text>Title: <Text bold>{title}</Text></Text>
-          <Text marginTop={1}>Select priority:</Text>
+          <Box marginTop={1}><Text>Select priority:</Text></Box>
           {PRIORITIES.map((p, i) => (
             <Box key={p} gap={1}>
               <Text color={i === priorityIndex ? 'cyan' : undefined} bold={i === priorityIndex}>
@@ -117,14 +117,14 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
               </Text>
             </Box>
           ))}
-          <Text dimColor marginTop={1}>↑↓ to select, Enter to confirm</Text>
+          <Box marginTop={1}><Text dimColor>↑↓ to select, Enter to confirm</Text></Box>
         </Box>
       )}
 
       {step === 'assignee' && (
         <Box flexDirection="column">
           <Text>Title: <Text bold>{title}</Text>  Priority: <Text bold>{PRIORITIES[priorityIndex]}</Text></Text>
-          <Text marginTop={1}>Assign to agent (optional, Enter to skip):</Text>
+          <Box marginTop={1}><Text>Assign to agent (optional, Enter to skip):</Text></Box>
           {agents.length > 0 && (
             <Text dimColor>Available: {agents.map((a) => a.displayName).join(', ')}</Text>
           )}
@@ -145,7 +145,7 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
           <Text>Title: <Text bold>{title}</Text>  Priority: <Text bold>{PRIORITIES[priorityIndex]}</Text>
             {assignee ? <Text>  Assignee: <Text bold>{assignee}</Text></Text> : null}
           </Text>
-          <Text marginTop={1}>Description (optional, Enter to skip):</Text>
+          <Box marginTop={1}><Text>Description (optional, Enter to skip):</Text></Box>
           <Box>
             <Text bold color="green">&gt; </Text>
             <TextInput

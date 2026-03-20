@@ -54,7 +54,7 @@ function renderContent(content: string | undefined | null, members: Map<string, 
     const isCeo = mentionedMember?.rank === 'master';
 
     if (isCeo) {
-      parts.push(<RainbowText key={`m${match.index}`}>@{mentionName}</RainbowText>);
+      parts.push(<RainbowText key={`m${match.index}`}>{`@${mentionName}`}</RainbowText>);
     } else {
       parts.push(<Text key={`m${match.index}`} bold color={COLORS.secondary}>@{mentionName}</Text>);
     }

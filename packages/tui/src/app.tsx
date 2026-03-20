@@ -100,19 +100,33 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         setDaemon(d);
         setClient(new DaemonClient(port));
 
-        setStatus('Spawning agents...');
-        try {
-          await d.spawnAllAgents();
-        } catch (err) {
-          console.error('[startup] Agent spawning had errors:', err);
-          // Continue — partial corp is better than no corp
-        }
+        const daemon = d!;
+        const tryConnect = async (): Promise<boolean> => {
+          try {
+            await daemon.spawnAllAgents();
+          } catch (err) {
+            console.error('[startup] Agent spawning had errors:', err);
+          }
 
-        // Wait for at least one agent (non-blocking timeout)
-        for (let i = 0; i < 15; i++) {
-          const agents = d.processManager.listAgents();
-          if (agents.some((a) => a.status === 'ready')) break;
-          await new Promise((r) => setTimeout(r, 1000));
+          const maxWait = globalConfig.userGateway ? 5 : 15;
+          for (let i = 0; i < maxWait; i++) {
+            const agents = daemon.processManager.listAgents();
+            if (agents.some((a) => a.status === 'ready')) return true;
+            if (agents.some((a) => a.status === 'crashed')) break;
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+          return false;
+        };
+
+        setStatus('Spawning agents...');
+        let agentsReady = await tryConnect();
+
+        // Retry loop for gateway connections
+        while (!agentsReady && globalConfig.userGateway) {
+          setStatus('Cannot reach your OpenClaw gateway. Reconnecting in 5s...');
+          await new Promise((r) => setTimeout(r, 5000));
+          setStatus('Reconnecting to OpenClaw gateway...');
+          agentsReady = await tryConnect();
         }
 
         try {

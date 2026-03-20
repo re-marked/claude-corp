@@ -25,6 +25,8 @@ import { CLAUDE_CORP_LOGO, asciiName } from '../ascii.js';
 
 type Step = 'your-name' | 'corp-name' | 'theme' | 'spawning' | 'ready';
 
+const RECONNECT_INTERVAL = 5;
+
 const THEMES = getAllThemes();
 
 export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
@@ -42,6 +44,8 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
   const [messagesPath, setMessagesPath] = useState('');
   const [corpRoot, setCorpRoot] = useState('');
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [reconnecting, setReconnecting] = useState(false);
   const { stdout } = useStdout();
   const termHeight = stdout?.rows ?? 40;
 
@@ -99,35 +103,54 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       setDaemon(d);
       setDaemonClient(new DaemonClient(port));
 
-      if (globalConfig.userGateway) {
-        setStatusText(`Connecting to your OpenClaw...`);
-      } else {
-        setStatusText(`Waking up your ${selectedTheme.ranks.master}...`);
-      }
-      await d.spawnAllAgents();
-
-      const maxWait = globalConfig.userGateway ? 5 : 30;
-      let ready = false;
-      for (let i = 0; i < maxWait; i++) {
-        const agents = d.processManager.listAgents();
-        if (agents.some((a) => a.status === 'ready')) {
-          ready = true;
-          break;
+      const tryConnect = async (): Promise<boolean> => {
+        if (globalConfig.userGateway) {
+          setStatusText(`Connecting to your OpenClaw...`);
+        } else {
+          setStatusText(`Waking up your ${selectedTheme.ranks.master}...`);
         }
-        if (agents.some((a) => a.status === 'crashed')) break;
-        await new Promise((r) => setTimeout(r, 1000));
+
+        try {
+          await d.spawnAllAgents();
+        } catch {
+          // swallow — partial start is ok
+        }
+
+        const maxWait = globalConfig.userGateway ? 5 : 30;
+        for (let i = 0; i < maxWait; i++) {
+          const agents = d.processManager.listAgents();
+          if (agents.some((a) => a.status === 'ready')) return true;
+          if (agents.some((a) => a.status === 'crashed')) break;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        return false;
+      };
+
+      let ready = await tryConnect();
+
+      // Retry loop for gateway connections
+      while (!ready && globalConfig.userGateway) {
+        setError('Cannot reach your OpenClaw gateway. Make sure it is running: openclaw gateway run');
+        setReconnecting(true);
+
+        // Countdown timer
+        for (let s = RECONNECT_INTERVAL; s > 0; s--) {
+          setCountdown(s);
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        setCountdown(0);
+        setError('');
+        ready = await tryConnect();
+      }
+
+      setReconnecting(false);
+
+      if (!ready) {
+        setError(`${selectedTheme.ranks.master} failed to start.`);
+        return;
       }
 
       d.startRouter();
-
-      if (!ready) {
-        if (globalConfig.userGateway) {
-          setError('Cannot reach your OpenClaw gateway. Make sure it is running: openclaw gateway run');
-        } else {
-          setError(`${selectedTheme.ranks.master} failed to start.`);
-        }
-        return;
-      }
 
       const allMembers = readConfig<Member[]>(join(root, MEMBERS_JSON));
       const allChannels = readConfig<Channel[]>(join(root, CHANNELS_JSON));
@@ -276,6 +299,11 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
             <Text color={COLORS.subtle}>{statusText}</Text>
           </Box>
           {error && <Box marginTop={1}><Text color={COLORS.danger}>{error}</Text></Box>}
+          {reconnecting && countdown > 0 && (
+            <Box marginTop={0}>
+              <Text color={COLORS.muted}>Reconnecting in {countdown}s...</Text>
+            </Box>
+          )}
         </Box>
       </Box>
     );

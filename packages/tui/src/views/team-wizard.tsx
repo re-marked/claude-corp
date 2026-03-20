@@ -137,14 +137,14 @@ export function TeamWizard({ daemonClient, founderId, members, onClose, onCreate
               <Text dimColor>({p.name})</Text>
             </Box>
           ))}
-          <Text dimColor marginTop={1}>up/down to select, Enter to confirm</Text>
+          <Box marginTop={1}><Text dimColor>up/down to select, Enter to confirm</Text></Box>
         </Box>
       )}
 
       {step === 'name' && (
         <Box flexDirection="column">
           <Text>Project: <Text bold>{projects[projectIndex]?.displayName}</Text></Text>
-          <Text marginTop={1}>Team name:</Text>
+          <Box marginTop={1}><Text>Team name:</Text></Box>
           <Box>
             <Text bold color={COLORS.success}>&gt; </Text>
             <TextInput
@@ -160,7 +160,7 @@ export function TeamWizard({ daemonClient, founderId, members, onClose, onCreate
       {step === 'leader' && (
         <Box flexDirection="column">
           <Text>Project: <Text bold>{projects[projectIndex]?.displayName}</Text>  Team: <Text bold>{name}</Text></Text>
-          <Text marginTop={1}>Select team leader:</Text>
+          <Box marginTop={1}><Text>Select team leader:</Text></Box>
           {agents.map((a, i) => (
             <Box key={a.id} gap={1}>
               <Text color={i === leaderIndex ? COLORS.primary : undefined} bold={i === leaderIndex}>
@@ -169,7 +169,7 @@ export function TeamWizard({ daemonClient, founderId, members, onClose, onCreate
               <Text dimColor>({a.rank})</Text>
             </Box>
           ))}
-          <Text dimColor marginTop={1}>up/down to select, Enter to confirm</Text>
+          <Box marginTop={1}><Text dimColor>up/down to select, Enter to confirm</Text></Box>
         </Box>
       )}
 
