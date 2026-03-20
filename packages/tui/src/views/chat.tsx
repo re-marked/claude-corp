@@ -72,8 +72,9 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     if (messages.length > lastMsgCount.current) {
       const newMsg = messages[messages.length - 1];
       const founder = members.find((m) => m.rank === 'owner');
-      if (newMsg && founder && newMsg.senderId !== founder.id) {
+      if (newMsg && founder && newMsg.senderId !== founder.id && newMsg.kind === 'text') {
         setThinking(false);
+        process.stdout.write('\x07'); // Terminal bell
       }
     }
     lastMsgCount.current = messages.length;
@@ -170,7 +171,7 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
             statusColor = 'success';
           } else if (member.type === 'agent') {
             const agentStatus = agentStatusMap.get(member.id);
-            if (agentStatus === 'running' || agentStatus === 'active') {
+            if (agentStatus === 'ready') {
               statusIcon = '◆'; // online
               statusColor = 'success';
             } else {
@@ -179,8 +180,8 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
             }
           }
 
-          const statusText = member.type === 'user' ? 'user' : 
-                           (agentStatusMap.get(member.id) === 'running' || agentStatusMap.get(member.id) === 'active') ? 'online' : 'offline';
+          const statusText = member.type === 'user' ? 'user' :
+                           agentStatusMap.get(member.id) === 'ready' ? 'online' : 'offline';
           
           lines.push(`${statusIcon} ${member.displayName} (${member.rank}) - ${statusText}`);
         }

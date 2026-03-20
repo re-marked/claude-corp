@@ -121,15 +121,6 @@ export class MessageRouter {
   }
 
   private processMessage(msg: ChannelMessage, channel: Channel): void {
-    // Handle slash commands before other processing
-    if (msg.kind === 'text') {
-      const command = msg.content.trim().toLowerCase();
-      if (command === '/who' || command === '/m' || command === '/members') {
-        this.handleSlashCommand(msg, channel);
-        return;
-      }
-    }
-
     // Don't dispatch system messages or task events
     if (msg.kind !== 'text') return;
 
@@ -281,55 +272,6 @@ export class MessageRouter {
     } catch (err) {
       console.error(`[router] Dispatch to ${target.displayName} failed:`, err);
     }
-  }
-
-  private handleSlashCommand(msg: ChannelMessage, channel: Channel): void {
-    const members = this.loadMembers();
-    const runningAgents = this.daemon.processManager.listAgents();
-    
-    // Build roster string
-    let roster = '🏢 Corporation Roster\n';
-    roster += '━━━━━━━━━━━━━━━━━━━━\n';
-    
-    for (const member of members) {
-      if (member.status === 'archived') continue;
-      
-      let statusIcon = '◇'; // Default offline
-      
-      if (member.type === 'user') {
-        // Users are always considered online
-        statusIcon = '◆';
-      } else if (member.type === 'agent') {
-        // Check if agent is running and ready
-        const agentProc = runningAgents.find(a => a.memberId === member.id);
-        if (agentProc && agentProc.status === 'ready') {
-          statusIcon = '◆';
-        }
-      }
-      
-      roster += `${statusIcon} ${member.displayName} - ${member.rank} (${member.type})\n`;
-    }
-    
-    // Create system message
-    const systemMsg: ChannelMessage = {
-      id: generateId(),
-      channelId: channel.id,
-      senderId: 'system',
-      threadId: msg.threadId,
-      content: roster,
-      kind: 'system',
-      mentions: [],
-      metadata: null,
-      depth: msg.depth,
-      originId: msg.originId,
-      timestamp: new Date().toISOString(),
-    };
-    
-    // Write to channel messages
-    const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
-    appendMessage(msgPath, systemMsg);
-    
-    console.log(`[router] Roster displayed in #${channel.name}`);
   }
 
   private buildContext(
