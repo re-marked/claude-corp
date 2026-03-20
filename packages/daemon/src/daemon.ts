@@ -48,6 +48,9 @@ export class Daemon {
   }
 
   async start(): Promise<number> {
+    // Kill any stale daemon from a previous session (prevents double dispatch)
+    await this.killStaleDaemon();
+
     // Ensure .gateway/ is gitignored (older corps may lack this)
     this.ensureGatewayGitignored();
 
@@ -189,6 +192,35 @@ export class Daemon {
 
   getPort(): number {
     return this.port;
+  }
+
+  /** Kill any daemon left over from a previous session. */
+  private async killStaleDaemon(): Promise<void> {
+    try {
+      if (!existsSync(DAEMON_PID_PATH)) return;
+      const oldPid = parseInt(readFileSync(DAEMON_PID_PATH, 'utf-8').trim(), 10);
+      if (!oldPid || oldPid === process.pid) return;
+
+      console.log(`[daemon] Killing stale daemon (PID ${oldPid})...`);
+
+      // Try SIGTERM first (works same-process-tree)
+      try { process.kill(oldPid, 'SIGTERM'); } catch {}
+
+      // On Windows, also use taskkill (works cross-process-tree)
+      if (process.platform === 'win32') {
+        try {
+          const { execa: run } = await import('execa');
+          await run('taskkill', ['/F', '/PID', String(oldPid)], { reject: false, timeout: 5000 });
+        } catch {}
+      }
+
+      // Wait for it to die
+      await new Promise((r) => setTimeout(r, 1500));
+
+      // Clean up stale files
+      try { unlinkSync(DAEMON_PID_PATH); } catch {}
+      try { unlinkSync(DAEMON_PORT_PATH); } catch {}
+    } catch {}
   }
 
   /** Get formatted uptime string like "12m 34s" or "1h 5m 12s" */
