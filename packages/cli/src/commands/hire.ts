@@ -12,7 +12,7 @@ export async function cmdHire(opts: { name: string; rank: string; soul?: string;
   }
 
   const client = getClient();
-  const corpRoot = getCorpRoot();
+  const corpRoot = await getCorpRoot();
   const founder = getFounder(corpRoot);
   const ceo = getCeo(corpRoot);
   const creatorId = ceo?.id ?? founder.id;

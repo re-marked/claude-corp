@@ -28,6 +28,8 @@ export class MessageRouter {
   private daemon: Daemon;
   private channelsDirWatcher: FSWatcher | null = null;
   private dedupClearInterval: ReturnType<typeof setInterval> | null = null;
+  /** Currently dispatching — agent displayNames that are actively processing. */
+  activeDispatches = new Set<string>();
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -121,6 +123,28 @@ export class MessageRouter {
   }
 
   private processMessage(msg: ChannelMessage, channel: Channel): void {
+    // Handle /uptime slash command
+    if (msg.kind === 'text' && msg.content.trim() === '/uptime') {
+      const uptime = this.daemon.getUptime();
+      const totalMessages = this.daemon.countAllMessages();
+      const responseMsg: ChannelMessage = {
+        id: generateId(),
+        channelId: channel.id,
+        senderId: 'system',
+        threadId: msg.threadId,
+        content: `⏱ Uptime: ${uptime} | 📨 Messages: ${totalMessages} total across all channels`,
+        kind: 'system',
+        mentions: [],
+        metadata: null,
+        depth: 0,
+        originId: msg.originId || msg.id,
+        timestamp: new Date().toISOString(),
+      };
+      const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+      appendMessage(msgPath, responseMsg);
+      return;
+    }
+
     // Don't dispatch system messages or task events
     if (msg.kind !== 'text') return;
 
@@ -240,12 +264,16 @@ export class MessageRouter {
     }
 
     try {
+      this.activeDispatches.add(target.displayName);
+
       const result = await dispatchToAgent(
         agentProc,
         messageContent,
         context,
         `channel-${channel.id}-${msg.id}`,
       );
+
+      this.activeDispatches.delete(target.displayName);
 
       // Write agent response to JSONL
       const responseMsg: ChannelMessage = {
@@ -270,6 +298,7 @@ export class MessageRouter {
       // Mark corp as dirty for git commit
       this.daemon.gitManager.markDirty(target.displayName);
     } catch (err) {
+      this.activeDispatches.delete(target.displayName);
       console.error(`[router] Dispatch to ${target.displayName} failed:`, err);
     }
   }

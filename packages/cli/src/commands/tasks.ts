@@ -2,7 +2,7 @@ import { listTasks } from '@claudecorp/shared';
 import { getCorpRoot, getMembers } from '../client.js';
 
 export async function cmdTasks(opts: { status?: string; assigned?: string; json: boolean }) {
-  const corpRoot = getCorpRoot();
+  const corpRoot = await getCorpRoot();
   const members = getMembers(corpRoot);
 
   const filter: Record<string, string> = {};

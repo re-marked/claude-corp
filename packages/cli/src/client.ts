@@ -21,8 +21,8 @@ export function getClient(): DaemonClient {
   return new DaemonClient(port);
 }
 
-/** Resolve the active corp root path. */
-export function getCorpRoot(corpName?: string): string {
+/** Resolve the active corp root path — prefers the running daemon's corp. */
+export async function getCorpRoot(corpName?: string): Promise<string> {
   if (corpName) {
     const path = findCorp(corpName);
     if (!path) {
@@ -31,6 +31,16 @@ export function getCorpRoot(corpName?: string): string {
     }
     return path;
   }
+  // Ask the running daemon which corp it's serving
+  const { running, port } = isDaemonRunning();
+  if (running && port) {
+    try {
+      const client = new DaemonClient(port);
+      const status = await client.status();
+      if (status.corpRoot) return status.corpRoot;
+    } catch {}
+  }
+  // Fallback to first indexed corp
   const corps = listCorps();
   if (corps.length === 0) {
     console.error('No corporations found. Create one with: claudecorp-cli init');

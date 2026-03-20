@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, unlinkSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import {
@@ -12,6 +12,7 @@ import {
   resolveMentions,
   MEMBERS_JSON,
   CHANNELS_JSON,
+  MESSAGES_JSONL,
   DAEMON_PID_PATH,
   DAEMON_PORT_PATH,
 } from '@claudecorp/shared';
@@ -30,6 +31,7 @@ export class Daemon {
   gitManager: GitManager;
   heartbeat: HeartbeatManager;
   taskWatcher: TaskWatcher;
+  readonly startedAt: number = Date.now();
   private server: Server | null = null;
   private port = 0;
 
@@ -185,6 +187,51 @@ export class Daemon {
 
   getPort(): number {
     return this.port;
+  }
+
+  /** Get formatted uptime string like "12m 34s" or "1h 5m 12s" */
+  getUptime(): string {
+    const ms = Date.now() - this.startedAt;
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  /** Count total messages across all channel JSONL files */
+  countAllMessages(): number {
+    let total = 0;
+    try {
+      const channelsDir = join(this.corpRoot, 'channels');
+      if (!existsSync(channelsDir)) return 0;
+      const dirs = readdirSync(channelsDir, { withFileTypes: true });
+      for (const dir of dirs) {
+        if (!dir.isDirectory()) continue;
+        const msgPath = join(channelsDir, dir.name, MESSAGES_JSONL);
+        try {
+          const content = readFileSync(msgPath, 'utf-8');
+          const lines = content.trim().split('\n').filter((l: string) => l.trim());
+          total += lines.length;
+        } catch {
+          // File doesn't exist or empty
+        }
+      }
+    } catch {
+      // channels dir doesn't exist
+    }
+    return total;
+  }
+
+  /** Get uptime info for API endpoint */
+  getUptimeInfo(): { uptime: string; totalMessages: number; startedAt: number } {
+    return {
+      uptime: this.getUptime(),
+      totalMessages: this.countAllMessages(),
+      startedAt: this.startedAt,
+    };
   }
 
   /** Patch .gitignore to exclude .gateway/ if not already present. */

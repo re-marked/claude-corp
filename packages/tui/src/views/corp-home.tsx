@@ -124,20 +124,24 @@ export function CorpHome({ corpRoot, daemonClient, initialMembers, initialChanne
       items.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
       setActivity(items.slice(0, 15));
 
-      // Get live agent status from daemon
+      // Get live agent status + active dispatches from daemon
       let procStatuses: Record<string, string> = {};
+      let dispatchingNames: string[] = [];
       try {
-        const agentList = await daemonClient.listAgents();
-        for (const a of agentList) {
+        const statusResult = await daemonClient.status();
+        for (const a of statusResult.agents) {
           procStatuses[a.memberId] = a.status;
         }
+        dispatchingNames = (statusResult as any).dispatching ?? [];
       } catch {}
 
       const agentInfos: AgentInfo[] = m
         .filter((mem) => mem.type === 'agent')
         .map((mem) => ({
           member: mem,
-          processStatus: procStatuses[mem.id] ?? (mem.status === 'active' ? 'ready' : 'stopped'),
+          processStatus: dispatchingNames.includes(mem.displayName)
+            ? 'working'
+            : procStatuses[mem.id] ?? (mem.status === 'active' ? 'ready' : 'stopped'),
           lastActive: lastActive.get(mem.id) ?? null,
         }));
       setAgents(agentInfos);
@@ -195,6 +199,7 @@ export function CorpHome({ corpRoot, daemonClient, initialMembers, initialChanne
 
   const PROC_STATUS: Record<string, { icon: string; color: string; label: string }> = {
     ready: { icon: '\u25C6', color: COLORS.success, label: 'online' },
+    working: { icon: '\u25C6', color: COLORS.info, label: 'working...' },
     starting: { icon: '\u25C6', color: COLORS.warning, label: 'starting' },
     stopped: { icon: '\u25C7', color: COLORS.muted, label: 'offline' },
     crashed: { icon: '\u25C7', color: COLORS.danger, label: 'crashed' },

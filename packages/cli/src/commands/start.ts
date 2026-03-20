@@ -9,7 +9,7 @@ export async function cmdStart(opts: { corp?: string }) {
     return;
   }
 
-  const corpRoot = getCorpRoot(opts.corp);
+  const corpRoot = await getCorpRoot(opts.corp);
   const globalConfig = ensureGlobalConfig();
   const daemon = new Daemon(corpRoot, globalConfig);
 

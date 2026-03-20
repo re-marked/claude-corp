@@ -8,7 +8,7 @@ export async function cmdMessages(opts: { channel: string; last: number; json: b
     process.exit(1);
   }
 
-  const corpRoot = getCorpRoot();
+  const corpRoot = await getCorpRoot();
   const channel = resolveChannel(corpRoot, opts.channel);
   const members = getMembers(corpRoot);
   const messagesPath = join(corpRoot, channel.path, MESSAGES_JSONL);

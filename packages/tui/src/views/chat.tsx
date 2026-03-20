@@ -72,12 +72,27 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     if (messages.length > lastMsgCount.current) {
       const newMsg = messages[messages.length - 1];
       const founder = members.find((m) => m.rank === 'owner');
-      if (newMsg && founder && newMsg.senderId !== founder.id) {
+      if (newMsg && founder && newMsg.senderId !== founder.id && newMsg.kind === 'text') {
         setThinking(false);
+        process.stdout.write('\x07'); // Terminal bell
       }
     }
     lastMsgCount.current = messages.length;
   }, [messages.length]);
+
+  // Poll daemon for active dispatches (agent-to-agent typing indicators)
+  const [dispatchingAgents, setDispatchingAgents] = useState<string[]>([]);
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const status = await daemonClient.status();
+        const dispatching = (status as any).dispatching as string[] | undefined;
+        setDispatchingAgents(dispatching ?? []);
+      } catch {}
+    };
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, [daemonClient]);
 
   // Timeout the spinner
   useEffect(() => {
@@ -148,8 +163,54 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
 
-    // /logs — show recent daemon logs
+    // /ping responds with pong!
+    if (text.trim().toLowerCase() === '/ping') {
+      writeSystemMessage('pong!');
+      return;
+    }
+
+    // /who, /m, /members — show member roster with status
     const cmd = text.trim().toLowerCase();
+    if (cmd === '/who' || cmd === '/m' || cmd === '/members') {
+      try {
+        const agents = await daemonClient.listAgents();
+        const statusMap = new Map(agents.map((a) => [a.memberId, a.status]));
+        const online = members.filter((m) => m.type === 'user' || statusMap.get(m.id) === 'ready');
+        const offline = members.filter((m) => m.type === 'agent' && statusMap.get(m.id) !== 'ready');
+
+        const lines: string[] = [`━━━ Roster (${online.length} online) ━━━`];
+        for (const m of online) {
+          lines.push(`  ◆ ${m.displayName.padEnd(16)} ${m.rank.padEnd(8)} ${m.type === 'user' ? 'founder' : 'online'}`);
+        }
+        if (offline.length > 0) {
+          lines.push('');
+          for (const m of offline) {
+            lines.push(`  ◇ ${m.displayName.padEnd(16)} ${m.rank.padEnd(8)} offline`);
+          }
+        }
+        writeSystemMessage(lines.join('\n'));
+      } catch (err) {
+        writeSystemMessage(`Failed to fetch member status: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // /uptime — show daemon uptime and message count
+    if (cmd === '/uptime') {
+      try {
+        const { uptime, totalMessages } = await daemonClient.getUptime();
+        
+        // Format message count with commas
+        const messageCountStr = (totalMessages ?? 0).toLocaleString();
+        
+        writeSystemMessage(`⏱ Uptime: ${uptime} | Messages: ${messageCountStr}`);
+      } catch (err) {
+        writeSystemMessage(`Failed to fetch uptime: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // /logs — show recent daemon logs
     if (cmd === '/logs') {
       try {
         const { readFileSync, existsSync } = await import('node:fs');
@@ -161,6 +222,22 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
         } else {
           writeSystemMessage('No daemon logs found.');
         }
+      } catch {}
+      return;
+    }
+
+    // /channels — list all channels
+    if (cmd === '/channels' || cmd === '/ch') {
+      try {
+        const { readConfig: rc, CHANNELS_JSON: CJ } = await import('@claudecorp/shared');
+        const { join: j } = await import('node:path');
+        const allCh = rc<{ name: string; kind: string; scope: string }[]>(j(corpRoot, CJ));
+        const lines = ['━━━ Channels ━━━'];
+        for (const c of allCh) {
+          const icon = c.kind === 'direct' ? '◆' : '#';
+          lines.push(`  ${icon} ${c.name.padEnd(24)} ${c.kind.padEnd(10)} ${c.scope}`);
+        }
+        writeSystemMessage(lines.join('\n'));
       } catch {}
       return;
     }
@@ -440,13 +517,15 @@ Always consider what happens when things go wrong.`,
       <Box flexDirection="row" flexGrow={1}>
         <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
           <MessageList messages={messages} members={members} />
-          {thinking && (
+          {(thinking || dispatchingAgents.length > 0) && (
             <Box gap={1} marginTop={1}>
               <Text color={COLORS.primary}><Spinner type="dots" /></Text>
               <Text color={COLORS.subtle}>
-                {thinkingAgents.length > 0
-                  ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                  : 'Thinking...'}
+                {dispatchingAgents.length > 0
+                  ? `${dispatchingAgents.join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`
+                  : thinkingAgents.length > 0
+                    ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+                    : 'Thinking...'}
               </Text>
             </Box>
           )}

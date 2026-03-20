@@ -123,4 +123,9 @@ export class DaemonClient {
     const data = await resp.json() as { dispatching?: boolean; dispatchTargets?: string[] };
     return { dispatching: data.dispatching ?? false, dispatchTargets: data.dispatchTargets ?? [] };
   }
+
+  async getUptime(): Promise<{ uptime: string; totalMessages: number; startedAt: number }> {
+    const resp = await fetch(`${this.baseUrl}/uptime`);
+    return resp.json() as Promise<{ uptime: string; totalMessages: number; startedAt: number }>;
+  }
 }

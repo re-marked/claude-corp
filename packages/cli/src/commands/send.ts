@@ -24,7 +24,7 @@ export async function cmdSend(opts: {
   }
 
   const client = getClient();
-  const corpRoot = getCorpRoot();
+  const corpRoot = await getCorpRoot();
   const channel = resolveChannel(corpRoot, opts.channel);
   const founder = getFounder(corpRoot);
   const members = getMembers(corpRoot);

@@ -86,6 +86,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const lastVisitedRef = React.useRef<Map<string, string>>(new Map());
   const [, forceRender] = useState(0);
 
   const viewStack = useMemo(() => new ViewStack(), []);
@@ -245,6 +246,8 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         <CommandPalette
           channels={channels}
           members={members}
+          corpRoot={corpPath}
+          lastVisited={lastVisitedRef.current}
           onNavigate={(view) => {
             navigate(view);
             setShowSwitcher(false);
@@ -287,6 +290,8 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         const ch = channels.find((c) => c.id === current.channelId);
         if (!ch) return <Text color={COLORS.danger}>Channel not found</Text>;
         const messagesPath = join(corpPath, ch.path, 'messages.jsonl');
+        // Mark channel as visited (for unread indicators)
+        lastVisitedRef.current.set(ch.id, new Date().toISOString());
         return (
           <ChatView
             channel={ch}

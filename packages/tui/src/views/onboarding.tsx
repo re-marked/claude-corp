@@ -322,6 +322,8 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
           <CommandPalette
             channels={channels}
             members={members}
+            corpRoot={corpRoot}
+            lastVisited={new Map()}
             onNavigate={() => {}}
             onSelectChannel={switchToChannel}
             onCommand={() => {}}

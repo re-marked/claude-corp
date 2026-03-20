@@ -4,7 +4,7 @@ import { getClient, getCorpRoot, getFounder, getCeo } from '../client.js';
 
 export async function cmdDogfood(opts: { repo?: string; json: boolean }) {
   const client = getClient();
-  const corpRoot = getCorpRoot();
+  const corpRoot = await getCorpRoot();
   const founder = getFounder(corpRoot);
   const ceo = getCeo(corpRoot);
   const creatorId = ceo?.id ?? founder.id;
