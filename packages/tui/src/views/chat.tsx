@@ -90,23 +90,31 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
         // Get active dispatches
         const status = await daemonClient.status();
         const dispatching = (status as any).dispatching as string[] | undefined;
+        if (dispatching && dispatching.length > 0) {
+          console.log(`[poll] dispatching: ${dispatching.join(', ')}`);
+        }
         setDispatchingAgents(dispatching ?? []);
 
         // Get streaming content for this channel
         const streams = await daemonClient.getStreaming();
+        const streamKeys = Object.keys(streams);
+        if (streamKeys.length > 0) {
+          console.log(`[poll] streams: ${streamKeys.length} entries, channelId match: ${Object.values(streams).some(d => d.channelId === channel.id)}`);
+        }
         let found = false;
         for (const data of Object.values(streams)) {
-          if (data.channelId === channel.id && data.content) {
-            // Only update state if content actually changed (reduces re-renders)
-            if (data.content !== lastStreamContent.current) {
-              lastStreamContent.current = data.content;
-              setStreamPreview({ agentName: data.agentName, content: data.content });
+          if (data.channelId === channel.id) {
+            // Entry exists — agent is being dispatched to
+            const content = data.content || '';
+            if (content !== lastStreamContent.current) {
+              lastStreamContent.current = content;
+              setStreamPreview({ agentName: data.agentName, content });
             }
             found = true;
             break;
           }
         }
-        if (!found && lastStreamContent.current) {
+        if (!found && lastStreamContent.current !== '') {
           lastStreamContent.current = '';
           setStreamPreview(null);
         }
@@ -584,8 +592,8 @@ Always consider what happens when things go wrong.`,
         <Box flexDirection="column" flexGrow={1} paddingX={1}>
           {/* Recent messages that arrived during this session */}
           {liveMessages.map((msg) => renderMsg(msg))}
-          {/* Streaming preview — only when content hasn't landed in liveMessages yet */}
-          {streamPreview?.content && !streamAlreadyLanded && (
+          {/* Streaming: show preview OR typing indicator based on content */}
+          {streamPreview && !streamAlreadyLanded && streamPreview.content && (
             <Box flexDirection="column" marginBottom={1}>
               <Box gap={1}>
                 <Text bold color={COLORS.agent}>{streamPreview.agentName}</Text>
@@ -594,16 +602,18 @@ Always consider what happens when things go wrong.`,
               <Text wrap="wrap">{streamPreview.content}</Text>
             </Box>
           )}
-          {/* Typing indicator — when no streaming content yet */}
-          {!streamPreview?.content && (thinking || dispatchingAgents.length > 0) && (
+          {/* Typing indicator — stream exists but no text yet, or dispatch in progress */}
+          {((!streamPreview?.content && streamPreview !== null) || (!streamPreview && (thinking || dispatchingAgents.length > 0))) && !streamAlreadyLanded && (
             <Box gap={1}>
               <Text color={COLORS.primary}><Spinner type="dots" /></Text>
               <Text color={COLORS.subtle}>
-                {dispatchingAgents.length > 0
-                  ? `${dispatchingAgents.join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`
-                  : thinkingAgents.length > 0
-                    ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                    : 'Thinking...'}
+                {streamPreview
+                  ? `${streamPreview.agentName} is working...`
+                  : dispatchingAgents.length > 0
+                    ? `${dispatchingAgents.join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`
+                    : thinkingAgents.length > 0
+                      ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+                      : 'Thinking...'}
               </Text>
             </Box>
           )}
