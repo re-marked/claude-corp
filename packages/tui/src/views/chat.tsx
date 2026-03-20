@@ -86,7 +86,7 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     if (key.tab || input === '\t') {
       onSwitchChannel?.();
     }
-    if (input === 'm' || input === 'M') {
+    if (key.ctrl && input === 'm') {
       setShowMemberSidebar(prev => !prev);
     }
   });
@@ -434,7 +434,7 @@ Always consider what happens when things go wrong.`,
       <Box borderStyle="round" borderColor={COLORS.border} paddingX={1}>
         <Text bold color={COLORS.primary}># {channel.name}</Text>
         <Text color={COLORS.muted}>  Tab: command palette</Text>
-        {!showMemberSidebar && <Text color={COLORS.muted}>  m: members</Text>}
+        {!showMemberSidebar && <Text color={COLORS.muted}>  Ctrl+M: members</Text>}
       </Box>
       <Box flexDirection="row" flexGrow={1}>
         <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
