@@ -123,6 +123,28 @@ export class MessageRouter {
   }
 
   private processMessage(msg: ChannelMessage, channel: Channel): void {
+    // Handle /uptime slash command
+    if (msg.kind === 'text' && msg.content.trim() === '/uptime') {
+      const uptime = this.daemon.getUptime();
+      const totalMessages = this.daemon.countAllMessages();
+      const responseMsg: ChannelMessage = {
+        id: generateId(),
+        channelId: channel.id,
+        senderId: 'system',
+        threadId: msg.threadId,
+        content: `⏱ Uptime: ${uptime} | 📨 Messages: ${totalMessages} total across all channels`,
+        kind: 'system',
+        mentions: [],
+        metadata: null,
+        depth: 0,
+        originId: msg.originId || msg.id,
+        timestamp: new Date().toISOString(),
+      };
+      const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+      appendMessage(msgPath, responseMsg);
+      return;
+    }
+
     // Don't dispatch system messages or task events
     if (msg.kind !== 'text') return;
 

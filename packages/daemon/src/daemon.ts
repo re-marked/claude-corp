@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, unlinkSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import {
@@ -31,9 +31,9 @@ export class Daemon {
   gitManager: GitManager;
   heartbeat: HeartbeatManager;
   taskWatcher: TaskWatcher;
+  readonly startedAt: number = Date.now();
   private server: Server | null = null;
   private port = 0;
-  private startedAt: number;
 
   constructor(corpRoot: string, globalConfig: GlobalConfig) {
     this.corpRoot = corpRoot;
@@ -43,7 +43,6 @@ export class Daemon {
     this.gitManager = new GitManager(corpRoot);
     this.heartbeat = new HeartbeatManager(this);
     this.taskWatcher = new TaskWatcher(this);
-    this.startedAt = Date.now();
   }
 
   async start(): Promise<number> {
@@ -190,31 +189,49 @@ export class Daemon {
     return this.port;
   }
 
-  /**
-   * Get daemon uptime and total message count across all channels
-   */
-  getUptimeInfo(): { uptimeMs: number; totalMessages: number } {
-    const uptimeMs = Date.now() - this.startedAt;
-    
-    // Count total messages by reading all channels/*/messages.jsonl files
-    let totalMessages = 0;
+  /** Get formatted uptime string like "12m 34s" or "1h 5m 12s" */
+  getUptime(): string {
+    const ms = Date.now() - this.startedAt;
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  /** Count total messages across all channel JSONL files */
+  countAllMessages(): number {
+    let total = 0;
     try {
-      const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
-      for (const channel of channels) {
-        const messagesPath = join(this.corpRoot, channel.path, 'messages.jsonl');
+      const channelsDir = join(this.corpRoot, 'channels');
+      if (!existsSync(channelsDir)) return 0;
+      const dirs = readdirSync(channelsDir, { withFileTypes: true });
+      for (const dir of dirs) {
+        if (!dir.isDirectory()) continue;
+        const msgPath = join(channelsDir, dir.name, MESSAGES_JSONL);
         try {
-          const content = readFileSync(messagesPath, 'utf-8');
-          const lines = content.trim().split('\n').filter(line => line.trim());
-          totalMessages += lines.length;
+          const content = readFileSync(msgPath, 'utf-8');
+          const lines = content.trim().split('\n').filter((l: string) => l.trim());
+          total += lines.length;
         } catch {
-          // File doesn't exist or is empty, skip
+          // File doesn't exist or empty
         }
       }
     } catch {
-      // Failed to read channels.json
+      // channels dir doesn't exist
     }
-    
-    return { uptimeMs, totalMessages };
+    return total;
+  }
+
+  /** Get uptime info for API endpoint */
+  getUptimeInfo(): { uptime: string; totalMessages: number; startedAt: number } {
+    return {
+      uptime: this.getUptime(),
+      totalMessages: this.countAllMessages(),
+      startedAt: this.startedAt,
+    };
   }
 
   /** Patch .gitignore to exclude .gateway/ if not already present. */
