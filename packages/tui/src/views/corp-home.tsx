@@ -17,6 +17,7 @@ import {
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
 import { COLORS, TASK_STATUS, BORDER_STYLE } from '../theme.js';
+import { CLAUDE_CORP_LOGO } from '../ascii.js';
 import type { View } from '../navigation.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
 
@@ -207,6 +208,10 @@ export function CorpHome({ corpRoot, daemonClient, initialMembers, initialChanne
 
   return (
     <Box flexDirection="column" flexGrow={1} height={Math.floor(termHeight * 0.9)}>
+      {/* ASCII logo */}
+      <Box justifyContent="center" paddingY={0}>
+        <Text color={COLORS.primary}>{CLAUDE_CORP_LOGO}</Text>
+      </Box>
       {/* Corp header */}
       <Box
         borderStyle={BORDER_STYLE}
