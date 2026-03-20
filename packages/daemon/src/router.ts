@@ -28,6 +28,8 @@ export class MessageRouter {
   private daemon: Daemon;
   private channelsDirWatcher: FSWatcher | null = null;
   private dedupClearInterval: ReturnType<typeof setInterval> | null = null;
+  /** Currently dispatching — agent displayNames that are actively processing. */
+  activeDispatches = new Set<string>();
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -46,7 +48,6 @@ export class MessageRouter {
     if (existsSync(channelsDir)) {
       this.channelsDirWatcher = watch(channelsDir, (event, filename) => {
         if (event === 'rename' && filename) {
-          // New channel directory may have appeared
           const msgPath = join(channelsDir, filename, MESSAGES_JSONL);
           if (existsSync(msgPath) && !this.watchers.has(filename)) {
             const freshChannels = this.loadChannels();
@@ -55,11 +56,15 @@ export class MessageRouter {
           }
         }
       });
+      this.channelsDirWatcher.on('error', () => {
+        // Non-fatal — new channels won't auto-watch until restart
+      });
     }
 
     // Clear dedup set every 5 minutes
     this.dedupClearInterval = setInterval(() => {
       this.dispatched.clear();
+      this.processedMsgIds.clear();
     }, 5 * 60 * 1000);
 
     console.log(`[router] Watching ${channels.length} channels`);
@@ -99,21 +104,66 @@ export class MessageRouter {
     const watcher = watch(msgPath, () => {
       this.onFileChange(channel, msgPath);
     });
+    watcher.on('error', () => {
+      // Windows EPERM on external file modification — re-watch
+      this.watchers.delete(channel.id);
+      setTimeout(() => this.watchChannel(channel), 1000);
+    });
 
     this.watchers.set(channel.id, watcher);
   }
 
+  /** Message-level dedup — prevents double dispatch regardless of fs.watch timing */
+  private processedMsgIds = new Set<string>();
+
   private onFileChange(channel: Channel, msgPath: string): void {
     const currentOffset = this.offsets.get(msgPath) ?? 0;
     const { messages, newOffset } = readNewLines(msgPath, currentOffset);
+    if (newOffset === currentOffset) return; // No new bytes
     this.offsets.set(msgPath, newOffset);
 
     for (const msg of messages) {
+      if (this.processedMsgIds.has(msg.id)) continue;
+      this.processedMsgIds.add(msg.id);
+
+      // Ignore agent messages not written by our router (external OpenClaw writes)
+      const meta = msg.metadata as Record<string, unknown> | null;
+      if (msg.kind === 'text' && msg.senderId !== 'system' && !meta?.source) {
+        const members = this.loadMembers();
+        const sender = members.find((m) => m.id === msg.senderId);
+        if (sender?.type === 'agent') {
+          console.log(`[router] IGNORED external agent write from ${sender.displayName}`);
+          continue;
+        }
+      }
+
       this.processMessage(msg, channel);
     }
   }
 
   private processMessage(msg: ChannelMessage, channel: Channel): void {
+    // Handle /uptime slash command
+    if (msg.kind === 'text' && msg.content.trim() === '/uptime') {
+      const uptime = this.daemon.getUptime();
+      const totalMessages = this.daemon.countAllMessages();
+      const responseMsg: ChannelMessage = {
+        id: generateId(),
+        channelId: channel.id,
+        senderId: 'system',
+        threadId: msg.threadId,
+        content: `⏱ Uptime: ${uptime} | 📨 Messages: ${totalMessages} total across all channels`,
+        kind: 'system',
+        mentions: [],
+        metadata: null,
+        depth: 0,
+        originId: msg.originId || msg.id,
+        timestamp: new Date().toISOString(),
+      };
+      const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+      appendMessage(msgPath, responseMsg);
+      return;
+    }
+
     // Don't dispatch system messages or task events
     if (msg.kind !== 'text') return;
 
@@ -177,14 +227,13 @@ export class MessageRouter {
     members: Member[],
     sender: Member,
   ): Promise<void> {
-    // Dedup guard (only for agent-to-agent, not user messages)
-    if (sender.type === 'agent') {
-      const dedupKey = `${msg.originId}:${targetId}`;
-      if (this.dispatched.has(dedupKey)) {
-        return;
-      }
-      this.dispatched.add(dedupKey);
+    // Universal dedup: never dispatch the same message to the same target twice
+    const dispatchKey = `${msg.id}:${targetId}`;
+    if (this.dispatched.has(dispatchKey)) {
+      console.log(`[router] DEDUP blocked dispatch to ${targetId} for msg ${msg.id}`);
+      return;
     }
+    this.dispatched.add(dispatchKey);
 
     // Cooldown guard (only for agent-to-agent, user messages always go through)
     if (sender.type === 'agent') {
@@ -233,14 +282,37 @@ export class MessageRouter {
     }
 
     try {
+      this.activeDispatches.add(target.displayName);
+
+      // Stream tokens into daemon.streaming so the TUI can show live preview
+      this.daemon.streaming.set(targetId, {
+        agentName: target.displayName,
+        content: '',
+        channelId: channel.id,
+      });
+
       const result = await dispatchToAgent(
         agentProc,
         messageContent,
         context,
         `channel-${channel.id}-${msg.id}`,
+        (accumulated) => {
+          if (accumulated.length % 50 === 0 || accumulated.length < 5) {
+            console.log(`[stream] ${target.displayName}: ${accumulated.length} chars`);
+          }
+          this.daemon.streaming.set(targetId, {
+            agentName: target.displayName,
+            content: accumulated,
+            channelId: channel.id,
+          });
+        },
       );
 
+      this.daemon.streaming.delete(targetId);
+      this.activeDispatches.delete(target.displayName);
+
       // Write agent response to JSONL
+      console.log(`[router] WRITING ${target.displayName}'s response (${result.content.length} chars) "${result.content.substring(0, 80)}"`);
       const responseMsg: ChannelMessage = {
         id: generateId(),
         channelId: channel.id,
@@ -249,7 +321,7 @@ export class MessageRouter {
         content: result.content,
         kind: 'text',
         mentions: resolveMentions(result.content, members),
-        metadata: null,
+        metadata: { source: 'router' },
         depth: msg.depth + 1,
         originId: msg.originId,
         timestamp: new Date().toISOString(),
@@ -263,6 +335,8 @@ export class MessageRouter {
       // Mark corp as dirty for git commit
       this.daemon.gitManager.markDirty(target.displayName);
     } catch (err) {
+      this.daemon.streaming.delete(targetId);
+      this.activeDispatches.delete(target.displayName);
       console.error(`[router] Dispatch to ${target.displayName} failed:`, err);
     }
   }

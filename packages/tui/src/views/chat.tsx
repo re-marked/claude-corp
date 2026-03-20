@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, Static } from 'ink';
 import Spinner from 'ink-spinner';
 import {
   type Channel,
@@ -14,6 +14,7 @@ import {
 import { join } from 'node:path';
 import { MessageList } from '../components/message-list.js';
 import { MessageInput } from '../components/message-input.js';
+import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
 import { HireWizard } from './hire-wizard.js';
 import { COLORS, BORDER_STYLE } from '../theme.js';
@@ -44,7 +45,13 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
   const [showTaskWizard, setShowTaskWizard] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
+  const [showMemberSidebar, setShowMemberSidebar] = useState(false);
   const lastMsgCount = useRef(messages.length);
+
+  // Update tab title with channel name
+  useEffect(() => {
+    process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name}\x07`);
+  }, [channel.name]);
 
   // Refresh members when new messages arrive (new agents may have been hired)
   useEffect(() => {
@@ -65,12 +72,50 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     if (messages.length > lastMsgCount.current) {
       const newMsg = messages[messages.length - 1];
       const founder = members.find((m) => m.rank === 'owner');
-      if (newMsg && founder && newMsg.senderId !== founder.id) {
+      if (newMsg && founder && newMsg.senderId !== founder.id && newMsg.kind === 'text') {
         setThinking(false);
+        process.stdout.write('\x07'); // Terminal bell
       }
     }
     lastMsgCount.current = messages.length;
   }, [messages.length]);
+
+  // Poll daemon for streaming content + active dispatches
+  const [dispatchingAgents, setDispatchingAgents] = useState<string[]>([]);
+  const [streamPreview, setStreamPreview] = useState<{ agentName: string; content: string } | null>(null);
+  const lastStreamContent = useRef('');
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        // Get active dispatches
+        const status = await daemonClient.status();
+        const dispatching = (status as any).dispatching as string[] | undefined;
+        setDispatchingAgents(dispatching ?? []);
+
+        // Get streaming content for this channel
+        const streams = await daemonClient.getStreaming();
+        let found = false;
+        for (const data of Object.values(streams)) {
+          if (data.channelId === channel.id && data.content) {
+            // Only update state if content actually changed (reduces re-renders)
+            if (data.content !== lastStreamContent.current) {
+              lastStreamContent.current = data.content;
+              setStreamPreview({ agentName: data.agentName, content: data.content });
+            }
+            found = true;
+            break;
+          }
+        }
+        if (!found && lastStreamContent.current) {
+          lastStreamContent.current = '';
+          setStreamPreview(null);
+        }
+      } catch {}
+    };
+    poll(); // Poll immediately on mount
+    const interval = setInterval(poll, 500); // Fast poll for streaming
+    return () => clearInterval(interval);
+  }, [daemonClient, channel.id]);
 
   // Timeout the spinner
   useEffect(() => {
@@ -81,8 +126,8 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
 
   useInput((input, key) => {
     if (showHireWizard) return;
-    if (key.tab || input === '\t') {
-      onSwitchChannel?.();
+    if (key.ctrl && input === 'm') {
+      setShowMemberSidebar(prev => !prev);
     }
   });
 
@@ -141,8 +186,54 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
 
-    // /logs — show recent daemon logs
+    // /ping responds with pong!
+    if (text.trim().toLowerCase() === '/ping') {
+      writeSystemMessage('pong!');
+      return;
+    }
+
+    // /who, /m, /members — show member roster with status
     const cmd = text.trim().toLowerCase();
+    if (cmd === '/who' || cmd === '/m' || cmd === '/members') {
+      try {
+        const agents = await daemonClient.listAgents();
+        const statusMap = new Map(agents.map((a) => [a.memberId, a.status]));
+        const online = members.filter((m) => m.type === 'user' || statusMap.get(m.id) === 'ready');
+        const offline = members.filter((m) => m.type === 'agent' && statusMap.get(m.id) !== 'ready');
+
+        const lines: string[] = [`━━━ Roster (${online.length} online) ━━━`];
+        for (const m of online) {
+          lines.push(`  ◆ ${m.displayName.padEnd(16)} ${m.rank.padEnd(8)} ${m.type === 'user' ? 'founder' : 'online'}`);
+        }
+        if (offline.length > 0) {
+          lines.push('');
+          for (const m of offline) {
+            lines.push(`  ◇ ${m.displayName.padEnd(16)} ${m.rank.padEnd(8)} offline`);
+          }
+        }
+        writeSystemMessage(lines.join('\n'));
+      } catch (err) {
+        writeSystemMessage(`Failed to fetch member status: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // /uptime — show daemon uptime and message count
+    if (cmd === '/uptime') {
+      try {
+        const { uptime, totalMessages } = await daemonClient.getUptime();
+        
+        // Format message count with commas
+        const messageCountStr = (totalMessages ?? 0).toLocaleString();
+        
+        writeSystemMessage(`⏱ Uptime: ${uptime} | Messages: ${messageCountStr}`);
+      } catch (err) {
+        writeSystemMessage(`Failed to fetch uptime: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // /logs — show recent daemon logs
     if (cmd === '/logs') {
       try {
         const { readFileSync, existsSync } = await import('node:fs');
@@ -158,6 +249,22 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
 
+    // /channels — list all channels
+    if (cmd === '/channels' || cmd === '/ch') {
+      try {
+        const { readConfig: rc, CHANNELS_JSON: CJ } = await import('@claudecorp/shared');
+        const { join: j } = await import('node:path');
+        const allCh = rc<{ name: string; kind: string; scope: string }[]>(j(corpRoot, CJ));
+        const lines = ['━━━ Channels ━━━'];
+        for (const c of allCh) {
+          const icon = c.kind === 'direct' ? '◆' : '#';
+          lines.push(`  ${icon} ${c.name.padEnd(24)} ${c.kind.padEnd(10)} ${c.scope}`);
+        }
+        writeSystemMessage(lines.join('\n'));
+      } catch {}
+      return;
+    }
+
     // Navigation commands
     if (cmd === '/h' || cmd === '/hierarchy') {
       onNavigate?.({ type: 'hierarchy' });
@@ -168,8 +275,175 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
       return;
     }
     if (cmd === '/a' || cmd === '/agents') {
-      // Show hierarchy as agent picker
       onNavigate?.({ type: 'hierarchy' });
+      return;
+    }
+    if (cmd === '/home') {
+      onNavigate?.({ type: 'corp-home' });
+      return;
+    }
+
+    // /dogfood — set up a dev project pointing at this repo with a team and task
+    if (cmd === '/dogfood') {
+      writeSystemMessage('Setting up dogfood: project + dev team + task...');
+      const f = members.find((m) => m.rank === 'owner');
+      const ceo = members.find((m) => m.rank === 'master');
+      const creatorId = ceo?.id ?? f?.id ?? '';
+      const repoPath = process.cwd().replace(/\\/g, '/');
+
+      try {
+        // 1. Create project
+        await daemonClient.createProject({
+          name: 'claude-corp',
+          type: 'codebase',
+          path: repoPath,
+          lead: ceo?.id,
+          description: 'Claude Corp — the AI corporation framework itself. Dogfooding: agents build the tool that runs them.',
+          createdBy: f?.id ?? '',
+        });
+        writeSystemMessage('Project "claude-corp" created.');
+
+        // 2. Hire tech lead
+        await daemonClient.hireAgent({
+          creatorId,
+          agentName: 'atlas',
+          displayName: 'Atlas',
+          rank: 'leader',
+          soulContent: `# Identity
+
+You are Atlas, the Tech Lead of the Claude Corp dev team.
+
+# Responsibilities
+
+- Architect features for the Claude Corp codebase (Node.js/TypeScript monorepo)
+- Break down tasks into actionable sub-tasks and delegate to your team
+- Review code quality, ensure changes follow existing patterns
+- The codebase is at: ${repoPath}
+- Packages: shared/ (types, parsers), daemon/ (router, process manager, gateway), tui/ (Ink/React terminal UI)
+- Build command: cd ${repoPath} && pnpm build
+
+# CRITICAL: You write REAL code
+
+- You must ACTUALLY read files, write code, and run builds. Not describe what you would do.
+- Use the write tool to create/modify files. Use bash to run builds and verify.
+- Never claim something "already exists" without reading the actual file path first.
+- After completing work: list every file you created or modified, and run pnpm build to prove it compiles.
+- If a task says "implement X", that means X does NOT exist yet. Create it.
+
+# Communication Style
+
+Direct, technical, encouraging. Lead with specifics — file paths, function names, concrete suggestions.
+When delegating, give clear acceptance criteria. When reviewing, check their actual file diffs.`,
+        });
+        writeSystemMessage('Atlas (Tech Lead) hired.');
+
+        // 3. Hire frontend dev
+        await daemonClient.hireAgent({
+          creatorId,
+          agentName: 'pixel',
+          displayName: 'Pixel',
+          rank: 'worker',
+          soulContent: `# Identity
+
+You are Pixel, a Frontend Developer specializing in terminal UIs.
+
+# Responsibilities
+
+- Build and improve TUI views and components (packages/tui/)
+- Work with React/Ink to create beautiful terminal interfaces
+- The codebase is at: ${repoPath}
+- Key files: packages/tui/src/views/, packages/tui/src/components/, packages/tui/src/theme.ts
+- Build command: cd ${repoPath} && pnpm build
+
+# CRITICAL: You write REAL code
+
+- You must ACTUALLY create .tsx files and modify existing ones. Use the write tool.
+- Read existing views (chat.tsx, hierarchy.tsx) to understand patterns BEFORE writing.
+- After writing code, run: cd ${repoPath} && pnpm build — if it fails, fix the errors.
+- Never claim a component exists unless you read the file and saw the code.
+- Your deliverable is working code, not descriptions of code.
+
+# Communication Style
+
+Creative, detail-oriented. You care about aesthetics AND usability.
+Show your work — paste key snippets of what you wrote. Ask about edge cases.`,
+        });
+        writeSystemMessage('Pixel (Frontend Dev) hired.');
+
+        // 4. Hire backend dev
+        await daemonClient.hireAgent({
+          creatorId,
+          agentName: 'forge',
+          displayName: 'Forge',
+          rank: 'worker',
+          soulContent: `# Identity
+
+You are Forge, a Backend Developer focused on the daemon and shared libraries.
+
+# Responsibilities
+
+- Build and improve the daemon (packages/daemon/) — router, process manager, gateway, APIs
+- Maintain shared types and utilities (packages/shared/)
+- The codebase is at: ${repoPath}
+- Key files: packages/daemon/src/, packages/shared/src/
+- Build command: cd ${repoPath} && pnpm build
+
+# CRITICAL: You write REAL code
+
+- You must ACTUALLY create/modify .ts files. Use the write tool.
+- Read existing code (daemon.ts, router.ts, process-manager.ts) to understand patterns BEFORE writing.
+- After writing code, run: cd ${repoPath} && pnpm build — if it fails, fix the errors.
+- Never claim something works without running the build. Never claim a file exists without reading it.
+- Your deliverable is working code, not descriptions of code.
+
+# Communication Style
+
+Methodical, systems-thinking. You think about failure modes, race conditions, and data integrity.
+Always consider what happens when things go wrong.`,
+        });
+        writeSystemMessage('Forge (Backend Dev) hired.');
+
+        // 5. Refresh members
+        try {
+          const fresh = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+          setMembers(fresh);
+        } catch {}
+
+        // 6. Create a real task for the team
+        const atlas = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON)).find(
+          (m) => m.agentDir === 'agents/atlas/',
+        );
+        await daemonClient.createTask({
+          title: 'Implement member sidebar in channel view',
+          priority: 'high',
+          assignedTo: atlas?.id,
+          createdBy: f?.id ?? '',
+          description: `Add a member sidebar to the chat view (packages/tui/src/views/chat.tsx).
+
+## Requirements
+- Show list of channel members on the right side of the chat
+- Each member: status diamond + name + rank
+- Online/offline status from daemon API
+- Toggle with a hotkey (e.g., 'm' to show/hide)
+- Follow existing theme (COLORS, STATUS from theme.ts)
+- Sidebar should be ~20 chars wide
+
+## Reference
+- See hierarchy.tsx for member rendering patterns
+- See theme.ts for status icons and colors
+- Channel members available from channel.memberIds + members.json
+
+## Acceptance Criteria
+- Sidebar renders correctly alongside message list
+- Shows accurate online/offline status
+- Togglable without disrupting chat input
+- Matches warm charcoal theme`,
+        });
+        writeSystemMessage('Task "Implement member sidebar" created and assigned to Atlas.');
+        writeSystemMessage('Dogfood setup complete! Your dev team is ready. Check /tasks and /hierarchy.');
+      } catch (err) {
+        writeSystemMessage(`Dogfood error: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return;
     }
 
@@ -257,23 +531,90 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     );
   }
 
+  // Split messages: historical go into Static (scroll buffer), recent stay dynamic.
+  // This prevents streaming preview from duplicating the final message.
+  const initialCountRef = useRef(messages.length);
+
+  // Bump the static boundary when no streaming is active and new messages arrived
+  useEffect(() => {
+    if (!streamPreview?.content && !thinking && messages.length > initialCountRef.current) {
+      initialCountRef.current = messages.length;
+    }
+  }, [messages.length, streamPreview, thinking]);
+
+  const historyMessages = messages.slice(0, initialCountRef.current);
+  const liveMessages = messages.slice(initialCountRef.current);
+
+  const renderMsg = (msg: ChannelMessage) => {
+    const sender = members.find((m) => m.id === msg.senderId);
+    const name = sender?.displayName ?? 'system';
+    const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isSystem = msg.senderId === 'system' || msg.kind === 'system' || msg.kind === 'task_event';
+
+    if (isSystem) {
+      return (
+        <Box key={msg.id} flexDirection="column">
+          <Text color={COLORS.muted}> {'\u250A'} {name} {time}</Text>
+          <Text color={COLORS.muted}> {'\u250A'} {msg.content}</Text>
+        </Box>
+      );
+    }
+    return (
+      <Box key={msg.id} flexDirection="column" marginBottom={1}>
+        <Box gap={1}>
+          <Text bold color={sender?.type === 'user' ? COLORS.user : COLORS.agent}>{name}</Text>
+          <Text color={COLORS.subtle}>{time}</Text>
+        </Box>
+        <Text wrap="wrap">{msg.content}</Text>
+      </Box>
+    );
+  };
+
+  // Is there an active stream whose content already landed in liveMessages?
+  const streamAlreadyLanded = streamPreview?.content && liveMessages.length > 0;
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Box borderStyle="round" borderColor={COLORS.border} paddingX={1}>
-        <Text bold color={COLORS.primary}># {channel.name}</Text>
-        <Text color={COLORS.muted}>  Tab: command palette</Text>
-      </Box>
-      <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
-        <MessageList messages={messages} members={members} />
-        {thinking && (
-          <Box gap={1} marginTop={1}>
-            <Text color={COLORS.primary}><Spinner type="dots" /></Text>
-            <Text color={COLORS.subtle}>
-              {thinkingAgents.length > 0
-                ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                : 'Thinking...'}
-            </Text>
-          </Box>
+      {/* Historical messages — rendered once, scrollable */}
+      <Static items={historyMessages}>
+        {(msg) => renderMsg(msg)}
+      </Static>
+      {/* Dynamic section — live messages + streaming + input */}
+      <Box flexDirection="row">
+        <Box flexDirection="column" flexGrow={1} paddingX={1}>
+          {/* Recent messages that arrived during this session */}
+          {liveMessages.map((msg) => renderMsg(msg))}
+          {/* Streaming preview — only when content hasn't landed in liveMessages yet */}
+          {streamPreview?.content && !streamAlreadyLanded && (
+            <Box flexDirection="column" marginBottom={1}>
+              <Box gap={1}>
+                <Text bold color={COLORS.agent}>{streamPreview.agentName}</Text>
+                <Spinner type="dots" />
+              </Box>
+              <Text wrap="wrap">{streamPreview.content}</Text>
+            </Box>
+          )}
+          {/* Typing indicator — when no streaming content yet */}
+          {!streamPreview?.content && (thinking || dispatchingAgents.length > 0) && (
+            <Box gap={1}>
+              <Text color={COLORS.primary}><Spinner type="dots" /></Text>
+              <Text color={COLORS.subtle}>
+                {dispatchingAgents.length > 0
+                  ? `${dispatchingAgents.join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`
+                  : thinkingAgents.length > 0
+                    ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+                    : 'Thinking...'}
+              </Text>
+            </Box>
+          )}
+        </Box>
+        {showMemberSidebar && (
+          <MemberSidebar
+            members={members}
+            channelMemberIds={channel.memberIds}
+            visible={showMemberSidebar}
+            daemonClient={daemonClient}
+          />
         )}
       </Box>
       <MessageInput
@@ -281,6 +622,7 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
         disabled={sending}
         placeholder="Type a message... (/hire to add agents)"
       />
+      <Text color={COLORS.muted}> #{channel.name}  C-K:palette  C-H:home  C-T:tasks  C-M:members  Esc:back</Text>
     </Box>
   );
 }

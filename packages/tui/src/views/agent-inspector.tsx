@@ -18,24 +18,7 @@ interface Props {
 export function AgentInspector({ corpRoot, memberId, members, channels, onNavigate, onBack }: Props) {
   const member = members.find((m) => m.id === memberId);
 
-  useInput((input, key) => {
-    if (key.escape || input === 'q') {
-      onBack();
-    } else if (input === 'd' && member) {
-      // Find DM channel with this agent
-      const founder = members.find((m) => m.rank === 'owner');
-      if (founder) {
-        const dm = channels.find(
-          (c) => c.kind === 'direct' &&
-          c.memberIds.includes(founder.id) &&
-          c.memberIds.includes(member.id),
-        );
-        if (dm) {
-          onNavigate({ type: 'chat', channelId: dm.id });
-        }
-      }
-    }
-  });
+  // Navigation handled globally by Ctrl shortcuts in app.tsx
 
   if (!member) {
     return <Text color={COLORS.danger}>Agent not found</Text>;

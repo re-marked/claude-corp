@@ -145,6 +145,9 @@ export async function hireAgent(
     const status = gw.getStatus();
     if (status === 'stopped' || status === 'starting') {
       await gw.start();
+    } else {
+      // Give OpenClaw a moment to hot-reload the new agent config
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 
@@ -175,11 +178,16 @@ Clear, concise, professional. Focus on getting work done.
 function defaultAgentsRules(rank: MemberRank): string {
   return `# Operating Rules
 
-- Read your assigned tasks and work on them.
-- Post updates to your channel when you make progress.
-- Ask your team leader or the CEO if you're blocked.
-- Update your MEMORY.md with things you learn.
-${rank === 'leader' ? '- You can assign tasks to workers on your team.\n- Review their work and provide feedback.' : ''}
+- Read your TASKS.md to see assigned work. Read the full task file for details.
+- ACTUALLY DO THE WORK. Read source files, write code, run builds. Do not just describe what you would do.
+- Never claim something is "already implemented" without reading the actual file and verifying.
+- After writing files, read them back to confirm the write succeeded.
+- Run \`pnpm build\` after code changes to verify they compile.
+- Post concrete progress updates: file paths modified, build results, what changed.
+- Only mark a task completed when you can list the exact files you created/modified.
+- If stuck, ask for help. If a path doesn't exist, check the real directory structure first.
+- Update your MEMORY.md with things you learn about the codebase.
+${rank === 'leader' ? '- You can create sub-tasks and assign them to workers.\n- Review their actual output (file diffs), not just their claims.' : ''}
 `;
 }
 
@@ -187,9 +195,10 @@ function defaultHeartbeat(rank: MemberRank): string {
   return `# Heartbeat Schedule
 
 On each wake cycle:
-1. Check for unread messages in your channels.
-2. Review your assigned tasks.
-3. Work on the highest-priority pending task.
-4. Post a status update if you completed something.
+1. Read your TASKS.md for current assignments.
+2. For each in-progress task: check the actual files you're supposed to be modifying. Are your changes there?
+3. Work on the highest-priority task — read code, write code, run builds.
+4. Post a status update with CONCRETE details: which files you touched, what you changed, build results.
+5. If a task is stuck, update its status to blocked and explain why.
 `;
 }

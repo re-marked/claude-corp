@@ -177,6 +177,8 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
   const isTypingHierarchy = !disabled && trimmedValue === '/h';
   const isTypingTasks = !disabled && trimmedValue === '/t';
   const isTypingAgents = !disabled && trimmedValue === '/a';
+  const isTypingWho = !disabled && /^\/(w(h(o)?)?|m(e(m(b(e(r(s)?)?)?)?)?)?)?$/i.test(trimmedValue);
+  const isTypingUptime = !disabled && /^\/(u(p(t(i(m(e)?)?)?)?)?)?$/i.test(trimmedValue);
   const showNavHint = !disabled && trimmedValue === '/' && !isTypingHire && !isTypingTask;
 
   return (
@@ -187,7 +189,9 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
           <Text color="#FDCB6E" bold>/task</Text>
           <Text color="#E17055" bold>/project</Text>
           <Text color="#FFEAA7" bold>/team</Text>
-          <Text color="#B2BEC3" bold>/h <Text color="#636E72">hierarchy</Text>  /t <Text color="#636E72">tasks</Text>  /a <Text color="#636E72">agents</Text></Text>
+          <Text color="#00B894" bold>/dogfood</Text>
+          <Text color="#B2BEC3" bold>/who <Text color="#636E72">roster</Text>  /uptime  /channels  /ping  /logs</Text>
+          <Text color="#B2BEC3" bold>/h <Text color="#636E72">hierarchy</Text>  /t <Text color="#636E72">tasks</Text>  /a <Text color="#636E72">agents</Text>  /home</Text>
         </Box>
       )}
       {isTypingHire && (
@@ -230,6 +234,18 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
         <Box paddingX={2}>
           <Text color="#FFEAA7" bold>/team</Text>
           <Text color="#636E72"> — create a new team</Text>
+        </Box>
+      )}
+      {isTypingWho && (
+        <Box paddingX={2}>
+          <Text color="#B2BEC3" bold>/who</Text>
+          <Text color="#636E72"> — show member roster (/m, /members)</Text>
+        </Box>
+      )}
+      {isTypingUptime && (
+        <Box paddingX={2}>
+          <Text color="#B2BEC3" bold>/uptime</Text>
+          <Text color="#636E72"> — show daemon uptime and message count</Text>
         </Box>
       )}
       <Box borderStyle="round" borderColor={disabled ? '#636E72' : '#636E72'} paddingX={1}>

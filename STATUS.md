@@ -12,6 +12,9 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - Layer 4: task files, /task wizard, API, TASKS.md live inbox, auto-assignment dispatch
 - Layer 5: shared corp gateway, /hire wizard, CEO-initiated hiring, multi-agent chat
 - Layer 6: task board, hierarchy tree, agent inspector, command palette, warm charcoal theme
+- **Corp Home**: default landing view — agent status grid, activity feed, task summary (Discord-like)
+- **Resilience**: gateway auto-restart, dispatch retry, graceful degradation on partial failures
+- **Dogfood**: /dogfood command auto-creates project + dev team + task for self-development
 - Themes: Corporate / Mafia / Military picker during onboarding
 - Projects & Teams: /project + /team commands, project-scoped channels
 - Git tracking: auto-commit after agent actions (10s debounce)
@@ -148,11 +151,32 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## Corp Home — DONE
+
+- [x] Corp Home as default landing view (Discord-like dashboard)
+- [x] Agent status grid (2-column, live process status from daemon, last-active timestamps)
+- [x] Activity feed (recent messages across all channels, chronological, scrollable with cursor)
+- [x] Task summary bar (counts by status: active, pending, done, failed, blocked)
+- [x] Auto-refresh every 5 seconds (live data from files + daemon API)
+- [x] Navigation: Enter opens channel, d opens CEO DM, c opens palette
+- [x] Corp Home added to command palette and /home nav command
+- [x] /dogfood command (auto-creates project + dev team + task for dogfooding)
+
+## Resilience — DONE
+
+- [x] Gateway auto-restart on crash (3 retries with exponential backoff)
+- [x] Auth re-copy on gateway restart (refreshAllAuth before respawn)
+- [x] Dispatch retry on transient failures (401, 502+, connection errors — 1 retry with 3s delay)
+- [x] Resilient startup: each init step (gateway, agents, router, file reads) isolated in try/catch
+- [x] Gateway-less agent registration (agents registered with stopped status if gateway not ready)
+- [x] Graceful degradation: partial corp loads even if members.json or channels.json corrupted
+
 ## Future / Deferred
 
 - [ ] Custom themes (name your own ranks)
 - [ ] WebSocket streaming for real-time tool call visibility
-- [ ] Member sidebar in channel view
+- [x] Member sidebar in channel view (Ctrl+M toggle, live daemon status)
+- [ ] Multiline paste support in message input bar
 - [ ] Thread support (threadId in messages)
 - [ ] Agent suspension/resume/archival
 - [ ] Git Janitor agent

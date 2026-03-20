@@ -11,11 +11,7 @@ interface Props {
 }
 
 export function TaskDetail({ corpRoot, taskId, members, onBack }: Props) {
-  useInput((input, key) => {
-    if (key.escape || input === 'q') {
-      onBack();
-    }
-  });
+  // Navigation handled globally by Ctrl shortcuts in app.tsx
 
   let task, body;
   try {

@@ -124,7 +124,25 @@ export class ProcessManager {
   /** Register an agent that runs on the shared corp gateway. */
   registerGatewayAgent(memberId: string, member?: Member): AgentProcess {
     if (!this.corpGateway) {
-      throw new Error('Corp gateway not initialized. Call initCorpGateway() first.');
+      // Gateway not ready yet — register with stopped status, will become ready when gateway starts
+      if (!member) {
+        const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+        member = members.find((m) => m.id === memberId);
+        if (!member) throw new Error(`Member ${memberId} not found`);
+      }
+      const agentName = member.agentDir!.replace(/^agents\//, '').replace(/\/$/, '');
+      const agentProc: AgentProcess = {
+        memberId,
+        displayName: member.displayName,
+        port: 0,
+        status: 'stopped',
+        gatewayToken: '',
+        process: null,
+        mode: 'gateway',
+        model: `openclaw:${agentName}`,
+      };
+      this.agents.set(memberId, agentProc);
+      return agentProc;
     }
 
     if (!member) {

@@ -101,7 +101,7 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
       {step === 'rank' && (
         <Box flexDirection="column">
           <Text>Name: <Text bold>{name}</Text></Text>
-          <Text marginTop={1}>Select rank:</Text>
+          <Box marginTop={1}><Text>Select rank:</Text></Box>
           {RANKS.map((r, i) => (
             <Box key={r} gap={1}>
               <Text color={i === rankIndex ? 'cyan' : undefined} bold={i === rankIndex}>
@@ -114,14 +114,14 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
               </Text>
             </Box>
           ))}
-          <Text dimColor marginTop={1}>↑↓ to select, Enter to confirm</Text>
+          <Box marginTop={1}><Text dimColor>↑↓ to select, Enter to confirm</Text></Box>
         </Box>
       )}
 
       {step === 'description' && (
         <Box flexDirection="column">
           <Text>Name: <Text bold>{name}</Text>  Rank: <Text bold>{RANKS[rankIndex]}</Text></Text>
-          <Text marginTop={1}>What does this agent do? (optional, Enter to skip)</Text>
+          <Box marginTop={1}><Text>What does this agent do? (optional, Enter to skip)</Text></Box>
           <Box>
             <Text bold color="green">&gt; </Text>
             <TextInput

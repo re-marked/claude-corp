@@ -1,6 +1,18 @@
 import { watch, type FSWatcher, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { type TaskStatus, readTask } from '@claudecorp/shared';
+import {
+  type TaskStatus,
+  type Member,
+  type Channel,
+  type ChannelMessage,
+  readTask,
+  readConfig,
+  appendMessage,
+  generateId,
+  MEMBERS_JSON,
+  CHANNELS_JSON,
+  MESSAGES_JSONL,
+} from '@claudecorp/shared';
 import { writeTaskEvent } from './task-events.js';
 import type { Daemon } from './daemon.js';
 
@@ -26,6 +38,11 @@ export class TaskWatcher {
       if (!filename || !filename.endsWith('.md')) return;
       const filePath = join(tasksDir, filename);
       this.onTaskFileChange(filePath);
+    });
+    this.watcher.on('error', () => {
+      // Windows EPERM — try to re-watch after a delay
+      this.watcher = null;
+      setTimeout(() => this.start(), 2000);
     });
 
     console.log(`[task-watcher] Watching tasks/ (${this.taskCache.size} tasks cached)`);
@@ -89,6 +106,41 @@ export class TaskWatcher {
           this.daemon.corpRoot,
           `"${task.title}" → ${task.status}`,
         );
+
+        // When task completes or fails, notify the CEO so they can report to the founder
+        if (task.status === 'completed' || task.status === 'failed') {
+          try {
+            const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+            const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+            if (ceo) {
+              const channels = readConfig<Channel[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
+              const taskChannel = channels.find(c =>
+                c.name.includes('tasks') || c.name.includes('job-board') || c.name.includes('operations'),
+              );
+              if (taskChannel) {
+                const assignee = members.find(m => m.id === task.assignedTo);
+                const assigneeName = assignee?.displayName ?? 'an agent';
+                const notifyMsg: ChannelMessage = {
+                  id: generateId(),
+                  channelId: taskChannel.id,
+                  senderId: 'system',
+                  threadId: null,
+                  content: `@${ceo.displayName} Task "${task.title}" has been marked as ${task.status} by ${assigneeName}. Report this to the Founder.`,
+                  kind: 'text',
+                  mentions: [ceo.id],
+                  metadata: null,
+                  depth: 0,
+                  originId: '',
+                  timestamp: new Date().toISOString(),
+                };
+                notifyMsg.originId = notifyMsg.id;
+                appendMessage(join(this.daemon.corpRoot, taskChannel.path, MESSAGES_JSONL), notifyMsg);
+              }
+            }
+          } catch {
+            // Non-fatal — notification is best-effort
+          }
+        }
       }
 
       // Check for assignment change

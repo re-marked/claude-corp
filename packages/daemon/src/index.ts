@@ -10,3 +10,4 @@ export { hireAgent } from './hire.js';
 export type { HireOpts, HireResult } from './hire.js';
 export { dispatchToAgent } from './dispatch.js';
 export type { DispatchResult, DispatchContext } from './dispatch.js';
+export { DaemonClient } from './client.js';

@@ -39,10 +39,10 @@ export class ViewStack {
   }
 
   /** Get breadcrumb labels for the current stack. */
-  breadcrumbs(): string[] {
+  breadcrumbs(channelNames?: Map<string, string>): string[] {
     return this.stack.map((v) => {
       switch (v.type) {
-        case 'chat': return `#${v.channelId}`;
+        case 'chat': return `#${channelNames?.get(v.channelId) ?? v.channelId.substring(0, 8)}`;
         case 'task-board': return 'Tasks';
         case 'task-detail': return `Task`;
         case 'agent-inspector': return 'Agent';

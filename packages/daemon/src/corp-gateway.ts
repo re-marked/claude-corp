@@ -229,20 +229,19 @@ export class CorpGateway {
         body: JSON.stringify({ model: 'openclaw:main', messages: [] }),
         signal: AbortSignal.timeout(2000),
       });
-      // Only adopt if auth passes (not 401)
+      // Auth passes — adopt the running gateway
       if (resp.status < 400) {
         this._status = 'ready';
         this.startHealthMonitor();
         console.log(`[gateway] Adopted existing gateway on port ${this._port} with ${this.listAgents().length} agents`);
         return true;
       }
-      // 401 = stale gateway with wrong token — kill it and respawn
-      if (resp.status === 401) {
-        console.log(`[gateway] Stale gateway on port ${this._port} (wrong token), killing...`);
-        await this.killPortHolder();
-      }
+      // Something is running on our port but auth fails — kill it and respawn
+      console.log(`[gateway] Stale gateway on port ${this._port} (status ${resp.status}), killing...`);
+      await this.killPortHolder();
     } catch {
-      // Not running — need to spawn
+      // Port not reachable — but check if something is still holding it (Windows port release delay)
+      await this.killPortHolder();
     }
     return false;
   }
@@ -262,7 +261,7 @@ export class CorpGateway {
     } catch {}
   }
 
-  /** Periodically check if the gateway is still alive. Mark agents crashed if not. */
+  /** Periodically check if the gateway is still alive. Auto-restart if dead. */
   private startHealthMonitor(): void {
     const interval = setInterval(async () => {
       if (this._status !== 'ready') {
@@ -280,12 +279,39 @@ export class CorpGateway {
           signal: AbortSignal.timeout(3000),
         });
       } catch {
-        console.error(`[gateway] Corp gateway died — agents will fail until restart`);
+        console.error(`[gateway] Corp gateway died — auto-restarting...`);
         this._status = 'stopped';
         this.process = null;
         clearInterval(interval);
+        this.autoRestart();
       }
     }, 30_000); // Check every 30s
+  }
+
+  /** Re-copy auth profiles for all registered agents (in case keys changed). */
+  refreshAllAuth(): void {
+    for (const agent of this.listAgents()) {
+      this.writeAgentAuth(agent.id);
+    }
+  }
+
+  /** Attempt to auto-restart with backoff and auth re-copy. */
+  private async autoRestart(): Promise<void> {
+    const maxRetries = 3;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        // Wait with exponential backoff
+        await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+        // Re-copy auth before restart in case keys changed
+        this.refreshAllAuth();
+        await this.start();
+        console.log(`[gateway] Auto-restart successful (attempt ${i + 1})`);
+        return;
+      } catch (err) {
+        console.error(`[gateway] Auto-restart attempt ${i + 1}/${maxRetries} failed:`, err);
+      }
+    }
+    console.error('[gateway] Auto-restart exhausted — gateway is down. Restart the TUI to recover.');
   }
 
   private async healthCheck(): Promise<void> {

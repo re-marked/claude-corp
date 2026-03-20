@@ -28,6 +28,9 @@ export const SYSTEM_CHANNELS = ['general', 'system', 'heartbeat', 'tasks', 'erro
 export const GITIGNORE_CONTENT = `# Agent secrets (injected by daemon, never committed)
 auth-profiles.json
 
+# Corp gateway runtime state (OpenClaw workspaces, sessions, configs)
+.gateway/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import type { Channel, Member } from '@claudecorp/shared';
+import { join } from 'node:path';
+import { type Channel, type Member, tailMessages, MESSAGES_JSONL } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
 
@@ -16,21 +17,41 @@ interface PaletteItem {
 interface Props {
   channels: Channel[];
   members: Member[];
+  corpRoot: string;
+  lastVisited: Map<string, string>;
   onNavigate: (view: View) => void;
   onSelectChannel: (channel: Channel) => void;
   onCommand: (cmd: string) => void;
   onClose: () => void;
 }
 
-export function CommandPalette({ channels, members, onNavigate, onSelectChannel, onCommand, onClose }: Props) {
+export function CommandPalette({ channels, members, corpRoot, lastVisited, onNavigate, onSelectChannel, onCommand, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const agents = members.filter((m) => m.type === 'agent');
 
+  // Check which channels have unread messages
+  const unreadChannels = new Set<string>();
+  for (const ch of channels) {
+    try {
+      const msgs = tailMessages(join(corpRoot, ch.path, MESSAGES_JSONL), 1);
+      if (msgs.length > 0) {
+        const lastMsgTime = msgs[0]!.timestamp;
+        const visitedTime = lastVisited.get(ch.id);
+        if (!visitedTime || lastMsgTime > visitedTime) {
+          unreadChannels.add(ch.id);
+        }
+      }
+    } catch {
+      // Channel may not have messages yet
+    }
+  }
+
   // Build all items
   const items: PaletteItem[] = [
     // Views
+    { id: 'v-home', label: 'Corp Home', kind: 'view', icon: '◆', action: () => onNavigate({ type: 'corp-home' }) },
     { id: 'v-hierarchy', label: 'Hierarchy', kind: 'view', icon: '◇', action: () => onNavigate({ type: 'hierarchy' }) },
     { id: 'v-tasks', label: 'Task Board', kind: 'view', icon: '◆', action: () => onNavigate({ type: 'task-board' }) },
     // Commands
@@ -38,10 +59,11 @@ export function CommandPalette({ channels, members, onNavigate, onSelectChannel,
     { id: 'c-task', label: '/task', kind: 'command', icon: '▸', action: () => onCommand('task') },
     { id: 'c-project', label: '/project', kind: 'project', icon: '▸', action: () => onCommand('project') },
     { id: 'c-team', label: '/team', kind: 'command', icon: '▸', action: () => onCommand('team') },
+    { id: 'c-dogfood', label: '/dogfood', kind: 'command', icon: '▸', action: () => onCommand('dogfood') },
     // Channels
     ...channels.map((ch) => ({
       id: `ch-${ch.id}`,
-      label: `#${ch.name}`,
+      label: unreadChannels.has(ch.id) ? `#${ch.name} ●` : `#${ch.name}`,
       kind: 'channel' as const,
       icon: ch.kind === 'direct' ? '◆' : '#',
       action: () => onSelectChannel(ch),
