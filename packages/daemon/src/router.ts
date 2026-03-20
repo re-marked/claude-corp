@@ -123,11 +123,20 @@ export class MessageRouter {
     this.offsets.set(msgPath, newOffset);
 
     for (const msg of messages) {
-      if (this.processedMsgIds.has(msg.id)) {
-        console.log(`[router] DEDUP skipped msg ${msg.id} (already processed)`);
-        continue;
-      }
+      if (this.processedMsgIds.has(msg.id)) continue;
       this.processedMsgIds.add(msg.id);
+
+      // Ignore agent messages not written by our router (external OpenClaw writes)
+      const meta = msg.metadata as Record<string, unknown> | null;
+      if (msg.kind === 'text' && msg.senderId !== 'system' && !meta?.source) {
+        const members = this.loadMembers();
+        const sender = members.find((m) => m.id === msg.senderId);
+        if (sender?.type === 'agent') {
+          console.log(`[router] IGNORED external agent write from ${sender.displayName}`);
+          continue;
+        }
+      }
+
       this.processMessage(msg, channel);
     }
   }
@@ -300,6 +309,7 @@ export class MessageRouter {
       this.activeDispatches.delete(target.displayName);
 
       // Write agent response to JSONL
+      console.log(`[router] WRITING ${target.displayName}'s response (${result.content.length} chars) "${result.content.substring(0, 80)}"`);
       const responseMsg: ChannelMessage = {
         id: generateId(),
         channelId: channel.id,
@@ -308,7 +318,7 @@ export class MessageRouter {
         content: result.content,
         kind: 'text',
         mentions: resolveMentions(result.content, members),
-        metadata: null,
+        metadata: { source: 'router' },
         depth: msg.depth + 1,
         originId: msg.originId,
         timestamp: new Date().toISOString(),
