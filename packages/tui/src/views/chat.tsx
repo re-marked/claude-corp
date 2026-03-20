@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, Static } from 'ink';
 import Spinner from 'ink-spinner';
 import {
   type Channel,
@@ -530,15 +530,44 @@ Always consider what happens when things go wrong.`,
     );
   }
 
+  // Use Static for historical messages — they render once into the terminal
+  // scroll buffer and never re-render. Only the bottom (streaming/input) is dynamic.
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle="round" borderColor={COLORS.border} paddingX={1}>
         <Text bold color={COLORS.primary}># {channel.name}</Text>
         {!showMemberSidebar && <Text color={COLORS.muted}>  C-M: members</Text>}
       </Box>
-      <Box flexDirection="row" flexGrow={1}>
-        <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
-          <MessageList messages={messages} members={members} />
+      <Static items={messages}>
+        {(msg) => {
+          const sender = members.find((m) => m.id === msg.senderId);
+          const name = sender?.displayName ?? 'system';
+          const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const isSystem = msg.senderId === 'system' || msg.kind === 'system' || msg.kind === 'task_event';
+
+          if (isSystem) {
+            return (
+              <Box key={msg.id} flexDirection="column">
+                <Text color={COLORS.muted}> {'\u250A'} {name} {time}</Text>
+                <Text color={COLORS.muted}> {'\u250A'} {msg.content}</Text>
+              </Box>
+            );
+          }
+
+          return (
+            <Box key={msg.id} flexDirection="column" marginBottom={1}>
+              <Box gap={1}>
+                <Text bold color={sender?.type === 'user' ? COLORS.user : COLORS.agent}>{name}</Text>
+                <Text color={COLORS.subtle}>{time}</Text>
+              </Box>
+              <Text wrap="wrap">{msg.content}</Text>
+            </Box>
+          );
+        }}
+      </Static>
+      {/* Dynamic section — only this re-renders */}
+      <Box flexDirection="row">
+        <Box flexDirection="column" flexGrow={1} paddingX={1}>
           {streamPreview && streamPreview.content && (
             <Box flexDirection="column" marginBottom={1}>
               <Box gap={1}>
@@ -549,7 +578,7 @@ Always consider what happens when things go wrong.`,
             </Box>
           )}
           {!streamPreview?.content && (thinking || dispatchingAgents.length > 0) && (
-            <Box gap={1} marginTop={1}>
+            <Box gap={1}>
               <Text color={COLORS.primary}><Spinner type="dots" /></Text>
               <Text color={COLORS.subtle}>
                 {dispatchingAgents.length > 0
@@ -561,12 +590,14 @@ Always consider what happens when things go wrong.`,
             </Box>
           )}
         </Box>
-        <MemberSidebar 
-          members={members} 
-          channelMemberIds={channel.memberIds} 
-          visible={showMemberSidebar}
-          daemonClient={daemonClient}
-        />
+        {showMemberSidebar && (
+          <MemberSidebar
+            members={members}
+            channelMemberIds={channel.memberIds}
+            visible={showMemberSidebar}
+            daemonClient={daemonClient}
+          />
+        )}
       </Box>
       <MessageInput
         onSend={handleSend}
