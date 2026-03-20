@@ -26,13 +26,55 @@ import { COLORS } from './theme.js';
 
 export function App() {
   const [, forceReload] = useState(0);
+  const [selectedCorp, setSelectedCorp] = useState<string | null>(null);
   const corps = listCorps();
 
   if (corps.length === 0) {
     return <OnboardingView onComplete={() => forceReload((n) => n + 1)} />;
   }
 
-  return <ResumeView corpPath={corps[0]!.path} />;
+  if (selectedCorp) {
+    return <ResumeView corpPath={selectedCorp} />;
+  }
+
+  if (corps.length === 1) {
+    return <ResumeView corpPath={corps[0]!.path} />;
+  }
+
+  return <CorpSelector corps={corps} onSelect={(path) => setSelectedCorp(path)} />;
+}
+
+function CorpSelector({ corps, onSelect }: { corps: { name: string; path: string }[]; onSelect: (path: string) => void }) {
+  const [index, setIndex] = useState(0);
+
+  useInput((input, key) => {
+    if (key.upArrow) setIndex((i) => Math.max(0, i - 1));
+    if (key.downArrow) setIndex((i) => Math.min(corps.length - 1, i + 1));
+    if (key.return) onSelect(corps[index]!.path);
+  });
+
+  return (
+    <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+      <Box flexDirection="column" borderStyle="round" borderColor={COLORS.primary} paddingX={3} paddingY={1} width={50}>
+        <Box marginBottom={1}>
+          <Text bold color={COLORS.primary}>Select a corporation</Text>
+        </Box>
+        {corps.map((c, i) => (
+          <Box key={c.name} gap={1}>
+            <Text color={i === index ? COLORS.primary : COLORS.muted}>
+              {i === index ? '\u25B8' : ' '}
+            </Text>
+            <Text bold={i === index} color={i === index ? COLORS.text : COLORS.subtle}>
+              {c.name}
+            </Text>
+          </Box>
+        ))}
+        <Box marginTop={1}>
+          <Text color={COLORS.muted}>\u2191\u2193 to select, Enter to open</Text>
+        </Box>
+      </Box>
+    </Box>
+  );
 }
 
 function ResumeView({ corpPath }: { corpPath: string }) {
