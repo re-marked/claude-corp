@@ -107,25 +107,27 @@ export class TaskWatcher {
           `"${task.title}" → ${task.status}`,
         );
 
-        // When task completes or fails, notify the creator so they can report back
+        // When task completes or fails, notify the CEO so they can report to the founder
         if (task.status === 'completed' || task.status === 'failed') {
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
-            const creator = members.find(m => m.id === task.createdBy);
-            if (creator && creator.type === 'agent') {
+            const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+            if (ceo) {
               const channels = readConfig<Channel[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
               const taskChannel = channels.find(c =>
                 c.name.includes('tasks') || c.name.includes('job-board') || c.name.includes('operations'),
               );
               if (taskChannel) {
+                const assignee = members.find(m => m.id === task.assignedTo);
+                const assigneeName = assignee?.displayName ?? 'an agent';
                 const notifyMsg: ChannelMessage = {
                   id: generateId(),
                   channelId: taskChannel.id,
                   senderId: 'system',
                   threadId: null,
-                  content: `@${creator.displayName} Task "${task.title}" has been marked as ${task.status} by the assignee.`,
+                  content: `@${ceo.displayName} Task "${task.title}" has been marked as ${task.status} by ${assigneeName}. Report this to the Founder.`,
                   kind: 'text',
-                  mentions: [creator.id],
+                  mentions: [ceo.id],
                   metadata: null,
                   depth: 0,
                   originId: '',
