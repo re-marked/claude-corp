@@ -175,7 +175,8 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 - [ ] Custom themes (name your own ranks)
 - [ ] WebSocket streaming for real-time tool call visibility
-- [ ] Member sidebar in channel view
+- [x] Member sidebar in channel view (Ctrl+M toggle, live daemon status)
+- [ ] Multiline paste support in message input bar
 - [ ] Thread support (threadId in messages)
 - [ ] Agent suspension/resume/archival
 - [ ] Git Janitor agent
