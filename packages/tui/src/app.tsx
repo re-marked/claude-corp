@@ -23,6 +23,7 @@ import { CorpHome } from './views/corp-home.js';
 import { StatusBar } from './components/status-bar.js';
 import { DaemonClient } from './lib/daemon-client.js';
 import { useDaemonEvents } from './hooks/use-daemon-events.js';
+import { CorpProvider } from './context/corp-context.js';
 import { COLORS } from './theme.js';
 
 export function App() {
@@ -253,31 +254,39 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   // Command palette overlay
   if (showSwitcher) {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
-        <CommandPalette
-          channels={channels}
-          members={members}
-          corpRoot={corpPath}
-          lastVisited={lastVisitedRef.current}
-          onNavigate={(view) => {
-            navigate(view);
-            setShowSwitcher(false);
-          }}
-          onSelectChannel={(ch) => {
-            viewStack.replace({ type: 'chat', channelId: ch.id });
-            setShowSwitcher(false);
-            forceRender((n) => n + 1);
-          }}
-          onCommand={(cmd) => {
-            setShowSwitcher(false);
-            // Commands handled by ChatView when it renders
-            if (cmd === 'hire' || cmd === 'task' || cmd === 'project' || cmd === 'team') {
-              // Navigate to chat first, then the command will be handled
-            }
-          }}
-          onClose={() => setShowSwitcher(false)}
-        />
-      </Box>
+      <CorpProvider
+        corpRoot={corpPath}
+        daemonClient={client}
+        daemonPort={daemonPort}
+        initialMembers={members}
+        initialChannels={channels}
+      >
+        <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
+          <CommandPalette
+            channels={channels}
+            members={members}
+            corpRoot={corpPath}
+            lastVisited={lastVisitedRef.current}
+            onNavigate={(view) => {
+              navigate(view);
+              setShowSwitcher(false);
+            }}
+            onSelectChannel={(ch) => {
+              viewStack.replace({ type: 'chat', channelId: ch.id });
+              setShowSwitcher(false);
+              forceRender((n) => n + 1);
+            }}
+            onCommand={(cmd) => {
+              setShowSwitcher(false);
+              // Commands handled by ChatView when it renders
+              if (cmd === 'hire' || cmd === 'task' || cmd === 'project' || cmd === 'team') {
+                // Navigate to chat first, then the command will be handled
+              }
+            }}
+            onClose={() => setShowSwitcher(false)}
+          />
+        </Box>
+      </CorpProvider>
     );
   }
 
@@ -373,14 +382,22 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   };
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      {renderView()}
-      {current.type !== 'chat' && (
-        <StatusBar
-          breadcrumbs={viewStack.breadcrumbs(new Map(channels.map((c) => [c.id, c.name])))}
-          hints={hints[current.type] ?? ''}
-        />
-      )}
-    </Box>
+    <CorpProvider
+      corpRoot={corpPath}
+      daemonClient={client}
+      daemonPort={daemonPort}
+      initialMembers={members}
+      initialChannels={channels}
+    >
+      <Box flexDirection="column" flexGrow={1}>
+        {renderView()}
+        {current.type !== 'chat' && (
+          <StatusBar
+            breadcrumbs={viewStack.breadcrumbs(new Map(channels.map((c) => [c.id, c.name])))}
+            hints={hints[current.type] ?? ''}
+          />
+        )}
+      </Box>
+    </CorpProvider>
   );
 }
