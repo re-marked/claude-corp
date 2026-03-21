@@ -22,6 +22,7 @@ import { TaskDetail } from './views/task-detail.js';
 import { CorpHome } from './views/corp-home.js';
 import { StatusBar } from './components/status-bar.js';
 import { DaemonClient } from './lib/daemon-client.js';
+import { useDaemonEvents } from './hooks/use-daemon-events.js';
 import { COLORS } from './theme.js';
 
 export function App() {
@@ -80,6 +81,7 @@ function CorpSelector({ corps, onSelect }: { corps: { name: string; path: string
 function ResumeView({ corpPath }: { corpPath: string }) {
   const [daemon, setDaemon] = useState<Daemon | null>(null);
   const [client, setClient] = useState<DaemonClient | null>(null);
+  const [daemonPort, setDaemonPort] = useState(0);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [status, setStatus] = useState('Starting daemon...');
@@ -88,6 +90,9 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const [showSwitcher, setShowSwitcher] = useState(false);
   const lastVisitedRef = React.useRef<Map<string, string>>(new Map());
   const [, forceRender] = useState(0);
+
+  // WebSocket event bus for real-time streaming + dispatch updates
+  const events = useDaemonEvents(daemonPort);
 
   const viewStack = useMemo(() => new ViewStack(), []);
 
@@ -117,10 +122,14 @@ function ResumeView({ corpPath }: { corpPath: string }) {
 
   // Global key handler — Ctrl combos work in ALL views including chat
   useInput((input, key) => {
-    if (!ready || showSwitcher) return;
+    if (!ready) return;
+    
+    // Don't handle other keys when palette is open (let the palette handle them)
+    if (showSwitcher) return;
+    
     const current = viewStack.current();
 
-    // Ctrl+K — command palette
+    // Ctrl+K — command palette (only when palette is closed)
     if (key.ctrl && input === 'k') {
       setShowSwitcher(true);
       return;
@@ -158,6 +167,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         d = new Daemon(corpPath, globalConfig);
         const port = await d.start();
         setDaemon(d);
+        setDaemonPort(port);
         setClient(new DaemonClient(port));
 
         const daemon = d!;
@@ -292,6 +302,8 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         const messagesPath = join(corpPath, ch.path, 'messages.jsonl');
         // Mark channel as visited (for unread indicators)
         lastVisitedRef.current.set(ch.id, new Date().toISOString());
+        // Get streaming data for this channel from WebSocket events
+        const streamForChannel = events.streams.get(current.channelId) ?? null;
         return (
           <ChatView
             channel={ch}
@@ -299,6 +311,8 @@ function ResumeView({ corpPath }: { corpPath: string }) {
             messagesPath={messagesPath}
             daemonClient={client}
             corpRoot={corpPath}
+            streamData={streamForChannel}
+            dispatchingAgents={[...events.dispatching]}
             onSwitchChannel={() => setShowSwitcher(true)}
             onNavigate={navigate}
           />

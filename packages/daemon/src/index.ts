@@ -11,3 +11,5 @@ export type { HireOpts, HireResult } from './hire.js';
 export { dispatchToAgent } from './dispatch.js';
 export type { DispatchResult, DispatchContext } from './dispatch.js';
 export { DaemonClient } from './client.js';
+export { EventBus } from './events.js';
+export type { DaemonEvent } from './events.js';

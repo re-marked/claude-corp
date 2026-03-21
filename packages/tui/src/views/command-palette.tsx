@@ -85,6 +85,11 @@ export function CommandPalette({ channels, members, corpRoot, lastVisited, onNav
     : items;
 
   useInput((input, key) => {
+    // Ctrl+K toggles (closes) the palette
+    if (key.ctrl && input === 'k') {
+      onClose();
+      return;
+    }
     if (key.escape || key.tab || input === '\t') {
       onClose();
       return;

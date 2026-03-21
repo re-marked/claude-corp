@@ -21,6 +21,7 @@ import { MessageRouter } from './router.js';
 import { GitManager } from './git-manager.js';
 import { HeartbeatManager } from './heartbeat.js';
 import { TaskWatcher } from './task-watcher.js';
+import { EventBus, type DaemonEvent } from './events.js';
 import { createApi } from './api.js';
 
 export class Daemon {
@@ -34,6 +35,8 @@ export class Daemon {
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
+  /** WebSocket event bus for real-time TUI updates. */
+  events = new EventBus();
   private server: Server | null = null;
   private port = 0;
 
@@ -54,8 +57,9 @@ export class Daemon {
     // Ensure .gateway/ is gitignored (older corps may lack this)
     this.ensureGatewayGitignored();
 
-    // Start HTTP API
+    // Start HTTP API + WebSocket event bus
     this.server = createApi(this);
+    this.events.attach(this.server);
 
     return new Promise((resolve, reject) => {
       this.server!.listen(0, '127.0.0.1', () => {
@@ -68,7 +72,7 @@ export class Daemon {
         writeFileSync(DAEMON_PID_PATH, String(process.pid), 'utf-8');
         writeFileSync(DAEMON_PORT_PATH, String(this.port), 'utf-8');
 
-        console.log(`[daemon] API listening on 127.0.0.1:${this.port}`);
+        console.log(`[daemon] API + WebSocket listening on 127.0.0.1:${this.port}`);
         resolve(this.port);
       });
 
@@ -182,6 +186,7 @@ export class Daemon {
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();
+    this.events.close();
     if (this.server) {
       this.server.close();
     }

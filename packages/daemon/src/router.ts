@@ -284,7 +284,12 @@ export class MessageRouter {
     try {
       this.activeDispatches.add(target.displayName);
 
-      // Stream tokens into daemon.streaming so the TUI can show live preview
+      // Broadcast dispatch start + set streaming state
+      this.daemon.events.broadcast({
+        type: 'dispatch_start',
+        agentName: target.displayName,
+        channelId: channel.id,
+      });
       this.daemon.streaming.set(targetId, {
         agentName: target.displayName,
         content: '',
@@ -297,19 +302,28 @@ export class MessageRouter {
         context,
         `channel-${channel.id}-${msg.id}`,
         (accumulated) => {
-          if (accumulated.length % 50 === 0 || accumulated.length < 5) {
-            console.log(`[stream] ${target.displayName}: ${accumulated.length} chars`);
-          }
           this.daemon.streaming.set(targetId, {
             agentName: target.displayName,
             content: accumulated,
             channelId: channel.id,
+          });
+          // Push streaming tokens to TUI via WebSocket
+          this.daemon.events.broadcast({
+            type: 'stream_token',
+            agentName: target.displayName,
+            channelId: channel.id,
+            content: accumulated,
           });
         },
       );
 
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
+      this.daemon.events.broadcast({
+        type: 'stream_end',
+        agentName: target.displayName,
+        channelId: channel.id,
+      });
 
       // Write agent response to JSONL
       console.log(`[router] WRITING ${target.displayName}'s response (${result.content.length} chars) "${result.content.substring(0, 80)}"`);
@@ -337,6 +351,11 @@ export class MessageRouter {
     } catch (err) {
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
+      this.daemon.events.broadcast({
+        type: 'dispatch_end',
+        agentName: target.displayName,
+        channelId: channel.id,
+      });
       console.error(`[router] Dispatch to ${target.displayName} failed:`, err);
     }
   }

@@ -25,17 +25,27 @@ import type { DaemonClient } from '../lib/daemon-client.js';
 
 const THINKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes — agents can work long
 
+interface StreamData {
+  agentName: string;
+  content: string;
+  channelId: string;
+}
+
 interface Props {
   channel: Channel;
   members: Member[];
   messagesPath: string;
   daemonClient: DaemonClient;
   corpRoot: string;
+  /** Streaming state from WebSocket events */
+  streamData?: StreamData | null;
+  /** Agent names currently dispatching */
+  dispatchingAgents?: string[];
   onSwitchChannel?: () => void;
   onNavigate?: (view: import('../navigation.js').View) => void;
 }
 
-export function ChatView({ channel, members: initialMembers, messagesPath, daemonClient, corpRoot, onSwitchChannel, onNavigate }: Props) {
+export function ChatView({ channel, members: initialMembers, messagesPath, daemonClient, corpRoot, streamData, dispatchingAgents = [], onSwitchChannel, onNavigate }: Props) {
   const messages = useMessages(messagesPath);
   const [sending, setSending] = useState(false);
   const [thinking, setThinking] = useState(false);
@@ -80,42 +90,7 @@ export function ChatView({ channel, members: initialMembers, messagesPath, daemo
     lastMsgCount.current = messages.length;
   }, [messages.length]);
 
-  // Poll daemon for streaming content + active dispatches
-  const [dispatchingAgents, setDispatchingAgents] = useState<string[]>([]);
-  const [streamPreview, setStreamPreview] = useState<{ agentName: string; content: string } | null>(null);
-  const lastStreamContent = useRef('');
-  useEffect(() => {
-    const poll = async () => {
-      try {
-        // Get active dispatches
-        const status = await daemonClient.status();
-        const dispatching = (status as any).dispatching as string[] | undefined;
-        setDispatchingAgents(dispatching ?? []);
-
-        // Get streaming content for this channel
-        const streams = await daemonClient.getStreaming();
-        let found = false;
-        for (const data of Object.values(streams)) {
-          if (data.channelId === channel.id && data.content) {
-            // Only update state if content actually changed (reduces re-renders)
-            if (data.content !== lastStreamContent.current) {
-              lastStreamContent.current = data.content;
-              setStreamPreview({ agentName: data.agentName, content: data.content });
-            }
-            found = true;
-            break;
-          }
-        }
-        if (!found && lastStreamContent.current) {
-          lastStreamContent.current = '';
-          setStreamPreview(null);
-        }
-      } catch {}
-    };
-    poll(); // Poll immediately on mount
-    const interval = setInterval(poll, 500); // Fast poll for streaming
-    return () => clearInterval(interval);
-  }, [daemonClient, channel.id]);
+  // Streaming + dispatch state now comes from WebSocket events (via props)
 
   // Timeout the spinner
   useEffect(() => {
@@ -531,19 +506,10 @@ Always consider what happens when things go wrong.`,
     );
   }
 
-  // Split messages: historical go into Static (scroll buffer), recent stay dynamic.
-  // This prevents streaming preview from duplicating the final message.
-  const initialCountRef = useRef(messages.length);
-
-  // Bump the static boundary when no streaming is active and new messages arrived
-  useEffect(() => {
-    if (!streamPreview?.content && !thinking && messages.length > initialCountRef.current) {
-      initialCountRef.current = messages.length;
-    }
-  }, [messages.length, streamPreview, thinking]);
-
-  const historyMessages = messages.slice(0, initialCountRef.current);
-  const liveMessages = messages.slice(initialCountRef.current);
+  // Derive streaming state for this channel from props
+  const channelStream = streamData?.channelId === channel.id ? streamData : null;
+  const isStreaming = !!channelStream;
+  const hasStreamContent = !!(channelStream?.content);
 
   const renderMsg = (msg: ChannelMessage) => {
     const sender = members.find((m) => m.id === msg.senderId);
@@ -570,53 +536,34 @@ Always consider what happens when things go wrong.`,
     );
   };
 
-  // Is there an active stream whose content already landed in liveMessages?
-  const streamAlreadyLanded = streamPreview?.content && liveMessages.length > 0;
-
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Historical messages — rendered once, scrollable */}
-      <Static items={historyMessages}>
+      {/* All messages in Static — terminal scroll buffer, never re-renders */}
+      <Static items={messages}>
         {(msg) => renderMsg(msg)}
       </Static>
-      {/* Dynamic section — live messages + streaming + input */}
-      <Box flexDirection="row">
-        <Box flexDirection="column" flexGrow={1} paddingX={1}>
-          {/* Recent messages that arrived during this session */}
-          {liveMessages.map((msg) => renderMsg(msg))}
-          {/* Streaming preview — only when content hasn't landed in liveMessages yet */}
-          {streamPreview?.content && !streamAlreadyLanded && (
-            <Box flexDirection="column" marginBottom={1}>
-              <Box gap={1}>
-                <Text bold color={COLORS.agent}>{streamPreview.agentName}</Text>
-                <Spinner type="dots" />
-              </Box>
-              <Text wrap="wrap">{streamPreview.content}</Text>
-            </Box>
-          )}
-          {/* Typing indicator — when no streaming content yet */}
-          {!streamPreview?.content && (thinking || dispatchingAgents.length > 0) && (
-            <Box gap={1}>
-              <Text color={COLORS.primary}><Spinner type="dots" /></Text>
-              <Text color={COLORS.subtle}>
-                {dispatchingAgents.length > 0
-                  ? `${dispatchingAgents.join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`
-                  : thinkingAgents.length > 0
-                    ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                    : 'Thinking...'}
-              </Text>
-            </Box>
-          )}
+      {/* Dynamic: streaming preview + indicators + input */}
+      {hasStreamContent && (
+        <Box flexDirection="column" paddingX={1}>
+          <Box gap={1}>
+            <Text bold color={COLORS.agent}>{channelStream!.agentName}</Text>
+            <Spinner type="dots" />
+          </Box>
+          <Text wrap="wrap">{channelStream!.content}</Text>
         </Box>
-        {showMemberSidebar && (
-          <MemberSidebar
-            members={members}
-            channelMemberIds={channel.memberIds}
-            visible={showMemberSidebar}
-            daemonClient={daemonClient}
-          />
-        )}
-      </Box>
+      )}
+      {!hasStreamContent && (isStreaming || thinking || dispatchingAgents.length > 0) && (
+        <Box gap={1} paddingX={1}>
+          <Text color={COLORS.primary}><Spinner type="dots" /></Text>
+          <Text color={COLORS.subtle}>
+            {isStreaming
+              ? `${channelStream!.agentName} is working...`
+              : thinkingAgents.length > 0
+                ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+                : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
+          </Text>
+        </Box>
+      )}
       <MessageInput
         onSend={handleSend}
         disabled={sending}
