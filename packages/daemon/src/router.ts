@@ -31,6 +31,8 @@ export class MessageRouter {
   private dedupClearInterval: ReturnType<typeof setInterval> | null = null;
   /** Currently dispatching — agent displayNames that are actively processing. */
   activeDispatches = new Set<string>();
+  /** Queued dispatches per agent — when agent is busy, messages wait here. */
+  private dispatchQueue = new Map<string, { msg: ChannelMessage; channel: Channel; targetId: string; members: Member[]; sender: Member }[]>();
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -250,6 +252,15 @@ export class MessageRouter {
       return;
     }
 
+    // Queue if agent is busy (one dispatch at a time per agent)
+    if (this.activeDispatches.has(agentProc.displayName)) {
+      const queue = this.dispatchQueue.get(targetId) ?? [];
+      queue.push({ msg, channel, targetId, members, sender });
+      this.dispatchQueue.set(targetId, queue);
+      log(`[router] ${agentProc.displayName} is busy — queued (${queue.length} waiting)`);
+      return;
+    }
+
     const target = members.find((m) => m.id === targetId);
     if (!target) return;
 
@@ -349,6 +360,9 @@ export class MessageRouter {
 
       // Mark corp as dirty for git commit
       this.daemon.gitManager.markDirty(target.displayName);
+
+      // Drain queue — dispatch next waiting message for this agent
+      this.drainQueue(targetId);
     } catch (err) {
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
@@ -358,7 +372,22 @@ export class MessageRouter {
         channelId: channel.id,
       });
       logError(`[router] Dispatch to ${target.displayName} failed: ${err}`);
+
+      // Still drain queue on error — next task might succeed
+      this.drainQueue(targetId);
     }
+  }
+
+  /** Process the next queued message for an agent after their current dispatch finishes. */
+  private drainQueue(agentId: string): void {
+    const queue = this.dispatchQueue.get(agentId);
+    if (!queue || queue.length === 0) return;
+
+    const next = queue.shift()!;
+    if (queue.length === 0) this.dispatchQueue.delete(agentId);
+
+    log(`[router] Draining queue for ${next.sender.displayName ?? agentId} — ${queue.length} remaining`);
+    this.dispatchToTarget(next.msg, next.channel, next.targetId, next.members, next.sender);
   }
 
   private buildContext(
