@@ -1,4 +1,5 @@
 import type { AgentProcess } from './process-manager.js';
+import { log, logError } from './logger.js';
 
 export interface DispatchContext {
   /** Path to the agent's workspace dir inside the corp */
@@ -246,7 +247,7 @@ export async function dispatchToAgent(
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const url = `http://127.0.0.1:${agent.port}/v1/chat/completions`;
-      console.log(`[dispatch] >>> HTTP POST to ${agent.displayName} (attempt ${attempt + 1}, port ${agent.port}, model ${agent.model})`);
+      log(`[dispatch] >>> HTTP POST to ${agent.displayName} (attempt ${attempt + 1}, port ${agent.port}, model ${agent.model})`);
       const resp = await fetch(url, {
         method: 'POST',
         headers: {
@@ -266,7 +267,7 @@ export async function dispatchToAgent(
       if ((resp.status === 401 || resp.status >= 502) && attempt === 0) {
         const text = await resp.text();
         lastError = new Error(`Agent ${agent.displayName} returned ${resp.status}: ${text}`);
-        console.error(`[dispatch] ${agent.displayName} returned ${resp.status}, retrying in 3s...`);
+        logError(`[dispatch] ${agent.displayName} returned ${resp.status}, retrying in 3s...`);
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }
@@ -278,7 +279,7 @@ export async function dispatchToAgent(
       // Connection-level error (gateway down) — retry once
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt === 0) {
-        console.error(`[dispatch] ${agent.displayName} unreachable, retrying in 3s...`);
+        logError(`[dispatch] ${agent.displayName} unreachable, retrying in 3s...`);
         await new Promise((r) => setTimeout(r, 3000));
         continue;
       }

@@ -21,7 +21,9 @@ import { MessageRouter } from './router.js';
 import { GitManager } from './git-manager.js';
 import { HeartbeatManager } from './heartbeat.js';
 import { TaskWatcher } from './task-watcher.js';
+import { EventBus, type DaemonEvent } from './events.js';
 import { createApi } from './api.js';
+import { log, logError } from './logger.js';
 
 export class Daemon {
   corpRoot: string;
@@ -34,6 +36,8 @@ export class Daemon {
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
+  /** WebSocket event bus for real-time TUI updates. */
+  events = new EventBus();
   private server: Server | null = null;
   private port = 0;
 
@@ -54,8 +58,9 @@ export class Daemon {
     // Ensure .gateway/ is gitignored (older corps may lack this)
     this.ensureGatewayGitignored();
 
-    // Start HTTP API
+    // Start HTTP API + WebSocket event bus
     this.server = createApi(this);
+    this.events.attach(this.server);
 
     return new Promise((resolve, reject) => {
       this.server!.listen(0, '127.0.0.1', () => {
@@ -68,7 +73,7 @@ export class Daemon {
         writeFileSync(DAEMON_PID_PATH, String(process.pid), 'utf-8');
         writeFileSync(DAEMON_PORT_PATH, String(this.port), 'utf-8');
 
-        console.log(`[daemon] API listening on 127.0.0.1:${this.port}`);
+        log(`[daemon] API + WebSocket listening on 127.0.0.1:${this.port}`);
         resolve(this.port);
       });
 
@@ -89,14 +94,14 @@ export class Daemon {
     try {
       await this.processManager.initCorpGateway();
     } catch (err) {
-      console.error(`[daemon] Corp gateway init failed (agents may start later):`, err);
+      logError(`[daemon] Corp gateway init failed (agents may start later): ${err}`);
     }
 
     let members: Member[];
     try {
       members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
     } catch (err) {
-      console.error(`[daemon] Failed to read members.json:`, err);
+      logError(`[daemon] Failed to read members.json: ${err}`);
       return;
     }
 
@@ -106,7 +111,7 @@ export class Daemon {
       try {
         await this.processManager.spawnAgent(agent.id);
       } catch (err) {
-        console.error(`[daemon] Failed to spawn ${agent.displayName}:`, err);
+        logError(`[daemon] Failed to spawn ${agent.displayName}: ${err}`);
       }
     }
   }
@@ -182,6 +187,7 @@ export class Daemon {
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();
+    this.events.close();
     if (this.server) {
       this.server.close();
     }
@@ -201,7 +207,7 @@ export class Daemon {
       const oldPid = parseInt(readFileSync(DAEMON_PID_PATH, 'utf-8').trim(), 10);
       if (!oldPid || oldPid === process.pid) return;
 
-      console.log(`[daemon] Killing stale daemon (PID ${oldPid})...`);
+      log(`[daemon] Killing stale daemon (PID ${oldPid})...`);
 
       // Try SIGTERM first (works same-process-tree)
       try { process.kill(oldPid, 'SIGTERM'); } catch {}

@@ -15,6 +15,7 @@ import {
 } from '@claudecorp/shared';
 import { writeTaskEvent } from './task-events.js';
 import type { Daemon } from './daemon.js';
+import { log } from './logger.js';
 
 export class TaskWatcher {
   private daemon: Daemon;
@@ -45,7 +46,7 @@ export class TaskWatcher {
       setTimeout(() => this.start(), 2000);
     });
 
-    console.log(`[task-watcher] Watching tasks/ (${this.taskCache.size} tasks cached)`);
+    log(`[task-watcher] Watching tasks/ (${this.taskCache.size} tasks cached)`);
   }
 
   /** Mark a task file as already announced by the API (prevents duplicate events). */

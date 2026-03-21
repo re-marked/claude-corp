@@ -3,19 +3,17 @@ import { Box, Text, useInput } from 'ink';
 import { type Member, type TaskStatus, listTasks } from '@claudecorp/shared';
 import { COLORS, TASK_STATUS, PRIORITY, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
-import type { DaemonClient } from '../lib/daemon-client.js';
+import { useCorp } from '../context/corp-context.js';
 
 const FILTERS: (TaskStatus | 'all')[] = ['all', 'pending', 'assigned', 'in_progress', 'completed', 'failed', 'blocked'];
 
 interface Props {
-  corpRoot: string;
-  members: Member[];
-  daemonClient: DaemonClient;
   onNavigate: (view: View) => void;
   onBack: () => void;
 }
 
-export function TaskBoard({ corpRoot, members, daemonClient, onNavigate, onBack }: Props) {
+export function TaskBoard({ onNavigate, onBack }: Props) {
+  const { corpRoot, members, daemonClient } = useCorp();
   const [filterIndex, setFilterIndex] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
 

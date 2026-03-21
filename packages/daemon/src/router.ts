@@ -19,6 +19,7 @@ import {
 } from '@claudecorp/shared';
 import { dispatchToAgent, type DispatchContext } from './dispatch.js';
 import type { Daemon } from './daemon.js';
+import { log, logError } from './logger.js';
 
 export class MessageRouter {
   private watchers = new Map<string, FSWatcher>();
@@ -67,7 +68,7 @@ export class MessageRouter {
       this.processedMsgIds.clear();
     }, 5 * 60 * 1000);
 
-    console.log(`[router] Watching ${channels.length} channels`);
+    log(`[router] Watching ${channels.length} channels`);
   }
 
   stop(): void {
@@ -132,7 +133,7 @@ export class MessageRouter {
         const members = this.loadMembers();
         const sender = members.find((m) => m.id === msg.senderId);
         if (sender?.type === 'agent') {
-          console.log(`[router] IGNORED external agent write from ${sender.displayName}`);
+          log(`[router] IGNORED external agent write from ${sender.displayName}`);
           continue;
         }
       }
@@ -169,7 +170,7 @@ export class MessageRouter {
 
     // Depth guard
     if (msg.depth >= MAX_DEPTH) {
-      console.log(`[router] Depth limit reached (${msg.depth}) for message ${msg.id}`);
+      log(`[router] Depth limit reached (${msg.depth}) for message ${msg.id}`);
       return;
     }
 
@@ -230,7 +231,7 @@ export class MessageRouter {
     // Universal dedup: never dispatch the same message to the same target twice
     const dispatchKey = `${msg.id}:${targetId}`;
     if (this.dispatched.has(dispatchKey)) {
-      console.log(`[router] DEDUP blocked dispatch to ${targetId} for msg ${msg.id}`);
+      log(`[router] DEDUP blocked dispatch to ${targetId} for msg ${msg.id}`);
       return;
     }
     this.dispatched.add(dispatchKey);
@@ -239,7 +240,7 @@ export class MessageRouter {
     if (sender.type === 'agent') {
       const lastTime = this.lastDispatch.get(targetId) ?? 0;
       if (Date.now() - lastTime < COOLDOWN_MS) {
-        console.log(`[router] Cooldown active for ${targetId}, skipping`);
+        log(`[router] Cooldown active for ${targetId}, skipping`);
         return;
       }
     }
@@ -284,7 +285,12 @@ export class MessageRouter {
     try {
       this.activeDispatches.add(target.displayName);
 
-      // Stream tokens into daemon.streaming so the TUI can show live preview
+      // Broadcast dispatch start + set streaming state
+      this.daemon.events.broadcast({
+        type: 'dispatch_start',
+        agentName: target.displayName,
+        channelId: channel.id,
+      });
       this.daemon.streaming.set(targetId, {
         agentName: target.displayName,
         content: '',
@@ -297,22 +303,31 @@ export class MessageRouter {
         context,
         `channel-${channel.id}-${msg.id}`,
         (accumulated) => {
-          if (accumulated.length % 50 === 0 || accumulated.length < 5) {
-            console.log(`[stream] ${target.displayName}: ${accumulated.length} chars`);
-          }
           this.daemon.streaming.set(targetId, {
             agentName: target.displayName,
             content: accumulated,
             channelId: channel.id,
+          });
+          // Push streaming tokens to TUI via WebSocket
+          this.daemon.events.broadcast({
+            type: 'stream_token',
+            agentName: target.displayName,
+            channelId: channel.id,
+            content: accumulated,
           });
         },
       );
 
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
+      this.daemon.events.broadcast({
+        type: 'stream_end',
+        agentName: target.displayName,
+        channelId: channel.id,
+      });
 
       // Write agent response to JSONL
-      console.log(`[router] WRITING ${target.displayName}'s response (${result.content.length} chars) "${result.content.substring(0, 80)}"`);
+      log(`[router] WRITING ${target.displayName}'s response (${result.content.length} chars) "${result.content.substring(0, 80)}"`);
       const responseMsg: ChannelMessage = {
         id: generateId(),
         channelId: channel.id,
@@ -330,14 +345,19 @@ export class MessageRouter {
       const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
       appendMessage(msgPath, responseMsg);
 
-      console.log(`[router] ${target.displayName} responded in #${channel.name}`);
+      log(`[router] ${target.displayName} responded in #${channel.name}`);
 
       // Mark corp as dirty for git commit
       this.daemon.gitManager.markDirty(target.displayName);
     } catch (err) {
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
-      console.error(`[router] Dispatch to ${target.displayName} failed:`, err);
+      this.daemon.events.broadcast({
+        type: 'dispatch_end',
+        agentName: target.displayName,
+        channelId: channel.id,
+      });
+      logError(`[router] Dispatch to ${target.displayName} failed: ${err}`);
     }
   }
 

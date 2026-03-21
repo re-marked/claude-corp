@@ -20,6 +20,7 @@ import {
   CORP_JSON,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
+import { log } from './logger.js';
 
 export interface HireOpts {
   creatorId: string;
@@ -154,7 +155,7 @@ export async function hireAgent(
   // 7. Register in process manager
   daemon.processManager.registerGatewayAgent(member.id, member);
 
-  console.log(`[daemon] Hired ${opts.displayName} (${opts.rank}) as ${opts.agentName}`);
+  log(`[daemon] Hired ${opts.displayName} (${opts.rank}) as ${opts.agentName}`);
 
   return { member, dmChannel };
 }

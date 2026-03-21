@@ -1,4 +1,5 @@
 import { corpGit, type CorpGit } from '@claudecorp/shared';
+import { log, logError } from './logger.js';
 
 const DEBOUNCE_MS = 10_000; // Wait 10s of quiet before committing
 const JANITOR_INTERVAL_MS = 60_000; // Safety net: check every 60s
@@ -61,16 +62,28 @@ export class GitManager {
       const message = `${author}: ${summary}`;
 
       await this.git.commitAll(message);
-      console.log(`[git] ${message} (${changedFiles.length} files)`);
+      log(`[git] ${message} (${changedFiles.length} files)`);
 
       this.pendingAuthor = null;
     } catch (err) {
-      // Git errors are non-fatal — log and move on
       const msg = err instanceof Error ? err.message : String(err);
-      // "nothing to commit" is expected, don't log it
-      if (!msg.includes('nothing to commit')) {
-        console.error(`[git] Commit failed: ${msg}`);
+      if (msg.includes('nothing to commit')) return;
+
+      // Auto-repair broken HEAD reference
+      if (msg.includes('reference broken') || msg.includes('unable to resolve reference')) {
+        log('[git] Broken HEAD detected — repairing...');
+        try {
+          await this.git.raw.raw(['checkout', '--orphan', 'repair-branch']);
+          await this.git.raw.raw(['checkout', '-B', 'main']);
+          await this.git.commitAll('repair: auto-fix broken HEAD reference');
+          log('[git] HEAD repaired successfully');
+        } catch (repairErr) {
+          logError(`[git] HEAD repair failed: ${repairErr}`);
+        }
+        return;
       }
+
+      logError(`[git] Commit failed: ${msg}`);
     } finally {
       this.committing = false;
     }

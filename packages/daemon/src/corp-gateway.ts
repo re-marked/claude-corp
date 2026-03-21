@@ -8,6 +8,7 @@ import {
   writeConfig,
   generateId,
 } from '@claudecorp/shared';
+import { log, logError } from './logger.js';
 
 export interface CorpGatewayAgent {
   id: string;
@@ -131,7 +132,7 @@ export class CorpGateway {
   async start(): Promise<void> {
     if (this._status === 'ready' || this._status === 'starting') return;
     if (!this.hasAgents()) {
-      console.log('[gateway] No agents registered, skipping start');
+      log('[gateway] No agents registered, skipping start');
       return;
     }
 
@@ -163,18 +164,18 @@ export class CorpGateway {
     // Log output
     proc.stdout?.on('data', (chunk: Buffer) => {
       const line = chunk.toString().trim();
-      if (line) console.log(`[gateway] ${line}`);
+      if (line) log(`[gateway] ${line}`);
     });
     proc.stderr?.on('data', (chunk: Buffer) => {
       const line = chunk.toString().trim();
-      if (line) console.error(`[gateway] ${line}`);
+      if (line) logError(`[gateway] ${line}`);
     });
 
     // Handle exit
     proc.then((result) => {
       if (this._status !== 'stopped' && this._status !== 'restarting') {
         this._status = 'stopped';
-        console.error(`[gateway] Corp gateway exited with code ${result.exitCode}`);
+        logError(`[gateway] Corp gateway exited with code ${result.exitCode}`);
       }
       this.process = null;
     }).catch(() => {
@@ -186,7 +187,7 @@ export class CorpGateway {
     await this.healthCheck();
     this._status = 'ready';
     this.startHealthMonitor();
-    console.log(`[gateway] Corp gateway ready on port ${this._port} with ${this.listAgents().length} agents`);
+    log(`[gateway] Corp gateway ready on port ${this._port} with ${this.listAgents().length} agents`);
   }
 
   /** Stop the gateway process. */
@@ -233,11 +234,11 @@ export class CorpGateway {
       if (resp.status < 400) {
         this._status = 'ready';
         this.startHealthMonitor();
-        console.log(`[gateway] Adopted existing gateway on port ${this._port} with ${this.listAgents().length} agents`);
+        log(`[gateway] Adopted existing gateway on port ${this._port} with ${this.listAgents().length} agents`);
         return true;
       }
       // Something is running on our port but auth fails — kill it and respawn
-      console.log(`[gateway] Stale gateway on port ${this._port} (status ${resp.status}), killing...`);
+      log(`[gateway] Stale gateway on port ${this._port} (status ${resp.status}), killing...`);
       await this.killPortHolder();
     } catch {
       // Port not reachable — but check if something is still holding it (Windows port release delay)
@@ -279,7 +280,7 @@ export class CorpGateway {
           signal: AbortSignal.timeout(3000),
         });
       } catch {
-        console.error(`[gateway] Corp gateway died — auto-restarting...`);
+        logError(`[gateway] Corp gateway died — auto-restarting...`);
         this._status = 'stopped';
         this.process = null;
         clearInterval(interval);
@@ -305,13 +306,13 @@ export class CorpGateway {
         // Re-copy auth before restart in case keys changed
         this.refreshAllAuth();
         await this.start();
-        console.log(`[gateway] Auto-restart successful (attempt ${i + 1})`);
+        log(`[gateway] Auto-restart successful (attempt ${i + 1})`);
         return;
       } catch (err) {
-        console.error(`[gateway] Auto-restart attempt ${i + 1}/${maxRetries} failed:`, err);
+        logError(`[gateway] Auto-restart attempt ${i + 1}/${maxRetries} failed: ${err}`);
       }
     }
-    console.error('[gateway] Auto-restart exhausted — gateway is down. Restart the TUI to recover.');
+    logError('[gateway] Auto-restart exhausted — gateway is down. Restart the TUI to recover.');
   }
 
   private async healthCheck(): Promise<void> {

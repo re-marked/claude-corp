@@ -18,14 +18,10 @@ import {
 } from '@claudecorp/shared';
 import { COLORS, TASK_STATUS, BORDER_STYLE } from '../theme.js';
 import { CLAUDE_CORP_LOGO } from '../ascii.js';
+import { useCorp } from '../context/corp-context.js';
 import type { View } from '../navigation.js';
-import type { DaemonClient } from '../lib/daemon-client.js';
 
 interface Props {
-  corpRoot: string;
-  daemonClient: DaemonClient;
-  initialMembers: Member[];
-  initialChannels: Channel[];
   onNavigate: (view: View) => void;
 }
 
@@ -70,9 +66,10 @@ function truncate(s: string, max: number): string {
   return cleaned.slice(0, max - 1) + '\u2026';
 }
 
-export function CorpHome({ corpRoot, daemonClient, initialMembers, initialChannels, onNavigate }: Props) {
-  const [members, setMembers] = useState<Member[]>(initialMembers);
-  const [channels, setChannels] = useState<Channel[]>(initialChannels);
+export function CorpHome({ onNavigate }: Props) {
+  const { corpRoot, daemonClient, members: ctxMembers, channels: ctxChannels } = useCorp();
+  const [members, setMembers] = useState<Member[]>(ctxMembers);
+  const [channels, setChannels] = useState<Channel[]>(ctxChannels);
   const [corp, setCorp] = useState<Corporation | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);

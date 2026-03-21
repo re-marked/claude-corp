@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { type Channel, type Member, tailMessages, MESSAGES_JSONL } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
+import { useCorp } from '../context/corp-context.js';
 
 interface PaletteItem {
   id: string;
@@ -15,9 +16,6 @@ interface PaletteItem {
 }
 
 interface Props {
-  channels: Channel[];
-  members: Member[];
-  corpRoot: string;
   lastVisited: Map<string, string>;
   onNavigate: (view: View) => void;
   onSelectChannel: (channel: Channel) => void;
@@ -25,7 +23,8 @@ interface Props {
   onClose: () => void;
 }
 
-export function CommandPalette({ channels, members, corpRoot, lastVisited, onNavigate, onSelectChannel, onCommand, onClose }: Props) {
+export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onCommand, onClose }: Props) {
+  const { channels, members, corpRoot } = useCorp();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -85,6 +84,11 @@ export function CommandPalette({ channels, members, corpRoot, lastVisited, onNav
     : items;
 
   useInput((input, key) => {
+    // Ctrl+K toggles (closes) the palette
+    if (key.ctrl && input === 'k') {
+      onClose();
+      return;
+    }
     if (key.escape || key.tab || input === '\t') {
       onClose();
       return;

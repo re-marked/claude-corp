@@ -7,6 +7,7 @@ import {
   MEMBERS_JSON,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
+import { log, logError } from './logger.js';
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // Refresh every 5 minutes
 const STALE_ASSIGNED_MS = 10 * 60 * 1000;
@@ -34,7 +35,7 @@ export class HeartbeatManager {
       this.refreshAll();
     }, REFRESH_INTERVAL_MS);
 
-    console.log('[heartbeat] TASKS.md refresh started (every 5m)');
+    log('[heartbeat] TASKS.md refresh started (every 5m)');
   }
 
   stop(): void {
@@ -68,7 +69,7 @@ export class HeartbeatManager {
         }
       }
     } catch (err) {
-      console.error('[heartbeat] TASKS.md refresh failed:', err);
+      logError(`[heartbeat] TASKS.md refresh failed: ${err}`);
     }
   }
 

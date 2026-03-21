@@ -4,9 +4,9 @@ import { type Member, readConfig, buildHierarchy, type HierarchyNode, MEMBERS_JS
 import { join } from 'node:path';
 import { COLORS, STATUS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
+import { useCorp } from '../context/corp-context.js';
 
 interface Props {
-  corpRoot: string;
   onNavigate: (view: View) => void;
   onBack: () => void;
 }
@@ -33,7 +33,8 @@ function flattenTree(node: HierarchyNode, prefix = '', isLast = true, depth = 0)
   return result;
 }
 
-export function HierarchyView({ corpRoot, onNavigate, onBack }: Props) {
+export function HierarchyView({ onNavigate, onBack }: Props) {
+  const { corpRoot } = useCorp();
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));

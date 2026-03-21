@@ -13,6 +13,7 @@ import {
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 import { writeTaskEvent, notifyTaskAssignment } from './task-events.js';
+import { logError } from './logger.js';
 
 export function createApi(daemon: Daemon): Server {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -259,7 +260,7 @@ export function createApi(daemon: Daemon): Server {
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[daemon] API error: ${message}`);
+      logError(`[daemon] API error: ${message}`);
       json(res, { error: message }, 500);
     }
   });

@@ -257,11 +257,11 @@ export class ProcessManager {
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       const line = chunk.toString().trim();
-      if (line) console.log(`[${member.displayName}] ${line}`);
+      if (line) log(`[${member.displayName}] ${line}`);
     });
     proc.stderr?.on('data', (chunk: Buffer) => {
       const line = chunk.toString().trim();
-      if (line) console.error(`[${member.displayName}] ${line}`);
+      if (line) logError(`[${member.displayName}] ${line}`);
     });
 
     this.updateMemberPort(memberId, port);
@@ -273,9 +273,9 @@ export class ProcessManager {
     proc.then((result) => {
       if (agentProc.status !== 'stopped') {
         agentProc.status = 'crashed';
-        console.error(`[daemon] Agent ${member.displayName} exited with code ${result.exitCode}`);
+        logError(`[daemon] Agent ${member.displayName} exited with code ${result.exitCode}`);
         if (result.stderr) {
-          console.error(`[daemon] stderr: ${result.stderr}`);
+          logError(`[daemon] stderr: ${result.stderr}`);
         }
       }
       agentProc.process = null;

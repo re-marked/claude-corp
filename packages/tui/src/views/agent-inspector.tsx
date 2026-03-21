@@ -2,20 +2,19 @@ import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { type Member, type Channel, listTasks, MEMBERS_JSON } from '@claudecorp/shared';
+import { type Member, type Channel, listTasks } from '@claudecorp/shared';
 import { COLORS, STATUS, TASK_STATUS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
+import { useCorp } from '../context/corp-context.js';
 
 interface Props {
-  corpRoot: string;
   memberId: string;
-  members: Member[];
-  channels: Channel[];
   onNavigate: (view: View) => void;
   onBack: () => void;
 }
 
-export function AgentInspector({ corpRoot, memberId, members, channels, onNavigate, onBack }: Props) {
+export function AgentInspector({ memberId, onNavigate, onBack }: Props) {
+  const { corpRoot, members, channels } = useCorp();
   const member = members.find((m) => m.id === memberId);
 
   // Navigation handled globally by Ctrl shortcuts in app.tsx

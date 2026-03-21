@@ -9,7 +9,7 @@ import {
   MEMBERS_JSON,
   CHANNELS_JSON,
 } from '@claudecorp/shared';
-import { Daemon } from '@claudecorp/daemon';
+import { Daemon, setSilentMode } from '@claudecorp/daemon';
 import { join } from 'node:path';
 import { ViewStack, type View } from './navigation.js';
 import { OnboardingView } from './views/onboarding.js';
@@ -22,6 +22,8 @@ import { TaskDetail } from './views/task-detail.js';
 import { CorpHome } from './views/corp-home.js';
 import { StatusBar } from './components/status-bar.js';
 import { DaemonClient } from './lib/daemon-client.js';
+import { useDaemonEvents } from './hooks/use-daemon-events.js';
+import { CorpProvider } from './context/corp-context.js';
 import { COLORS } from './theme.js';
 
 export function App() {
@@ -80,6 +82,7 @@ function CorpSelector({ corps, onSelect }: { corps: { name: string; path: string
 function ResumeView({ corpPath }: { corpPath: string }) {
   const [daemon, setDaemon] = useState<Daemon | null>(null);
   const [client, setClient] = useState<DaemonClient | null>(null);
+  const [daemonPort, setDaemonPort] = useState(0);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [status, setStatus] = useState('Starting daemon...');
@@ -88,6 +91,9 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const [showSwitcher, setShowSwitcher] = useState(false);
   const lastVisitedRef = React.useRef<Map<string, string>>(new Map());
   const [, forceRender] = useState(0);
+
+  // WebSocket event bus for real-time streaming + dispatch updates
+  const events = useDaemonEvents(daemonPort);
 
   const viewStack = useMemo(() => new ViewStack(), []);
 
@@ -117,10 +123,14 @@ function ResumeView({ corpPath }: { corpPath: string }) {
 
   // Global key handler — Ctrl combos work in ALL views including chat
   useInput((input, key) => {
-    if (!ready || showSwitcher) return;
+    if (!ready) return;
+    
+    // Don't handle other keys when palette is open (let the palette handle them)
+    if (showSwitcher) return;
+    
     const current = viewStack.current();
 
-    // Ctrl+K — command palette
+    // Ctrl+K — command palette (only when palette is closed)
     if (key.ctrl && input === 'k') {
       setShowSwitcher(true);
       return;
@@ -154,10 +164,12 @@ function ResumeView({ corpPath }: { corpPath: string }) {
 
     (async () => {
       try {
+        setSilentMode(true); // Logs go to file only, not stdout (garbles TUI)
         const globalConfig = ensureGlobalConfig();
         d = new Daemon(corpPath, globalConfig);
         const port = await d.start();
         setDaemon(d);
+        setDaemonPort(port);
         setClient(new DaemonClient(port));
 
         const daemon = d!;
@@ -242,31 +254,36 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   // Command palette overlay
   if (showSwitcher) {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
-        <CommandPalette
-          channels={channels}
-          members={members}
-          corpRoot={corpPath}
-          lastVisited={lastVisitedRef.current}
-          onNavigate={(view) => {
-            navigate(view);
-            setShowSwitcher(false);
-          }}
-          onSelectChannel={(ch) => {
-            viewStack.replace({ type: 'chat', channelId: ch.id });
-            setShowSwitcher(false);
-            forceRender((n) => n + 1);
-          }}
-          onCommand={(cmd) => {
-            setShowSwitcher(false);
-            // Commands handled by ChatView when it renders
-            if (cmd === 'hire' || cmd === 'task' || cmd === 'project' || cmd === 'team') {
-              // Navigate to chat first, then the command will be handled
-            }
-          }}
-          onClose={() => setShowSwitcher(false)}
-        />
-      </Box>
+      <CorpProvider
+        corpRoot={corpPath}
+        daemonClient={client}
+        daemonPort={daemonPort}
+        initialMembers={members}
+        initialChannels={channels}
+      >
+        <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height="100%">
+          <CommandPalette
+            lastVisited={lastVisitedRef.current}
+            onNavigate={(view) => {
+              navigate(view);
+              setShowSwitcher(false);
+            }}
+            onSelectChannel={(ch) => {
+              viewStack.replace({ type: 'chat', channelId: ch.id });
+              setShowSwitcher(false);
+              forceRender((n) => n + 1);
+            }}
+            onCommand={(cmd) => {
+              setShowSwitcher(false);
+              // Commands handled by ChatView when it renders
+              if (cmd === 'hire' || cmd === 'task' || cmd === 'project' || cmd === 'team') {
+                // Navigate to chat first, then the command will be handled
+              }
+            }}
+            onClose={() => setShowSwitcher(false)}
+          />
+        </Box>
+      </CorpProvider>
     );
   }
 
@@ -292,14 +309,14 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         const messagesPath = join(corpPath, ch.path, 'messages.jsonl');
         // Mark channel as visited (for unread indicators)
         lastVisitedRef.current.set(ch.id, new Date().toISOString());
+        // Get streaming data for this channel from WebSocket events
+        const streamForChannel = events.streams.get(current.channelId) ?? null;
         return (
           <ChatView
             channel={ch}
-            members={members}
             messagesPath={messagesPath}
-            daemonClient={client}
-            corpRoot={corpPath}
-            onSwitchChannel={() => setShowSwitcher(true)}
+            streamData={streamForChannel}
+            dispatchingAgents={[...events.dispatching]}
             onNavigate={navigate}
           />
         );
@@ -307,9 +324,6 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       case 'task-board':
         return (
           <TaskBoard
-            corpRoot={corpPath}
-            members={members}
-            daemonClient={client}
             onNavigate={navigate}
             onBack={goBack}
           />
@@ -317,7 +331,6 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       case 'hierarchy':
         return (
           <HierarchyView
-            corpRoot={corpPath}
             onNavigate={navigate}
             onBack={goBack}
           />
@@ -325,19 +338,14 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       case 'task-detail':
         return (
           <TaskDetail
-            corpRoot={corpPath}
             taskId={current.taskId}
-            members={members}
             onBack={goBack}
           />
         );
       case 'agent-inspector':
         return (
           <AgentInspector
-            corpRoot={corpPath}
             memberId={current.memberId}
-            members={members}
-            channels={channels}
             onNavigate={navigate}
             onBack={goBack}
           />
@@ -345,10 +353,6 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       case 'corp-home':
         return (
           <CorpHome
-            corpRoot={corpPath}
-            daemonClient={client}
-            initialMembers={members}
-            initialChannels={channels}
             onNavigate={navigate}
           />
         );
@@ -358,14 +362,22 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   };
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      {renderView()}
-      {current.type !== 'chat' && (
-        <StatusBar
-          breadcrumbs={viewStack.breadcrumbs(new Map(channels.map((c) => [c.id, c.name])))}
-          hints={hints[current.type] ?? ''}
-        />
-      )}
-    </Box>
+    <CorpProvider
+      corpRoot={corpPath}
+      daemonClient={client}
+      daemonPort={daemonPort}
+      initialMembers={members}
+      initialChannels={channels}
+    >
+      <Box flexDirection="column" flexGrow={1}>
+        {renderView()}
+        {current.type !== 'chat' && (
+          <StatusBar
+            breadcrumbs={viewStack.breadcrumbs(new Map(channels.map((c) => [c.id, c.name])))}
+            hints={hints[current.type] ?? ''}
+          />
+        )}
+      </Box>
+    </CorpProvider>
   );
 }

@@ -2,15 +2,15 @@ import React from 'react';
 import { Box, Text, useInput } from 'ink';
 import { type Member, readTask, taskPath } from '@claudecorp/shared';
 import { COLORS, TASK_STATUS, PRIORITY, BORDER_STYLE } from '../theme.js';
+import { useCorp } from '../context/corp-context.js';
 
 interface Props {
-  corpRoot: string;
   taskId: string;
-  members: Member[];
   onBack: () => void;
 }
 
-export function TaskDetail({ corpRoot, taskId, members, onBack }: Props) {
+export function TaskDetail({ taskId, onBack }: Props) {
+  const { corpRoot, members } = useCorp();
   // Navigation handled globally by Ctrl shortcuts in app.tsx
 
   let task, body;
