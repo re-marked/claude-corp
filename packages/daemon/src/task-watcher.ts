@@ -108,29 +108,25 @@ export class TaskWatcher {
           `"${task.title}" → ${task.status}`,
         );
 
-        // When task completes or fails, notify the CEO in their DM with the Founder
+        // When task completes or fails, notify the CEO in #tasks
         if (task.status === 'completed' || task.status === 'failed') {
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
             const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
-            const founder = members.find(m => m.rank === 'owner');
-            if (ceo && founder) {
+            if (ceo) {
               const channels = readConfig<Channel[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
-              // Find the CEO-Founder DM channel (so CEO responds there, not in #tasks)
-              const dmChannel = channels.find(c =>
-                c.kind === 'direct' &&
-                c.memberIds.includes(ceo.id) &&
-                c.memberIds.includes(founder.id),
+              const taskChannel = channels.find(c =>
+                c.name.includes('tasks') || c.name.includes('job-board') || c.name.includes('operations'),
               );
-              if (dmChannel) {
+              if (taskChannel) {
                 const assignee = members.find(m => m.id === task.assignedTo);
                 const assigneeName = assignee?.displayName ?? 'an agent';
                 const notifyMsg: ChannelMessage = {
                   id: generateId(),
-                  channelId: dmChannel.id,
+                  channelId: taskChannel.id,
                   senderId: 'system',
                   threadId: null,
-                  content: `@${ceo.displayName} Task "${task.title}" has been marked as ${task.status} by ${assigneeName}. Tell the Founder what was done.`,
+                  content: `@${ceo.displayName} Task "${task.title}" has been marked as ${task.status} by ${assigneeName}. Go to your DM with the Founder and report what was done.`,
                   kind: 'text',
                   mentions: [ceo.id],
                   metadata: null,
@@ -139,7 +135,7 @@ export class TaskWatcher {
                   timestamp: new Date().toISOString(),
                 };
                 notifyMsg.originId = notifyMsg.id;
-                appendMessage(join(this.daemon.corpRoot, dmChannel.path, MESSAGES_JSONL), notifyMsg);
+                appendMessage(join(this.daemon.corpRoot, taskChannel.path, MESSAGES_JSONL), notifyMsg);
               }
             }
           } catch {
