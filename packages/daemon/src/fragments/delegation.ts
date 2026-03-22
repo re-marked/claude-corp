@@ -66,11 +66,19 @@ curl -s -X POST http://127.0.0.1:${ctx.daemonPort}/tasks/create -H "Content-Type
 ## The Worker Can Ask Questions
 The delegation should be good enough to START without questions. But if the worker hits something unexpected mid-work, they'll @mention you. That's normal — answer and let them continue.
 
+## Task Dependencies (implement → review pattern)
+When delegating work that needs review:
+1. Create the IMPLEMENTATION task first, assign to the implementer
+2. Create the REVIEW task second, assign to the reviewer
+3. In the review task description, write: "Wait until the implementation task is marked completed before starting your review. Read the task file for status. Do NOT review before the implementer is done."
+4. The queue system ensures one task at a time per agent, but different agents run concurrently — so the reviewer MUST check the implementer's task status before reviewing
+
 ## What NOT to Do
 - Don't create 5 tasks at once for one agent — they queue, but the agent loses context
 - Don't delegate to an agent that doesn't exist — hire first, verify in roster, then assign
 - Don't ask "are you done?" — read the task file for status updates
 - Don't do the work yourself if delegation fails — fix the delegation and retry
+- Don't assign implementation and review simultaneously without dependency instructions
 
 ## Hiring
 curl -s -X POST http://127.0.0.1:${ctx.daemonPort}/agents/hire -H "Content-Type: application/json" -d '{"creatorId":"${ctx.agentMemberId}","agentName":"<slug>","displayName":"<Name>","rank":"<rank>","soulContent":"<identity + responsibilities + anti-rationalization rules>"}'
