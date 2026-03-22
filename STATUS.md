@@ -12,20 +12,27 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - Layer 4: task files, /task wizard, API, TASKS.md live inbox, auto-assignment dispatch
 - Layer 5: shared corp gateway, /hire wizard, CEO-initiated hiring, multi-agent chat
 - Layer 6: task board, hierarchy tree, agent inspector, command palette, warm charcoal theme
-- **Corp Home**: default landing view — agent status grid, activity feed, task summary (Discord-like)
-- **Resilience**: gateway auto-restart, dispatch retry, graceful degradation on partial failures
-- **Dogfood**: /dogfood command auto-creates project + dev team + task for self-development
+- **Corp Home**: default landing view — agent status grid, activity feed, task summary
+- **CLI Package**: 11 commands for non-interactive management (init, start, stop, send --wait, dogfood, etc.)
+- **WebSocket Streaming**: real-time token-by-token agent responses via daemon event bus
+- **CorpContext**: centralized state via React Context — all views use useCorp()
+- **Agent Task Queue**: one dispatch at a time per agent, overflow queued and drained automatically
+- **Response Chain**: task completion → CEO notified → CEO DMs Founder with report
+- **Metadata Tagging**: external OpenClaw writes filtered via source:'router'/'user' tags
+- **Anti-Hallucination Rules**: agents must verify file writes, run builds, prove work
+- **Resilience**: gateway auto-restart, dispatch retry, stale daemon kill, git HEAD auto-repair
 - Themes: Corporate / Mafia / Military picker during onboarding
 - Projects & Teams: /project + /team commands, project-scoped channels
 - Git tracking: auto-commit after agent actions (10s debounce)
-- ASCII splash screen, /logs command, daemon file logger
+- Silent logger: daemon logs go to file only when TUI runs (no garbled output)
 - Autonomous task loop VERIFIED: /task → @mention assignee → agent reads TASKS.md → works → completed
+- Agent-written code VERIFIED: Atlas built /who, /ping, /uptime. Clawdigy built Ctrl+K fix, ASCII art script.
 
 ---
 
 ## Layer 1: Foundation — DONE
 
-- [x] Monorepo setup (pnpm workspaces, packages/shared + daemon + tui)
+- [x] Monorepo setup (pnpm workspaces, packages/shared + daemon + tui + cli)
 - [x] Type definitions (Member, Channel, Message, Task, Team, Corp, Project, AgentConfig, GlobalConfig)
 - [x] File format parsers (JSONL reader/writer, markdown+frontmatter, JSON config)
 - [x] Corp directory structure creation (scaffoldCorp — mkdir, init files, git init, first commit)
@@ -35,7 +42,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ## Layer 2: CEO — DONE
 
-- [x] Two-tier architecture: CEO = user's OpenClaw, workers = shared corp gateway
+- [x] Two-tier architecture: CEO = user's OpenClaw (exoskeleton), workers = shared corp gateway
 - [x] Auto-detect user's OpenClaw gateway from ~/.openclaw/openclaw.json
 - [x] Remote agent mode (connect to existing gateway, no process spawning)
 - [x] CEO workspace files (SOUL.md, AGENTS.md, HEARTBEAT.md, IDENTITY.md, USER.md)
@@ -52,15 +59,17 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] DM auto-routing (every message in DM wakes the other member)
 - [x] @mention routing in broadcast/team/system channels
 - [x] Router handles 'system' sender for automated notifications
-- [x] Guards: depth (max 5), dedup, cooldown (agent-to-agent only, user bypasses)
+- [x] Guards: depth (max 5), dedup (message-level + dispatch-level), cooldown
 - [x] Recent channel history (last 50 messages) included in every dispatch
-- [x] Named typing indicator ("CEO is typing..." not generic "Thinking...")
-- [x] Command palette (Tab — search channels, agents, views, commands)
+- [x] WebSocket event bus for real-time streaming (replaces HTTP polling)
+- [x] Command palette (Ctrl+K — search channels, agents, views, commands)
 - [x] Auto-watch new channel directories
 - [x] Mention regex handles trailing punctuation (@CEO! resolves correctly)
 - [x] Bare @mention substitutes previous message as content
 - [x] Unique session keys per dispatch (no OpenClaw concurrency conflicts)
 - [x] 15-minute dispatch + spinner timeouts (agents can work long)
+- [x] Agent task queue (busy agents queue dispatches, drain on completion)
+- [x] Metadata source tagging (filters external OpenClaw tool-execution writes)
 
 ## Layer 4: Tasks — DONE
 
@@ -78,6 +87,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] Task board view with status icons + filters
 - [x] Task detail view with full body + progress notes
 - [x] Tasks support projectId for project scoping
+- [x] Task completion → CEO notification chain (system + agent @mention)
 
 ## Layer 5: Autonomy — DONE
 
@@ -85,29 +95,66 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] Corp gateway hot-reload (OpenClaw detects agents.list changes dynamically)
 - [x] Corp gateway adopts existing process / kills stale 401 gateways
 - [x] Corp gateway health monitor (30s periodic check)
+- [x] Gateway auto-restart on crash (3 retries, exponential backoff, auth re-copy)
 - [x] Agent auth copied from user's ~/.openclaw auth-profiles
 - [x] Agent hiring flow (create workspace + add to corp gateway + DM channel)
 - [x] /hire TUI wizard (interactive: name → rank select → description)
 - [x] Rank validation (canHire — owner > master > leader > worker > subagent)
 - [x] CEO-initiated hiring (curl to daemon API from system message instructions)
-- [x] Agent-to-agent @mention chaining (CEO → Researcher → CEO, verified working)
+- [x] Agent-to-agent @mention chaining (CEO → Atlas → CEO, verified working)
 - [x] Multi-agent fan-out dispatch (@CEO @Researcher in one message)
 - [x] Rainbow @mentions (static in chat, animated in input bar)
 - [x] Git auto-commit after agent actions (10s debounce, 60s janitor)
 - [x] Daemon file logger + /logs command
+- [x] Anti-hallucination rules in dispatch system message
 
 ## Layer 6: Views — DONE
 
 - [x] View stack navigation (push/pop with breadcrumbs + status bar)
+- [x] Corp Home dashboard (agent grid, activity feed, task summary, ASCII logo)
 - [x] Hierarchy tree view (box-drawing ├── └──, status diamonds ◆/◇)
 - [x] Agent inspector view (SOUL excerpt, tasks, brain files)
 - [x] Task board view (filtered list, status icons, priority colors)
 - [x] Task detail view (full markdown body)
 - [x] Warm charcoal theme (orange accents, rounded borders, diamond status icons)
 - [x] System messages styled with ┊ prefix
-- [x] Slash command navigation (/h /t /a /logs)
-- [x] Command palette (Tab — unified search for everything)
-- [x] ASCII splash screen at startup
+- [x] Unified Ctrl-key navigation (C-K palette, C-H home, C-T tasks, C-D ceo, Esc back)
+- [x] Command palette with unread indicators (● dot on channels with new messages)
+- [x] Corp selector when multiple corps exist
+- [x] Member sidebar (Ctrl+M toggle, live daemon status)
+- [x] Dynamic terminal tab title (corp name + online count / channel name)
+- [x] Silent daemon logger (logs to file only, no garbled TUI output)
+- [x] Ink Static for message history (scrollable terminal buffer)
+
+## Layer 7: CLI — DONE
+
+- [x] Non-interactive CLI package (packages/cli/)
+- [x] init: create corp without TUI (--name, --user, --theme)
+- [x] start/stop: daemon lifecycle (foreground, SIGINT graceful)
+- [x] status/agents: daemon and agent status (--json for machine parsing)
+- [x] send --wait: message to channel, poll for agent response
+- [x] hire: add agents via CLI (--name, --rank, --soul)
+- [x] dogfood: project + 3 agents + task in one command
+- [x] messages: read channel history (--last N, --json)
+- [x] tasks: list/filter tasks
+- [x] logs: tail daemon log
+- [x] getCorpRoot queries running daemon (multi-corp support)
+
+## Layer 8: Streaming — DONE
+
+- [x] SSE streaming from OpenClaw (stream:true, chunk parsing, [DONE] sentinel)
+- [x] WebSocket event bus (daemon pushes stream_token, dispatch_start/end to TUI)
+- [x] useDaemonEvents hook (WebSocket client with auto-reconnect)
+- [x] Live streaming preview in chat (agent name + spinner + growing text)
+- [x] "X is working..." indicator during tool execution (empty content phase)
+- [x] GET /streaming HTTP endpoint (fallback for CLI)
+
+## Layer 9: State Management — DONE
+
+- [x] CorpContext provider with useCorp() hook
+- [x] All views migrated: CorpHome, ChatView, Hierarchy, TaskBoard, TaskDetail, AgentInspector, CommandPalette
+- [x] Centralized members, channels, corp, daemonClient, daemonPort
+- [x] refreshMembers() / refreshChannels() for on-demand updates
 
 ## Themes — DONE
 
@@ -131,7 +178,37 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] Daemon API: POST/GET for projects and teams
 - [x] Projects + teams in command palette
 
-## Layer 7: Externals
+## Robustness — DONE
+
+- [x] Stale corp cleanup: scaffoldCorp nukes broken remnants
+- [x] listCorps checks members.json not just directory
+- [x] Gateway starts on first hire, hot-reloads on subsequent
+- [x] Gateway auth copied from user's OpenClaw, not empty globalConfig
+- [x] Stale 401 gateways killed and respawned
+- [x] Gateway health monitor (30s periodic check)
+- [x] Stale daemon kill on startup (PID file + taskkill on Windows)
+- [x] isDaemonRunning trusts port file on Windows (cross-process PID check fails)
+- [x] fs.watch EPERM error handling (auto re-watch on Windows)
+- [x] Message-level dedup (processedMsgIds prevents double dispatch)
+- [x] Dispatch-level dedup (msgId:targetId prevents same message to same agent twice)
+- [x] .gateway/ gitignored (prevents nested repo commit failures)
+- [x] Git HEAD auto-repair (broken reference → orphan branch reset)
+
+## Slash Commands — DONE
+
+- [x] /hire — agent hiring wizard
+- [x] /task — task creation wizard
+- [x] /project — project creation wizard
+- [x] /team — team creation wizard
+- [x] /dogfood — project + dev team + task in one shot
+- [x] /who, /m, /members — online roster with status
+- [x] /ping — pong! system message
+- [x] /uptime — daemon uptime + total message count
+- [x] /channels, /ch — list all channels
+- [x] /logs — recent daemon logs
+- [x] /home, /h, /t, /a — navigation shortcuts
+
+## Layer 10: Externals
 
 - [ ] OpenClaw native channel bridges (Telegram, Discord, Slack, WhatsApp)
 - [ ] CEO morning briefing via external platform
@@ -140,42 +217,9 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## Robustness Fixes
-
-- [x] Stale corp cleanup: scaffoldCorp nukes broken remnants
-- [x] listCorps checks members.json not just directory
-- [x] Gateway starts on first hire, hot-reloads on subsequent
-- [x] Gateway auth copied from user's OpenClaw, not empty globalConfig
-- [x] Stale 401 gateways killed and respawned
-- [x] Gateway health monitor (30s periodic check)
-
----
-
-## Corp Home — DONE
-
-- [x] Corp Home as default landing view (Discord-like dashboard)
-- [x] Agent status grid (2-column, live process status from daemon, last-active timestamps)
-- [x] Activity feed (recent messages across all channels, chronological, scrollable with cursor)
-- [x] Task summary bar (counts by status: active, pending, done, failed, blocked)
-- [x] Auto-refresh every 5 seconds (live data from files + daemon API)
-- [x] Navigation: Enter opens channel, d opens CEO DM, c opens palette
-- [x] Corp Home added to command palette and /home nav command
-- [x] /dogfood command (auto-creates project + dev team + task for dogfooding)
-
-## Resilience — DONE
-
-- [x] Gateway auto-restart on crash (3 retries with exponential backoff)
-- [x] Auth re-copy on gateway restart (refreshAllAuth before respawn)
-- [x] Dispatch retry on transient failures (401, 502+, connection errors — 1 retry with 3s delay)
-- [x] Resilient startup: each init step (gateway, agents, router, file reads) isolated in try/catch
-- [x] Gateway-less agent registration (agents registered with stopped status if gateway not ready)
-- [x] Graceful degradation: partial corp loads even if members.json or channels.json corrupted
-
 ## Future / Deferred
 
 - [ ] Custom themes (name your own ranks)
-- [ ] WebSocket streaming for real-time tool call visibility
-- [x] Member sidebar in channel view (Ctrl+M toggle, live daemon status)
 - [ ] Multiline paste support in message input bar
 - [ ] Thread support (threadId in messages)
 - [ ] Agent suspension/resume/archival
@@ -183,7 +227,12 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [ ] Starter pack: CEO bootstraps agents from conversation
 - [ ] Agent forking (copy SOUL.md + BRAIN, let it evolve)
 - [ ] Agent ELO / reputation system
+- [ ] /kudos command (public shoutouts with tracking)
+- [ ] /assign @agent <task> — inline task creation
+- [ ] /standup — trigger all agents to report status
+- [ ] Morning CEO briefings
 - [ ] Web frontend (connects to same daemon)
+- [ ] Agent quality improvements (rework system prompts using Claude Code patterns)
 
 ---
 
@@ -198,4 +247,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 7. ~~**Views** — task board, hierarchy, agent inspector, command palette~~
 8. ~~**Themes** — Corporate / Mafia / Military~~
 9. ~~**Projects & Teams** — organized structure, scoped channels~~
-10. **Next**: dogfood it — use Claude Corp to build Claude Corp features
+10. ~~**CLI** — non-interactive management, testable without TUI~~
+11. ~~**Streaming** — WebSocket event bus, real-time token preview~~
+12. ~~**State** — CorpContext, useCorp(), centralized state~~
+13. **Next**: agent quality — rework system prompts, improve reliability
