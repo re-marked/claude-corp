@@ -164,6 +164,36 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /help shows available commands
+    if (text.trim().toLowerCase() === '/help') {
+      const helpText = [
+        '━━━ Available Commands ━━━',
+        '',
+        '📍 Navigation:',
+        '  /h, /hierarchy     View corp hierarchy',
+        '  /t, /tasks         View task board',
+        '  /a, /agents        View agents (alias for hierarchy)',
+        '  /home              Go to corp home',
+        '  /channels, /ch     List all channels',
+        '',
+        '📊 Info:',
+        '  /who, /m, /members Show member roster with online/offline status',
+        '  /ping              Test command (responds with pong!)',
+        '  /uptime            Show daemon uptime and message count',
+        '  /logs              Show recent daemon logs',
+        '',
+        '⚙️ Management:',
+        '  /hire              Open agent hiring wizard',
+        '  /task              Open task creation wizard',
+        '  /project           Open project creation wizard',
+        '  /team              Open team creation wizard',
+        '  /dogfood           Set up development project',
+        '  /help              Show this help message',
+      ];
+      writeSystemMessage(helpText.join('\n'));
+      return;
+    }
+
     // /who, /m, /members — show member roster with status
     const cmd = text.trim().toLowerCase();
     if (cmd === '/who' || cmd === '/m' || cmd === '/members') {
