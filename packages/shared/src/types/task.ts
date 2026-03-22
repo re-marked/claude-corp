@@ -19,6 +19,7 @@ export interface Task {
   projectId: string | null;
   parentTaskId: string | null;
   teamId: string | null;
+  acceptanceCriteria: string[] | null;
   dueAt: string | null;
   createdAt: string;
   updatedAt: string;
