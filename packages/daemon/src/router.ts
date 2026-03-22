@@ -413,6 +413,13 @@ export class MessageRouter {
       status: m.status,
     }));
 
+    // Resolve supervisor name (who spawned this agent)
+    let supervisorName: string | null = null;
+    if (targetAgent.spawnedBy) {
+      const supervisor = members.find((m) => m.id === targetAgent.spawnedBy);
+      supervisorName = supervisor?.displayName ?? null;
+    }
+
     return {
       agentDir: agentDirDisplay,
       corpRoot: corpRootDisplay,
@@ -423,6 +430,9 @@ export class MessageRouter {
       daemonPort: this.daemon.getPort(),
       agentMemberId: targetAgent.id,
       agentRank: targetAgent.rank,
+      agentDisplayName: targetAgent.displayName,
+      channelKind: channel.kind,
+      supervisorName,
     };
   }
 }

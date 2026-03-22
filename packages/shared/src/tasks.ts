@@ -12,6 +12,7 @@ export interface CreateTaskOpts {
   createdBy: string;
   projectId?: string | null;
   parentTaskId?: string | null;
+  acceptanceCriteria?: string[];
   dueAt?: string | null;
 }
 
@@ -47,14 +48,17 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
     projectId: opts.projectId ?? null,
     parentTaskId: opts.parentTaskId ?? null,
     teamId: null,
+    acceptanceCriteria: opts.acceptanceCriteria ?? null,
     dueAt: opts.dueAt ?? null,
     createdAt: now,
     updatedAt: now,
   };
 
-  const body = opts.description
-    ? `${opts.description}\n\n## Progress Notes\n`
-    : `## Progress Notes\n`;
+  let body = opts.description ? `${opts.description}\n\n` : '';
+  if (opts.acceptanceCriteria && opts.acceptanceCriteria.length > 0) {
+    body += `## Acceptance Criteria\n${opts.acceptanceCriteria.map((c) => `- [ ] ${c}`).join('\n')}\n\n`;
+  }
+  body += `## Progress Notes\n`;
 
   const content = stringifyFrontmatter(task as unknown as Record<string, unknown>, body);
   writeFileSync(join(tasksDir, `${id}.md`), content, 'utf-8');

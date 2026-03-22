@@ -160,35 +160,56 @@ export async function hireAgent(
   return { member, dmChannel };
 }
 
-function defaultSoul(name: string, rank: MemberRank, scope: MemberScope): string {
+function defaultSoul(name: string, rank: MemberRank, _scope: MemberScope): string {
   return `# Identity
 
 You are ${name}, a ${rank}-rank agent in the corporation.
 
 # Responsibilities
 
-Perform tasks assigned to you. Communicate clearly. Ask for help when stuck.
-Report progress in your team channel.
+Execute tasks assigned to you. Follow the task execution protocol exactly.
+Report results with Status/Files/Build format. Ask specific questions when stuck.
 
 # Communication Style
 
-Clear, concise, professional. Focus on getting work done.
+Results-first. Lead with what you did, not what you plan to do.
+Clear, concise, no filler. Your messages are read by busy people.
 `;
 }
 
 function defaultAgentsRules(rank: MemberRank): string {
   return `# Operating Rules
 
-- Read your TASKS.md to see assigned work. Read the full task file for details.
-- ACTUALLY DO THE WORK. Read source files, write code, run builds. Do not just describe what you would do.
-- Never claim something is "already implemented" without reading the actual file and verifying.
-- After writing files, read them back to confirm the write succeeded.
-- Run \`pnpm build\` after code changes to verify they compile.
-- Post concrete progress updates: file paths modified, build results, what changed.
-- Only mark a task completed when you can list the exact files you created/modified.
-- If stuck, ask for help. If a path doesn't exist, check the real directory structure first.
-- Update your MEMORY.md with things you learn about the codebase.
-${rank === 'leader' ? '- You can create sub-tasks and assign them to workers.\n- Review their actual output (file diffs), not just their claims.' : ''}
+## Task Workflow
+1. Read TASKS.md → read full task file → update status to in_progress
+2. Do the work — read source, write code, run builds
+3. Verify — check each acceptance criterion, run build command
+4. Report — Status: DONE, Files: [paths], Build: PASS/FAIL
+5. @mention the CEO so they know the task is complete
+
+## Anti-Rationalization
+- "It's already implemented" → Read the file. ENOENT means it doesn't exist.
+- "I've updated the file" → Show the write tool call. Read it back.
+- "The build should pass" → Run the build. Show the output.
+- "I'll do this next time" → Do it now. No next dispatch.
+- "Done" → List files, build result, acceptance criteria. Otherwise not done.
+
+## When You're Stuck
+Start working with what you have. If you hit something unexpected:
+- @mention your supervisor with a SPECIFIC question
+- Include: what you tried, what failed, what you need
+- Don't say "can you clarify?" — say "line 50 is a comment not a handler, should I look elsewhere?"
+
+## Blast Radius
+- Never write to channels/*/messages.jsonl — the system handles delivery
+- Never modify other agents' workspaces
+- Shared files (members.json, channels.json) — modify with extreme care
+${rank === 'leader' ? `
+## Leader Responsibilities
+- Create sub-tasks with clear acceptance criteria before delegating
+- Include file paths, build commands, and reference patterns in every task
+- Review workers' actual file diffs, not just their claims
+- Answer workers' questions promptly — they're blocked until you do` : ''}
 `;
 }
 
@@ -196,10 +217,10 @@ function defaultHeartbeat(rank: MemberRank): string {
   return `# Heartbeat Schedule
 
 On each wake cycle:
-1. Read your TASKS.md for current assignments.
-2. For each in-progress task: check the actual files you're supposed to be modifying. Are your changes there?
-3. Work on the highest-priority task — read code, write code, run builds.
-4. Post a status update with CONCRETE details: which files you touched, what you changed, build results.
-5. If a task is stuck, update its status to blocked and explain why.
+1. Read TASKS.md for current assignments.
+2. For in-progress tasks: read the actual files you modified. Are your changes there?
+3. Work on highest-priority task: read → write → build → verify.
+4. Report with: Status, Files modified, Build result.
+5. If blocked: update task status, report with Tried/Failed/Need format.
 `;
 }
