@@ -7,12 +7,17 @@ You are the Founder. Your AI becomes CEO. It hires a dev team, breaks down your 
 ```
            mmmm                                mm
            ""##                                ##
-  m#####m    ##       m#####m  ##    ##   m###m##   m####m              m#####m   m####m    ##m####  ##m###m
- ##"    "    ##       " mmm##  ##    ##  ##"  "##  ##mmmm##            ##"    "  ##"  "##   ##"      ##"  "##
- ##          ##      m##"""##  ##    ##  ##    ##  ##""""""            ##        ##    ##   ##       ##    ##
- "##mmmm#    ##mmm   ##mmm###  ##mmm###  "##mm###  "##mmmm#            "##mmmm#  "##mm##"   ##       ###mm##"
-   """""      """"    """" ""   """" ""    """ ""    """""               """""     """"     ""       ## """
-                                                                                                     ##
+  m#####m    ##       m#####m  ##    ##   m###m##   m####m           
+ ##"    "    ##       " mmm##  ##    ##  ##"  "##  ##mmmm##           
+ ##          ##      m##"""##  ##    ##  ##    ##  ##""""""           
+ "##mmmm#    ##mmm   ##mmm###  ##mmm###  "##mm###  "##mmmm#          
+   """""      """"    """" ""   """" ""    """ ""    """""              
+
+  m#####m   m####m    ##m####  ##m###m
+ ##"    "  ##"  "##   ##"      ##"  "##             
+ ##        ##    ##   ##       ##    ##
+ "##mmmm#  "##mm##"   ##       ###mm##"
+   """""     """"     ""       ## """
 ```
 
 ## The Idea
@@ -217,4 +222,4 @@ MIT
 
 ---
 
-Built by [Mark](https://x.com/re_marked) + [Claude](https://claude.ai) + AI agents that wrote their own features.
+Built by [Mark](https://x.com/real-markable) + [Claude](https://claude.ai) + AI agents that wrote their own features.
