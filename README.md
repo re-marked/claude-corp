@@ -31,19 +31,19 @@
 
 What if your AI assistant wasn't just one agent — but an **entire company**?
 
-Claude Corp turns [OpenClaw](https://github.com/openclaw/openclaw) into a corporate operating system. Your personal AI takes on the role of CEO. It hires specialists, creates tasks with acceptance criteria, delegates work, and manages the whole operation through channels — like a **Discord server where every member is an AI agent** working for you.
+Claude Corp turns [OpenClaw](https://github.com/openclaw/openclaw) into a corporate operating system. Your personal AI takes on the role of CEO. It hires specialists — researchers, writers, developers, analysts, whatever you need — creates tasks with acceptance criteria, delegates work, and manages the whole operation through channels — like a **Discord server where every member is an AI agent** working for you.
 
-> **The agents write real code.** Not descriptions of code. Real TypeScript files, verified builds, git-committed changes. And when one agent lies about completing a task, another agent catches it.
+> **The agents do real work.** Research, writing, coding, analysis, planning — any task you'd delegate to a team. And when one agent claims a task is done, another agent independently verifies it.
 
 ## ✨ What Makes It Different
 
-🤖 **Agents are autonomous, not scripted.** You don't program workflows. You tell the CEO what you want, and it figures out who to hire, what tasks to create, and how to get it done.
+🤖 **Agents are autonomous, not scripted.** You don't program workflows. You tell the CEO "I need a research team" or "build me a landing page" and it figures out who to hire, what tasks to create, and how to get it done.
 
-🔄 **The system is self-correcting.** A Reviewer agent independently checks the implementer's work. In testing, it caught a Coder that marked a task complete without writing any code. The CEO then adapted — on the next task, it waited for verification before reporting. Nobody programmed this behavior.
+🔄 **The system is self-correcting.** A Reviewer agent independently checks the work. In testing, it caught an agent that marked a task complete without actually doing it. The CEO then adapted — on the next task, it waited for verification before reporting. Nobody programmed this behavior.
 
 📁 **Everything is files.** Messages are JSONL. Tasks are markdown. Agent identity is a `SOUL.md` file. `cat` any conversation, `grep` across the entire corp, `git log` every decision. `git revert` undoes bad agent decisions.
 
-🧠 **Your AI keeps its brain.** The CEO isn't a fresh agent — it's your existing OpenClaw assistant with a new job. Same memory, same personality. Claude Corp is an **exoskeleton**, not a replacement.
+🧠 **Your AI keeps its brain.** The CEO isn't a fresh agent — it's your existing OpenClaw assistant with a new job. Same memory, same personality, same integrations. Claude Corp is an **exoskeleton**, not a replacement.
 
 ## 🚀 Quick Start
 
@@ -77,15 +77,17 @@ Pick your name, name your corp, choose a theme. The CEO introduces itself. 🐾
 
 ### 🔗 A real task chain we tested:
 
-1. 👤 We told the CEO: *"Add a /version command"*
-2. 📋 CEO delegated to **Architect**
-3. ✂️ Architect created two sub-tasks — **Coder** (implement) + **Reviewer** (verify after Coder finishes)
-4. ⌨️ Coder read the codebase, wrote **32 lines of TypeScript**, ran `pnpm build` — **PASS**
-5. 🔍 Reviewer waited for Coder to finish, opened the same file, verified code exists, ran build
+1. 👤 We told the CEO: *"Add a /version command to the app"*
+2. 📋 CEO delegated to **Architect** (team lead)
+3. ✂️ Architect broke it into sub-tasks — **Coder** (implement) + **Reviewer** (verify after Coder finishes)
+4. ⌨️ Coder read the codebase, wrote the feature, ran the build — **PASS**
+5. 🔍 Reviewer waited for Coder, then independently verified the work exists
 6. ✅ Reviewer issued: **VERDICT: PASS**
 7. 📨 CEO reported to the Founder with a structured summary
 
-**All autonomous. Zero human intervention. Real code. Verified.**
+**All autonomous. Zero human intervention. Real work. Verified.**
+
+> This was a code task, but the same chain works for any kind of work — research, writing, analysis, planning. The agents adapt to whatever you throw at them.
 
 ## 🎭 Themes
 
