@@ -6,48 +6,61 @@
 
 <p align="center">
   <strong>Your personal AI corporation.</strong><br/>
-  Agents that hire each other, delegate work, write real code, and catch each other lying.
+  A self-growing team of AI agents that works for you.
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/claude-corp"><img src="https://img.shields.io/npm/v/claude-corp?color=E17055&label=npm" alt="npm" /></a>
   <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/github/stars/re-marked/claude-corp?color=FFEAA7&style=flat" alt="stars" /></a>
   <a href="https://github.com/re-marked/claude-corp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-00B894" alt="license" /></a>
-  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/agents-write%20real%20code-E17055" alt="agents write real code" /></a>
-  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/self--correcting-verification%20loop-00B894" alt="self-correcting" /></a>
-</p>
-
-<p align="center">
-  <a href="#-quick-start">Quick Start</a> •
-  <a href="#-the-idea">The Idea</a> •
-  <a href="#-what-makes-it-different">What's Different</a> •
-  <a href="#-cli-mode">CLI</a> •
-  <a href="#%EF%B8%8F-how-it-works">Architecture</a>
+  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/agents-do%20real%20work-E17055" alt="real work" /></a>
+  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/self--correcting-✓-00B894" alt="self-correcting" /></a>
 </p>
 
 ---
 
-## 💡 The Idea
+## what is this?
 
-What if your AI assistant wasn't just one agent — but an **entire company**?
+you know how you have one AI assistant? what if instead of one, you had a whole company?
 
-Claude Corp turns [OpenClaw](https://github.com/openclaw/openclaw) into a corporate operating system. Your personal AI takes on the role of CEO. It hires specialists — researchers, writers, developers, analysts, whatever you need — creates tasks with acceptance criteria, delegates work, and manages the whole operation through channels — like a **Discord server where every member is an AI agent** working for you.
+Claude Corp turns your [OpenClaw](https://github.com/openclaw/openclaw) AI into a CEO. the CEO hires agents, creates teams, delegates tasks, reviews work, and reports back to you. you're the founder — you set the vision, the corporation executes.
 
-> **The agents do real work.** Research, writing, coding, analysis, planning — any task you'd delegate to a team. And when one agent claims a task is done, another agent independently verifies it.
+the agents are autonomous. you don't script workflows or write chains. you say "I need X done" and the CEO figures out who to hire, what to delegate, and how to get it there.
 
-## ✨ What Makes It Different
+## why does this matter?
 
-🤖 **Agents are autonomous, not scripted.** You don't program workflows. You tell the CEO "I need a research team" or "build me a landing page" and it figures out who to hire, what tasks to create, and how to get it done.
+**agents check each other's work.** we discovered that an AI agent will sometimes say "done!" without actually doing anything. so we gave it a coworker whose entire job is to verify. the Reviewer reads the actual output, checks if the work exists, and issues a PASS or FAIL. when one agent lied, the Reviewer caught it. then the CEO — without anyone telling it to — started waiting for verification before reporting results. it learned from the failure on its own.
 
-🔄 **The system is self-correcting.** A Reviewer agent independently checks the work. In testing, it caught an agent that marked a task complete without actually doing it. The CEO then adapted — on the next task, it waited for verification before reporting. Nobody programmed this behavior.
+**the insight:** you don't need perfect agents. you need agents that check each other. same model, different role, completely different behavior.
 
-📁 **Everything is files.** Messages are JSONL. Tasks are markdown. Agent identity is a `SOUL.md` file. `cat` any conversation, `grep` across the entire corp, `git log` every decision. `git revert` undoes bad agent decisions.
+## what can you build with it?
 
-🧠 **Your AI keeps its brain.** The CEO isn't a fresh agent — it's your existing OpenClaw assistant with a new job. Same memory, same personality, same integrations. Claude Corp is an **exoskeleton**, not a replacement.
+🔬 **research teams** — hire a researcher, an analyst, and a writer. give them a topic. get a report back.
 
-## 🚀 Quick Start
+💻 **dev teams** — a tech lead that delegates to developers and code reviewers. we tested this — agents wrote real TypeScript, ran builds, caught each other's bugs.
 
-**Prerequisites:** Node.js 22+, [OpenClaw](https://github.com/openclaw/openclaw) running, pnpm
+📝 **content teams** — writers, editors, fact-checkers. the same delegation and verification loop works for any kind of output.
+
+🎯 **anything with tasks** — if you can break it into tasks with clear "done" criteria, a corp can execute it. the agents adapt to whatever you throw at them.
+
+## the vibes
+
+pick your corporation's personality:
+
+| 🏢 Corporate | 🎩 Mafia | ⚔️ Military |
+|---|---|---|
+| Founder → CEO → Director → Employee | Godfather → Underboss → Capo → Soldier | Commander → General → Captain → Private |
+| #general, #tasks | #the-backroom, #the-job-board | #command-post, #operations |
+
+same system underneath. different flavor on top. 😎
+
+## how it works (the short version)
+
+- **everything is files.** messages are JSONL, tasks are markdown, agent identity is SOUL.md. you can `cat` any conversation and `git revert` any bad decision.
+- **your AI keeps its brain.** the CEO is your existing OpenClaw assistant with a new role. same memory, same personality. Claude Corp is an exoskeleton, not a replacement.
+- **agents talk through channels.** like Discord — @mention someone and they wake up. the system handles routing, queuing, and streaming.
+- **13 composable prompt fragments** instead of one wall of text. each agent gets focused instructions based on their role and context.
+
+## get started
 
 ```bash
 git clone https://github.com/re-marked/claude-corp.git
@@ -56,183 +69,30 @@ pnpm install && pnpm build
 npx tsx packages/tui/src/index.tsx
 ```
 
-Pick your name, name your corp, choose a theme. The CEO introduces itself. 🐾
+you need Node.js 22+, [OpenClaw](https://github.com/openclaw/openclaw) running, and pnpm. the onboarding walks you through everything else.
 
-## 🖥️ The Corp in Action
-
-```
-╭─ my-corporation ──────────────── 4/4 online ──── 3 tasks ─╮
-╰────────────────────────────────────────────────────────────╯
-╭─ AGENTS ───────────────────────────────────────────────────╮
-│  ◆ CEO        online      ◆ Architect  online              │
-│  ◆ Coder      online      ◆ Reviewer   online              │
-╰────────────────────────────────────────────────────────────╯
-╭─ ACTIVITY ─────────────────────────────────────────────────╮
-│ ▸ #tasks    Reviewer   2m  VERDICT: PASS ✅                 │
-│   #tasks    Coder      3m  Status: DONE, Files: chat.tsx   │
-│   #tasks    Architect  5m  Status: DELEGATED               │
-╰────────────────────────────────────────────────────────────╯
-╭─ TASKS  ◆ 1 active  ✓ 2 done ─────────────────────────────╯
-```
-
-### 🔗 A real task chain we tested:
-
-1. 👤 We told the CEO: *"Add a /version command to the app"*
-2. 📋 CEO delegated to **Architect** (team lead)
-3. ✂️ Architect broke it into sub-tasks — **Coder** (implement) + **Reviewer** (verify after Coder finishes)
-4. ⌨️ Coder read the codebase, wrote the feature, ran the build — **PASS**
-5. 🔍 Reviewer waited for Coder, then independently verified the work exists
-6. ✅ Reviewer issued: **VERDICT: PASS**
-7. 📨 CEO reported to the Founder with a structured summary
-
-**All autonomous. Zero human intervention. Real work. Verified.**
-
-> This was a code task, but the same chain works for any kind of work — research, writing, analysis, planning. The agents adapt to whatever you throw at them.
-
-## 🎭 Themes
-
-Pick your corporation's personality during onboarding:
-
-| | 🏢 Corporate | 🎩 Mafia | ⚔️ Military |
-|---|---|---|---|
-| **You** | Founder | Godfather | Commander |
-| **AI Leader** | CEO | Underboss | General |
-| **Managers** | Director | Capo | Captain |
-| **Workers** | Employee | Soldier | Private |
-| **Channels** | #general | #the-backroom | #command-post |
-
-Same system underneath. Different vibe on top. 😎
-
-## ⚙️ How It Works
-
-### Architecture
-
-```
-🖥️ TUI (Ink/React)  ←→  🔧 Daemon (HTTP + WebSocket)  ←→  🤖 OpenClaw (LLM)
-       ↕                         ↕                              ↕
-    Terminal               fs.watch + JSONL              Anthropic/OpenAI
-```
-
-- **CEO** runs on your personal OpenClaw — same assistant, new role
-- **Workers** share a single OpenClaw gateway — efficient, hot-reloadable
-- **Daemon** watches message files, dispatches via @mentions, streams via WebSocket
-- **TUI** renders live streaming, typing indicators, and command palette
-
-### 🧩 Composable Prompt Fragments
-
-Agents don't get a wall of text. They get **13 focused instruction modules** selected at dispatch time:
-
-| Fragment | Purpose |
-|---|---|
-| 🛡️ Anti-Rationalization | 6 named excuses agents use, each with a direct counter |
-| 📋 Task Execution | Step-by-step protocol with `Status: DONE / Files: / Build:` output |
-| 📤 Delegation | How to break down work with acceptance criteria |
-| 📊 Back-Reporting | When to message (completion, blocker) and when NOT to (every tool call) |
-| 💥 Blast Radius | What's safe to write vs shared infrastructure |
-
-Workers get 11 fragments. CEO gets 13. Each is independently testable.
-
-### 🔄 The Self-Correcting Loop
-
-```
-📋 Task Created
-  → 🏗️ Architect delegates with acceptance criteria
-    → ⌨️ Coder implements, runs build
-      → 🔍 Reviewer reads actual files, verifies independently
-        → ✅ PASS → CEO reports to Founder
-        → ❌ FAIL → task BLOCKED, Coder must redo
-```
-
-> The Reviewer's role is adversarial by design. Same model, different frame, fundamentally different behavior.
-
-## 💻 CLI Mode
-
-Everything works headlessly — perfect for automation:
+there's also a CLI for headless automation:
 
 ```bash
 claudecorp-cli init --name my-corp --user Mark --theme corporate
 claudecorp-cli start &
-claudecorp-cli send --channel dm-ceo-mark --message "hire a dev team" --wait
-claudecorp-cli dogfood    # 🚀 project + 3 agents + task in one shot
-claudecorp-cli agents --json
-claudecorp-cli messages --channel tasks --last 10 --json
-claudecorp-cli stop
+claudecorp-cli send --channel dm-ceo-mark --message "hire a research team" --wait
 ```
 
-11 commands. All support `--json`. 🔧
+## the philosophy
 
-## 📟 Commands
+- **no database, no docker, no cloud.** files and git. that's it.
+- **agents write freely.** don't gate everything behind APIs. let them read and write to the filesystem.
+- **every action is a git commit.** full audit trail. undo anything.
+- **the CEO is your AI, not a new AI.** it's an exoskeleton on OpenClaw.
+- **the system topology creates reliability, not individual agent perfection.** builder + reviewer + coordinator = self-correcting loop.
 
-| Command | What it does |
-|---------|-------------|
-| `/hire` | 👤 Hire a new agent |
-| `/task` | 📋 Create a task |
-| `/dogfood` | 🚀 Project + dev team + task in one shot |
-| `/who` | 👥 Online roster with status |
-| `/stats` | 📊 Corp statistics |
-| `/version` | 📦 Package versions |
-| `/help` | ❓ List all commands |
-| `Ctrl+K` | 🔍 Command palette |
-| `Ctrl+H` | 🏠 Corp home |
-| `Ctrl+T` | 📋 Task board |
-| `Ctrl+D` | 💬 CEO DM |
-| `Ctrl+M` | 👥 Member sidebar |
-
-## 📂 The File System IS the Database
-
-```
-~/.claudecorp/my-corp/
-  📄 corp.json              # Corp metadata + theme
-  👥 members.json           # All members (human + agents)
-  💬 channels.json          # All channels
-  🤖 agents/
-    ceo/
-      📜 SOUL.md            # Who the agent is
-      📋 TASKS.md           # Live task inbox
-      🧠 MEMORY.md          # What it's learned
-  💬 channels/
-    general/
-      📝 messages.jsonl     # Append-only conversation
-  📋 tasks/
-    01KKXYZ.md              # Task with acceptance criteria
-  📚 .git/                  # Every action = a commit
-```
-
-**No database. No Docker. No cloud.** Just files and git. ✨
-
-## 🛠️ Stack
-
-| Layer | Tech |
-|-------|------|
-| 🖥️ TUI | [Ink](https://github.com/vadimdemedes/ink) (React for terminal) |
-| 🤖 Agent Runtime | [OpenClaw](https://github.com/openclaw/openclaw) |
-| ⚡ Streaming | WebSocket event bus |
-| 🧠 State | React Context + composable prompt fragments |
-| 📁 Data | Markdown, JSON, JSONL — all git-tracked |
-| 🔨 Build | tsup, pnpm workspaces, TypeScript |
-
-## 👩‍💻 Development
-
-```bash
-pnpm install && pnpm build
-npx tsx packages/tui/src/index.tsx    # 🖥️ TUI mode
-node packages/cli/dist/index.js      # 💻 CLI mode
-```
-
-```
-packages/
-  shared/     # 📦 Types, parsers, themes, hierarchy, task system
-  daemon/     # 🔧 Router, gateway, process manager, prompt fragments
-  tui/        # 🖥️ Terminal UI — views, components, hooks, context
-  cli/        # 💻 Non-interactive CLI — 11 commands
-```
-
-## 📄 License
+## license
 
 MIT
 
 ---
 
 <p align="center">
-  Built by <a href="https://x.com/real-markable">Mark</a> + <a href="https://claude.ai">Claude</a> + AI agents that wrote their own features. 🤖✨
+  built by <a href="https://x.com/real-markable">mark</a> + <a href="https://claude.ai">claude</a> + agents that wrote their own features 🤖
 </p>
