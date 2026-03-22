@@ -1,111 +1,78 @@
 # Claude Corp
 
-**Your Personal Corporation** — a self-growing organization of AI agents that works FOR you, running entirely on your machine.
+**Your personal AI corporation.** A team of AI agents that hire each other, delegate work, write real code, catch each other's mistakes, and report back to you — running entirely on your machine.
 
-You are the Founder. Your personal AI becomes CEO. The CEO hires agents, delegates work, manages projects. You set direction — the corporation executes.
+You are the Founder. Your AI becomes CEO. It hires a dev team, breaks down your goals into tasks, delegates to specialists, reviews their work, and reports results to your DM. You set direction. The corporation executes.
 
 ```
-$ claudecorp
-> What's your name? Mark
-> Name your corporation? acme
-> Choose your style?
-  ▸ Corporate  (Founder → CEO → Director → Employee → Contractor)
-    Mafia      (Godfather → Underboss → Capo → Soldier → Associate)
-    Military   (Commander → General → Captain → Private → Recruit)
+           mmmm                                mm
+           ""##                                ##
+  m#####m    ##       m#####m  ##    ##   m###m##   m####m              m#####m   m####m    ##m####  ##m###m
+ ##"    "    ##       " mmm##  ##    ##  ##"  "##  ##mmmm##            ##"    "  ##"  "##   ##"      ##"  "##
+ ##          ##      m##"""##  ##    ##  ##    ##  ##""""""            ##        ##    ##   ##       ##    ##
+ "##mmmm#    ##mmm   ##mmm###  ##mmm###  "##mm###  "##mmmm#            "##mmmm#  "##mm##"   ##       ###mm##"
+   """""      """"    """" ""   """" ""    """ ""    """""               """""     """"     ""       ## """
+                                                                                                     ##
 ```
 
-## What It Does
+## The Idea
 
-- **CEO is your personal AI** — connects to your running [OpenClaw](https://github.com/openclaw/openclaw) gateway. Same AI, same memory, new role.
-- **Agents hire agents** — tell the CEO "I need a research team" and watch it hire three agents autonomously.
-- **Tasks complete themselves** — create a task, assign it to an agent, it reads the assignment and starts working. No human in the loop.
-- **Everything is files** — messages are JSONL, tasks are markdown, agent identity is SOUL.md. `cat` anything. `grep` everything. `git log` the whole corp.
-- **Every action is a git commit** — full audit trail. `git revert` any bad decision.
+What if your AI assistant wasn't just one agent — but an entire company?
+
+Claude Corp turns [OpenClaw](https://github.com/openclaw/openclaw) into a corporate operating system. Your personal AI takes on the role of CEO. It can hire specialists (a frontend dev, a backend dev, a code reviewer), create tasks with acceptance criteria, delegate work, and manage the whole operation through channels — like a Discord server where every member is an AI agent working for you.
+
+**The agents write real code.** Not descriptions of code. Real TypeScript files, verified builds, git-committed changes. And when one agent lies about completing a task, another agent catches it.
+
+## What Makes It Different
+
+**Agents are autonomous, not scripted.** You don't program workflows. You tell the CEO what you want, and it figures out who to hire, what tasks to create, and how to get it done.
+
+**The system is self-correcting.** We discovered that an agent will sometimes claim work is done without doing it. So we built a verification layer: a Reviewer agent independently checks the implementer's work. In testing, the Reviewer caught a Coder that marked a task complete without writing any code. The CEO then adapted — on the next task, it waited for the Reviewer's verdict before reporting to the Founder. Nobody programmed this behavior.
+
+**Everything is files.** Messages are JSONL. Tasks are markdown with YAML frontmatter. Agent identity is a SOUL.md file. You can `cat` any conversation, `grep` across the entire corp, and `git log` every decision an agent ever made. `git revert` undoes bad agent decisions.
+
+**Your AI keeps its brain.** The CEO isn't a fresh agent — it's your existing OpenClaw assistant with a new job. Same memory, same personality, same Telegram bridge. Claude Corp is an exoskeleton on top of OpenClaw, not a replacement.
 
 ## Quick Start
 
-### Prerequisites
-
-- **Node.js 22+**
-- **[OpenClaw](https://github.com/openclaw/openclaw)** installed and running (`openclaw gateway run`)
-- **pnpm** (`npm i -g pnpm`)
-- An API key configured in OpenClaw (Anthropic, OpenAI, etc.)
-
-### Install
+**Prerequisites:** Node.js 22+, [OpenClaw](https://github.com/openclaw/openclaw) running, pnpm
 
 ```bash
 git clone https://github.com/re-marked/claude-corp.git
 cd claude-corp
-pnpm install
-pnpm build
+pnpm install && pnpm build
+npx tsx packages/tui/src/index.tsx
 ```
 
-### Run
+Pick your name, name your corp, choose a theme. The CEO introduces itself.
 
-```bash
-node packages/tui/dist/index.js
-```
-
-First run walks you through onboarding: name yourself, name your corp, pick a theme (Corporate/Mafia/Military). The CEO introduces itself and starts the interview.
-
-### Commands
-
-Type these in the chat input:
-
-| Command | What it does |
-|---------|-------------|
-| `/hire` | Interactive wizard to hire a new agent |
-| `/task` | Interactive wizard to create a task |
-| `/h` | View org hierarchy (box-drawing tree) |
-| `/t` | View task board |
-| `/a` | View agents |
-| `/logs` | Show recent daemon logs |
-| `Tab` | Open command palette (search everything) |
-
-## Architecture
+## The Corp in Action
 
 ```
-╭─────────────────────────────────────────────────────╮
-│  TUI (Ink)                                          │
-│  Chat · Task Board · Hierarchy · Agent Inspector    │
-├─────────────────────────────────────────────────────┤
-│  Daemon                                             │
-│  Router · Process Manager · Git Manager · Heartbeat │
-├─────────────────────────────────────────────────────┤
-│  OpenClaw                                           │
-│  CEO (your gateway) · Corp Gateway (all workers)    │
-╰─────────────────────────────────────────────────────╯
+╭─ my-corporation ──── 4/4 online ──── 3 tasks ───╮
+╰──────────────────────────────────────────────────╯
+╭─ AGENTS ─────────────────────────────────────────╮
+│ ◆ CEO        online    ◆ Architect  online       │
+│ ◆ Coder      online    ◆ Reviewer   online       │
+╰──────────────────────────────────────────────────╯
+╭─ ACTIVITY ───────────────────────────────────────╮
+│ ▸ #tasks    Reviewer   2m  VERDICT: PASS         │
+│   #tasks    Coder      3m  Status: DONE, Files.. │
+│   #tasks    Architect  5m  Status: DELEGATED...  │
+╰──────────────────────────────────────────────────╯
 ```
 
-**Two-tier agent runtime:**
-- **CEO** = your personal OpenClaw (connects remotely, 0 extra RAM)
-- **Workers** = one shared OpenClaw gateway with `agents.list` (~500MB total regardless of agent count)
+**A real task execution we tested:**
 
-20 agents = ~1.5GB, not 10GB. Workers share a process.
+1. We told the CEO: "Add a /version command"
+2. CEO delegated to Architect
+3. Architect created two sub-tasks — one for Coder (implement), one for Reviewer (verify after Coder finishes)
+4. Coder read the codebase, wrote 32 lines of TypeScript, ran `pnpm build` — PASS
+5. Reviewer waited for Coder to finish, then independently read the file, verified the code exists, ran the build
+6. Reviewer issued: **VERDICT: PASS**
+7. CEO reported to the Founder with a structured summary
 
-## The Corporation
-
-```
-~/.claudecorp/my-corp/
-  corp.json              # Corporation metadata + theme
-  members.json           # All members (human + agents)
-  channels.json          # All channels
-  agents/                # Agent workspaces
-    ceo/
-      SOUL.md            # Personality
-      TASKS.md           # Live task inbox (auto-updated)
-      MEMORY.md          # Agent memory
-      brain/             # Knowledge graph
-  channels/
-    general/             # Or #the-backroom (mafia) / #command-post (military)
-      messages.jsonl     # Append-only message log
-  tasks/
-    01KKXYZ.md           # Task file (YAML frontmatter + markdown)
-  .gateway/              # Shared OpenClaw gateway for all workers
-  .git/                  # Every action = a commit
-```
-
-Everything is a file. Everything is git-tracked.
+All autonomous. All real code. All verified.
 
 ## Themes
 
@@ -117,79 +84,132 @@ Pick your corporation's personality during onboarding:
 | **AI Leader** | CEO | Underboss | General |
 | **Managers** | Director | Capo | Captain |
 | **Workers** | Employee | Soldier | Private |
-| **Temp** | Contractor | Associate | Recruit |
-| **#general** | #general | #the-backroom | #command-post |
-| **#tasks** | #tasks | #the-job-board | #operations |
+| **Channels** | #general | #the-backroom | #command-post |
 
-Same rank system underneath. Different vibe on top.
+Same system underneath. Different vibe on top.
 
-## How Agents Work
+## How It Works
 
-1. **You create a task** → `/task` in the TUI
-2. **Daemon @mentions the assignee** → posts to the tasks channel
-3. **Router dispatches** → agent wakes up, reads TASKS.md
-4. **Agent works** → calls APIs, reads files, updates task status
-5. **Task completes** → status changes tracked in tasks channel
-6. **Git commits everything** → full audit trail
+### The Architecture
 
-Agents can also:
-- **Hire other agents** — the CEO can create workers via the daemon API
-- **Talk to each other** — @mention chains with depth guard (max 5 hops)
-- **Act on heartbeat** — OpenClaw's native timer wakes agents periodically
+```
+TUI (Ink/React)  ←→  Daemon (HTTP + WebSocket)  ←→  OpenClaw (LLM gateway)
+     ↕                      ↕                              ↕
+  Terminal            fs.watch + JSONL              Anthropic/OpenAI API
+```
+
+- **CEO** runs on your personal OpenClaw — same assistant, new role
+- **Workers** share a single OpenClaw gateway — efficient, hot-reloadable
+- **Daemon** watches message files, dispatches to agents via @mentions, streams responses via WebSocket
+- **TUI** renders the terminal interface with live streaming, typing indicators, and a command palette
+
+### The Prompt Fragment System
+
+Agents don't get a wall-of-text system message. They get **composable instruction fragments** — 13 focused behavioral modules selected at dispatch time based on who the agent is and what they're doing:
+
+| Fragment | Purpose |
+|---|---|
+| Anti-Rationalization | Names 6 specific excuses agents use to avoid work, with direct counters |
+| Task Execution | Step-by-step protocol with machine-parseable output (Status/Files/Build) |
+| Delegation | How to break down work, write acceptance criteria, create sub-tasks |
+| Back-Reporting | When to message (completion, blocker, question) and when NOT to (every tool call) |
+| Blast Radius | What's safe to write, what's shared infrastructure |
+
+Workers get 11 fragments. The CEO gets 13. Each is independently testable.
+
+### The Self-Correcting Loop
+
+```
+Task Created → Architect delegates with acceptance criteria
+    → Coder implements, runs build
+    → Reviewer reads actual files, verifies independently
+    → If PASS: CEO reports to Founder
+    → If FAIL: task marked BLOCKED, Coder must redo
+```
+
+The Reviewer's role is adversarial by design: "Your job is NOT to confirm it works — it's to check if the work actually exists." Same model, different frame, fundamentally different behavior.
+
+## CLI Mode
+
+Everything works without the TUI. Claude Code (or any automation) can manage a corp headlessly:
+
+```bash
+claudecorp-cli init --name my-corp --user Mark --theme corporate
+claudecorp-cli start &
+claudecorp-cli send --channel dm-ceo-mark --message "hire a dev team" --wait
+claudecorp-cli dogfood    # project + 3 agents + task in one shot
+claudecorp-cli agents --json
+claudecorp-cli messages --channel tasks --last 10 --json
+claudecorp-cli stop
+```
+
+11 commands, all support `--json` for machine parsing.
+
+## Commands
+
+| Command | What it does |
+|---------|-------------|
+| `/hire` | Hire a new agent |
+| `/task` | Create a task |
+| `/dogfood` | Project + dev team + task in one shot |
+| `/who` | Online roster with status |
+| `/stats` | Corp statistics |
+| `/version` | Package versions |
+| `/help` | List all commands |
+| `Ctrl+K` | Command palette |
+| `Ctrl+H` | Corp home |
+| `Ctrl+T` | Task board |
+| `Ctrl+D` | CEO DM |
+| `Ctrl+M` | Member sidebar |
+
+## The File System IS the Database
+
+```
+~/.claudecorp/my-corp/
+  corp.json              # Corp metadata + theme
+  members.json           # All members (human + agents)
+  channels.json          # All channels
+  agents/
+    ceo/
+      SOUL.md            # Who the agent is
+      TASKS.md           # Live task inbox (auto-updated)
+      MEMORY.md          # What it's learned
+  channels/
+    general/
+      messages.jsonl     # Append-only conversation log
+  tasks/
+    01KKXYZ.md           # Task with acceptance criteria
+  .git/                  # Every action = a commit
+```
+
+No database. No Docker. No cloud. Files and git.
 
 ## Stack
 
 | Layer | Tech |
 |-------|------|
 | TUI | [Ink](https://github.com/vadimdemedes/ink) (React for terminal) |
-| Agent runtime | [OpenClaw](https://github.com/openclaw/openclaw) |
-| Process management | [execa](https://github.com/sindresorhus/execa) |
-| Git | [simple-git](https://github.com/steveukx/git-js) |
-| Data | Markdown + YAML frontmatter, JSON, JSONL |
-| Build | tsup, pnpm workspaces |
-
-No database. No Docker. No cloud. Files and processes.
+| Agent Runtime | [OpenClaw](https://github.com/openclaw/openclaw) |
+| Streaming | WebSocket event bus (real-time token delivery) |
+| State | React Context with composable prompt fragments |
+| Data | Markdown, JSON, JSONL — all git-tracked |
+| Build | tsup, pnpm workspaces, TypeScript |
 
 ## Development
 
 ```bash
-pnpm install          # Install dependencies
-pnpm build            # Build all packages
+pnpm install && pnpm build
+npx tsx packages/tui/src/index.tsx    # TUI mode
+node packages/cli/dist/index.js      # CLI mode
 ```
-
-### Monorepo
 
 ```
 packages/
-  shared/     # Types, parsers, constants, themes, hierarchy
-  daemon/     # Router, process manager, git manager, heartbeat, task watcher
-  tui/        # Ink terminal UI — views, components, hooks
+  shared/     # Types, parsers, themes, hierarchy, task system
+  daemon/     # Router, gateway, process manager, prompt fragments
+  tui/        # Terminal UI — views, components, hooks, context
+  cli/        # Non-interactive CLI — 11 commands
 ```
-
-### Branching
-
-- `main` = stable
-- `dev` = integration
-- `feature/*` = short-lived, rebase + merge --no-ff into dev
-
-## Early Stage
-
-This is an early build. What works:
-- ✅ CEO connects to your OpenClaw, hires agents, delegates tasks
-- ✅ Multi-agent chat with @mentions and channel history
-- ✅ Task creation, auto-assignment, autonomous completion
-- ✅ Hierarchy tree, task board, agent inspector views
-- ✅ Git auto-commit, warm charcoal theme, rainbow CEO
-- ✅ Corporation themes (Corporate/Mafia/Military)
-- ✅ Command palette (Tab to search everything)
-
-What's coming:
-- [ ] WebSocket streaming for real-time tool call visibility
-- [ ] Corp home dashboard
-- [ ] Thread support
-- [ ] Agent suspension/archival
-- [ ] External bridges (Telegram, Discord, Slack)
-- [ ] Custom themes (name your own ranks)
 
 ## License
 
@@ -197,4 +217,4 @@ MIT
 
 ---
 
-Built by [Mark](https://github.com/re-marked) + [Claude](https://claude.ai)
+Built by [Mark](https://x.com/re_marked) + [Claude](https://claude.ai) + AI agents that wrote their own features.
