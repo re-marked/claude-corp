@@ -170,6 +170,40 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /time-machine — show recent git history of the corp
+    if (text.trim().toLowerCase() === '/time-machine' || text.trim().toLowerCase() === '/tm') {
+      try {
+        const commits = await daemonClient.getGitLog(15);
+        if (commits.length === 0) {
+          writeSystemMessage('No git history found.');
+        } else {
+          const lines = ['━━━ Time Machine ━━━', ''];
+          for (const c of commits) {
+            const ago = new Date(c.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const hash = c.hash.substring(0, 7);
+            lines.push(`  ${hash}  ${ago}  ${c.message}`);
+          }
+          lines.push('', 'Use /rewind <hash> to undo a specific commit.');
+          writeSystemMessage(lines.join('\n'));
+        }
+      } catch (err) {
+        writeSystemMessage(`Failed to read git history: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // /rewind <hash> — revert a specific commit
+    const rewindMatch = text.trim().match(/^\/rewind\s+([a-f0-9]+)$/i);
+    if (rewindMatch) {
+      try {
+        const { result } = await daemonClient.revertGitCommit(rewindMatch[1]!);
+        writeSystemMessage(`⏪ ${result}`);
+      } catch (err) {
+        writeSystemMessage(`Rewind failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     // /ping responds with pong!
     if (text.trim().toLowerCase() === '/ping') {
       writeSystemMessage('pong!');
@@ -196,6 +230,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         '  /ping              Test command (responds with pong!)',
         '  /uptime            Show daemon uptime and message count',
         '  /logs              Show recent daemon logs',
+        '  /time-machine, /tm Browse corp git history',
+        '  /rewind <hash>     Undo a specific commit',
         '',
         '⚙️ Management:',
         '  /hire              Open agent hiring wizard',

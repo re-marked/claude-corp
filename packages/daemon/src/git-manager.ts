@@ -1,13 +1,11 @@
 import { corpGit, type CorpGit } from '@claudecorp/shared';
 import { log, logError } from './logger.js';
 
-const DEBOUNCE_MS = 10_000; // Wait 10s of quiet before committing
-const JANITOR_INTERVAL_MS = 60_000; // Safety net: check every 60s
+const SNAPSHOT_INTERVAL_MS = 5_000; // Snapshot every 5 seconds
 
 export class GitManager {
   private git: CorpGit;
-  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  private janitorInterval: ReturnType<typeof setInterval> | null = null;
+  private snapshotInterval: ReturnType<typeof setInterval> | null = null;
   private pendingAuthor: string | null = null;
   private committing = false;
 
@@ -15,29 +13,50 @@ export class GitManager {
     this.git = corpGit(corpRoot);
   }
 
-  /** Signal that an agent just acted. Debounces, then commits. */
+  /** Signal that an agent just acted. The next snapshot will include their name. */
   markDirty(agentName: string): void {
     this.pendingAuthor = agentName;
-
-    // Reset debounce timer
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => {
-      this.tryCommit();
-    }, DEBOUNCE_MS);
   }
 
-  /** Start the periodic janitor (safety net for missed commits). */
+  /** Start the 5-second snapshot timer. */
   start(): void {
-    this.janitorInterval = setInterval(() => {
+    this.snapshotInterval = setInterval(() => {
       this.tryCommit();
-    }, JANITOR_INTERVAL_MS);
+    }, SNAPSHOT_INTERVAL_MS);
   }
 
-  /** Stop the janitor and flush any pending commit. */
+  /** Stop the snapshot timer and flush any pending commit. */
   async stop(): Promise<void> {
-    if (this.janitorInterval) clearInterval(this.janitorInterval);
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    if (this.snapshotInterval) clearInterval(this.snapshotInterval);
     await this.tryCommit();
+  }
+
+  /** Get the git log (for /time-machine and /rewind). */
+  async getLog(count = 20): Promise<{ hash: string; message: string; date: string }[]> {
+    try {
+      return await this.git.log(count);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Show what changed in a specific commit (for /time-machine detail view). */
+  async showCommit(hash: string): Promise<string> {
+    try {
+      return await this.git.raw.raw(['show', '--stat', '--format=%H %s (%ar)', hash]);
+    } catch {
+      return 'Could not read commit';
+    }
+  }
+
+  /** Revert a specific commit (for /rewind). */
+  async revertCommit(hash: string): Promise<string> {
+    try {
+      await this.git.raw.raw(['revert', '--no-edit', hash]);
+      return `Reverted commit ${hash.substring(0, 7)}`;
+    } catch (err) {
+      return `Revert failed: ${err}`;
+    }
   }
 
   private async tryCommit(): Promise<void> {
@@ -94,7 +113,6 @@ export class GitManager {
       return `update ${files[0]}`;
     }
 
-    // Group by type
     const messages = files.filter((f) => f.includes('messages.jsonl'));
     const tasks = files.filter((f) => f.includes('tasks/'));
     const agents = files.filter((f) => f.includes('agents/'));

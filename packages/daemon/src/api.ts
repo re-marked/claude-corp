@@ -55,6 +55,30 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // GET /git/log — recent commit history for time-machine
+      if (method === 'GET' && path === '/git/log') {
+        const count = parseInt(url.searchParams.get('count') ?? '20', 10);
+        const commits = await daemon.gitManager.getLog(count);
+        json(res, commits);
+        return;
+      }
+
+      // GET /git/show/:hash — details for a specific commit
+      const showMatch = path.match(/^\/git\/show\/([a-f0-9]+)$/);
+      if (method === 'GET' && showMatch) {
+        const detail = await daemon.gitManager.showCommit(showMatch[1]!);
+        json(res, { detail });
+        return;
+      }
+
+      // POST /git/revert/:hash — revert a specific commit
+      const revertMatch = path.match(/^\/git\/revert\/([a-f0-9]+)$/);
+      if (method === 'POST' && revertMatch) {
+        const result = await daemon.gitManager.revertCommit(revertMatch[1]!);
+        json(res, { result });
+        return;
+      }
+
       // GET /agents
       if (method === 'GET' && path === '/agents') {
         json(res, daemon.processManager.listAgents().map((a) => ({

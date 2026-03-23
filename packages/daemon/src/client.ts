@@ -133,4 +133,19 @@ export class DaemonClient {
     const resp = await fetch(`${this.baseUrl}/streaming`);
     return resp.json() as Promise<Record<string, { agentName: string; content: string; channelId: string }>>;
   }
+
+  async getGitLog(count = 20): Promise<{ hash: string; message: string; date: string }[]> {
+    const resp = await fetch(`${this.baseUrl}/git/log?count=${count}`);
+    return resp.json() as Promise<{ hash: string; message: string; date: string }[]>;
+  }
+
+  async showGitCommit(hash: string): Promise<{ detail: string }> {
+    const resp = await fetch(`${this.baseUrl}/git/show/${hash}`);
+    return resp.json() as Promise<{ detail: string }>;
+  }
+
+  async revertGitCommit(hash: string): Promise<{ result: string }> {
+    const resp = await fetch(`${this.baseUrl}/git/revert/${hash}`, { method: 'POST' });
+    return resp.json() as Promise<{ result: string }>;
+  }
 }
