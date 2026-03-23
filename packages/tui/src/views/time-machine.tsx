@@ -14,6 +14,45 @@ interface Props {
   onBack: () => void;
 }
 
+function timeAgo(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** Make git commit messages human-readable. */
+function humanize(msg: string): string {
+  // "CEO: update channels/dm-ceo-mark/messages.jsonl" → "CEO sent a message in #dm-ceo-mark"
+  const channelMatch = msg.match(/^(.+?): update channels\/(.+?)\/messages\.jsonl/);
+  if (channelMatch) return `${channelMatch[1]} sent a message in #${channelMatch[2]}`;
+
+  // "system: update 4 agent file(s)" → "Agent files updated"
+  if (msg.includes('agent file(s)')) return 'Agent files updated';
+
+  // "system: update 2 channel(s), 1 task(s)" → "Channels and tasks updated"
+  if (msg.includes('channel(s)') && msg.includes('task(s)')) return 'Channels and tasks updated';
+  if (msg.includes('channel(s)')) return 'Channel activity';
+  if (msg.includes('task(s)')) return 'Task status changed';
+
+  // "Mark: update ..." → "You made a change"
+  if (msg.startsWith('Mark:') || msg.startsWith('Tester:')) return 'You made a change';
+
+  // "system: update deliverables/..." → "Deliverable updated"
+  if (msg.includes('deliverables/')) return 'Deliverable file updated';
+
+  // "system: update agents/ceo/MEMORY.md" → "CEO memory updated"
+  const memoryMatch = msg.match(/update agents\/(.+?)\/MEMORY\.md/);
+  if (memoryMatch) return `${memoryMatch[1]} memory updated`;
+
+  // Fallback: just clean it up
+  return msg.replace(/^(system|Mark|Tester): /, '');
+}
+
 export function TimeMachine({ onBack }: Props) {
   const { daemonClient } = useCorp();
   const { stdout } = useStdout();
@@ -21,16 +60,17 @@ export function TimeMachine({ onBack }: Props) {
 
   const [commits, setCommits] = useState<Commit[]>([]);
   const [cursor, setCursor] = useState(0);
+  const [headIdx, setHeadIdx] = useState(0); // Which commit is HEAD (current state)
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('');
-  const [canForward, setCanForward] = useState(false);
 
-  // Load git log
   const loadLog = async () => {
     setLoading(true);
     try {
       const log = await daemonClient.getGitLog(50);
       setCommits(log);
+      setHeadIdx(0); // HEAD is always the first (newest) commit after load
+      setCursor(0);
     } catch {
       setCommits([]);
     }
@@ -49,38 +89,30 @@ export function TimeMachine({ onBack }: Props) {
       setCursor((i) => Math.min(commits.length - 1, i + 1));
     }
 
-    // Enter — rewind to selected commit
+    // Enter — travel to selected point
     if (key.return && commits[cursor]) {
+      if (cursor === headIdx) {
+        setStatus('Already here.');
+        return;
+      }
       const hash = commits[cursor]!.hash;
-      setStatus('Rewinding...');
+      setStatus('Traveling...');
       daemonClient.rewindTo(hash).then(({ result }) => {
-        setStatus(result);
-        setCanForward(true);
-        loadLog();
+        setHeadIdx(cursor);
+        setStatus(cursor < headIdx ? '\u23EA Went back in time' : '\u23E9 Went forward in time');
       }).catch(() => {
-        setStatus('Rewind failed');
+        setStatus('Travel failed');
       });
     }
 
-    // F — forward (undo rewind)
-    if ((input === 'f' || input === 'F') && canForward) {
-      setStatus('Forwarding...');
-      daemonClient.forward().then(({ result }) => {
-        setStatus(result);
-        setCanForward(false);
-        loadLog();
-      }).catch(() => {
-        setStatus('Forward failed');
-      });
-    }
-
-    // R — refresh log
+    // R — refresh
     if (input === 'r' || input === 'R') {
       loadLog();
+      setStatus('Refreshed');
     }
   });
 
-  const visibleCount = Math.max(termHeight - 10, 5);
+  const visibleCount = Math.max(termHeight - 8, 5);
   let startIdx = 0;
   if (cursor >= visibleCount) {
     startIdx = cursor - visibleCount + 1;
@@ -99,7 +131,7 @@ export function TimeMachine({ onBack }: Props) {
           {'\u23F0'} Time Machine
         </Text>
         <Text color={COLORS.subtle}>
-          {commits.length} snapshots
+          {commits.length} snapshots {headIdx > 0 ? `\u2022 rewound ${headIdx} back` : ''}
         </Text>
       </Box>
 
@@ -117,35 +149,34 @@ export function TimeMachine({ onBack }: Props) {
           {visibleCommits.map((c, i) => {
             const actualIdx = startIdx + i;
             const selected = actualIdx === cursor;
-            const hash = c.hash.substring(0, 7);
-            const time = new Date(c.date).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-            });
-            const isRewind = c.message.startsWith('Revert');
+            const isHead = actualIdx === headIdx;
+            const time = timeAgo(new Date(c.date));
+            const label = humanize(c.message);
+            const isFuture = actualIdx < headIdx; // Above HEAD = "future" (rewound past this)
 
             return (
-              <Box key={c.hash} gap={1}>
-                <Text color={selected ? COLORS.primary : COLORS.muted}>
-                  {selected ? '\u25B8' : ' '}
+              <Box key={c.hash}>
+                <Text color={isHead ? COLORS.success : selected ? COLORS.primary : COLORS.muted}>
+                  {isHead ? '\u25C6 ' : selected ? '\u25B8 ' : '  '}
                 </Text>
-                <Text color={selected ? COLORS.secondary : COLORS.muted}>
-                  {hash}
+                <Text color={isHead ? COLORS.success : isFuture ? COLORS.muted : COLORS.subtle}>
+                  {time.padEnd(9)}
                 </Text>
-                <Text color={COLORS.subtle}>{time}</Text>
                 <Text
                   color={
-                    selected
+                    isHead
                       ? COLORS.text
-                      : isRewind
-                        ? COLORS.warning
-                        : COLORS.subtle
+                      : isFuture
+                        ? COLORS.muted
+                        : selected
+                          ? COLORS.text
+                          : COLORS.subtle
                   }
-                  bold={selected}
+                  bold={isHead || selected}
                   wrap="truncate"
                 >
-                  {c.message}
+                  {label}
+                  {isHead ? '  \u2190 YOU ARE HERE' : ''}
                 </Text>
               </Box>
             );
@@ -155,9 +186,7 @@ export function TimeMachine({ onBack }: Props) {
 
       {status && (
         <Box paddingX={1}>
-          <Text color={status.includes('Rewound') ? COLORS.warning : status.includes('Forwarded') ? COLORS.success : COLORS.info}>
-            {status}
-          </Text>
+          <Text color={COLORS.info}>{status}</Text>
         </Box>
       )}
 
@@ -168,7 +197,7 @@ export function TimeMachine({ onBack }: Props) {
         justifyContent="space-between"
       >
         <Text color={COLORS.muted}>
-          Enter:rewind{canForward ? '  F:forward' : ''}  R:refresh  Esc:back
+          {'\u2191\u2193'}:navigate  Enter:travel here  R:refresh  Esc:back
         </Text>
         <Text color={COLORS.muted}>
           {cursor + 1}/{commits.length}
