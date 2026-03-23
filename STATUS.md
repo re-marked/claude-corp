@@ -207,6 +207,21 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] /channels, /ch — list all channels
 - [x] /logs — recent daemon logs
 - [x] /home, /h, /t, /a — navigation shortcuts
+- [x] /help — list all available commands (built by Architect agent)
+- [x] /stats — corp statistics (built by Coder agent)
+- [x] /version — package versions (built by Coder agent, verified by Reviewer)
+- [x] /weather — OpenWeatherMap weather data (built by Coder after blocker resolution)
+
+## Layer 11: Escalation & Recovery — DONE
+
+- [x] 5-level escalation chain (self → supervisor → CEO → Founder as last resort)
+- [x] Failure recovery fragment (review feedback loop, evidence-based disagreement)
+- [x] BLOCKED auto-notification (task-watcher @mentions task creator)
+- [x] CEO proactive triage (checks blocked tasks, solves before bothering Founder)
+- [x] Blocker resolution loop VERIFIED: BLOCKED → escalate → resolve → resume → complete
+- [x] 9/9 escalation chain test (missing weather-config.json correctly blocked and escalated)
+- [x] Agent-to-agent feedback: Reviewer provides specific FAIL details to implementer
+- [x] Evidence-based disagreement: agents push back with proof, supervisor breaks ties
 
 ## Layer 10: Externals
 
@@ -232,7 +247,9 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [ ] /standup — trigger all agents to report status
 - [ ] Morning CEO briefings
 - [ ] Web frontend (connects to same daemon)
-- [ ] Agent quality improvements (rework system prompts using Claude Code patterns)
+- [ ] Auto-resume blocked tasks when dependency is resolved (system-level, not manual)
+- [ ] Multi-step task pipelines (task B auto-starts when task A completes)
+- [ ] Agent memory persistence across sessions (MEMORY.md active use)
 
 ---
 
@@ -250,4 +267,5 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 10. ~~**CLI** — non-interactive management, testable without TUI~~
 11. ~~**Streaming** — WebSocket event bus, real-time token preview~~
 12. ~~**State** — CorpContext, useCorp(), centralized state~~
-13. **Next**: agent quality — rework system prompts, improve reliability
+13. ~~**Escalation** — 5-level chain, BLOCKED auto-notify, blocker resolution loop~~
+14. **Next**: multi-step pipelines, agent memory, auto-resume blocked tasks
