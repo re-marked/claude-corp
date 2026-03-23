@@ -90,3 +90,45 @@ export function notifyTaskAssignment(
     // Non-fatal
   }
 }
+
+/**
+ * Notify a task's creator (supervisor) that the task is blocked.
+ * Triggers a dispatch so the supervisor sees the blocker and can act.
+ */
+export function notifyTaskBlocker(
+  corpRoot: string,
+  creatorId: string,
+  assigneeName: string,
+  taskTitle: string,
+): void {
+  try {
+    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
+    const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+
+    const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
+    const theme = getTheme((corp.theme || 'corporate') as ThemeId);
+    const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
+    if (!tasksChannel) return;
+
+    const creator = members.find((m) => m.id === creatorId);
+    if (!creator) return;
+
+    const msg: ChannelMessage = {
+      id: generateId(),
+      channelId: tasksChannel.id,
+      senderId: 'system',
+      threadId: null,
+      content: `@${creator.displayName} Task "${taskTitle}" is BLOCKED by ${assigneeName}. Read the task file for details and help unblock.`,
+      kind: 'text',
+      mentions: [creatorId],
+      metadata: null,
+      depth: 0,
+      originId: '',
+      timestamp: new Date().toISOString(),
+    };
+    msg.originId = msg.id;
+    appendMessage(join(corpRoot, tasksChannel.path, MESSAGES_JSONL), msg);
+  } catch {
+    // Non-fatal
+  }
+}

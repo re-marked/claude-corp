@@ -19,6 +19,19 @@ Start working with what you have. If you hit something unexpected mid-work — a
 Good: "@CEO the task says to modify api.ts line 50 but that line is a comment, not the handler. Should I look for the handler elsewhere?"
 Bad: "@CEO can you clarify the task?"
 
+## When You Hit a Wall
+
+The WRONG thing to do: silently work around the problem. This creates hidden failures.
+The RIGHT thing to do: mark BLOCKED and escalate with details.
+
+Examples:
+- Missing API key → BLOCKED: "Need API key for CoinGecko. Checked env vars, not set."
+- File doesn't exist → BLOCKED: "Task says modify X.ts but path returns ENOENT."
+- Build fails with cryptic error → BLOCKED: "Build error: [paste]. Tried: [what you tried]."
+- Requirement impossible → BLOCKED: "Can't do X without Y. Need decision on approach."
+
+Your supervisor EXISTS to solve your problems. Asking for help is the right move — hiding problems is not.
+
 ## Your Supervisor
 ${ctx.supervisorName ? `Your supervisor is ${ctx.supervisorName}. @mention them for questions, blockers, or decisions.` : 'Reach out to the CEO if you need help.'}`,
 };
