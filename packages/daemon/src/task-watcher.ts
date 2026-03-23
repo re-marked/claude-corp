@@ -13,7 +13,7 @@ import {
   CHANNELS_JSON,
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
-import { writeTaskEvent, notifyTaskAssignment } from './task-events.js';
+import { writeTaskEvent, notifyTaskAssignment, notifyTaskBlocker } from './task-events.js';
 import type { Daemon } from './daemon.js';
 import { log } from './logger.js';
 
@@ -113,6 +113,18 @@ export class TaskWatcher {
           this.daemon.corpRoot,
           `"${task.title}" → ${task.status}`,
         );
+
+        // When task is BLOCKED, notify the creator (supervisor) so they can help
+        if (task.status === 'blocked' && task.createdBy) {
+          try {
+            const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+            const assignee = members.find(m => m.id === task.assignedTo);
+            const assigneeName = assignee?.displayName ?? 'an agent';
+            notifyTaskBlocker(this.daemon.corpRoot, task.createdBy, assigneeName, task.title);
+          } catch {
+            // Non-fatal
+          }
+        }
 
         // When task completes or fails, notify the CEO in #tasks
         if (task.status === 'completed' || task.status === 'failed') {

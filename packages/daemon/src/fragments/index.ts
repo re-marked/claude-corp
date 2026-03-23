@@ -5,7 +5,9 @@ import { backReportingFragment } from './back-reporting.js';
 import { ceoReportingFragment } from './ceo-reporting.js';
 import { delegationFragment } from './delegation.js';
 import { receivingDelegationFragment } from './receiving-delegation.js';
+import { escalationChainFragment } from './escalation-chain.js';
 import { blockerEscalationFragment } from './blocker-escalation.js';
+import { failureRecoveryFragment } from './failure-recovery.js';
 import { channelEtiquetteFragment } from './channel-etiquette.js';
 import { antiRationalizationFragment } from './anti-rationalization.js';
 import { outputEfficiencyFragment } from './output-efficiency.js';
@@ -20,7 +22,9 @@ const FRAGMENTS: Fragment[] = [
   ceoReportingFragment,
   delegationFragment,
   receivingDelegationFragment,
+  escalationChainFragment,
   blockerEscalationFragment,
+  failureRecoveryFragment,
   channelEtiquetteFragment,
   antiRationalizationFragment,
   outputEfficiencyFragment,
