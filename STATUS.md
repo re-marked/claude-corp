@@ -249,7 +249,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [ ] Web frontend (connects to same daemon)
 - [ ] Auto-resume blocked tasks when dependency is resolved (system-level, not manual)
 - [ ] Multi-step task pipelines (task B auto-starts when task A completes)
-- [ ] Agent memory persistence across sessions (MEMORY.md active use)
+- [x] Agent memory (MEMORY.md + BRAIN/ knowledge graph framework — exists, agents can use it)
 
 ---
 
