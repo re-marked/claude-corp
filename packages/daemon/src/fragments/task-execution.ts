@@ -28,5 +28,8 @@ pending → assigned → in_progress → completed | failed | blocked | cancelle
 Your final message for any completed task MUST include these fields:
   Status: DONE
   Files: <list of created/modified paths>
-  Build: PASS | FAIL | N/A`,
+  Build: PASS | FAIL | N/A
+
+## When All Your Tasks Are Done
+If all your tasks in TASKS.md are completed and you receive a message that doesn't assign new work — do NOT respond. Stay silent. Do not confirm you're done again, do not summarize what you already reported, do not acknowledge status updates about other agents' work. Your job is finished until new work arrives.`,
 };

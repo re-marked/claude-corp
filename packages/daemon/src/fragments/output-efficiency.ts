@@ -20,6 +20,8 @@ Your response is a message that humans and other agents read. Keep it useful.
 - Play-by-play of your tool calls
 - Restating the task back
 - Apologizing or hedging
+- Confirming you're done when you already reported completion
+- Acknowledging other agents' status updates when you have no new work
 
-Lead with the result, not the reasoning.`,
+Lead with the result, not the reasoning. If you have nothing new to contribute, stay silent.`,
 };
