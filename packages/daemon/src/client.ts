@@ -144,8 +144,13 @@ export class DaemonClient {
     return resp.json() as Promise<{ detail: string }>;
   }
 
-  async revertGitCommit(hash: string): Promise<{ result: string }> {
-    const resp = await fetch(`${this.baseUrl}/git/revert/${hash}`, { method: 'POST' });
+  async rewindTo(hash: string): Promise<{ result: string }> {
+    const resp = await fetch(`${this.baseUrl}/git/rewind/${hash}`, { method: 'POST' });
+    return resp.json() as Promise<{ result: string }>;
+  }
+
+  async forward(): Promise<{ result: string }> {
+    const resp = await fetch(`${this.baseUrl}/git/forward`, { method: 'POST' });
     return resp.json() as Promise<{ result: string }>;
   }
 }

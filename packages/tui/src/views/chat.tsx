@@ -192,14 +192,25 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
-    // /rewind <hash> — revert a specific commit
+    // /rewind <hash> — go back to a specific point in time
     const rewindMatch = text.trim().match(/^\/rewind\s+([a-f0-9]+)$/i);
     if (rewindMatch) {
       try {
-        const { result } = await daemonClient.revertGitCommit(rewindMatch[1]!);
-        writeSystemMessage(`⏪ ${result}`);
+        const { result } = await daemonClient.rewindTo(rewindMatch[1]!);
+        writeSystemMessage(result);
       } catch (err) {
         writeSystemMessage(`Rewind failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // /forward — undo the last rewind, restore timeline
+    if (text.trim().toLowerCase() === '/forward' || text.trim().toLowerCase() === '/ff') {
+      try {
+        const { result } = await daemonClient.forward();
+        writeSystemMessage(result);
+      } catch (err) {
+        writeSystemMessage(`Forward failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
@@ -231,7 +242,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         '  /uptime            Show daemon uptime and message count',
         '  /logs              Show recent daemon logs',
         '  /time-machine, /tm Browse corp git history',
-        '  /rewind <hash>     Undo a specific commit',
+        '  /rewind <hash>     Go back to a point in time',
+        '  /forward, /ff      Undo the last rewind',
         '',
         '⚙️ Management:',
         '  /hire              Open agent hiring wizard',

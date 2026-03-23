@@ -37,7 +37,11 @@ export function useMessages(messagesPath: string, initialCount = 50) {
           lastIdRef.current = newMsgs[newMsgs.length - 1]!.id;
           const filtered = filterExternal(newMsgs);
           if (filtered.length > 0) {
-            setMessages((prev) => [...prev, ...filtered]);
+            setMessages((prev) => {
+              const combined = [...prev, ...filtered];
+              // Cap at 200 messages to prevent unbounded memory growth
+              return combined.length > 200 ? combined.slice(-200) : combined;
+            });
           }
         }
       } catch {

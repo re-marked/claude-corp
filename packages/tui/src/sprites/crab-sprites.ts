@@ -1,0 +1,233 @@
+import type { SpriteDefinition, SpriteFrame } from './types.js';
+
+// ─── Helper: idle blink pattern ─────────────────────────────────────
+// Repeats open-eye frame 6x then one blink — natural rhythm
+function idle(open: string[], blink: string[]): SpriteFrame[] {
+  const o = { lines: open };
+  return [o, o, o, o, o, o, { lines: blink }];
+}
+
+function frames(...fs: string[][]): SpriteFrame[] {
+  return fs.map((lines) => ({ lines }));
+}
+
+// ─── WORKER CRAB ────────────────────────────────────────────────────
+export const WORKER: SpriteDefinition = {
+  name: 'Worker',
+  role: 'worker',
+  states: {
+    idle: idle(
+      [' ╻ ▄█▄ ╻',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      [' ╻ ▄█▄ ╻',
+       ' █▐█─█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+    ),
+    working: frames(
+      [' ╻ ▄█▄ ╻',
+       ' █▐█⊛█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      [' ╻ ▄█▄ ╻',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▘▗ ▖▝ '],
+    ),
+    walking: frames(
+      [' ╻ ▄█▄ ╻',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      [' ╻ ▄█▄ ╻',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▘▗ ▖▝ '],
+    ),
+    talking: frames(
+      [' ╻ ▄█▄ ╻ ',
+       ' █▐█⊙█▌█▸',
+       '  ▝███▘  ',
+       '  ▗▘ ▝▖  '],
+      [' ╻ ▄█▄ ╻ ',
+       ' █▐█⊙█▌█ ',
+       '  ▝███▘  ',
+       '  ▗▘ ▝▖  '],
+    ),
+  },
+};
+
+// ─── CEO CRAB (TOP HAT) ────────────────────────────────────────────
+export const CEO: SpriteDefinition = {
+  name: 'CEO',
+  role: 'master',
+  states: {
+    idle: idle(
+      ['   ▄█▄  ',
+       ' ╻ ███ ╻',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      ['   ▄█▄  ',
+       ' ╻ ███ ╻',
+       ' █▐█─█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+    ),
+    working: frames(
+      ['   ▄█▄  ',
+       ' ╻ ███ ╻',
+       ' █▐█⊛█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      ['   ▄█▄  ',
+       ' ╻ ███ ╻',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▘▗ ▖▝ '],
+    ),
+    walking: frames(
+      ['   ▄█▄  ',
+       ' ╻ ███ ╻',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      ['   ▄█▄  ',
+       ' ╻ ███ ╻',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▘▗ ▖▝ '],
+    ),
+    talking: frames(
+      ['   ▄█▄   ',
+       ' ╻ ███ ╻ ',
+       ' █▐█⊙█▌█▸',
+       '  ▝███▘  ',
+       '  ▗▘ ▝▖  '],
+      ['   ▄█▄   ',
+       ' ╻ ███ ╻ ',
+       ' █▐█⊙█▌█ ',
+       '  ▝███▘  ',
+       '  ▗▘ ▝▖  '],
+    ),
+  },
+};
+
+// ─── PM CRAB (FLAT CAP) ────────────────────────────────────────────
+export const PM: SpriteDefinition = {
+  name: 'PM',
+  role: 'leader',
+  states: {
+    idle: idle(
+      ['  ▄██▄  ',
+       ' ╻▀██▀╻ ',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      ['  ▄██▄  ',
+       ' ╻▀██▀╻ ',
+       ' █▐█─█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+    ),
+    working: frames(
+      ['  ▄██▄  ',
+       ' ╻▀██▀╻ ',
+       ' █▐█⊛█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      ['  ▄██▄  ',
+       ' ╻▀██▀╻ ',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▘▗ ▖▝ '],
+    ),
+    walking: frames(
+      ['  ▄██▄  ',
+       ' ╻▀██▀╻ ',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      ['  ▄██▄  ',
+       ' ╻▀██▀╻ ',
+       ' █▐█⊙█▌█',
+       '  ▝███▘ ',
+       '  ▘▗ ▖▝ '],
+    ),
+    talking: frames(
+      ['  ▄██▄   ',
+       ' ╻▀██▀╻  ',
+       ' █▐█⊙█▌█▸',
+       '  ▝███▘  ',
+       '  ▗▘ ▝▖  '],
+      ['  ▄██▄   ',
+       ' ╻▀██▀╻  ',
+       ' █▐█⊙█▌█ ',
+       '  ▝███▘  ',
+       '  ▗▘ ▝▖  '],
+    ),
+  },
+};
+
+// ─── ADVISER CRAB (MONOCLE) ────────────────────────────────────────
+export const ADVISER: SpriteDefinition = {
+  name: 'Adviser',
+  role: 'adviser',
+  states: {
+    idle: idle(
+      [' ╻ ▄█▄ ╻',
+       ' █▐█◎█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      [' ╻ ▄█▄ ╻',
+       ' █▐█─█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+    ),
+    working: frames(
+      [' ╻ ▄█▄ ╻',
+       ' █▐█◎█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      [' ╻ ▄█▄ ╻',
+       ' █▐█◎█▌█',
+       '  ▝███▘ ',
+       '  ▘▗ ▖▝ '],
+    ),
+    walking: frames(
+      [' ╻ ▄█▄ ╻',
+       ' █▐█◎█▌█',
+       '  ▝███▘ ',
+       '  ▗▘ ▝▖ '],
+      [' ╻ ▄█▄ ╻',
+       ' █▐█◎█▌█',
+       '  ▝███▘ ',
+       '  ▘▗ ▖▝ '],
+    ),
+    talking: frames(
+      [' ╻ ▄█▄ ╻ ',
+       ' █▐█◎█▌█▸',
+       '  ▝███▘  ',
+       '  ▗▘ ▝▖  '],
+      [' ╻ ▄█▄ ╻ ',
+       ' █▐█◎█▌█ ',
+       '  ▝███▘  ',
+       '  ▗▘ ▝▖  '],
+    ),
+  },
+};
+
+/** All built-in sprite definitions. */
+export const ALL_SPRITES = [CEO, PM, WORKER, ADVISER] as const;
+
+/** Look up sprite by role name. */
+export function spriteForRole(role: string): SpriteDefinition {
+  switch (role) {
+    case 'master': return CEO;
+    case 'leader': return PM;
+    case 'adviser': return ADVISER;
+    default: return WORKER;
+  }
+}

@@ -71,10 +71,17 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
-      // POST /git/revert/:hash — revert a specific commit
-      const revertMatch = path.match(/^\/git\/revert\/([a-f0-9]+)$/);
-      if (method === 'POST' && revertMatch) {
-        const result = await daemon.gitManager.revertCommit(revertMatch[1]!);
+      // POST /git/rewind/:hash — go back to a specific point in time
+      const rewindMatch = path.match(/^\/git\/rewind\/([a-f0-9]+)$/);
+      if (method === 'POST' && rewindMatch) {
+        const result = await daemon.gitManager.rewindTo(rewindMatch[1]!);
+        json(res, { result });
+        return;
+      }
+
+      // POST /git/forward — undo the last rewind
+      if (method === 'POST' && path === '/git/forward') {
+        const result = await daemon.gitManager.forward();
         json(res, { result });
         return;
       }

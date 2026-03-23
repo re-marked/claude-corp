@@ -19,6 +19,7 @@ import {
 import { COLORS, TASK_STATUS, BORDER_STYLE } from '../theme.js';
 import { CLAUDE_CORP_LOGO } from '../ascii.js';
 import { useCorp } from '../context/corp-context.js';
+import { FactoryFloor } from '../components/factory-floor.js';
 import type { View } from '../navigation.js';
 
 interface Props {
@@ -77,6 +78,7 @@ export function CorpHome({ onNavigate }: Props) {
     pending: 0, assigned: 0, in_progress: 0, completed: 0, failed: 0, blocked: 0,
   });
   const [cursor, setCursor] = useState(0);
+  const [factoryMode, setFactoryMode] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -173,7 +175,12 @@ export function CorpHome({ onNavigate }: Props) {
     process.stdout.write(`\x1b]0;${name} ${icon} ${online} online\x07`);
   }, [agents, corp]);
 
-  useInput((_input, key) => {
+  useInput((input, key) => {
+    // Ctrl+F — toggle factory floor mode
+    if (key.ctrl && input === 'f') {
+      setFactoryMode((prev) => !prev);
+      return;
+    }
     if (key.upArrow) {
       setCursor((i) => Math.max(0, i - 1));
     }
@@ -202,6 +209,15 @@ export function CorpHome({ onNavigate }: Props) {
     stopped: { icon: '\u25C7', color: COLORS.muted, label: 'offline' },
     crashed: { icon: '\u25C7', color: COLORS.danger, label: 'crashed' },
   };
+
+  // Factory floor mode — steampunk pipeline view
+  if (factoryMode) {
+    return (
+      <Box flexDirection="column" flexGrow={1} height={Math.floor(termHeight * 0.9)}>
+        <FactoryFloor agents={agents} taskCounts={taskCounts} activity={activity} />
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" flexGrow={1} height={Math.floor(termHeight * 0.9)}>

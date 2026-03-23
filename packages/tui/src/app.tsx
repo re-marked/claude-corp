@@ -20,6 +20,7 @@ import { HierarchyView } from './views/hierarchy.js';
 import { AgentInspector } from './views/agent-inspector.js';
 import { TaskDetail } from './views/task-detail.js';
 import { CorpHome } from './views/corp-home.js';
+import { SpriteShowcase } from './views/sprite-showcase.js';
 import { StatusBar } from './components/status-bar.js';
 import { DaemonClient } from './lib/daemon-client.js';
 import { useDaemonEvents } from './hooks/use-daemon-events.js';
@@ -150,6 +151,11 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       if (ceoDmChannel && !(current?.type === 'chat' && current.channelId === ceoDmChannel.id)) {
         navigate({ type: 'chat', channelId: ceoDmChannel.id });
       }
+      return;
+    }
+    // Ctrl+G — sprite showcase (experimental)
+    if (key.ctrl && input === 'g') {
+      if (current?.type !== 'sprite-showcase') navigate({ type: 'sprite-showcase' });
       return;
     }
     // Escape — go back
@@ -291,7 +297,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   if (!current) return null;
 
   // Hints for status bar
-  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-D:ceo  Esc:back';
+  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-D:ceo  C-G:sprites  Esc:back';
   const hints: Record<string, string> = {
     'chat': globalHints,
     'task-board': `Enter:detail  Tab:filter  ${globalHints}`,
@@ -354,6 +360,12 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         return (
           <CorpHome
             onNavigate={navigate}
+          />
+        );
+      case 'sprite-showcase':
+        return (
+          <SpriteShowcase
+            onBack={goBack}
           />
         );
       default:

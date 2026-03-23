@@ -17,12 +17,24 @@ interface DaemonEventState {
 /**
  * WebSocket hook that connects to the daemon's event bus.
  * Receives real-time streaming tokens and dispatch notifications.
+ *
+ * Stream tokens are throttled — buffered in a ref and flushed to state
+ * at most every 80ms to avoid thousands of Map copies / re-renders.
  */
 export function useDaemonEvents(port: number): DaemonEventState {
   const [streams, setStreams] = useState<Map<string, StreamState>>(new Map());
   const [dispatching, setDispatching] = useState<Set<string>>(new Set());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Stream token throttle — buffer writes in a ref, flush to state periodically
+  const streamBufferRef = useRef<Map<string, StreamState>>(new Map());
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushStreams = useCallback(() => {
+    flushTimerRef.current = null;
+    setStreams(new Map(streamBufferRef.current));
+  }, []);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -38,27 +50,25 @@ export function useDaemonEvents(port: number): DaemonEventState {
           switch (event.type) {
             case 'dispatch_start':
               setDispatching((prev) => new Set(prev).add(event.agentName));
-              setStreams((prev) => {
-                const next = new Map(prev);
-                next.set(event.channelId, {
-                  agentName: event.agentName,
-                  content: '',
-                  channelId: event.channelId,
-                });
-                return next;
+              streamBufferRef.current.set(event.channelId, {
+                agentName: event.agentName,
+                content: '',
+                channelId: event.channelId,
               });
+              setStreams(new Map(streamBufferRef.current));
               break;
 
             case 'stream_token':
-              setStreams((prev) => {
-                const next = new Map(prev);
-                next.set(event.channelId, {
-                  agentName: event.agentName,
-                  content: event.content,
-                  channelId: event.channelId,
-                });
-                return next;
+              // Buffer — don't create a new Map on every single token
+              streamBufferRef.current.set(event.channelId, {
+                agentName: event.agentName,
+                content: event.content,
+                channelId: event.channelId,
               });
+              // Throttled flush to React state (max ~12 updates/sec)
+              if (!flushTimerRef.current) {
+                flushTimerRef.current = setTimeout(flushStreams, 80);
+              }
               break;
 
             case 'stream_end':
@@ -68,11 +78,13 @@ export function useDaemonEvents(port: number): DaemonEventState {
                 next.delete(event.agentName);
                 return next;
               });
-              setStreams((prev) => {
-                const next = new Map(prev);
-                next.delete(event.channelId);
-                return next;
-              });
+              streamBufferRef.current.delete(event.channelId);
+              // Flush immediately on end so UI clears promptly
+              if (flushTimerRef.current) {
+                clearTimeout(flushTimerRef.current);
+                flushTimerRef.current = null;
+              }
+              setStreams(new Map(streamBufferRef.current));
               break;
           }
         } catch {}
@@ -88,12 +100,13 @@ export function useDaemonEvents(port: number): DaemonEventState {
         try { ws.close(); } catch {}
       });
     } catch {}
-  }, [port]);
+  }, [port, flushStreams]);
 
   useEffect(() => {
     connect();
     return () => {
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current);
       wsRef.current?.close();
     };
   }, [connect]);

@@ -8,6 +8,8 @@ export class GitManager {
   private snapshotInterval: ReturnType<typeof setInterval> | null = null;
   private pendingAuthor: string | null = null;
   private committing = false;
+  /** Saved HEAD before last rewind — enables /forward to undo a rewind. */
+  private savedHead: string | null = null;
 
   constructor(corpRoot: string) {
     this.git = corpGit(corpRoot);
@@ -49,19 +51,32 @@ export class GitManager {
     }
   }
 
-  /** Revert a specific commit (for /rewind). */
-  async revertCommit(hash: string): Promise<string> {
+  /** Rewind to a specific commit. Saves current HEAD so /forward can undo it. */
+  async rewindTo(hash: string): Promise<string> {
     try {
-      await this.git.raw.raw(['revert', '--no-edit', hash]);
-      return `Reverted commit ${hash.substring(0, 7)}`;
+      // Save current HEAD before rewinding
+      const currentHead = await this.git.raw.raw(['rev-parse', 'HEAD']);
+      this.savedHead = currentHead.trim();
+
+      await this.git.raw.raw(['reset', '--hard', hash]);
+      return `⏪ Rewound to ${hash.substring(0, 7)}. Use /forward to undo this rewind.`;
     } catch (err) {
-      // Abort the failed revert so the repo stays clean
-      try { await this.git.raw.raw(['revert', '--abort']); } catch {}
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('CONFLICT')) {
-        return `Can't rewind — later changes depend on this commit. Try a more recent one.`;
-      }
-      return `Revert failed: ${msg}`;
+      return `Rewind failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  /** Undo the last rewind — go back to where we were before /rewind. */
+  async forward(): Promise<string> {
+    if (!this.savedHead) {
+      return 'Nothing to forward to. Use /rewind first.';
+    }
+    try {
+      const target = this.savedHead;
+      this.savedHead = null;
+      await this.git.raw.raw(['reset', '--hard', target]);
+      return `⏩ Forwarded back to ${target.substring(0, 7)}. Timeline restored.`;
+    } catch (err) {
+      return `Forward failed: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 
