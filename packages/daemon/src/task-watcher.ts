@@ -6,6 +6,7 @@ import {
   type Channel,
   type ChannelMessage,
   readTask,
+  listTasks,
   readConfig,
   appendMessage,
   generateId,
@@ -158,6 +159,31 @@ export class TaskWatcher {
             }
           } catch {
             // Non-fatal — notification is best-effort
+          }
+
+          // Dependency enforcement: when a task completes, check for sibling tasks
+          // (same parentTaskId) that are 'assigned' and waiting. Notify their assignees
+          // so they know their dependency is resolved and they can start.
+          if (task.status === 'completed' && task.parentTaskId) {
+            try {
+              const allTasks = listTasks(this.daemon.corpRoot);
+              const waitingSiblings = allTasks.filter(t =>
+                t.task.parentTaskId === task.parentTaskId &&
+                t.task.id !== task.id &&
+                t.task.status === 'assigned' &&
+                t.task.assignedTo,
+              );
+              for (const sibling of waitingSiblings) {
+                notifyTaskAssignment(
+                  this.daemon.corpRoot,
+                  sibling.task.assignedTo!,
+                  sibling.task.title,
+                );
+                log(`[task-watcher] Dependency resolved: notifying ${sibling.task.assignedTo} that "${sibling.task.title}" can start (sibling "${task.title}" completed)`);
+              }
+            } catch {
+              // Non-fatal
+            }
           }
         }
       }
