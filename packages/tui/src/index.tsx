@@ -31,8 +31,9 @@ waitUntilExit().then(async () => {
   // Actually await daemon stop — this kills gateway + agent processes
   try { await daemonRef?.stop(); } catch {}
   process.exit(0);
-}).catch(() => {
+}).catch((err) => {
   restoreTerminal();
+  if (err) process.stderr.write(`[Claude Corp] ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
   process.exit(1);
 });
 
