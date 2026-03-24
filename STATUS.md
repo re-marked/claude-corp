@@ -125,6 +125,8 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [x] Dynamic terminal tab title (corp name + online count / channel name)
 - [x] Silent daemon logger (logs to file only, no garbled TUI output)
 - [x] Ink Static for message history (scrollable terminal buffer)
+- [x] Time Machine: 5s git snapshots, /tm timeline browser, rewind/forward any point
+- [x] Bracketed paste: terminal-level paste detection, mixed typed + pasted content, PUA markers
 
 ## Layer 7: CLI — DONE
 
@@ -235,7 +237,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 ## Future / Deferred
 
 - [ ] Custom themes (name your own ranks)
-- [ ] Multiline paste support in message input bar
+- [x] ~~Multiline paste support~~ — v0.4: bracketed paste mode with mixed typed + pasted content
 - [ ] Thread support (threadId in messages)
 - [ ] Agent suspension/resume/archival
 - [ ] Git Janitor agent

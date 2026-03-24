@@ -326,7 +326,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           throw new Error(`Weather API error: ${response.status} ${response.statusText}`);
         }
         
-        const weatherData = await response.json();
+        const weatherData: any = await response.json();
         
         const lines = [
           '━━━ Weather: London ━━━',

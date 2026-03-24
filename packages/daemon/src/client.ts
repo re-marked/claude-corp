@@ -63,7 +63,7 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
-  async listTasks(filter?: { status?: string; assignedTo?: string }): Promise<unknown[]> {
+  async listTasks(filter?: { status?: string; assignedTo?: string }): Promise<{ id: string; title: string; status: string; priority: string; assignedTo: string | null; createdBy: string }[]> {
     const params = new URLSearchParams();
     if (filter?.status) params.set('status', filter.status);
     if (filter?.assignedTo) params.set('assignedTo', filter.assignedTo);
