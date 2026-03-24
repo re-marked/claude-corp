@@ -40,6 +40,10 @@ export class PasteFilterStdin extends PassThrough {
 
   get fd(): number { return process.stdin.fd; }
 
+  // Ink calls ref/unref to control event loop behavior
+  ref(): this { process.stdin.ref(); return this; }
+  unref(): this { process.stdin.unref(); return this; }
+
   override destroy(): this {
     process.stdin.off('data', this.handleData);
     return super.destroy();
