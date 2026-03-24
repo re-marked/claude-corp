@@ -131,10 +131,6 @@ export class CorpGateway {
   /** Start the gateway process. */
   async start(): Promise<void> {
     if (this._status === 'ready' || this._status === 'starting') return;
-    if (!this.hasAgents()) {
-      log('[gateway] No agents registered, skipping start');
-      return;
-    }
 
     // Check if a gateway is already running on our port (e.g. survived a Ctrl+C)
     if (await this.tryAdoptExisting()) {
