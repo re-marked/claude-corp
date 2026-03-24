@@ -102,6 +102,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     ? members.find((m) => channel.memberIds.includes(m.id) && m.type === 'agent')
     : null;
 
+  const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
+
   useInput((input, key) => {
     if (showHireWizard) return;
     if (key.ctrl && input === 'm') {
@@ -680,8 +682,6 @@ Always consider what happens when things go wrong.`,
   const channelStream = streamData?.channelId === channel.id ? streamData : null;
   const isStreaming = !!channelStream;
   const hasStreamContent = !!(channelStream?.content);
-
-  const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
   const renderMsg = (msg: ChannelMessage) => {
     const sender = members.find((m) => m.id === msg.senderId);

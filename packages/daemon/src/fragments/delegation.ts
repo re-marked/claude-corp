@@ -80,9 +80,35 @@ When delegating work that needs review:
 - Don't do the work yourself if delegation fails — fix the delegation and retry
 - Don't assign implementation and review simultaneously without dependency instructions
 
-## Hiring
-curl -s -X POST http://127.0.0.1:${ctx.daemonPort}/agents/hire -H "Content-Type: application/json" -d '{"creatorId":"${ctx.agentMemberId}","agentName":"<slug>","displayName":"<Name>","rank":"<rank>","soulContent":"<identity + responsibilities + anti-rationalization rules>"}'
+## Hiring (write a file — no curl needed)
+Create a markdown file in ${ctx.corpRoot}/hiring/ with a unique filename (e.g., hire-<agent-name>.md).
+The system auto-detects new hire files, creates the agent, and reports the result.
 
-Every SOUL.md for new hires MUST include: identity, responsibilities with file paths, build commands, and the anti-rationalization rules.`;
+Format:
+\`\`\`
+---
+agentName: <slug-lowercase-no-spaces>
+displayName: <Human Readable Name>
+rank: <${canCreate}>
+status: pending
+createdBy: ${ctx.agentMemberId}
+---
+
+# Identity
+You are <Name>, a <role> for <project/team>.
+
+# Responsibilities
+- <specific responsibility with file paths>
+- <build command: cd ${ctx.corpRoot} && pnpm build>
+
+# CRITICAL: You write REAL code
+- You must ACTUALLY read files, write code, and run builds.
+- After completing work: list every file you modified and run the build.
+- Never claim something works without running the build.
+\`\`\`
+
+The body of the file becomes the agent's SOUL.md. The system updates the file to status: hired (or status: failed with an error field).
+
+Every hire MUST include: identity, responsibilities with file paths, build commands, and anti-rationalization rules in the body.`;
   },
 };

@@ -141,13 +141,12 @@ export async function hireAgent(
       agentDir: gwAgentDir,
     });
 
-    // Start gateway if not running (first agent hired mid-session)
-    // If already running, OpenClaw hot-reloads agents.list automatically
-    const status = gw.getStatus();
-    if (status === 'stopped' || status === 'starting') {
+    // Start gateway if this is the first agent, otherwise let OpenClaw hot-reload
+    const gwStatus = gw.getStatus();
+    if (gwStatus === 'stopped') {
       await gw.start();
     } else {
-      // Give OpenClaw a moment to hot-reload the new agent config
+      // Gateway already running — OpenClaw watches agents.list for changes
       await new Promise((r) => setTimeout(r, 1500));
     }
   }

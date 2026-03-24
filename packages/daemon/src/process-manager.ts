@@ -84,7 +84,7 @@ export class ProcessManager {
       });
     }
 
-    // Start the gateway if there are agents
+    // Start the gateway if there are already agents registered
     if (gw.hasAgents()) {
       await gw.start();
     }

@@ -5,6 +5,7 @@ export { CorpGateway } from './corp-gateway.js';
 export { GitManager } from './git-manager.js';
 export { HeartbeatManager } from './heartbeat.js';
 export { TaskWatcher } from './task-watcher.js';
+export { HireWatcher } from './hire-watcher.js';
 export { MessageRouter } from './router.js';
 export { hireAgent } from './hire.js';
 export type { HireOpts, HireResult } from './hire.js';

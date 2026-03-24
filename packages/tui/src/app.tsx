@@ -27,24 +27,27 @@ import { useDaemonEvents } from './hooks/use-daemon-events.js';
 import { CorpProvider } from './context/corp-context.js';
 import { COLORS } from './theme.js';
 import { setDaemonRef } from './lib/daemon-ref.js';
+import { BootSequence, getBootStyle } from './components/boot-sequence.js';
 
 export function App() {
-  // Min terminal size guard — show warning if too small for the layout
+  // All hooks MUST be before any early returns (React rules of hooks)
   const [termSize, setTermSize] = useState({ cols: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 });
+  const [, forceReload] = useState(0);
+  const [selectedCorp, setSelectedCorp] = useState<string | null>(null);
+
   useEffect(() => {
     const onResize = () => setTermSize({ cols: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 });
     process.stdout.on('resize', onResize);
     return () => { process.stdout.off('resize', onResize); };
   }, []);
 
+  // Min terminal size guard
   if (termSize.cols < 80 || termSize.rows < 20) {
     return (
       <Text color={COLORS.warning}>Too small ({termSize.cols}x{termSize.rows}) — need 80x20</Text>
     );
   }
 
-  const [, forceReload] = useState(0);
-  const [selectedCorp, setSelectedCorp] = useState<string | null>(null);
   const corps = listCorps();
 
   if (corps.length === 0) {
@@ -107,6 +110,8 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const [showSwitcher, setShowSwitcher] = useState(false);
   const lastVisitedRef = React.useRef<Map<string, string>>(new Map());
   const [, forceRender] = useState(0);
+  const bootStyle = getBootStyle();
+  const [bootDone, setBootDone] = useState(!bootStyle);
 
   // WebSocket event bus for real-time streaming + dispatch updates
   const events = useDaemonEvents(daemonPort);
@@ -260,7 +265,10 @@ function ResumeView({ corpPath }: { corpPath: string }) {
     );
   }
 
-  if (!ready || !client) {
+  if (!ready || !client || !bootDone) {
+    if (bootStyle) {
+      return <BootSequence style={bootStyle} onComplete={() => setBootDone(true)} />;
+    }
     return (
       <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
         <Text color={COLORS.subtle}>{status}</Text>
