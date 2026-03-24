@@ -216,19 +216,26 @@ export class Daemon {
 
       log(`[daemon] Killing stale daemon (PID ${oldPid})...`);
 
-      // Try SIGTERM first (works same-process-tree)
-      try { process.kill(oldPid, 'SIGTERM'); } catch {}
-
-      // On Windows, also use taskkill (works cross-process-tree)
+      // On Windows, taskkill /T kills the entire process tree (gateway + child processes)
       if (process.platform === 'win32') {
         try {
           const { execa: run } = await import('execa');
-          await run('taskkill', ['/F', '/PID', String(oldPid)], { reject: false, timeout: 5000 });
+          await run('taskkill', ['/F', '/T', '/PID', String(oldPid)], { reject: false, timeout: 5000 });
         } catch {}
+      } else {
+        try { process.kill(oldPid, 'SIGTERM'); } catch {}
       }
 
-      // Wait for it to die
-      await new Promise((r) => setTimeout(r, 1500));
+      // Verify the process is actually dead — retry up to 5s
+      for (let i = 0; i < 10; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        try {
+          process.kill(oldPid, 0); // Throws if process doesn't exist
+        } catch {
+          log(`[daemon] Stale daemon (PID ${oldPid}) confirmed dead`);
+          break; // Process is dead
+        }
+      }
 
       // Clean up stale files
       try { unlinkSync(DAEMON_PID_PATH); } catch {}

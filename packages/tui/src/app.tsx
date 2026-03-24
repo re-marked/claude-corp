@@ -27,6 +27,7 @@ import { useDaemonEvents } from './hooks/use-daemon-events.js';
 import { CorpProvider } from './context/corp-context.js';
 import { COLORS } from './theme.js';
 import { setDaemonRef } from './lib/daemon-ref.js';
+import { BootSequence, getBootStyle } from './components/boot-sequence.js';
 
 export function App() {
   // Min terminal size guard — show warning if too small for the layout
@@ -260,7 +261,13 @@ function ResumeView({ corpPath }: { corpPath: string }) {
     );
   }
 
-  if (!ready || !client) {
+  const bootStyle = getBootStyle();
+  const [bootDone, setBootDone] = useState(!bootStyle); // no boot flag = skip animation
+
+  if (!ready || !client || !bootDone) {
+    if (bootStyle) {
+      return <BootSequence style={bootStyle} onComplete={() => setBootDone(true)} />;
+    }
     return (
       <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
         <Text color={COLORS.subtle}>{status}</Text>
