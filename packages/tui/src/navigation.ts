@@ -5,7 +5,6 @@ export type View =
   | { type: 'agent-inspector'; memberId: string }
   | { type: 'hierarchy' }
   | { type: 'corp-home' }
-  | { type: 'sprite-showcase' }
   | { type: 'time-machine' };
 
 export class ViewStack {
@@ -50,7 +49,6 @@ export class ViewStack {
         case 'agent-inspector': return 'Agent';
         case 'hierarchy': return 'Hierarchy';
         case 'corp-home': return 'Home';
-        case 'sprite-showcase': return 'Sprites';
         case 'time-machine': return 'Time Machine';
       }
     });

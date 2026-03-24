@@ -53,16 +53,5 @@ export const PRIORITY = {
   low: '#636E72',
 } as const;
 
-/** Steampunk palette — brass, copper, iron for the factory aesthetic. */
-export const STEAMPUNK = {
-  copper: '#CD7F32',
-  brass: '#DAA520',
-  iron: '#8B7355',
-  furnace: '#FF6B35',
-  steam: '#A9A9A9',
-  patina: '#2E8B57',
-  darkWood: '#3E2723',
-} as const;
-
 /** Border style for all views — always round (╭╮╰╯). */
 export const BORDER_STYLE = 'round' as const;
