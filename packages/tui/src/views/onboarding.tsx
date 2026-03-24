@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { ChatView } from './chat.js';
 import { CommandPalette } from './command-palette.js';
 import { DaemonClient } from '../lib/daemon-client.js';
+import { CorpProvider } from '../context/corp-context.js';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import { CLAUDE_CORP_LOGO, asciiName } from '../ascii.js';
 
@@ -38,6 +39,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
   const [statusText, setStatusText] = useState('');
   const [daemon, setDaemon] = useState<Daemon | null>(null);
   const [daemonClient, setDaemonClient] = useState<DaemonClient | null>(null);
+  const [daemonPort, setDaemonPort] = useState(0);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channel, setChannel] = useState<Channel | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -101,6 +103,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       const d = new Daemon(root, globalConfig);
       const port = await d.start();
       setDaemon(d);
+      setDaemonPort(port);
       setDaemonClient(new DaemonClient(port));
 
       const tryConnect = async (): Promise<boolean> => {
@@ -318,30 +321,27 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
   if (channel && daemonClient && messagesPath) {
     if (showSwitcher) {
       return (
-        <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
-          <CommandPalette
-            channels={channels}
-            members={members}
-            corpRoot={corpRoot}
-            lastVisited={new Map()}
-            onNavigate={() => {}}
-            onSelectChannel={switchToChannel}
-            onCommand={() => {}}
-            onClose={() => setShowSwitcher(false)}
-          />
-        </Box>
+        <CorpProvider corpRoot={corpRoot} daemonClient={daemonClient} daemonPort={daemonPort} initialMembers={members} initialChannels={channels}>
+          <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
+            <CommandPalette
+              lastVisited={new Map()}
+              onNavigate={() => {}}
+              onSelectChannel={switchToChannel}
+              onCommand={() => {}}
+              onClose={() => setShowSwitcher(false)}
+            />
+          </Box>
+        </CorpProvider>
       );
     }
 
     return (
-      <ChatView
-        channel={channel}
-        members={members}
-        messagesPath={messagesPath}
-        daemonClient={daemonClient}
-        corpRoot={corpRoot}
-        onSwitchChannel={() => setShowSwitcher(true)}
-      />
+      <CorpProvider corpRoot={corpRoot} daemonClient={daemonClient} daemonPort={daemonPort} initialMembers={members} initialChannels={channels}>
+        <ChatView
+          channel={channel}
+          messagesPath={messagesPath}
+        />
+      </CorpProvider>
     );
   }
 
