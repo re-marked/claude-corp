@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { getPasteFilter } from '../lib/paste-filter.js';
+import { COLORS } from '../theme.js';
 
 interface Props {
   onSend: (text: string) => void;
@@ -235,6 +236,10 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
   const [cursor, setCursor] = useState(0);
   const [pastes, setPastes] = useState<Map<number, PasteInfo>>(new Map());
   const [hueOffset, setHueOffset] = useState(0);
+  // Input history — up/down arrow recalls previous messages
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [draft, setDraft] = useState('');
 
   // Refs for the paste handler (fires from an EventEmitter, not a React callback)
   const cursorRef = useRef(0);
@@ -290,6 +295,9 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
       const trimmed = sendValue.trim();
       if (trimmed) {
         onSend(trimmed);
+        setHistory((h) => [...h.slice(-99), trimmed]);
+        setHistoryIndex(-1);
+        setDraft('');
         setValue('');
         setCursor(0);
         setPastes(new Map());
@@ -324,8 +332,64 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
       return;
     }
 
-    // Ignore control keys
-    if (key.ctrl || key.meta || key.upArrow || key.downArrow || key.escape) return;
+    // Readline shortcuts — before the blanket ctrl ignore
+    if (key.ctrl) {
+      if (input === 'a') { setCursor(0); return; }
+      if (input === 'e') { setCursor(value.length); return; }
+      if (input === 'w') {
+        // Delete word backward
+        if (cursor === 0) return;
+        const before = value.slice(0, cursor);
+        let i = before.length - 1;
+        while (i >= 0 && before[i] === ' ') i--;
+        while (i >= 0 && before[i] !== ' ') i--;
+        const pos = i + 1;
+        setValue((v) => v.slice(0, pos) + v.slice(cursor));
+        setCursor(pos);
+        return;
+      }
+      if (input === 'u') {
+        // Kill to start of line
+        setValue((v) => v.slice(cursor));
+        setCursor(0);
+        return;
+      }
+    }
+
+    // Input history — up/down recall previous messages
+    if (key.upArrow) {
+      if (history.length === 0) return;
+      if (historyIndex === -1) {
+        setDraft(value);
+        const idx = history.length - 1;
+        setHistoryIndex(idx);
+        setValue(history[idx]!);
+        setCursor(history[idx]!.length);
+      } else if (historyIndex > 0) {
+        const idx = historyIndex - 1;
+        setHistoryIndex(idx);
+        setValue(history[idx]!);
+        setCursor(history[idx]!.length);
+      }
+      return;
+    }
+    if (key.downArrow) {
+      if (historyIndex === -1) return;
+      if (historyIndex < history.length - 1) {
+        const idx = historyIndex + 1;
+        setHistoryIndex(idx);
+        setValue(history[idx]!);
+        setCursor(history[idx]!.length);
+      } else {
+        setHistoryIndex(-1);
+        setValue(draft);
+        setCursor(draft.length);
+      }
+      return;
+    }
+
+    // Ignore remaining control keys
+    if (key.ctrl || key.meta || key.escape) return;
 
     if (input) {
       // Fallback paste detection for terminals without bracketed paste support
@@ -423,7 +487,7 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
           <Text color="#636E72"> — show daemon uptime and message count</Text>
         </Box>
       )}
-      <Box borderStyle="round" borderColor={disabled ? '#636E72' : '#636E72'} paddingX={1}>
+      <Box borderStyle="round" borderColor={disabled ? COLORS.muted : COLORS.borderActive} paddingX={1}>
         <Text bold color="#E17055">&gt; </Text>
         {disabled ? (
           <Text color="#636E72">{placeholder ?? 'Waiting...'}</Text>

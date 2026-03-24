@@ -27,8 +27,29 @@ import { DaemonClient } from './lib/daemon-client.js';
 import { useDaemonEvents } from './hooks/use-daemon-events.js';
 import { CorpProvider } from './context/corp-context.js';
 import { COLORS } from './theme.js';
+import { setDaemonRef } from './lib/daemon-ref.js';
 
 export function App() {
+  // Min terminal size guard — show warning if too small for the layout
+  const [termSize, setTermSize] = useState({ cols: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 });
+  useEffect(() => {
+    const onResize = () => setTermSize({ cols: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 });
+    process.stdout.on('resize', onResize);
+    return () => { process.stdout.off('resize', onResize); };
+  }, []);
+
+  if (termSize.cols < 80 || termSize.rows < 20) {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+        <Box flexDirection="column" borderStyle="round" borderColor={COLORS.warning} paddingX={3} paddingY={1}>
+          <Text bold color={COLORS.warning}>Terminal too small</Text>
+          <Text color={COLORS.text}>Claude Corp needs at least 80×20. Current: {termSize.cols}×{termSize.rows}</Text>
+          <Text color={COLORS.muted}>Resize your terminal to continue.</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   const [, forceReload] = useState(0);
   const [selectedCorp, setSelectedCorp] = useState<string | null>(null);
   const corps = listCorps();
@@ -176,6 +197,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         d = new Daemon(corpPath, globalConfig);
         const port = await d.start();
         setDaemon(d);
+        setDaemonRef(d); // For crash cleanup in index.tsx
         setDaemonPort(port);
         setClient(new DaemonClient(port));
 

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Box, Text, useInput, Static } from 'ink';
 import Spinner from 'ink-spinner';
 import {
@@ -12,7 +12,7 @@ import {
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
-import { MessageList } from '../components/message-list.js';
+import { MessageList, renderContent } from '../components/message-list.js';
 import { MessageInput } from '../components/message-input.js';
 import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
@@ -687,6 +687,8 @@ Always consider what happens when things go wrong.`,
   const isStreaming = !!channelStream;
   const hasStreamContent = !!(channelStream?.content);
 
+  const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
+
   const renderMsg = (msg: ChannelMessage) => {
     const sender = members.find((m) => m.id === msg.senderId);
     const name = sender?.displayName ?? 'system';
@@ -707,7 +709,7 @@ Always consider what happens when things go wrong.`,
           <Text bold color={sender?.type === 'user' ? COLORS.user : COLORS.agent}>{name}</Text>
           <Text color={COLORS.subtle}>{time}</Text>
         </Box>
-        <Text wrap="wrap">{msg.content}</Text>
+        <Text wrap="wrap">{renderContent(msg.content, memberMap)}</Text>
       </Box>
     );
   };

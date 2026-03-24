@@ -35,28 +35,45 @@ export function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-function renderContent(content: string | undefined | null, members: Map<string, Member>) {
+/** Wrap a URL in OSC 8 hyperlink escapes. Clickable in supporting terminals. */
+function linkify(url: string): string {
+  return `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`;
+}
+
+/** Render message content with @mentions highlighted and URLs clickable. */
+export function renderContent(content: string | undefined | null, members: Map<string, Member>) {
   if (!content) return <Text wrap="wrap">{''}</Text>;
   const parts: React.ReactNode[] = [];
-  const mentionRegex = /@"([^"]+)"|@([A-Za-z0-9][\w-]*)/g;
+  // Combined regex: URLs or @mentions
+  const combined = /https?:\/\/[^\s<>"'\)\]]+|@"([^"]+)"|@([A-Za-z0-9][\w-]*)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = mentionRegex.exec(content)) !== null) {
+  while ((match = combined.exec(content)) !== null) {
     if (match.index > lastIndex) {
       parts.push(<Text key={`t${lastIndex}`} wrap="wrap">{content.slice(lastIndex, match.index)}</Text>);
     }
 
-    const mentionName = match[1] ?? match[2]!;
-    const mentionedMember = [...members.values()].find(
-      (m) => m.displayName.toLowerCase() === mentionName.toLowerCase(),
-    );
-    const isCeo = mentionedMember?.rank === 'master';
-
-    if (isCeo) {
-      parts.push(<RainbowText key={`m${match.index}`}>{`@${mentionName}`}</RainbowText>);
+    if (match[0].startsWith('http')) {
+      // URL — clickable via OSC 8
+      parts.push(
+        <Text key={`u${match.index}`} color={COLORS.info} underline>
+          {linkify(match[0])}
+        </Text>,
+      );
     } else {
-      parts.push(<Text key={`m${match.index}`} bold color={COLORS.secondary}>@{mentionName}</Text>);
+      // @mention
+      const mentionName = match[1] ?? match[2]!;
+      const mentionedMember = [...members.values()].find(
+        (m) => m.displayName.toLowerCase() === mentionName.toLowerCase(),
+      );
+      const isCeo = mentionedMember?.rank === 'master';
+
+      if (isCeo) {
+        parts.push(<RainbowText key={`m${match.index}`}>{`@${mentionName}`}</RainbowText>);
+      } else {
+        parts.push(<Text key={`m${match.index}`} bold color={COLORS.secondary}>@{mentionName}</Text>);
+      }
     }
 
     lastIndex = match.index + match[0].length;
