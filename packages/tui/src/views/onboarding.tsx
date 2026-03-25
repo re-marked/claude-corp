@@ -15,7 +15,7 @@ import {
   MEMBERS_JSON,
   CHANNELS_JSON,
 } from '@claudecorp/shared';
-import { Daemon } from '@claudecorp/daemon';
+import { Daemon, setSilentMode } from '@claudecorp/daemon';
 import { join } from 'node:path';
 import { ChatView } from './chat.js';
 import { CommandPalette } from './command-palette.js';
@@ -100,6 +100,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       const { dmChannel } = setupCeo(root, globalConfig, userName);
 
       setStatusText('Starting daemon...');
+      setSilentMode(true); // Logs go to file only, not stdout (garbles TUI)
       const d = new Daemon(root, globalConfig);
       const port = await d.start();
       setDaemon(d);
