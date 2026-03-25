@@ -100,57 +100,37 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       const { dmChannel } = setupCeo(root, globalConfig, userName);
 
       setStatusText('Starting daemon...');
-      setSilentMode(true); // Logs go to file only, not stdout (garbles TUI)
+      setSilentMode(true);
       const d = new Daemon(root, globalConfig);
       const port = await d.start();
       setDaemon(d);
       setDaemonPort(port);
       setDaemonClient(new DaemonClient(port));
 
-      const tryConnect = async (): Promise<boolean> => {
-        if (globalConfig.userGateway) {
-          setStatusText(`Connecting to your OpenClaw...`);
-        } else {
-          setStatusText(`Waking up your ${selectedTheme.ranks.master}...`);
-        }
+      setStatusText(globalConfig.userGateway
+        ? 'Connecting to your OpenClaw...'
+        : `Waking up your ${selectedTheme.ranks.master}...`);
 
-        try {
-          await d.spawnAllAgents();
-        } catch {
-          // swallow — partial start is ok
-        }
-
-        const maxWait = globalConfig.userGateway ? 5 : 30;
-        for (let i = 0; i < maxWait; i++) {
-          const agents = d.processManager.listAgents();
-          if (agents.some((a) => a.status === 'ready')) return true;
-          if (agents.some((a) => a.status === 'crashed')) break;
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        return false;
-      };
-
-      let ready = await tryConnect();
-
-      // Retry loop for gateway connections
-      while (!ready && globalConfig.userGateway) {
-        setError('Cannot reach your OpenClaw gateway. Make sure it is running: openclaw gateway run');
-        setReconnecting(true);
-
-        // Countdown timer
-        for (let s = RECONNECT_INTERVAL; s > 0; s--) {
-          setCountdown(s);
-          await new Promise((r) => setTimeout(r, 1000));
-        }
-        setCountdown(0);
-        setError('');
-        ready = await tryConnect();
+      try {
+        await d.spawnAllAgents();
+      } catch {
+        // partial start is ok
       }
 
-      setReconnecting(false);
+      // Quick check — CEO should be ready almost instantly for remote mode
+      let ready = d.processManager.listAgents().some((a) => a.status === 'ready');
+      if (!ready) {
+        // Give it a few seconds
+        for (let i = 0; i < 8; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          const agents = d.processManager.listAgents();
+          if (agents.some((a) => a.status === 'ready')) { ready = true; break; }
+          if (agents.some((a) => a.status === 'crashed')) break;
+        }
+      }
 
       if (!ready) {
-        setError(`${selectedTheme.ranks.master} failed to start.`);
+        setError('Could not connect to OpenClaw. Make sure it is running: openclaw gateway run');
         return;
       }
 
