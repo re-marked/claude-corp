@@ -74,7 +74,12 @@ Same system underneath. Different vibe on top. 😎
 git clone https://github.com/re-marked/claude-corp.git
 cd claude-corp
 pnpm install && pnpm build
-npx tsx packages/tui/src/index.tsx
+npm link
+
+claudecorp          # Launch the TUI
+claudecorp new      # Create a new corporation
+claudecorp list     # List all corporations
+claudecorp delete   # Delete a corporation
 ```
 
 The onboarding walks you through everything — name yourself, name your corp, pick a theme. The CEO introduces itself.
