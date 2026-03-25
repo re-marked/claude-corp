@@ -45,7 +45,8 @@ interface Props {
 
 export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCall, onNavigate }: Props) {
   const { corpRoot, daemonClient, members: ctxMembers } = useCorp();
-  const messages = useMessages(messagesPath);
+  const [activeThread, setActiveThread] = useState<string | undefined>(undefined);
+  const { messages, threadCounts } = useMessages(messagesPath, 50, activeThread);
   const [sending, setSending] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [thinkingAgents, setThinkingAgents] = useState<string[]>([]);
@@ -171,6 +172,14 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // /time-machine, /tm, /rewind, /forward — all open the Time Machine view
     if (text.trim().toLowerCase() === '/time-machine' || text.trim().toLowerCase() === '/tm' || text.trim().toLowerCase() === '/rewind' || text.trim().toLowerCase() === '/forward' || text.trim().toLowerCase() === '/ff') {
       onNavigate?.({ type: 'time-machine' });
+      return;
+    }
+
+    // /thread — view or exit thread
+    if (text.trim().toLowerCase() === '/thread' || text.trim().toLowerCase() === '/t') {
+      if (activeThread) {
+        setActiveThread(undefined); // back to main channel
+      }
       return;
     }
 
@@ -711,6 +720,7 @@ Always consider what happens when things go wrong.`,
       );
     }
 
+    const replyCount = threadCounts.get(msg.id) ?? 0;
     return (
       <Box key={msg.id} flexDirection="column" marginBottom={1}>
         <Box gap={1}>
@@ -718,6 +728,9 @@ Always consider what happens when things go wrong.`,
           <Text color={COLORS.subtle}>{time}</Text>
         </Box>
         <Text wrap="wrap">{renderContent(msg.content, memberMap)}</Text>
+        {replyCount > 0 && !activeThread && (
+          <Text color={COLORS.info}>  {'\u2514\u2500'} {replyCount} {replyCount === 1 ? 'reply' : 'replies'}</Text>
+        )}
       </Box>
     );
   };
@@ -757,7 +770,7 @@ Always consider what happens when things go wrong.`,
         disabled={sending}
         placeholder="Type a message... (/hire to add agents)"
       />
-      <Text color={COLORS.muted}> #{channel.name}  C-K:palette  C-H:home  C-T:tasks  C-M:members  Esc:back</Text>
+      <Text color={COLORS.muted}> {activeThread ? `Thread in #${channel.name}  /t:back` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  C-M:members  Esc:back</Text>
     </Box>
   );
 }

@@ -14,6 +14,7 @@ import { outputEfficiencyFragment } from './output-efficiency.js';
 import { blastRadiusFragment } from './blast-radius.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
+import { debateProtocolFragment } from './debate-protocol.js';
 
 const FRAGMENTS: Fragment[] = [
   workspaceFragment,
@@ -29,6 +30,7 @@ const FRAGMENTS: Fragment[] = [
   antiRationalizationFragment,
   outputEfficiencyFragment,
   blastRadiusFragment,
+  debateProtocolFragment,
   contextFragment,
   historyFragment,
 ].sort((a, b) => a.order - b.order);
