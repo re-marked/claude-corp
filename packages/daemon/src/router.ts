@@ -404,25 +404,28 @@ export class MessageRouter {
         channelId: channel.id,
       });
 
-      // Parse [thread] prefix — agent opted into threading
-      let responseContent = result.content;
-      let responseThreadId = msg.threadId; // inherit parent's thread by default
-      if (responseContent.startsWith('[thread]')) {
-        responseContent = responseContent.slice('[thread]'.length).trim();
-        responseThreadId = msg.threadId ?? msg.id; // continue existing thread or start new one
-        log(`[router] ${target.displayName} threaded response under ${responseThreadId}`);
+      // Parse [thread] marker — split into main channel + thread parts
+      const threadMarkerIdx = result.content.indexOf('[thread]');
+      let mainContent = result.content;
+      let threadContent: string | null = null;
+      let responseThreadId = msg.threadId;
+
+      if (threadMarkerIdx !== -1) {
+        mainContent = result.content.slice(0, threadMarkerIdx).trim();
+        threadContent = result.content.slice(threadMarkerIdx + '[thread]'.length).trim();
+        responseThreadId = msg.threadId ?? msg.id;
+        log(`[router] ${target.displayName} split response: main=${mainContent.length} chars, thread=${threadContent.length} chars`);
       }
 
-      // Write agent response to JSONL
-      log(`[router] WRITING ${target.displayName}'s response (${responseContent.length} chars) "${responseContent.substring(0, 80)}"`);
-      const responseMsg: ChannelMessage = {
+      // Write main channel response
+      const mainMsg: ChannelMessage = {
         id: generateId(),
         channelId: channel.id,
         senderId: targetId,
-        threadId: responseThreadId,
-        content: responseContent,
+        threadId: msg.threadId, // stays in same context (null for main, threadId for thread)
+        content: mainContent || threadContent!, // if no main content, put thread content in main
         kind: 'text',
-        mentions: resolveMentions(responseContent, members),
+        mentions: resolveMentions(mainContent || threadContent!, members),
         metadata: { source: 'router' },
         depth: msg.depth + 1,
         originId: msg.originId,
@@ -430,7 +433,30 @@ export class MessageRouter {
       };
 
       const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
-      appendMessage(msgPath, responseMsg);
+      log(`[router] WRITING ${target.displayName}'s response (${mainMsg.content.length} chars) "${mainMsg.content.substring(0, 80)}"`);
+      appendMessage(msgPath, mainMsg);
+
+      // Write thread portion as a separate message if it exists
+      if (threadContent && mainContent) {
+        const threadMsg: ChannelMessage = {
+          id: generateId(),
+          channelId: channel.id,
+          senderId: targetId,
+          threadId: responseThreadId,
+          content: threadContent,
+          kind: 'text',
+          mentions: resolveMentions(threadContent, members),
+          metadata: { source: 'router' },
+          depth: msg.depth + 1,
+          originId: msg.originId,
+          timestamp: new Date().toISOString(),
+        };
+        appendMessage(msgPath, threadMsg);
+        log(`[router] WRITING ${target.displayName}'s thread reply (${threadContent.length} chars)`);
+      }
+
+      // Use mainMsg as the "responseMsg" for the rest of the flow
+      const responseMsg = mainMsg;
 
       log(`[router] ${target.displayName} responded in #${channel.name}`);
 
