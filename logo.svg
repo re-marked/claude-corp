@@ -1,80 +1,83 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1a1a2e"/>
-      <stop offset="100%" style="stop-color:#16213e"/>
+    <linearGradient id="salmon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff6b4a"/>
+      <stop offset="50%" style="stop-color:#fa8072"/>
+      <stop offset="100%" style="stop-color:#e8956a"/>
     </linearGradient>
-    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#d4a853"/>
-      <stop offset="50%" style="stop-color:#f0c970"/>
-      <stop offset="100%" style="stop-color:#c9953c"/>
-    </linearGradient>
-    <linearGradient id="copper" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#b87333"/>
-      <stop offset="100%" style="stop-color:#da8a47"/>
-    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softglow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
 
-  <!-- Background rounded square -->
-  <rect x="16" y="16" width="480" height="480" rx="64" ry="64" fill="url(#bg)"/>
-  <rect x="20" y="20" width="472" height="472" rx="60" ry="60" fill="none" stroke="url(#gold)" stroke-width="2" opacity="0.4"/>
+  <!-- Black background -->
+  <rect width="512" height="512" rx="64" ry="64" fill="#0a0a0a"/>
 
-  <!-- Outer gear (large, subtle) -->
-  <g transform="translate(256,232)" opacity="0.15">
-    <circle r="155" fill="none" stroke="url(#gold)" stroke-width="3"/>
-    <!-- Gear teeth -->
-    <g fill="url(#gold)">
-      <rect x="-12" y="-168" width="24" height="30" rx="4"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(30)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(60)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(90)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(120)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(150)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(180)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(210)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(240)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(270)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(300)"/>
-      <rect x="-12" y="-168" width="24" height="30" rx="4" transform="rotate(330)"/>
-    </g>
+  <!-- Subtle grid lines like a terminal -->
+  <g opacity="0.04" stroke="#fa8072">
+    <line x1="0" y1="64" x2="512" y2="64" stroke-width="0.5"/>
+    <line x1="0" y1="128" x2="512" y2="128" stroke-width="0.5"/>
+    <line x1="0" y1="192" x2="512" y2="192" stroke-width="0.5"/>
+    <line x1="0" y1="256" x2="512" y2="256" stroke-width="0.5"/>
+    <line x1="0" y1="320" x2="512" y2="320" stroke-width="0.5"/>
+    <line x1="0" y1="384" x2="512" y2="384" stroke-width="0.5"/>
+    <line x1="0" y1="448" x2="512" y2="448" stroke-width="0.5"/>
   </g>
 
-  <!-- Corporation building / pillars motif -->
-  <g transform="translate(256,220)">
-    <!-- Central pillar / tower -->
-    <rect x="-20" y="-80" width="40" height="130" rx="4" fill="url(#gold)" opacity="0.9"/>
-    <!-- Left pillar -->
-    <rect x="-65" y="-50" width="30" height="100" rx="4" fill="url(#gold)" opacity="0.7"/>
-    <!-- Right pillar -->
-    <rect x="35" y="-50" width="30" height="100" rx="4" fill="url(#gold)" opacity="0.7"/>
-    <!-- Outer left pillar -->
-    <rect x="-100" y="-25" width="22" height="75" rx="3" fill="url(#gold)" opacity="0.5"/>
-    <!-- Outer right pillar -->
-    <rect x="78" y="-25" width="22" height="75" rx="3" fill="url(#gold)" opacity="0.5"/>
-
-    <!-- Triangular pediment / roof -->
-    <polygon points="-115,-25 0,-95 115,-25" fill="none" stroke="url(#gold)" stroke-width="3.5" stroke-linejoin="round"/>
-
-    <!-- Base line -->
-    <line x1="-115" y1="52" x2="115" y2="52" stroke="url(#gold)" stroke-width="3.5" stroke-linecap="round"/>
-
-    <!-- AI "eye" / node in center -->
-    <circle cx="0" cy="-10" r="18" fill="none" stroke="url(#copper)" stroke-width="3"/>
-    <circle cx="0" cy="-10" r="8" fill="url(#copper)"/>
-    <!-- Connection lines from eye -->
-    <line x1="-16" y1="-10" x2="-50" y2="-10" stroke="url(#copper)" stroke-width="1.5" opacity="0.6"/>
-    <line x1="16" y1="-10" x2="50" y2="-10" stroke="url(#copper)" stroke-width="1.5" opacity="0.6"/>
-    <line x1="0" y1="8" x2="0" y2="35" stroke="url(#copper)" stroke-width="1.5" opacity="0.6"/>
-    <!-- Small nodes at connection endpoints -->
-    <circle cx="-50" cy="-10" r="3" fill="url(#copper)" opacity="0.6"/>
-    <circle cx="50" cy="-10" r="3" fill="url(#copper)" opacity="0.6"/>
-    <circle cx="0" cy="35" r="3" fill="url(#copper)" opacity="0.6"/>
+  <!-- Scanline effect -->
+  <g opacity="0.02">
+    <pattern id="scanlines" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2" fill="#fa8072"/>
+    </pattern>
+    <rect width="512" height="512" rx="64" fill="url(#scanlines)"/>
   </g>
 
-  <!-- Text: CLAUDE CORP -->
-  <text x="256" y="360" text-anchor="middle" font-family="'Georgia', 'Times New Roman', serif" font-size="52" font-weight="bold" letter-spacing="8" fill="url(#gold)">CLAUDE</text>
-  <text x="256" y="405" text-anchor="middle" font-family="'Georgia', 'Times New Roman', serif" font-size="32" letter-spacing="14" fill="url(#copper)">CORP</text>
+  <!-- Terminal prompt bracket cluster - the main icon -->
+  <g transform="translate(256, 195)" filter="url(#glow)">
+    <!-- > prompt chevron (large) -->
+    <polyline points="-70,-55 -20,0 -70,55" fill="none" stroke="url(#salmon)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- Tagline -->
-  <text x="256" y="440" text-anchor="middle" font-family="'Helvetica Neue', Arial, sans-serif" font-size="13" letter-spacing="4" fill="#d4a853" opacity="0.5">YOUR PERSONAL CORPORATION</text>
+    <!-- Cursor block -->
+    <rect x="0" y="-8" width="45" height="55" rx="3" fill="url(#salmon)" opacity="0.85"/>
+
+    <!-- Underscore cursor blink -->
+    <rect x="55" y="35" width="35" height="8" rx="2" fill="#ff6b4a" opacity="0.6"/>
+  </g>
+
+  <!-- Network nodes - representing agents -->
+  <g filter="url(#softglow)" opacity="0.35">
+    <!-- Top node -->
+    <circle cx="256" cy="72" r="4" fill="#fa8072"/>
+    <line x1="256" y1="76" x2="256" y2="130" stroke="#fa8072" stroke-width="1" opacity="0.4"/>
+    <!-- Left node -->
+    <circle cx="120" cy="195" r="4" fill="#fa8072"/>
+    <line x1="124" y1="195" x2="175" y2="195" stroke="#fa8072" stroke-width="1" opacity="0.4"/>
+    <!-- Right node -->
+    <circle cx="392" cy="195" r="4" fill="#fa8072"/>
+    <line x1="388" y1="195" x2="340" y2="195" stroke="#fa8072" stroke-width="1" opacity="0.4"/>
+    <!-- Bottom left -->
+    <circle cx="155" cy="290" r="3" fill="#fa8072"/>
+    <line x1="158" y1="287" x2="195" y2="255" stroke="#fa8072" stroke-width="1" opacity="0.3"/>
+    <!-- Bottom right -->
+    <circle cx="357" cy="290" r="3" fill="#fa8072"/>
+    <line x1="354" y1="287" x2="317" y2="255" stroke="#fa8072" stroke-width="1" opacity="0.3"/>
+  </g>
+
+  <!-- CLAUDE CORP text - monospace, terminal style -->
+  <text x="256" y="370" text-anchor="middle" font-family="'Courier New', 'Fira Code', 'SF Mono', monospace" font-size="56" font-weight="bold" letter-spacing="4" fill="url(#salmon)">claude</text>
+  <text x="256" y="420" text-anchor="middle" font-family="'Courier New', 'Fira Code', 'SF Mono', monospace" font-size="56" font-weight="bold" letter-spacing="4" fill="#fa8072" opacity="0.7">corp</text>
+
+  <!-- Tagline as a command -->
+  <text x="256" y="458" text-anchor="middle" font-family="'Courier New', 'Fira Code', 'SF Mono', monospace" font-size="11" letter-spacing="2" fill="#fa8072" opacity="0.3">$ your personal corporation</text>
 </svg>
