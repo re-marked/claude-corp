@@ -356,7 +356,7 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
       }
     }
 
-    // Input history — up/down recall previous messages
+    // Input history — up/down arrow recall previous messages
     if (key.upArrow) {
       if (history.length === 0) return;
       if (historyIndex === -1) {

@@ -23,6 +23,7 @@ import { HeartbeatManager } from './heartbeat.js';
 import { TaskWatcher } from './task-watcher.js';
 import { HireWatcher } from './hire-watcher.js';
 import { EventBus, type DaemonEvent } from './events.js';
+import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
 
@@ -40,6 +41,10 @@ export class Daemon {
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
   /** WebSocket event bus for real-time TUI updates. */
   events = new EventBus();
+  /** WebSocket to user's personal OpenClaw (for CEO dispatch with tool events). */
+  openclawWS: OpenClawWS | null = null;
+  /** WebSocket to corp gateway (for worker dispatch with tool events). */
+  corpGatewayWS: OpenClawWS | null = null;
   private server: Server | null = null;
   private port = 0;
 
@@ -91,6 +96,37 @@ export class Daemon {
     this.heartbeat.start();
     this.taskWatcher.start();
     this.hireWatcher.start();
+    // Connect WebSocket to OpenClaw for tool event visibility (non-blocking)
+    this.connectOpenClawWS();
+  }
+
+  /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
+  private async connectOpenClawWS(): Promise<void> {
+    // User's personal OpenClaw (CEO)
+    const userGw = this.globalConfig.userGateway;
+    if (userGw) {
+      try {
+        this.openclawWS = new OpenClawWS(userGw.port, userGw.token);
+        await this.openclawWS.connect();
+        log('[daemon] WebSocket connected to user OpenClaw (tool events enabled)');
+      } catch (err) {
+        logError(`[daemon] WebSocket to user OpenClaw failed (falling back to HTTP): ${err}`);
+        this.openclawWS = null;
+      }
+    }
+
+    // Corp gateway (worker agents)
+    const corpGw = this.processManager.corpGateway;
+    if (corpGw && corpGw.getStatus() === 'ready') {
+      try {
+        this.corpGatewayWS = new OpenClawWS(corpGw.getPort(), corpGw.getToken());
+        await this.corpGatewayWS.connect();
+        log('[daemon] WebSocket connected to corp gateway (tool events enabled)');
+      } catch (err) {
+        logError(`[daemon] WebSocket to corp gateway failed (falling back to HTTP): ${err}`);
+        this.corpGatewayWS = null;
+      }
+    }
   }
 
   async spawnAllAgents(): Promise<void> {
@@ -199,6 +235,8 @@ export class Daemon {
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();
+    this.openclawWS?.close();
+    this.corpGatewayWS?.close();
     this.events.close();
     if (this.server) {
       this.server.close();

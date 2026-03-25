@@ -1,4 +1,4 @@
-export type MessageKind = 'text' | 'system' | 'task_event';
+export type MessageKind = 'text' | 'system' | 'task_event' | 'tool_event';
 
 export interface ChannelMessage {
   id: string;

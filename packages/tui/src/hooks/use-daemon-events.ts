@@ -7,11 +7,19 @@ interface StreamState {
   channelId: string;
 }
 
+interface ToolState {
+  agentName: string;
+  channelId: string;
+  toolName: string;
+}
+
 interface DaemonEventState {
   /** Active streaming content per channel */
   streams: Map<string, StreamState>;
   /** Agent names currently dispatching */
   dispatching: Set<string>;
+  /** Active tool calls per agent */
+  toolActivity: Map<string, ToolState>;
 }
 
 /**
@@ -24,6 +32,7 @@ interface DaemonEventState {
 export function useDaemonEvents(port: number): DaemonEventState {
   const [streams, setStreams] = useState<Map<string, StreamState>>(new Map());
   const [dispatching, setDispatching] = useState<Set<string>>(new Set());
+  const [toolActivity, setToolActivity] = useState<Map<string, ToolState>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,6 +80,26 @@ export function useDaemonEvents(port: number): DaemonEventState {
               }
               break;
 
+            case 'tool_start':
+              setToolActivity((prev) => {
+                const next = new Map(prev);
+                next.set(event.agentName, {
+                  agentName: event.agentName,
+                  channelId: event.channelId,
+                  toolName: event.toolName,
+                });
+                return next;
+              });
+              break;
+
+            case 'tool_end':
+              setToolActivity((prev) => {
+                const next = new Map(prev);
+                next.delete(event.agentName);
+                return next;
+              });
+              break;
+
             case 'stream_end':
             case 'dispatch_end':
               setDispatching((prev) => {
@@ -79,6 +108,11 @@ export function useDaemonEvents(port: number): DaemonEventState {
                 return next;
               });
               streamBufferRef.current.delete(event.channelId);
+              setToolActivity((prev) => {
+                const next = new Map(prev);
+                next.delete(event.agentName);
+                return next;
+              });
               // Flush immediately on end so UI clears promptly
               if (flushTimerRef.current) {
                 clearTimeout(flushTimerRef.current);
@@ -111,5 +145,5 @@ export function useDaemonEvents(port: number): DaemonEventState {
     };
   }, [connect]);
 
-  return { streams, dispatching };
+  return { streams, dispatching, toolActivity };
 }

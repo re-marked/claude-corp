@@ -308,6 +308,11 @@ export class MessageRouter {
         channelId: channel.id,
       });
 
+      // Pick WebSocket client based on agent mode (remote = user OpenClaw, gateway = corp gateway)
+      const wsClient = agentProc.mode === 'remote'
+        ? this.daemon.openclawWS
+        : this.daemon.corpGatewayWS;
+
       const result = await dispatchToAgent(
         agentProc,
         messageContent,
@@ -319,13 +324,47 @@ export class MessageRouter {
             content: accumulated,
             channelId: channel.id,
           });
-          // Push streaming tokens to TUI via WebSocket
           this.daemon.events.broadcast({
             type: 'stream_token',
             agentName: target.displayName,
             channelId: channel.id,
             content: accumulated,
           });
+        },
+        wsClient,
+        {
+          onToolStart: (tool) => {
+            this.daemon.events.broadcast({
+              type: 'tool_start',
+              agentName: target.displayName,
+              channelId: channel.id,
+              toolName: tool.name,
+              args: tool.args,
+            });
+          },
+          onToolEnd: (tool) => {
+            // Write tool_event to JSONL AFTER tool completes — permanent history
+            const toolMsg: ChannelMessage = {
+              id: generateId(),
+              channelId: channel.id,
+              senderId: targetId,
+              threadId: msg.threadId,
+              content: this.formatToolMessage(tool.name, tool.args),
+              kind: 'tool_event',
+              mentions: [],
+              metadata: { source: 'router', toolName: tool.name, toolCallId: tool.toolCallId },
+              depth: msg.depth + 1,
+              originId: msg.originId,
+              timestamp: new Date().toISOString(),
+            };
+            appendMessage(join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL), toolMsg);
+            this.daemon.events.broadcast({
+              type: 'tool_end',
+              agentName: target.displayName,
+              channelId: channel.id,
+              toolName: tool.name,
+            });
+          },
         },
       );
 
@@ -376,6 +415,60 @@ export class MessageRouter {
       // Still drain queue on error — next task might succeed
       this.drainQueue(targetId);
     }
+  }
+
+  /** Format a tool call into a human-readable message for the chat history. */
+  private formatToolMessage(toolName: string, args?: Record<string, unknown>): string {
+    const name = toolName.toLowerCase();
+
+    // File operations
+    if (name === 'write' || name === 'create' || name === 'write_file') {
+      const path = args?.path ?? args?.file_path ?? args?.filePath;
+      return path ? `wrote ${path}` : 'wrote a file';
+    }
+    if (name === 'edit' || name === 'edit_file' || name === 'patch') {
+      const path = args?.path ?? args?.file_path ?? args?.filePath;
+      return path ? `edited ${path}` : 'edited a file';
+    }
+    if (name === 'read' || name === 'read_file') {
+      const path = args?.path ?? args?.file_path ?? args?.filePath;
+      return path ? `read ${path}` : 'read a file';
+    }
+
+    // Commands / exec
+    if (name === 'bash' || name === 'execute' || name === 'exec' || name === 'shell' || name === 'run') {
+      const cmd = String(args?.command ?? args?.cmd ?? args?.input ?? '').trim();
+      if (cmd) {
+        const short = cmd.split('\n')[0]!.substring(0, 80);
+        return `ran \`${short}\``;
+      }
+      return 'ran a command';
+    }
+
+    // Search
+    if (name === 'glob' || name === 'search' || name === 'find') {
+      return `searched ${args?.pattern ?? args?.query ?? 'files'}`;
+    }
+    if (name === 'grep') {
+      return `searched for "${args?.pattern ?? args?.query ?? '...'}"`;
+    }
+
+    // Web
+    if (name === 'web_search' || name === 'websearch') {
+      return `searched web: "${args?.query ?? '...'}"`;
+    }
+    if (name === 'web_fetch' || name === 'fetch' || name === 'curl') {
+      return `fetched ${args?.url ?? 'a URL'}`;
+    }
+
+    // Fallback — try to extract something useful from args
+    const path = args?.path ?? args?.file_path ?? args?.filePath;
+    if (path) return `${name} ${path}`;
+    const cmd = args?.command ?? args?.cmd;
+    if (cmd) return `${name}: ${String(cmd).substring(0, 60)}`;
+
+    log(`[router] Unknown tool format: ${toolName} args=${JSON.stringify(args)}`);
+    return `used ${toolName}`;
   }
 
   /** Process the next queued message for an agent after their current dispatch finishes. */

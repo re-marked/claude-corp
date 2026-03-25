@@ -38,10 +38,12 @@ interface Props {
   streamData?: StreamData | null;
   /** Agent names currently dispatching */
   dispatchingAgents?: string[];
+  /** Active tool call (from WebSocket) */
+  activeToolCall?: { agentName: string; toolName: string } | null;
   onNavigate?: (view: import('../navigation.js').View) => void;
 }
 
-export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], onNavigate }: Props) {
+export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCall, onNavigate }: Props) {
   const { corpRoot, daemonClient, members: ctxMembers } = useCorp();
   const messages = useMessages(messagesPath);
   const [sending, setSending] = useState(false);
@@ -697,6 +699,18 @@ Always consider what happens when things go wrong.`,
         </Box>
       );
     }
+
+    // Tool events — compact inline display
+    if (msg.kind === 'tool_event') {
+      return (
+        <Box key={msg.id} gap={1}>
+          <Text color={COLORS.muted}> {'\u250A'}</Text>
+          <Text color={COLORS.agent}>{name}</Text>
+          <Text color={COLORS.subtle}>{msg.content}</Text>
+        </Box>
+      );
+    }
+
     return (
       <Box key={msg.id} flexDirection="column" marginBottom={1}>
         <Box gap={1}>
@@ -728,11 +742,13 @@ Always consider what happens when things go wrong.`,
         <Box gap={1} paddingX={1}>
           <Text color={COLORS.primary}><Spinner type="dots" /></Text>
           <Text color={COLORS.subtle}>
-            {isStreaming
-              ? `${channelStream!.agentName} is working...`
-              : thinkingAgents.length > 0
-                ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
+            {activeToolCall
+              ? `${activeToolCall.agentName} ${activeToolCall.toolName}...`
+              : isStreaming
+                ? `${channelStream!.agentName} is working...`
+                : thinkingAgents.length > 0
+                  ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+                  : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
           </Text>
         </Box>
       )}

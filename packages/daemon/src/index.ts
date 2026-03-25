@@ -15,3 +15,5 @@ export { DaemonClient } from './client.js';
 export { setSilentMode } from './logger.js';
 export { EventBus } from './events.js';
 export type { DaemonEvent } from './events.js';
+export { OpenClawWS } from './openclaw-ws.js';
+export type { AgentEvent, ChatEvent, ToolEvent } from './openclaw-ws.js';

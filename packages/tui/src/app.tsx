@@ -371,12 +371,17 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         lastVisitedRef.current.set(ch.id, new Date().toISOString());
         // Get streaming data for this channel from WebSocket events
         const streamForChannel = events.streams.get(current.channelId) ?? null;
+        // Get tool activity for this channel
+        const toolForChannel = [...events.toolActivity.values()].find(
+          (t) => t.channelId === current.channelId,
+        );
         return (
           <ChatView
             channel={ch}
             messagesPath={messagesPath}
             streamData={streamForChannel}
             dispatchingAgents={[...events.dispatching]}
+            activeToolCall={toolForChannel ? { agentName: toolForChannel.agentName, toolName: toolForChannel.toolName } : null}
             onNavigate={navigate}
           />
         );

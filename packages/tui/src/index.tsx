@@ -61,7 +61,7 @@ if (args[0] === 'help') {
 // --- TUI launch ---
 
 ensureClaudeCorpHome();
-process.stdout.write('\x1b[?1049h'); // Enter alt screen buffer
+process.stdout.write('\x1b[2J\x1b[H'); // Clear screen (keeps scrollback, scroll wheel works)
 process.stdout.write('\x1b]0;Claude Corp \u25C6\x07'); // Set tab title
 
 enableBracketedPaste();
@@ -78,7 +78,6 @@ const { unmount, waitUntilExit } = render(<App forceNew={forceNew} />, {
 
 function restoreTerminal() {
   disableBracketedPaste();
-  process.stdout.write('\x1b[?1049l');
 }
 
 waitUntilExit().then(async () => {
