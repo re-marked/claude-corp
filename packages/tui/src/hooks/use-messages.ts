@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { watch } from 'node:fs';
+import { watch, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { type ChannelMessage, tailMessages, readMessages } from '@claudecorp/shared';
 
 /** Only show messages written by our system. External OpenClaw writes are hidden. */
@@ -25,8 +26,12 @@ export function useMessages(messagesPath: string, initialCount = 50) {
     }
   }, [messagesPath]);
 
-  // Watch for changes
+  // Watch for changes — ensure file exists before watching
   useEffect(() => {
+    if (!existsSync(messagesPath)) {
+      mkdirSync(dirname(messagesPath), { recursive: true });
+      writeFileSync(messagesPath, '');
+    }
     const watcher = watch(messagesPath, () => {
       try {
         const newMsgs = lastIdRef.current
