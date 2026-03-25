@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Corporation } from './types/corp.js';
 import type { Member } from './types/member.js';
@@ -177,8 +177,6 @@ export function deleteCorp(name: string): boolean {
   const entry = index.corps.find((c) => c.name === name);
   if (!entry) return false;
 
-  // Remove directory
-  const { rmSync } = require('fs') as typeof import('fs');
   try { rmSync(entry.path, { recursive: true, force: true }); } catch {}
 
   // Remove from index
