@@ -29,7 +29,7 @@ import { COLORS } from './theme.js';
 import { setDaemonRef } from './lib/daemon-ref.js';
 import { BootSequence, getBootStyle } from './components/boot-sequence.js';
 
-export function App() {
+export function App({ forceNew }: { forceNew?: boolean } = {}) {
   // All hooks MUST be before any early returns (React rules of hooks)
   const [termSize, setTermSize] = useState({ cols: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 });
   const [, forceReload] = useState(0);
@@ -50,7 +50,7 @@ export function App() {
 
   const corps = listCorps();
 
-  if (corps.length === 0) {
+  if (corps.length === 0 || forceNew) {
     return <OnboardingView onComplete={() => forceReload((n) => n + 1)} />;
   }
 
