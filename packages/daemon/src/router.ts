@@ -194,10 +194,34 @@ export class MessageRouter {
     };
     if (!sender && msg.senderId !== 'system') return;
 
+    // Channel mode check — announce channels don't dispatch
+    const channelMode = channel.mode ?? (channel.kind === 'direct' ? 'open' : 'mention');
+    if (channelMode === 'announce') {
+      log(`[router] #${channel.name} is announce-mode — no dispatch`);
+      return;
+    }
+
     // Find dispatch targets
     let targetIds: string[] = [];
 
-    if (channel.kind === 'direct') {
+    if (msg.threadId) {
+      // Thread message — dispatch to thread participants + @mentioned only
+      const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+      const recent = tailMessages(msgPath, 100);
+      const threadMsgs = recent.filter(
+        (m) => m.threadId === msg.threadId || m.id === msg.threadId,
+      );
+      const participantIds = new Set(threadMsgs.map((m) => m.senderId));
+      const mentionedIds = resolveMentions(msg.content, members);
+      for (const id of mentionedIds) participantIds.add(id);
+      // Remove the sender, keep only agents
+      participantIds.delete(msg.senderId);
+      targetIds = [...participantIds].filter((id) => {
+        const m = members.find((mem) => mem.id === id);
+        return m && m.type === 'agent';
+      });
+      log(`[router] Thread dispatch: ${targetIds.length} participants`);
+    } else if (channel.kind === 'direct') {
       // DM: auto-route to the other member
       const otherId = channel.memberIds.find((id) => id !== msg.senderId);
       if (otherId) {
@@ -267,10 +291,14 @@ export class MessageRouter {
     // Track cooldown for all dispatches
     this.lastDispatch.set(targetId, Date.now());
 
-    // Load recent channel history for context
+    // Load recent channel history for context — thread-aware
     const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
-    const recent = tailMessages(msgPath, 50);
-    const recentHistory = recent.map((m) => {
+    const allRecent = tailMessages(msgPath, 100);
+    // If dispatching about a thread, show thread history. Otherwise main channel only.
+    const recent = msg.threadId
+      ? allRecent.filter((m) => m.threadId === msg.threadId || m.id === msg.threadId)
+      : allRecent.filter((m) => !m.threadId);
+    const recentHistory = recent.slice(-50).map((m) => {
       const s = members.find((mem) => mem.id === m.senderId);
       const name = s?.displayName ?? 'Unknown';
       const rank = s?.rank ?? '';
@@ -376,16 +404,25 @@ export class MessageRouter {
         channelId: channel.id,
       });
 
+      // Parse [thread] prefix — agent opted into threading
+      let responseContent = result.content;
+      let responseThreadId = msg.threadId; // inherit parent's thread by default
+      if (responseContent.startsWith('[thread]')) {
+        responseContent = responseContent.slice('[thread]'.length).trim();
+        responseThreadId = msg.threadId ?? msg.id; // continue existing thread or start new one
+        log(`[router] ${target.displayName} threaded response under ${responseThreadId}`);
+      }
+
       // Write agent response to JSONL
-      log(`[router] WRITING ${target.displayName}'s response (${result.content.length} chars) "${result.content.substring(0, 80)}"`);
+      log(`[router] WRITING ${target.displayName}'s response (${responseContent.length} chars) "${responseContent.substring(0, 80)}"`);
       const responseMsg: ChannelMessage = {
         id: generateId(),
         channelId: channel.id,
         senderId: targetId,
-        threadId: msg.threadId,
-        content: result.content,
+        threadId: responseThreadId,
+        content: responseContent,
         kind: 'text',
-        mentions: resolveMentions(result.content, members),
+        mentions: resolveMentions(responseContent, members),
         metadata: { source: 'router' },
         depth: msg.depth + 1,
         originId: msg.originId,
