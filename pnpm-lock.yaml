@@ -7,13 +7,44 @@ settings:
 importers:
 
   .:
+    dependencies:
+      execa:
+        specifier: ^9.6.1
+        version: 9.6.1
+      ink:
+        specifier: ^6.8.0
+        version: 6.8.0(@types/react@19.2.14)(react@19.2.4)
+      ink-spinner:
+        specifier: ^5.0.0
+        version: 5.0.0(ink@6.8.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
+      ink-text-input:
+        specifier: ^6.0.0
+        version: 6.0.0(ink@6.8.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      simple-git:
+        specifier: ^3.28.0
+        version: 3.33.0
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
+      yaml:
+        specifier: ^2.8.0
+        version: 2.8.3
     devDependencies:
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.14
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       tsup:
         specifier: ^8.5.1
-        version: 8.5.1(typescript@5.9.3)
+        version: 8.5.1(typescript@5.9.3)(yaml@2.8.3)
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -933,6 +964,11 @@ packages:
       utf-8-validate:
         optional: true
 
+  yaml@2.8.3:
+    resolution: {integrity: sha512-AvbaCLOO2Otw/lW5bmh9d/WEdcDFdQp2Z2ZUH3pX9U2ihyUY0nvLv7J6TrWowklRGPYbB/IuIMfYgxaCPg5Bpg==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yoctocolors@2.1.2:
     resolution: {integrity: sha512-CzhO+pFNo8ajLM2d2IW/R93ipy99LWjtwblvC1RsoSUMZgyLbYFr221TnSNT7GjGdYui6P459mw9JH/g/zW2ug==}
     engines: {node: '>=18'}
@@ -1433,9 +1469,11 @@ snapshots:
       mlly: 1.8.1
       pathe: 2.0.3
 
-  postcss-load-config@6.0.1:
+  postcss-load-config@6.0.1(yaml@2.8.3):
     dependencies:
       lilconfig: 3.1.3
+    optionalDependencies:
+      yaml: 2.8.3
 
   pretty-ms@9.3.0:
     dependencies:
@@ -1578,7 +1616,7 @@ snapshots:
 
   ts-interface-checker@0.1.13: {}
 
-  tsup@8.5.1(typescript@5.9.3):
+  tsup@8.5.1(typescript@5.9.3)(yaml@2.8.3):
     dependencies:
       bundle-require: 5.1.0(esbuild@0.27.4)
       cac: 6.7.14
@@ -1589,7 +1627,7 @@ snapshots:
       fix-dts-default-cjs-exports: 1.0.1
       joycon: 3.1.1
       picocolors: 1.1.1
-      postcss-load-config: 6.0.1
+      postcss-load-config: 6.0.1(yaml@2.8.3)
       resolve-from: 5.0.0
       rollup: 4.59.0
       source-map: 0.7.6
@@ -1636,6 +1674,8 @@ snapshots:
       strip-ansi: 7.2.0
 
   ws@8.19.0: {}
+
+  yaml@2.8.3: {}
 
   yoctocolors@2.1.2: {}
 
