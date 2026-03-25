@@ -90,14 +90,14 @@ export class Daemon {
   }
 
   /** Start the router, git manager, heartbeat, and task watcher */
-  startRouter(): void {
+  async startRouter(): Promise<void> {
+    // Connect WebSocket BEFORE router starts — so first dispatch uses WS not HTTP
+    await this.connectOpenClawWS();
     this.router.start();
     this.gitManager.start();
     this.heartbeat.start();
     this.taskWatcher.start();
     this.hireWatcher.start();
-    // Connect WebSocket to OpenClaw for tool event visibility (non-blocking)
-    this.connectOpenClawWS();
   }
 
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
