@@ -179,6 +179,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     if (text.trim().toLowerCase() === '/thread' || text.trim().toLowerCase() === '/t') {
       if (activeThread) {
         setActiveThread(undefined); // back to main channel
+      } else {
+        // Open the most recent thread
+        const sorted = [...threadCounts.entries()].sort((a, b) => b[1] - a[1]);
+        if (sorted.length > 0) {
+          setActiveThread(sorted[0]![0]);
+        }
       }
       return;
     }

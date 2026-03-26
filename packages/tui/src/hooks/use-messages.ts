@@ -29,9 +29,9 @@ export function useMessages(messagesPath: string, initialCount = 50, threadId?: 
     const external = filterExternal(msgs);
     const counts = new Map<string, number>();
 
-    // Count thread replies
+    // Count thread replies (exclude tool events — they inflate the count)
     for (const m of external) {
-      if (m.threadId) {
+      if (m.threadId && m.kind === 'text') {
         counts.set(m.threadId, (counts.get(m.threadId) ?? 0) + 1);
       }
     }
