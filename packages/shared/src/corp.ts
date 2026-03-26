@@ -56,6 +56,7 @@ export async function scaffoldCorp(
     join(corpRoot, 'resources'),
     join(corpRoot, 'deliverables'),
     join(corpRoot, 'hiring'),
+    join(corpRoot, 'skills'),
   ];
 
   for (const dir of dirs) {
