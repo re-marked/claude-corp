@@ -36,6 +36,7 @@ assignedTo: <member-id of the worker>
 createdBy: ${ctx.agentMemberId}
 projectId: null
 parentTaskId: null
+blockedBy: null
 teamId: null
 acceptanceCriteria:
   - criterion 1
@@ -66,12 +67,16 @@ curl -s -X POST http://127.0.0.1:${ctx.daemonPort}/tasks/create -H "Content-Type
 ## The Worker Can Ask Questions
 The delegation should be good enough to START without questions. But if the worker hits something unexpected mid-work, they'll @mention you. That's normal — answer and let them continue.
 
-## Task Dependencies (implement → review pattern)
-When delegating work that needs review:
-1. Create the IMPLEMENTATION task first, assign to the implementer
-2. Create the REVIEW task second, assign to the reviewer
-3. In the review task description, write: "Wait until the implementation task is marked completed before starting your review. Read the task file for status. Do NOT review before the implementer is done."
-4. The queue system ensures one task at a time per agent, but different agents run concurrently — so the reviewer MUST check the implementer's task status before reviewing
+## Task Dependencies
+Use \`blockedBy\` to declare that a task depends on other tasks completing first:
+\`\`\`
+blockedBy:
+  - task-energy-analysis
+  - task-site-assessment
+\`\`\`
+The system automatically notifies the assignee when ALL blockers complete. No manual pinging needed.
+
+Example: Create the IMPLEMENTATION task first, then create the REVIEW task with \`blockedBy: [implementation-task-id]\`. The reviewer gets auto-notified when the implementation is done — no need to write "wait until..." instructions.
 
 ## What NOT to Do
 - Don't create 5 tasks at once for one agent — they queue, but the agent loses context

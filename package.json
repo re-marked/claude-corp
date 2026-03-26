@@ -1,6 +1,6 @@
 {
   "name": "claude-corp",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Your personal AI corporation — agents that hire each other, delegate work, write real code, and catch each other's mistakes",
   "license": "MIT",
   "author": "Mark <psyhik17@gmail.com>",

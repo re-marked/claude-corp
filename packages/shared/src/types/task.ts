@@ -18,6 +18,8 @@ export interface Task {
   createdBy: string;
   projectId: string | null;
   parentTaskId: string | null;
+  /** Task IDs that must complete before this task can start. */
+  blockedBy: string[] | null;
   teamId: string | null;
   acceptanceCriteria: string[] | null;
   dueAt: string | null;

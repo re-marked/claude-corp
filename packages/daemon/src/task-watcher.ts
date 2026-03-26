@@ -185,6 +185,42 @@ export class TaskWatcher {
               // Non-fatal
             }
           }
+
+          // blockedBy resolution: when a task completes, find tasks that have
+          // this task's ID in their blockedBy array. If ALL their blockers are
+          // now completed, notify the assignee that they're unblocked.
+          if (task.status === 'completed') {
+            try {
+              const allTasks = listTasks(this.daemon.corpRoot);
+              const blocked = allTasks.filter(t =>
+                t.task.blockedBy?.includes(task.id) &&
+                t.task.status !== 'completed' &&
+                t.task.status !== 'cancelled' &&
+                t.task.assignedTo,
+              );
+              for (const downstream of blocked) {
+                // Check if ALL blockers are now completed
+                const allBlockersResolved = (downstream.task.blockedBy ?? []).every(blockerId => {
+                  const blocker = allTasks.find(t => t.task.id === blockerId);
+                  return blocker?.task.status === 'completed';
+                });
+                if (allBlockersResolved) {
+                  notifyTaskAssignment(
+                    this.daemon.corpRoot,
+                    downstream.task.assignedTo!,
+                    downstream.task.title,
+                  );
+                  writeTaskEvent(
+                    this.daemon.corpRoot,
+                    `"${downstream.task.title}" unblocked — all dependencies resolved (${task.title} completed)`,
+                  );
+                  log(`[task-watcher] blockedBy resolved: "${downstream.task.title}" unblocked by "${task.title}" completing`);
+                }
+              }
+            } catch {
+              // Non-fatal
+            }
+          }
         }
       }
 

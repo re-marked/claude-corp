@@ -53,6 +53,9 @@ export async function scaffoldCorp(
     join(corpRoot, 'channels', theme.channels.errors),
     join(corpRoot, 'tasks'),
     join(corpRoot, 'projects'),
+    join(corpRoot, 'resources'),
+    join(corpRoot, 'deliverables'),
+    join(corpRoot, 'hiring'),
   ];
 
   for (const dir of dirs) {

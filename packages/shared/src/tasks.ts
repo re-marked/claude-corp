@@ -12,6 +12,7 @@ export interface CreateTaskOpts {
   createdBy: string;
   projectId?: string | null;
   parentTaskId?: string | null;
+  blockedBy?: string[] | null;
   acceptanceCriteria?: string[];
   dueAt?: string | null;
 }
@@ -47,6 +48,7 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
     createdBy: opts.createdBy,
     projectId: opts.projectId ?? null,
     parentTaskId: opts.parentTaskId ?? null,
+    blockedBy: opts.blockedBy ?? null,
     teamId: null,
     acceptanceCriteria: opts.acceptanceCriteria ?? null,
     dueAt: opts.dueAt ?? null,
