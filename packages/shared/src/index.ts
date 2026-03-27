@@ -57,6 +57,9 @@ export {
 // Corp management
 export { scaffoldCorp, listCorps, findCorp, deleteCorp } from './corp.js';
 
+// Skills
+export { syncSkillsToAgent, syncSkillsToAllAgents, installDefaultSkills } from './skills.js';
+
 // Agent setup
 export {
   setupAgentWorkspace,

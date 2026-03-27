@@ -8,6 +8,7 @@ import type { AgentConfig } from './types/agent-config.js';
 import type { GlobalConfig } from './types/global-config.js';
 import { CHANNELS_JSON, MEMBERS_JSON, MESSAGES_JSONL } from './constants.js';
 import { readConfig } from './parsers/config.js';
+import { syncSkillsToAgent } from './skills.js';
 
 export interface AgentSetupOpts {
   corpRoot: string;
@@ -63,6 +64,10 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   // Create workspace directories
   mkdirSync(join(agentAbsDir, 'brain'), { recursive: true });
   mkdirSync(join(agentAbsDir, 'skills'), { recursive: true });
+
+  // Sync corp-level skills to agent workspace
+  try { syncSkillsToAgent(corpRoot, agentRelDir); } catch {}
+
 
   // Write workspace files
   writeFileSync(join(agentAbsDir, 'SOUL.md'), soulContent, 'utf-8');

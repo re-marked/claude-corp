@@ -66,6 +66,13 @@ export class Daemon {
     // Ensure .gateway/ is gitignored (older corps may lack this)
     this.ensureGatewayGitignored();
 
+    // Sync corp-level skills to all agent workspaces
+    try {
+      const { syncSkillsToAllAgents } = await import('@claudecorp/shared');
+      syncSkillsToAllAgents(this.corpRoot);
+      log('[daemon] Skills synced to all agents');
+    } catch {}
+
     // Start HTTP API + WebSocket event bus
     this.server = createApi(this);
     this.events.attach(this.server);

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { Corporation } from './types/corp.js';
 import type { Member } from './types/member.js';
 import type { Channel } from './types/channel.js';
+import { installDefaultSkills } from './skills.js';
 import { getTheme, type ThemeId } from './themes.js';
 import { generateId } from './id.js';
 import { writeConfig } from './parsers/config.js';
@@ -56,11 +57,15 @@ export async function scaffoldCorp(
     join(corpRoot, 'resources'),
     join(corpRoot, 'deliverables'),
     join(corpRoot, 'hiring'),
+    join(corpRoot, 'skills'),
   ];
 
   for (const dir of dirs) {
     mkdirSync(dir, { recursive: true });
   }
+
+  // Install default skills from bundled package
+  try { installDefaultSkills(corpRoot); } catch {}
 
   // IDs
   const userId = generateId();
