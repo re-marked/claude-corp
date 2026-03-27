@@ -1,9 +1,29 @@
 import { existsSync, mkdirSync, readdirSync, cpSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Resolve the bundled skills directory shipped with the package.
+ * Works both in source (src/) and compiled (dist/) contexts.
+ */
+function getBundledSkillsDir(): string | null {
+  try {
+    // From dist/index.js → ../skills/
+    // From src/skills.ts → ../../skills/
+    const thisFile = fileURLToPath(import.meta.url);
+    const candidates = [
+      resolve(thisFile, '..', '..', 'skills'),      // from dist/
+      resolve(thisFile, '..', '..', '..', 'skills'), // from src/
+    ];
+    for (const c of candidates) {
+      if (existsSync(c) && readdirSync(c).length > 0) return c;
+    }
+  } catch {}
+  return null;
+}
 
 /**
  * Sync corp-level skills to an agent's workspace.
- * Copies all skill directories from {corpRoot}/skills/ to {agentDir}/skills/.
  */
 export function syncSkillsToAgent(corpRoot: string, agentDir: string): void {
   const corpSkillsDir = join(corpRoot, 'skills');
@@ -25,7 +45,6 @@ export function syncSkillsToAgent(corpRoot: string, agentDir: string): void {
 
 /**
  * Sync corp-level skills to ALL agents in the corp.
- * Call on daemon startup to ensure all agents have the latest skills.
  */
 export function syncSkillsToAllAgents(corpRoot: string): void {
   const agentsDir = join(corpRoot, 'agents');
@@ -44,26 +63,19 @@ export function syncSkillsToAllAgents(corpRoot: string): void {
 
 /**
  * Install default skills into a new corp's skills/ directory.
- * Copies from the bundled skills in the shared package.
  */
 export function installDefaultSkills(corpRoot: string): void {
   const corpSkillsDir = join(corpRoot, 'skills');
   mkdirSync(corpSkillsDir, { recursive: true });
 
-  // Default skills ship with the package
-  const bundledSkillsDir = join(dirname(new URL(import.meta.url).pathname), '..', '..', 'skills');
-  // On Windows, strip leading /
-  const normalizedPath = process.platform === 'win32'
-    ? bundledSkillsDir.replace(/^\/([A-Z]:)/, '$1')
-    : bundledSkillsDir;
+  const bundled = getBundledSkillsDir();
+  if (!bundled) return;
 
-  if (!existsSync(normalizedPath)) return;
-
-  const skills = readdirSync(normalizedPath, { withFileTypes: true })
+  const skills = readdirSync(bundled, { withFileTypes: true })
     .filter((d) => d.isDirectory());
 
   for (const skill of skills) {
-    const src = join(normalizedPath, skill.name);
+    const src = join(bundled, skill.name);
     const dest = join(corpSkillsDir, skill.name);
     if (!existsSync(dest)) {
       cpSync(src, dest, { recursive: true });
