@@ -1,27 +1,27 @@
-/** Premium dark palette — refined, breathable, alive. */
+/** Premium dark palette — neutral tone, colorful accents. */
 export const COLORS = {
   // Brand
-  primary: '#C2785C',     // warm terracotta — accent, titles, active
-  secondary: '#E8D5B7',   // cream — highlights, warm emphasis
+  primary: '#E07B56',     // warm coral — accent, titles, active
+  secondary: '#F0C674',   // golden — highlights
 
   // Semantic
-  success: '#7EC8A0',     // sage green — completed, healthy
-  warning: '#E8C170',     // warm gold — assigned, idle, warnings
-  danger: '#D46B6B',      // muted red — failed, crashed, errors
-  info: '#8EAFC2',        // dusty blue — in_progress, working
+  success: '#6CC490',     // vivid green — completed, healthy
+  warning: '#F0C674',     // golden — assigned, idle, warnings
+  danger: '#E05A5A',      // clear red — failed, crashed, errors
+  info: '#6BAED6',        // sky blue — in_progress, working
 
-  // Neutral
-  text: '#E0DDD5',        // warm off-white — primary text
-  subtle: '#9A958D',      // warm gray — timestamps, secondary
-  muted: '#5C5751',       // dark warm gray — dim, offline, hints
-  border: '#3D3A36',      // deep charcoal — borders
-  borderActive: '#C2785C', // terracotta — focused borders
+  // Neutral — clean gray, no yellow cast
+  text: '#E2E2E2',        // pure light gray — primary text
+  subtle: '#9E9E9E',      // mid gray — timestamps, secondary
+  muted: '#5A5A5A',       // dark gray — dim, offline, hints
+  border: '#3A3A3A',      // charcoal — borders
+  borderActive: '#E07B56', // coral — focused borders
 
   // Agents
-  user: '#7EC8A0',        // sage — user/founder messages
-  agent: '#8EAFC2',       // dusty blue — agent messages
+  user: '#6CC490',        // green — user/founder messages
+  agent: '#6BAED6',       // sky blue — agent messages
   ceo: 'rainbow' as const,
-  system: '#5C5751',      // dark gray — system messages
+  system: '#5A5A5A',      // gray — system messages
 } as const;
 
 /** Status indicators — clean, minimal. */
@@ -47,10 +47,10 @@ export const TASK_STATUS = {
 
 /** Task priority colors. */
 export const PRIORITY = {
-  critical: '#D46B6B',
-  high: '#C2785C',
-  normal: '#E0DDD5',
-  low: '#5C5751',
+  critical: '#E05A5A',
+  high: '#E07B56',
+  normal: '#E2E2E2',
+  low: '#5A5A5A',
 } as const;
 
 /** Border style for all views. */

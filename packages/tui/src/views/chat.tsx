@@ -764,7 +764,7 @@ Always consider what happens when things go wrong.`,
     const isUser = sender?.type === 'user';
     const nameColor = isUser ? COLORS.user : COLORS.agent;
     return (
-      <Box key={msg.id} flexDirection="column" marginBottom={1} paddingLeft={1}>
+      <Box key={msg.id} flexDirection="column" marginBottom={1}>
         <Box gap={1}>
           <Text color={nameColor}>{'\u25CF'}</Text>
           <Text bold color={nameColor}>{name}</Text>
@@ -792,7 +792,7 @@ Always consider what happens when things go wrong.`,
       {/* Dynamic: streaming preview + indicators + input */}
       {hasStreamContent && (
         <Box flexDirection="column" paddingX={1} marginTop={1}>
-          <Box gap={1} paddingLeft={1}>
+          <Box gap={1}>
             <Text color={COLORS.agent}>{'\u25CF'}</Text>
             <Text bold color={COLORS.agent}>{channelStream!.agentName}</Text>
             <Spinner type="dots" />
