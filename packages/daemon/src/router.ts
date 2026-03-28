@@ -504,67 +504,8 @@ export class MessageRouter {
       // Drain queue — dispatch next waiting message for this agent
       this.drainQueue(targetId);
     } catch (err) {
-      // Fallback chain — if model is unavailable/overloaded, try next model
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const isModelError = /529|503|overloaded|capacity|rate_limit|model.*unavailable/i.test(errMsg);
-      const fallbackChain = this.daemon.globalConfig.defaults.fallbackChain ?? [];
-      const gw = this.daemon.processManager.corpGateway;
-
-      if (isModelError && fallbackChain.length > 0 && gw && agentProc.mode === 'gateway') {
-        const agentName = target.agentDir?.replace(/^agents\//, '').replace(/\/$/, '') ?? '';
-        const currentModels = gw.getModels();
-        const currentModel = currentModels.agents.find(a => a.id === agentName)?.model
-          ?? currentModels.defaultModel;
-
-        // Find next model in fallback chain
-        const { parseProviderModel } = await import('@claudecorp/shared');
-        const currentId = parseProviderModel(currentModel).model;
-        const chainIdx = fallbackChain.indexOf(currentId);
-        const nextIdx = chainIdx === -1 ? 0 : chainIdx + 1;
-
-        if (nextIdx < fallbackChain.length) {
-          const nextModel = fallbackChain[nextIdx]!;
-          log(`[router] Model unavailable for ${target.displayName}, falling back to ${nextModel}`);
-
-          // Temporarily update gateway config
-          gw.updateAgentModel(agentName, nextModel, 'anthropic');
-          await new Promise(r => setTimeout(r, 1500)); // Wait for hot-reload
-
-          try {
-            // Retry dispatch with fallback model
-            await dispatchToAgent(agentProc, messageContent, context, `channel-${channel.id}-${msg.id}-fallback`,
-              (accumulated) => {
-                this.daemon.streaming.set(targetId, { agentName: target.displayName, content: accumulated, channelId: channel.id });
-                this.daemon.events.broadcast({ type: 'stream_token', agentName: target.displayName, channelId: channel.id, content: accumulated });
-              },
-              this.daemon.corpGatewayWS,
-            );
-
-            // Restore original model after successful fallback
-            if (chainIdx === -1) {
-              gw.updateAgentModel(agentName, null); // Was using default
-            } else {
-              gw.updateAgentModel(agentName, currentId, 'anthropic');
-            }
-
-            log(`[router] Fallback dispatch to ${target.displayName} succeeded with ${nextModel}`);
-            this.daemon.streaming.delete(targetId);
-            this.activeDispatches.delete(target.displayName);
-            this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
-            this.drainQueue(targetId);
-            return; // Fallback succeeded
-          } catch (fallbackErr) {
-            // Restore original model
-            if (chainIdx === -1) {
-              gw.updateAgentModel(agentName, null);
-            } else {
-              gw.updateAgentModel(agentName, currentId, 'anthropic');
-            }
-            logError(`[router] Fallback dispatch also failed: ${fallbackErr}`);
-          }
-        }
-      }
-
+      // Model fallback is now handled natively by OpenClaw via agents.defaults.model.fallbacks
+      // in the gateway config (exponential backoff, profile rotation, session-sticky).
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
       this.daemon.events.broadcast({

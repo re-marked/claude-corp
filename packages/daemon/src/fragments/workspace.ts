@@ -1,10 +1,28 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import type { Fragment } from './types.js';
 
-// Matches OpenClaw's native skill prompt limits
+// Matches OpenClaw's native limits
 const MAX_SKILLS_IN_PROMPT = 150;
 const MAX_SKILLS_PROMPT_CHARS = 30_000;
+// OpenClaw bootstrap file limits — 20KB per file, 150KB total
+const MAX_BOOTSTRAP_FILE_CHARS = 20_000;
+const WORKSPACE_FILES = ['SOUL.md', 'RULES.md', 'TASKS.md', 'HEARTBEAT.md', 'MEMORY.md', 'IDENTITY.md', 'USER.md', 'ENVIRONMENT.md', 'BOOTSTRAP.md'];
+
+/** Warn if any workspace file exceeds OpenClaw's 20K char limit. */
+function checkWorkspaceFileSizes(agentDir: string): void {
+  for (const file of WORKSPACE_FILES) {
+    const filePath = join(agentDir, file);
+    if (!existsSync(filePath)) continue;
+    try {
+      const size = statSync(filePath).size;
+      if (size > MAX_BOOTSTRAP_FILE_CHARS) {
+        // Log to stderr so it shows in daemon logs but doesn't garble TUI
+        process.stderr.write(`[workspace] WARNING: ${basename(agentDir)}/${file} is ${Math.round(size / 1024)}KB — exceeds OpenClaw's 20KB limit. Content may be truncated.\n`);
+      }
+    } catch {}
+  }
+}
 
 interface SkillEntry {
   name: string;
@@ -96,6 +114,7 @@ export const workspaceFragment: Fragment = {
   applies: () => true,
   order: 10,
   render: (ctx) => {
+    checkWorkspaceFileSizes(ctx.agentDir);
     const skillsSection = loadSkillDescriptions(ctx.agentDir);
     return `# ${ctx.agentDisplayName}
 
@@ -103,13 +122,13 @@ You are **${ctx.agentDisplayName}**. Not any other agent. The message history co
 
 ## Session Startup
 Before doing anything else, read these files:
-1. ${ctx.agentDir}/SOUL.md — who you are, your personality and values
-2. ${ctx.agentDir}/RULES.md — non-negotiable behavioral rules
-3. ${ctx.agentDir}/TASKS.md — your current task inbox
-4. ${ctx.agentDir}/ENVIRONMENT.md — your tools, paths, workspace specifics
-5. ${ctx.agentDir}/MEMORY.md — what you've learned so far
-6. ${ctx.agentDir}/USER.md — who the Founder is and what they care about
-7. ${ctx.agentDir}/IDENTITY.md — your name, vibe, emoji (update as you evolve)
+1. ${ctx.agentDir}/BOOTSTRAP.md — if it exists, follow it FIRST (one-time setup, delete when done)
+2. ${ctx.agentDir}/SOUL.md — who you are, your personality and values
+3. ${ctx.agentDir}/RULES.md — non-negotiable behavioral rules
+4. ${ctx.agentDir}/TASKS.md — your current task inbox
+5. ${ctx.agentDir}/ENVIRONMENT.md — your tools, paths, workspace specifics
+6. ${ctx.agentDir}/MEMORY.md — what you've learned so far
+7. ${ctx.agentDir}/USER.md — who the Founder is and what they care about
 
 Don't ask permission. Just read them and start working.
 

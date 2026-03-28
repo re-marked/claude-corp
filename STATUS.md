@@ -22,17 +22,28 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - **Anti-Hallucination Rules**: agents must verify file writes, run builds, prove work
 - **Resilience**: gateway auto-restart, dispatch retry, stale daemon kill, git HEAD auto-repair
 - **Skills System**: 50 bundled skills from 6 repos, OpenClaw-native XML injection with when_to_use triggers, 30K char limit + binary search truncation
-- **Model Selector**: corp-wide default + per-agent override, fallback chain (auto-retry on 529/503), /model TUI wizard, hot reload via gateway config rewrite
-- **Threads + Channel Modes**: [thread] prefix, announce/mention/open modes, debate protocol
+- **Model Selector**: corp-wide default + per-agent override, native OpenClaw fallback chain, /model TUI wizard, hot reload
+- **Threads**: [thread] prefix, thread-aware dispatch, debate protocol
 - **Tool Event Visibility**: real-time tool calls displayed inline in TUI chat
 - **File-Based Hiring**: agents drop .md in hiring/ → HireWatcher auto-hires
 - **blockedBy Dependencies**: task frontmatter, auto-unblock when all blockers complete
+- **Per-Agent Session Isolation**: each agent gets unique session key — no identity bleeding
+- **Multi-Word @Mention Resolution**: @Lead Coder works without quotes
+- **Empty Response Guard**: empty agent responses silently dropped, not written to JSONL
+- **Channel Clear on Switch**: terminal buffer clears when switching channels
+- **Agent Workspace Files**: 7 focused files (SOUL, RULES, HEARTBEAT, MEMORY, IDENTITY, USER, ENVIRONMENT)
+- **BOOTSTRAP.md**: one-time onboarding file for new agents (CEO gets onboarding interview, workers get task check)
+- **Heartbeat Cost Optimization**: isolatedSession + lightContext on corp gateway (2-5K tokens vs 100K)
+- **Native OpenClaw Model Fallback**: agents.defaults.model.fallbacks in gateway config (exponential backoff, profile rotation)
+- **Session dmScope**: per-channel-peer isolation on corp gateway
+- **Memory Flush Before Compaction**: auto-save memories before context window compacts
+- **File Size Guard**: warns if workspace files exceed OpenClaw's 20K char bootstrap limit
 - Themes: Corporate / Mafia / Military picker during onboarding
 - Projects & Teams: /project + /team commands, project-scoped channels
 - Git tracking: auto-commit after agent actions (10s debounce)
 - Silent logger: daemon logs go to file only when TUI runs (no garbled output)
 - Autonomous task loop VERIFIED: /task → @mention assignee → agent reads TASKS.md → works → completed
-- Agent-written code VERIFIED: Atlas built /who, /ping, /uptime. Clawdigy built Ctrl+K fix, ASCII art script.
+- Agent-written code VERIFIED: Agents built file locking system (v1→v2→v3), QA Agent caught port mismatch bug, CEO caught TOCTOU race condition
 
 ---
 
@@ -52,7 +63,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [ ] Custom themes (name your own ranks, custom colors)
 - [ ] Agent suspension/resume/archival
 - [ ] Git Janitor agent (auto-resolves merge conflicts)
-- [ ] Starter pack: CEO bootstraps agents from a single conversation brief
+- [ ] File locking system (agents built v3 with daemon HTTP endpoints — needs merge review)
 - [ ] Agent forking (copy SOUL.md + BRAIN, let it evolve independently)
 - [ ] Agent ELO / reputation system (track agent reliability over time)
 - [ ] /kudos command (public shoutouts with tracking)
@@ -60,9 +71,10 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - [ ] /standup — trigger all agents to report their current status
 - [ ] Morning CEO briefings (daily summary of overnight work)
 - [ ] Web frontend (connects to same daemon, browser-based UI)
-- [ ] Per-agent model overrides via separate gateway instances (current: OpenClaw only reads corp default per-agent, workaround: re-trigger config reload)
+- [ ] Tool usage auditing (detect when agents don't use required tools like web_search)
 - [ ] Steampunk aesthetic (direction set, old implementation removed, rebuild properly)
 - [ ] Per-run analytics dashboard (agent participation, timing, deliverables)
+- [ ] TASKS.md / HEARTBEAT.md merge (decide on single file for task inbox + heartbeat)
 
 ---
 
@@ -83,6 +95,8 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 13. ~~**Escalation** — 5-level chain, BLOCKED auto-notify, blocker resolution loop~~
 14. ~~**TUI polish** — alt screen, input history, readline, URLs, crash cleanup~~
 15. ~~**WebSocket dispatch** — tool event visibility, real-time tool calls in TUI~~
-16. ~~**Threads + channel modes** — [thread] prefix, announce/mention/open modes, debate protocol~~
+16. ~~**Threads** — [thread] prefix, thread-aware dispatch, debate protocol~~
 17. ~~**Skills system** — 50 bundled skills from 6 repos, XML injection with when_to_use, 30K char limit~~
-18. ~~**Model selector** — corp-wide default + per-agent override, fallback chain, /model wizard, hot reload~~
+18. ~~**Model selector** — corp-wide default, native OpenClaw fallback, /model wizard, hot reload~~
+19. ~~**Agent identity** — per-agent session keys, workspace file system (7 files), BOOTSTRAP.md onboarding~~
+20. ~~**Reliability** — empty response guard, multi-word mentions, channel clear, file size guard~~

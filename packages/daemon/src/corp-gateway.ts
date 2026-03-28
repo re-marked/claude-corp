@@ -401,19 +401,37 @@ export class CorpGateway {
 
   private buildConfig(agentsList: CorpGatewayAgent[]): Record<string, unknown> {
     const defaultModel = `${this.globalConfig.defaults.provider}/${this.globalConfig.defaults.model}`;
+    const fallbacks = this.globalConfig.defaults.fallbackChain;
     return {
       agents: {
         defaults: {
-          model: { primary: defaultModel },
-          compaction: { mode: 'safeguard' },
+          model: {
+            primary: defaultModel,
+            // Native OpenClaw fallback chain — exponential backoff, profile rotation
+            ...(fallbacks && fallbacks.length > 0 ? {
+              fallbacks: fallbacks.map(m => `${this.globalConfig.defaults.provider}/${m}`),
+            } : {}),
+          },
+          compaction: {
+            mode: 'safeguard',
+            // Auto-save memories before context gets compacted
+            memoryFlush: { enabled: true },
+          },
           verboseDefault: 'full',
           blockStreamingDefault: 'off',
           heartbeat: {
             every: '10m',
             prompt: 'Read your HEARTBEAT.md file. It contains your current tasks and instructions. Follow them. If nothing needs attention, reply HEARTBEAT_OK.',
+            // Cost optimization: isolated session + light context for heartbeat runs
+            isolatedSession: true,
+            lightContext: true,
           },
         },
         list: agentsList,
+      },
+      // Per-agent session isolation — prevents identity bleeding across DMs
+      session: {
+        dmScope: 'per-channel-peer',
       },
       gateway: {
         port: this._port,

@@ -78,6 +78,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName), 'utf-8');
   writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? defaultUser(), 'utf-8');
   writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), defaultBootstrap(displayName, rank), 'utf-8');
 
   // Agent config
   const agentConfig: AgentConfig = {
@@ -252,6 +253,61 @@ What annoys them? What makes them smile? Build this over time.)
 
 The more you know, the better you can help. But you're learning
 about a person, not building a dossier. Respect the difference.
+`;
+}
+
+function defaultBootstrap(displayName: string, rank: Member['rank']): string {
+  if (rank === 'master') {
+    // CEO bootstrap — onboarding interview with the Founder
+    return `# Bootstrap — First Run
+
+You just came online as CEO. This is a fresh corporation.
+
+## Step 1: Read Your Files
+Read SOUL.md, RULES.md, ENVIRONMENT.md, USER.md right now. Don't ask — just read them.
+
+## Step 2: Meet the Founder
+Introduce yourself. Ask them:
+- What's their name and what should you call them?
+- What is this corporation going to do?
+- What's the first project or goal?
+
+Keep it natural. Don't interrogate. Have a real conversation.
+
+## Step 3: Update Your Files
+After the conversation:
+- Update USER.md with what you learned about the Founder
+- Update IDENTITY.md with your name and vibe
+- Update MEMORY.md with key decisions from the conversation
+
+## Step 4: Get to Work
+Based on what the Founder told you, start planning:
+- Who do you need to hire?
+- What's the first task?
+- What resources do you need?
+
+## When Done
+Delete this file. You don't need a bootstrap script anymore — you're you now.
+`;
+  }
+
+  // Worker/leader bootstrap — simpler, task-focused
+  return `# Bootstrap — First Run
+
+You just came online as ${displayName}. This is your first session.
+
+## Step 1: Read Your Files
+Read SOUL.md, RULES.md, ENVIRONMENT.md right now. Don't ask — just read them.
+
+## Step 2: Check Your Inbox
+Read TASKS.md. If you have tasks assigned, start working on the highest priority one.
+If no tasks yet, introduce yourself briefly in the channel you were @mentioned in.
+
+## Step 3: Update Your Identity
+Update IDENTITY.md with your name and vibe as you figure out who you are.
+
+## When Done
+Delete this file. You're up and running.
 `;
 }
 
