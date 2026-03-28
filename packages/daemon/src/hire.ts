@@ -139,6 +139,9 @@ export async function hireAgent(
       name: opts.displayName,
       workspace,
       agentDir: gwAgentDir,
+      model: model !== globalConfig.defaults.model
+        ? { primary: `${provider}/${model}` }
+        : undefined,
     });
 
     // Start gateway if this is the first agent, otherwise let OpenClaw hot-reload

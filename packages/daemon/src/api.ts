@@ -9,6 +9,10 @@ import {
   listProjects,
   createTeam,
   listTeams,
+  KNOWN_MODELS,
+  resolveModelAlias,
+  writeGlobalConfig,
+  readGlobalConfig,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
@@ -272,6 +276,104 @@ export function createApi(daemon: Daemon): Server {
         const projectId = url.searchParams.get('projectId') ?? undefined;
         const teams = listTeams(daemon.corpRoot, projectId);
         json(res, teams);
+        return;
+      }
+
+      // GET /models — current model config
+      if (method === 'GET' && path === '/models') {
+        const gw = daemon.processManager.corpGateway;
+        const gwModels = gw ? gw.getModels() : { defaultModel: `${daemon.globalConfig.defaults.provider}/${daemon.globalConfig.defaults.model}`, agents: [] };
+        json(res, {
+          corpDefault: {
+            model: daemon.globalConfig.defaults.model,
+            provider: daemon.globalConfig.defaults.provider,
+          },
+          fallbackChain: daemon.globalConfig.defaults.fallbackChain ?? [],
+          agents: gwModels.agents,
+          availableModels: KNOWN_MODELS,
+        });
+        return;
+      }
+
+      // POST /models/default — change corp-wide default model
+      if (method === 'POST' && path === '/models/default') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const modelInput = body.model as string;
+        const provider = (body.provider as string) ?? 'anthropic';
+        if (!modelInput) { json(res, { error: 'model is required' }, 400); return; }
+
+        const model = resolveModelAlias(modelInput) ?? modelInput;
+
+        // Update in-memory config
+        daemon.globalConfig.defaults.model = model;
+        daemon.globalConfig.defaults.provider = provider;
+
+        // Persist to disk
+        try {
+          const persisted = readGlobalConfig();
+          persisted.defaults.model = model;
+          persisted.defaults.provider = provider;
+          writeGlobalConfig(persisted);
+        } catch {}
+
+        // Update corp gateway
+        const gw = daemon.processManager.corpGateway;
+        if (gw) gw.updateDefaultModel(model, provider);
+
+        // Broadcast event
+        daemon.events.broadcast({ type: 'model_changed', agentName: null, model });
+
+        json(res, { ok: true, model, provider });
+        return;
+      }
+
+      // POST /models/agent/:name — set per-agent model override
+      const modelAgentMatch = path.match(/^\/models\/agent\/([^/]+)$/);
+      if (method === 'POST' && modelAgentMatch) {
+        const agentName = decodeURIComponent(modelAgentMatch[1]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        const modelInput = body.model as string;
+        const provider = (body.provider as string) ?? 'anthropic';
+        if (!modelInput) { json(res, { error: 'model is required' }, 400); return; }
+
+        const model = resolveModelAlias(modelInput) ?? modelInput;
+
+        const gw = daemon.processManager.corpGateway;
+        if (gw) gw.updateAgentModel(agentName, model, provider);
+
+        daemon.events.broadcast({ type: 'model_changed', agentName, model });
+
+        json(res, { ok: true, agentName, model, provider });
+        return;
+      }
+
+      // DELETE /models/agent/:name — clear per-agent override
+      if (method === 'DELETE' && modelAgentMatch) {
+        const agentName = decodeURIComponent(modelAgentMatch[1]!);
+        const gw = daemon.processManager.corpGateway;
+        if (gw) gw.updateAgentModel(agentName, null);
+
+        daemon.events.broadcast({ type: 'model_changed', agentName, model: daemon.globalConfig.defaults.model });
+
+        json(res, { ok: true, agentName, model: 'default' });
+        return;
+      }
+
+      // POST /models/fallback — set fallback chain
+      if (method === 'POST' && path === '/models/fallback') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const chain = body.chain as string[];
+        if (!Array.isArray(chain)) { json(res, { error: 'chain must be an array of model IDs' }, 400); return; }
+
+        daemon.globalConfig.defaults.fallbackChain = chain;
+
+        try {
+          const persisted = readGlobalConfig();
+          persisted.defaults.fallbackChain = chain;
+          writeGlobalConfig(persisted);
+        } catch {}
+
+        json(res, { ok: true, fallbackChain: chain });
         return;
       }
 
