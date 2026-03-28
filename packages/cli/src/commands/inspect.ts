@@ -13,10 +13,12 @@ export async function cmdInspect(opts: { agent?: string; json: boolean }) {
   const corpRoot = await getCorpRoot();
   const members = readConfigOr<Member[]>(join(corpRoot, MEMBERS_JSON), []);
 
+  const normalize = (s: string) => s.toLowerCase().replace(/[\s-_]+/g, '');
+  const needle = normalize(opts.agent!);
   const member = members.find(m =>
     m.id === opts.agent ||
-    m.displayName.toLowerCase() === opts.agent!.toLowerCase() ||
-    m.id.includes(opts.agent!),
+    normalize(m.displayName) === needle ||
+    (m.agentDir && normalize(m.agentDir) .includes(needle)),
   );
 
   if (!member) {
