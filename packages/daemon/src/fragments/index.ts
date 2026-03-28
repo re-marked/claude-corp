@@ -12,6 +12,7 @@ import { channelEtiquetteFragment } from './channel-etiquette.js';
 import { antiRationalizationFragment } from './anti-rationalization.js';
 import { outputEfficiencyFragment } from './output-efficiency.js';
 import { blastRadiusFragment } from './blast-radius.js';
+import { fileLockingFragment } from './file-locking.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { debateProtocolFragment } from './debate-protocol.js';
@@ -30,6 +31,7 @@ const FRAGMENTS: Fragment[] = [
   antiRationalizationFragment,
   outputEfficiencyFragment,
   blastRadiusFragment,
+  fileLockingFragment,
   debateProtocolFragment,
   contextFragment,
   historyFragment,
