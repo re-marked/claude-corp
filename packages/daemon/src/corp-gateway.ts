@@ -367,6 +367,13 @@ export class CorpGateway {
     }
 
     agents.list = list;
+    // Touch agents.defaults.model.primary to trigger gateway hot-reload
+    // (gateway only watches defaults changes, not per-agent list changes)
+    const defaults = (agents.defaults ?? {}) as Record<string, unknown>;
+    const currentDefault = (defaults.model as Record<string, string>)?.primary
+      ?? formatProviderModel(this.globalConfig.defaults.provider, this.globalConfig.defaults.model);
+    defaults.model = { primary: currentDefault };
+    agents.defaults = defaults;
     config.agents = agents;
     writeConfig(this.configPath, config);
   }
