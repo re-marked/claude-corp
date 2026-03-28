@@ -11,8 +11,8 @@ import {
 } from '@claudecorp/shared';
 import { isDaemonRunning, DaemonClient } from '@claudecorp/daemon';
 
-/** Get a connected DaemonClient or exit with error. */
-export function getClient(): DaemonClient {
+/** Get a connected DaemonClient or exit with error. Shows which corp is active. */
+export function getClient(silent = false): DaemonClient {
   const { running, port } = isDaemonRunning();
   if (!running || !port) {
     console.error('Daemon is not running. Start it with: claudecorp-cli start');
@@ -21,12 +21,32 @@ export function getClient(): DaemonClient {
   return new DaemonClient(port);
 }
 
+/** Verify the daemon is serving the expected corp. Warn if --corp doesn't match. */
+export async function verifyCorpMatch(client: DaemonClient, requestedCorp?: string): Promise<string> {
+  const status = await client.status();
+  const activeCorp = status.corpRoot;
+  const corpName = activeCorp.split(/[/\\]/).pop() ?? activeCorp;
+
+  if (requestedCorp && !activeCorp.includes(requestedCorp)) {
+    console.error(`Warning: --corp "${requestedCorp}" specified but daemon is serving "${corpName}" (${activeCorp})`);
+    console.error(`Stop the daemon and restart with: claudecorp-cli stop && claudecorp-cli start --corp ${requestedCorp}`);
+    process.exit(1);
+  }
+
+  return activeCorp;
+}
+
 /** Resolve the active corp root path — prefers the running daemon's corp. */
 export async function getCorpRoot(corpName?: string): Promise<string> {
   if (corpName) {
     const path = findCorp(corpName);
     if (!path) {
       console.error(`Corp "${corpName}" not found.`);
+      const corps = listCorps();
+      if (corps.length > 0) {
+        console.error('Available corps:');
+        for (const c of corps) console.error(`  ${c.name}`);
+      }
       process.exit(1);
     }
     return path;
@@ -40,10 +60,16 @@ export async function getCorpRoot(corpName?: string): Promise<string> {
       if (status.corpRoot) return status.corpRoot;
     } catch {}
   }
-  // Fallback to first indexed corp
+  // Multiple corps with no daemon — can't silently pick one
   const corps = listCorps();
   if (corps.length === 0) {
     console.error('No corporations found. Create one with: claudecorp-cli init');
+    process.exit(1);
+  }
+  if (corps.length > 1) {
+    console.error('Multiple corporations found. Specify which one with --corp:');
+    for (const c of corps) console.error(`  ${c.name.padEnd(20)} ${c.path}`);
+    console.error('\nOr start a daemon first: claudecorp-cli start --corp <name>');
     process.exit(1);
   }
   return corps[0]!.path;

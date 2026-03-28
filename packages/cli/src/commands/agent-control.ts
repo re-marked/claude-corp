@@ -16,12 +16,13 @@ export async function cmdAgentControl(opts: {
   const corpRoot = await getCorpRoot();
   const members = readConfigOr<Member[]>(join(corpRoot, MEMBERS_JSON), []);
 
-  // Resolve agent by name or id
+  // Resolve agent by name or id (normalize spaces/hyphens)
+  const normalize = (s: string) => s.toLowerCase().replace(/[\s-_]+/g, '');
+  const needle = normalize(opts.agent!);
   const member = members.find(m =>
     m.id === opts.agent ||
-    m.displayName.toLowerCase() === opts.agent!.toLowerCase() ||
-    m.agentDir?.includes(opts.agent!) ||
-    m.id.includes(opts.agent!),
+    normalize(m.displayName) === needle ||
+    (m.agentDir && normalize(m.agentDir).includes(needle)),
   );
 
   if (!member) {
