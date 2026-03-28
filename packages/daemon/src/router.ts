@@ -404,6 +404,15 @@ export class MessageRouter {
         channelId: channel.id,
       });
 
+      // Skip empty responses — agent glitched or had nothing to say
+      if (!result.content || result.content.trim().length === 0) {
+        log(`[router] ${target.displayName} returned empty response — skipping write`);
+        this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
+        this.daemon.gitManager.markDirty(target.displayName);
+        this.drainQueue(targetId);
+        return;
+      }
+
       // Parse [thread] marker — split into main channel + thread parts
       const threadMarkerIdx = result.content.indexOf('[thread]');
       let mainContent = result.content;

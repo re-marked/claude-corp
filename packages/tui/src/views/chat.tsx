@@ -60,10 +60,11 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
   const lastMsgCount = useRef(messages.length);
 
-  // Update tab title with channel name
+  // Clear screen + update tab title when switching channels
   useEffect(() => {
+    process.stdout.write('\x1b[2J\x1b[H'); // Clear terminal buffer so old channel messages don't linger
     process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name}\x07`);
-  }, [channel.name]);
+  }, [channel.id]);
 
   // Refresh members when new messages arrive (new agents may have been hired)
   useEffect(() => {
