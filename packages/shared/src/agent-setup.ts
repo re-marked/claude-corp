@@ -72,14 +72,12 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   // Write workspace files
   writeFileSync(join(agentAbsDir, 'SOUL.md'), soulContent, 'utf-8');
   writeFileSync(join(agentAbsDir, 'RULES.md'), agentsContent, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'MEMORY.md'), '# Memory\n\nNo memories yet.\n', 'utf-8');
   writeFileSync(join(agentAbsDir, 'HEARTBEAT.md'), heartbeatContent, 'utf-8');
-  if (identityContent) {
-    writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent, 'utf-8');
-  }
-  if (userContent) {
-    writeFileSync(join(agentAbsDir, 'USER.md'), userContent, 'utf-8');
-  }
+  writeFileSync(join(agentAbsDir, 'MEMORY.md'), '# Memory\n\nNo memories yet.\n', 'utf-8');
+
+  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? defaultUser(), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir), 'utf-8');
 
   // Agent config
   const agentConfig: AgentConfig = {
@@ -223,4 +221,65 @@ export function addMemberToChannel(corpRoot: string, channelId: string, memberId
     ch.memberIds.push(memberId);
     writeConfig(channelsPath, channels);
   }
+}
+
+// --- Default workspace file templates ---
+
+function defaultIdentity(displayName: string): string {
+  return `# Identity
+
+Name: ${displayName}
+Vibe: (develop this over time — how do you come across?)
+Emoji: (pick one that feels right)
+
+This isn't just metadata. It's the start of figuring out who you are.
+Update this file as you evolve. Your personality is yours to develop.
+`;
+}
+
+function defaultUser(): string {
+  return `# Founder
+
+Learn about the person you're working for. Update this as you go.
+
+Name: (the Founder's name)
+What to call them: (how they prefer to be addressed)
+Timezone: (their timezone)
+
+## Context
+(What do they care about? What projects are they working on?
+What annoys them? What makes them smile? Build this over time.)
+
+The more you know, the better you can help. But you're learning
+about a person, not building a dossier. Respect the difference.
+`;
+}
+
+function defaultEnvironment(corpRoot: string, agentDir: string): string {
+  return `# Environment
+
+Your tools and workspace specifics. Update this with anything that helps you work.
+
+## Workspace
+- Corp root: ${corpRoot}
+- Your directory: ${agentDir}
+- Tasks: ${corpRoot}/tasks/
+- Deliverables: ${corpRoot}/deliverables/
+- Resources: ${corpRoot}/resources/
+
+## Tools Available
+- **File read/write** — read any file, write to your workspace and deliverables
+- **Bash/exec** — run commands, build, test
+- **web_search** — research current data, verify numbers, find sources
+- **Skills** — check your skills/ directory for specialized capabilities
+
+## Build & Test
+- Build: \`cd ${corpRoot.replace(/\\/g, '/')} && pnpm build\` (if codebase project)
+- Always verify your work exists after writing it
+
+## Notes
+(Add environment-specific notes here: SSH hosts, API endpoints,
+project-specific commands, anything that helps you do your job.
+This is your cheat sheet.)
+`;
 }
