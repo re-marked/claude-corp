@@ -9,23 +9,27 @@ const MAX_SKILLS_PROMPT_CHARS = 30_000;
 interface SkillEntry {
   name: string;
   description: string;
+  whenToUse: string | null;
   path: string;
 }
 
-/** Parse a SKILL.md frontmatter for name + description. */
-function parseSkillMd(filePath: string): { name?: string; description?: string } {
+/** Parse a SKILL.md frontmatter for name, description, and when_to_use. */
+function parseSkillMd(filePath: string): { name?: string; description?: string; whenToUse?: string } {
   const content = readFileSync(filePath, 'utf-8');
-  const nameMatch = content.match(/name:\s*"([^"]+)"/);
-  const descMatch = content.match(/description:\s*"([^"]+)"/);
+  const nameMatch = content.match(/name:\s*["']?([^"'\n]+?)["']?\s*$/m);
+  const descMatch = content.match(/description:\s*["']?([^"'\n]+?)["']?\s*$/m);
+  const whenMatch = content.match(/when_to_use:\s*["']?([^"'\n]+?)["']?\s*$/m);
   return {
-    name: nameMatch?.[1],
-    description: descMatch?.[1],
+    name: nameMatch?.[1]?.trim(),
+    description: descMatch?.[1]?.trim(),
+    whenToUse: whenMatch?.[1]?.trim(),
   };
 }
 
 /** Format a single skill entry as XML. */
 function formatSkillXml(skill: SkillEntry): string {
-  return `<skill>\n<name>${skill.name}</name>\n<description>${skill.description}</description>\n</skill>`;
+  const whenTag = skill.whenToUse ? `\n<when_to_use>${skill.whenToUse}</when_to_use>` : '';
+  return `<skill>\n<name>${skill.name}</name>\n<description>${skill.description}</description>${whenTag}\n</skill>`;
 }
 
 /**
@@ -46,6 +50,7 @@ function loadSkillDescriptions(agentDir: string): string {
       skills.push({
         name: parsed.name ?? dir.name,
         description: parsed.description ?? `Read ${skillMd} for details`,
+        whenToUse: parsed.whenToUse ?? null,
         path: skillMd,
       });
     }
