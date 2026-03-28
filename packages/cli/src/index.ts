@@ -17,6 +17,12 @@ const { values, positionals } = parseArgs({
     agent: { type: 'string' },
     chain: { type: 'string' },
     hash: { type: 'string' },
+    title: { type: 'string' },
+    description: { type: 'string' },
+    priority: { type: 'string' },
+    project: { type: 'string' },
+    lead: { type: 'string' },
+    type: { type: 'string' },
     wait: { type: 'boolean', default: false },
     timeout: { type: 'string' },
     last: { type: 'string' },
@@ -44,25 +50,39 @@ Commands:
   start      Start the daemon (foreground)
   stop       Stop the running daemon
   status     Show daemon and agent status
+  stats      Show comprehensive corp statistics
   agents     List all agents
+  members    Show member roster with online/offline status
+  hierarchy  Show corporation org chart
+  inspect    Show detailed agent info (SOUL, tasks, model)
   send       Send a message to a channel
   hire       Hire a new agent
+  agent      Start/stop an agent (agent start/stop --agent <id>)
   models     View and change AI models
   channels   List all channels
-  uptime     Show daemon uptime and message count
-  version    Show package versions
-  tm         Time machine — view snapshots, rewind, fast-forward
-  dogfood    Set up dogfood project + dev team + task
   messages   Read channel messages
   tasks      List tasks
+  task       Create a task (task create --title "...")
+  projects   List/create projects
+  teams      List/create teams
+  tm         Time machine — view snapshots, rewind, fast-forward
+  uptime     Show daemon uptime and message count
+  version    Show package versions
   logs       Show daemon logs
+  dogfood    Set up dogfood project + dev team + task
 
 Model commands:
-  models                          List current model config
-  models default --model opus     Change corp default model
-  models set --agent hr --model haiku   Set per-agent override
-  models clear --agent hr         Clear per-agent override
-  models fallback --chain "sonnet,haiku"  Set fallback chain
+  models                                    List current model config
+  models default --model opus               Change corp default
+  models set --agent hr --model haiku       Per-agent override
+  models clear --agent hr                   Clear override
+  models fallback --chain "sonnet,haiku"    Set fallback chain
+
+Management commands:
+  task create --title "..." [--priority high] [--assigned <id>]
+  projects list | projects create --name "..." [--type development]
+  teams list | teams create --name "..." --project <id> --lead <id>
+  agent start --agent <id> | agent stop --agent <id>
 
 Common flags:
   --json     Output as JSON (machine-readable)
@@ -72,9 +92,13 @@ Examples:
   claudecorp-cli init --name my-corp --user Mark --theme corporate
   claudecorp-cli start &
   claudecorp-cli send --channel general --message "hello @CEO" --wait
+  claudecorp-cli hire --name Researcher --rank worker --model haiku
+  claudecorp-cli task create --title "Research competitors" --assigned researcher
   claudecorp-cli models default --model opus
-  claudecorp-cli models set --agent hr --model haiku
-  claudecorp-cli status --json
+  claudecorp-cli members
+  claudecorp-cli hierarchy
+  claudecorp-cli inspect --agent ceo
+  claudecorp-cli stats --json
 `);
   process.exit(0);
 }
@@ -198,6 +222,78 @@ async function run() {
     case 'logs': {
       const { cmdLogs } = await import('./commands/logs.js');
       await cmdLogs({ last: parseInt(values.last as string) || 50 });
+      break;
+    }
+    case 'stats': {
+      const { cmdStats } = await import('./commands/stats.js');
+      await cmdStats({ json: !!values.json });
+      break;
+    }
+    case 'members':
+    case 'who': {
+      const { cmdMembers } = await import('./commands/members.js');
+      await cmdMembers({ json: !!values.json });
+      break;
+    }
+    case 'hierarchy': {
+      const { cmdHierarchy } = await import('./commands/hierarchy.js');
+      await cmdHierarchy({ json: !!values.json });
+      break;
+    }
+    case 'inspect': {
+      const { cmdInspect } = await import('./commands/inspect.js');
+      await cmdInspect({ agent: values.agent as string | undefined, json: !!values.json });
+      break;
+    }
+    case 'agent': {
+      const { cmdAgentControl } = await import('./commands/agent-control.js');
+      const action = positionals[1];
+      if (action !== 'start' && action !== 'stop') {
+        console.error('Usage: claudecorp-cli agent start|stop --agent <name>');
+        process.exit(1);
+      }
+      await cmdAgentControl({ action, agent: values.agent as string | undefined, json: !!values.json });
+      break;
+    }
+    case 'task': {
+      const action = positionals[1];
+      if (action === 'create') {
+        const { cmdTaskCreate } = await import('./commands/task-create.js');
+        await cmdTaskCreate({
+          title: values.title as string | undefined,
+          description: values.description as string | undefined,
+          priority: values.priority as string | undefined,
+          assigned: values.assigned as string | undefined,
+          json: !!values.json,
+        });
+      } else {
+        console.error('Usage: claudecorp-cli task create --title "..." [--priority high] [--assigned <id>]');
+        process.exit(1);
+      }
+      break;
+    }
+    case 'projects': {
+      const { cmdProjects } = await import('./commands/projects.js');
+      await cmdProjects({
+        action: positionals[1] as string | undefined,
+        name: values.name as string | undefined,
+        type: values.type as string | undefined,
+        lead: values.lead as string | undefined,
+        description: values.description as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'teams': {
+      const { cmdTeams } = await import('./commands/teams.js');
+      await cmdTeams({
+        action: positionals[1] as string | undefined,
+        name: values.name as string | undefined,
+        project: values.project as string | undefined,
+        lead: values.lead as string | undefined,
+        description: values.description as string | undefined,
+        json: !!values.json,
+      });
       break;
     }
     default:
