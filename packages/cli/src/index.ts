@@ -13,6 +13,9 @@ const { values, positionals } = parseArgs({
     channel: { type: 'string' },
     message: { type: 'string' },
     rank: { type: 'string' },
+    model: { type: 'string' },
+    agent: { type: 'string' },
+    chain: { type: 'string' },
     wait: { type: 'boolean', default: false },
     timeout: { type: 'string' },
     last: { type: 'string' },
@@ -43,10 +46,21 @@ Commands:
   agents     List all agents
   send       Send a message to a channel
   hire       Hire a new agent
+  models     View and change AI models
+  channels   List all channels
+  uptime     Show daemon uptime and message count
+  version    Show package versions
   dogfood    Set up dogfood project + dev team + task
   messages   Read channel messages
   tasks      List tasks
   logs       Show daemon logs
+
+Model commands:
+  models                          List current model config
+  models default --model opus     Change corp default model
+  models set --agent hr --model haiku   Set per-agent override
+  models clear --agent hr         Clear per-agent override
+  models fallback --chain "sonnet,haiku"  Set fallback chain
 
 Common flags:
   --json     Output as JSON (machine-readable)
@@ -56,8 +70,8 @@ Examples:
   claudecorp-cli init --name my-corp --user Mark --theme corporate
   claudecorp-cli start &
   claudecorp-cli send --channel general --message "hello @CEO" --wait
-  claudecorp-cli dogfood
-  claudecorp-cli messages --channel tasks --last 10 --json
+  claudecorp-cli models default --model opus
+  claudecorp-cli models set --agent hr --model haiku
   claudecorp-cli status --json
 `);
   process.exit(0);
@@ -113,6 +127,32 @@ async function run() {
         soul: values.soul as string | undefined,
         json: !!values.json,
       });
+      break;
+    }
+    case 'models': {
+      const { cmdModels } = await import('./commands/models.js');
+      await cmdModels({
+        action: positionals[1] as string | undefined,
+        agent: values.agent as string | undefined,
+        model: values.model as string | undefined,
+        chain: values.chain as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'channels': {
+      const { cmdChannels } = await import('./commands/channels.js');
+      await cmdChannels({ json: !!values.json });
+      break;
+    }
+    case 'uptime': {
+      const { cmdUptime } = await import('./commands/uptime.js');
+      await cmdUptime({ json: !!values.json });
+      break;
+    }
+    case 'version': {
+      const { cmdVersion } = await import('./commands/version.js');
+      await cmdVersion({ json: !!values.json });
       break;
     }
     case 'dogfood': {
