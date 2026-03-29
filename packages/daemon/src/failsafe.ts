@@ -17,37 +17,27 @@ export class Failsafe {
   private interval: ReturnType<typeof setInterval> | null = null;
   /** Track when each agent entered busy state */
   private busySince = new Map<string, number>();
-  /** Track Pulse agent's last activity */
-  private pulseLastSeen = 0;
   private pulseAgentId: string | null = null;
+  private pulseLastSeen = 0;
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
   }
 
   start(): void {
-    // Find the Pulse agent if it exists
     this.findPulse();
+
+    // Track busy transitions via the existing onAgentIdle callback
+    this.daemon.onAgentIdle((memberId) => {
+      this.busySince.delete(memberId);
+      if (memberId === this.pulseAgentId) {
+        this.pulseLastSeen = Date.now();
+      }
+    });
 
     this.interval = setInterval(() => {
       this.check();
     }, CHECK_INTERVAL_MS);
-
-    // Track busy transitions for stuck detection
-    const origSet = this.daemon.setAgentWorkStatus.bind(this.daemon);
-    const self = this;
-    this.daemon.setAgentWorkStatus = function(memberId: string, displayName: string, status: any) {
-      if (status === 'busy') {
-        self.busySince.set(memberId, Date.now());
-      } else {
-        self.busySince.delete(memberId);
-      }
-      // Track Pulse activity
-      if (memberId === self.pulseAgentId && status === 'idle') {
-        self.pulseLastSeen = Date.now();
-      }
-      origSet(memberId, displayName, status);
-    };
 
     log('[failsafe] Started (checking every 2m)');
   }
@@ -62,7 +52,7 @@ export class Failsafe {
       const pulse = members.find(m => m.displayName === 'Pulse' && m.type === 'agent');
       if (pulse) {
         this.pulseAgentId = pulse.id;
-        this.pulseLastSeen = Date.now(); // Assume alive at start
+        this.pulseLastSeen = Date.now();
         log(`[failsafe] Pulse agent found: ${pulse.id}`);
       }
     } catch {}
@@ -76,6 +66,11 @@ export class Failsafe {
 
       for (const agent of agents) {
         const workStatus = this.daemon.getAgentWorkStatus(agent.memberId);
+
+        // Track busy start times
+        if (workStatus === 'busy' && !this.busySince.has(agent.memberId)) {
+          this.busySince.set(agent.memberId, now);
+        }
 
         // Restart broken agents
         if (workStatus === 'broken') {
@@ -95,28 +90,21 @@ export class Failsafe {
         if (workStatus === 'busy') {
           const since = this.busySince.get(agent.memberId);
           if (since && (now - since) > STUCK_THRESHOLD_MS) {
-            log(`[failsafe] ${agent.displayName} has been busy for ${Math.round((now - since) / 60000)}m — flagging as stuck`);
-            // Don't restart — just log. Pulse agent handles stuck via cc say.
-            // But if Pulse doesn't exist, escalate directly
-            if (!this.pulseAgentId) {
-              logError(`[failsafe] No Pulse agent — ${agent.displayName} is stuck with no one to help`);
-            }
+            log(`[failsafe] ${agent.displayName} stuck (busy ${Math.round((now - since) / 60000)}m)`);
           }
         }
       }
 
-      // Monitor Pulse itself
+      // Monitor Pulse
       if (this.pulseAgentId && this.pulseLastSeen > 0) {
-        const pulseStaleness = now - this.pulseLastSeen;
-        if (pulseStaleness > PULSE_STALE_MS) {
-          log(`[failsafe] Pulse agent stale (${Math.round(pulseStaleness / 60000)}m) — restarting`);
+        if ((now - this.pulseLastSeen) > PULSE_STALE_MS) {
+          log(`[failsafe] Pulse stale — restarting`);
           try {
             await this.daemon.processManager.stopAgent(this.pulseAgentId);
             await new Promise(r => setTimeout(r, 1000));
             await this.daemon.processManager.spawnAgent(this.pulseAgentId);
             this.daemon.setAgentWorkStatus(this.pulseAgentId, 'Pulse', 'idle');
             this.pulseLastSeen = Date.now();
-            log('[failsafe] Pulse agent restarted');
           } catch (err) {
             logError(`[failsafe] Failed to restart Pulse: ${err}`);
           }

@@ -231,10 +231,15 @@ export class Daemon {
     const founder = members.find((m) => m.rank === 'owner');
     if (!founder) throw new Error('No founder found');
 
-    // Use provided senderId (for agents sending as themselves) or default to Founder
-    const actualSender = senderId
-      ? members.find((m) => m.id === senderId) ?? founder
-      : founder;
+    // Use provided senderId, or detect the currently-dispatching agent, or default to Founder
+    let actualSender: Member;
+    if (senderId) {
+      actualSender = members.find((m) => m.id === senderId) ?? founder;
+    } else {
+      // If an agent is currently busy (dispatching), it's likely the one sending this message via exec
+      const busyAgents = members.filter(m => m.type === 'agent' && this.agentWorkStatus.get(m.id) === 'busy');
+      actualSender = busyAgents.length === 1 ? busyAgents[0]! : founder;
+    }
     const isAgent = actualSender.type === 'agent';
 
     const messagesPath = join(this.corpRoot, channel.path, 'messages.jsonl');
