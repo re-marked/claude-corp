@@ -264,6 +264,7 @@ export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Pro
   const [cursor, setCursor] = useState(0);
   const [pastes, setPastes] = useState<Map<number, PasteInfo>>(new Map());
   const [hueOffset, setHueOffset] = useState(0);
+  const [acIndex, setAcIndex] = useState(0); // Autocomplete selection index
   // Input history — up/down arrow recalls previous messages
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -315,16 +316,18 @@ export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Pro
 
   useInput((input, key) => {
     if (disabled) return;
-    // Tab — autocomplete
+    // Tab — autocomplete selected item
     if (key.tab || input === '\t') {
       const ac = getAutocomplete();
       if (ac && ac.items.length > 0) {
-        const completion = ac.items[0]!.label + ' ';
+        const selected = ac.items[Math.min(acIndex, ac.items.length - 1)]!;
+        const completion = selected.label + ' ';
         const beforeCursor = value.slice(0, cursor);
         const prefixStart = beforeCursor.length - ac.prefix.length;
         const newValue = value.slice(0, prefixStart) + completion + value.slice(cursor);
         setValue(newValue);
         setCursor(prefixStart + completion.length);
+        setAcIndex(0);
       }
       return;
     }
@@ -395,8 +398,13 @@ export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Pro
       }
     }
 
-    // Input history — up/down arrow recall previous messages
+    // Up/down: autocomplete navigation OR input history
     if (key.upArrow) {
+      const ac = getAutocomplete();
+      if (ac && ac.items.length > 0) {
+        setAcIndex(i => Math.max(0, i - 1));
+        return;
+      }
       if (history.length === 0) return;
       if (historyIndex === -1) {
         setDraft(value);
@@ -413,6 +421,11 @@ export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Pro
       return;
     }
     if (key.downArrow) {
+      const ac = getAutocomplete();
+      if (ac && ac.items.length > 0) {
+        setAcIndex(i => Math.min(ac.items.length - 1, i + 1));
+        return;
+      }
       if (historyIndex === -1) return;
       if (historyIndex < history.length - 1) {
         const idx = historyIndex + 1;
@@ -439,6 +452,7 @@ export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Pro
 
       setValue((v) => v.slice(0, cursor) + input + v.slice(cursor));
       setCursor((c) => c + input.length);
+      setAcIndex(0); // Reset autocomplete selection on new input
     }
   });
 
@@ -483,13 +497,17 @@ export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Pro
     <Box flexDirection="column">
       {autocomplete && (
         <Box paddingX={2} flexDirection="column">
-          {autocomplete.items.map((item, i) => (
-            <Box key={item.label} gap={1}>
-              <Text color={i === 0 ? COLORS.primary : COLORS.subtle} bold={i === 0}>{item.label}</Text>
-              <Text color={COLORS.muted}>{item.desc}</Text>
-              {i === 0 && <Text color={COLORS.muted} dimColor>Tab</Text>}
-            </Box>
-          ))}
+          {autocomplete.items.map((item, i) => {
+            const selected = i === Math.min(acIndex, autocomplete.items.length - 1);
+            return (
+              <Box key={item.label} gap={1}>
+                <Text color={selected ? COLORS.primary : COLORS.muted}>{selected ? '\u25B8' : ' '}</Text>
+                <Text color={selected ? COLORS.primary : COLORS.subtle} bold={selected}>{item.label}</Text>
+                <Text color={COLORS.muted}>{item.desc}</Text>
+                {selected && <Text color={COLORS.muted} dimColor>Tab</Text>}
+              </Box>
+            );
+          })}
         </Box>
       )}
       <Box borderStyle="round" borderColor={disabled ? '#3D3A36' : '#5C5751'} paddingX={1} marginTop={1}>

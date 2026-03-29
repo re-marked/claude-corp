@@ -43,42 +43,67 @@ function linkify(url: string): string {
 /** Render message content with @mentions highlighted and URLs clickable. */
 export function renderContent(content: string | undefined | null, members: Map<string, Member>) {
   if (!content) return <Text wrap="wrap">{''}</Text>;
-  const parts: React.ReactNode[] = [];
-  // Combined regex: URLs or @mentions
-  const combined = /https?:\/\/[^\s<>"'\)\]]+|@"([^"]+)"|@([A-Za-z0-9][\w-]*)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
 
-  while ((match = combined.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(<Text key={`t${lastIndex}`} wrap="wrap">{content.slice(lastIndex, match.index)}</Text>);
-    }
+  // Build a list of all highlight ranges: URLs and @mentions (both slug and display name)
+  const ranges: { start: number; end: number; type: 'url' | 'mention'; text: string; member?: Member }[] = [];
 
-    if (match[0].startsWith('http')) {
-      // URL — clickable via OSC 8
-      parts.push(
-        <Text key={`u${match.index}`} color={COLORS.info} underline>
-          {linkify(match[0])}
-        </Text>,
-      );
-    } else {
-      // @mention
-      const mentionName = match[1] ?? match[2]!;
-      const mentionedMember = [...members.values()].find(
-        (m) => m.displayName.toLowerCase() === mentionName.toLowerCase(),
-      );
-      const isCeo = mentionedMember?.rank === 'master';
-
-      if (isCeo) {
-        parts.push(<RainbowText key={`m${match.index}`}>{`@${mentionName}`}</RainbowText>);
-      } else {
-        parts.push(<Text key={`m${match.index}`} bold color={COLORS.secondary}>@{mentionName}</Text>);
-      }
-    }
-
-    lastIndex = match.index + match[0].length;
+  // Find URLs
+  const urlRe = /https?:\/\/[^\s<>"'\)\]]+/g;
+  let m: RegExpExecArray | null;
+  while ((m = urlRe.exec(content)) !== null) {
+    ranges.push({ start: m.index, end: m.index + m[0].length, type: 'url', text: m[0] });
   }
 
+  // Find @mentions — check every member's display name and slug against content
+  const lower = content.toLowerCase();
+  const allMembers = [...members.values()].sort((a, b) => b.displayName.length - a.displayName.length);
+  for (const member of allMembers) {
+    // Check display name: @Lead Strategist
+    const dnPattern = `@${member.displayName.toLowerCase()}`;
+    let idx = lower.indexOf(dnPattern);
+    while (idx !== -1) {
+      const end = idx + 1 + member.displayName.length;
+      if (!ranges.some(r => idx >= r.start && idx < r.end)) {
+        ranges.push({ start: idx, end, type: 'mention', text: content.slice(idx, end), member });
+      }
+      idx = lower.indexOf(dnPattern, idx + 1);
+    }
+    // Check slug: @lead-strategist
+    const slug = member.displayName.toLowerCase().replace(/\s+/g, '-');
+    const slugPattern = `@${slug}`;
+    idx = lower.indexOf(slugPattern);
+    while (idx !== -1) {
+      const end = idx + 1 + slug.length;
+      if (!ranges.some(r => idx >= r.start && idx < r.end)) {
+        ranges.push({ start: idx, end, type: 'mention', text: content.slice(idx, end), member });
+      }
+      idx = lower.indexOf(slugPattern, idx + 1);
+    }
+  }
+
+  // Sort by position
+  ranges.sort((a, b) => a.start - b.start);
+
+  // Render
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  for (const range of ranges) {
+    if (range.start < lastIndex) continue; // Skip overlapping
+    if (range.start > lastIndex) {
+      parts.push(<Text key={`t${lastIndex}`} wrap="wrap">{content.slice(lastIndex, range.start)}</Text>);
+    }
+    if (range.type === 'url') {
+      parts.push(<Text key={`u${range.start}`} color={COLORS.info} underline>{linkify(range.text)}</Text>);
+    } else {
+      const isCeo = range.member?.rank === 'master';
+      if (isCeo) {
+        parts.push(<RainbowText key={`m${range.start}`}>{range.text}</RainbowText>);
+      } else {
+        parts.push(<Text key={`m${range.start}`} bold color={COLORS.secondary}>{range.text}</Text>);
+      }
+    }
+    lastIndex = range.end;
+  }
   if (lastIndex < content.length) {
     parts.push(<Text key={`t${lastIndex}`} wrap="wrap">{content.slice(lastIndex)}</Text>);
   }
