@@ -591,6 +591,13 @@ export class MessageRouter {
 
       log(`[router] ${target.displayName} responded in #${channel.name}`);
 
+      // Clear dispatch state IMMEDIATELY so TUI stops showing "Agent is working..."
+      // before the response triggers new dispatches via fs.watch
+      this.daemon.streaming.delete(targetId);
+      this.activeDispatches.delete(target.displayName);
+      this.daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId: channel.id });
+      this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
+
       // Mark corp as dirty for git commit
       this.daemon.gitManager.markDirty(target.displayName);
 

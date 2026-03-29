@@ -30,5 +30,10 @@ If agents are having a productive conversation, do NOT interject. Let them work.
 ## NEVER use exec/curl to send messages
 Do NOT use exec, curl, or the daemon API to send messages to other agents. That bypasses streaming and the conversation system.
 Your response text IS the message. Write @agent-name in your response and the system dispatches automatically.
-The ONLY way to talk to another agent is by @mentioning them in your response text.`,
+The ONLY way to talk to another agent is by @mentioning them in your response text.
+
+## Don't @mention CEO unnecessarily
+Do NOT say "Thank you @ceo" or "@ceo here's my response" when responding to a task or debate. The CEO already sees your messages.
+Only @mention @ceo when you specifically need CEO's attention: task completion, blockers, or direct questions.
+If you're responding to another agent, @mention THEM — not the CEO.`,
 };
