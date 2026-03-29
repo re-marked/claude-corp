@@ -151,34 +151,20 @@ function ResumeView({ corpPath }: { corpPath: string }) {
 
   const viewStack = useMemo(() => new ViewStack(), []);
 
-  // Transitioning state — when true, render nothing (blank frame for clear to flush)
-  const [transitioning, setTransitioning] = useState(false);
-
   const navigate = useCallback((view: View) => {
-    // Step 1: blank the screen — render nothing
-    setTransitioning(true);
     process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
-
-    // Step 2: after one frame, update the view (React mounts fresh components)
-    setTimeout(() => {
-      if (view.type === 'corp-home') {
-        viewStack.clear(view);
-      } else {
-        viewStack.push(view);
-      }
-      setTransitioning(false);
-      forceRender((n) => n + 1);
-    }, 50);
+    if (view.type === 'corp-home') {
+      viewStack.clear(view);
+    } else {
+      viewStack.push(view);
+    }
+    forceRender((n) => n + 1);
   }, [viewStack]);
 
   const goBack = useCallback(() => {
-    setTransitioning(true);
     process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
-    setTimeout(() => {
-      viewStack.pop();
-      setTransitioning(false);
-      forceRender((n) => n + 1);
-    }, 50);
+    viewStack.pop();
+    forceRender((n) => n + 1);
   }, [viewStack]);
 
   // Find CEO DM channel for Ctrl+D
@@ -318,10 +304,6 @@ function ResumeView({ corpPath }: { corpPath: string }) {
     return <BootSequence onComplete={() => setBootDone(true)} />;
   }
 
-  // Blank frame during view transition — lets the clear flush before new Static renders
-  if (transitioning) {
-    return <Box flexGrow={1} />;
-  }
 
   // Command palette overlay
   if (showSwitcher) {
