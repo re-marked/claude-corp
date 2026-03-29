@@ -35,8 +35,9 @@ export class CorpGateway {
     this.globalConfig = globalConfig;
     this.gatewayDir = join(corpRoot, '.gateway');
     this.configPath = join(this.gatewayDir, 'openclaw.json');
-    // Port 0 = OS-assigned dynamic port — no more port conflicts between corps
-    this._port = 0;
+    // Random port from range — avoids conflicts between multiple corps
+    const [lo, hi] = globalConfig.daemon.portRange;
+    this._port = lo + Math.floor(Math.random() * (hi - lo));
     this._token = generateId() + generateId();
   }
 
@@ -135,8 +136,7 @@ export class CorpGateway {
     if (this._status === 'ready' || this._status === 'starting') return;
 
     // Check if a gateway is already running on our port (e.g. survived a Ctrl+C)
-    // Skip when using dynamic port (0) — nothing to adopt
-    if (this._port > 0 && await this.tryAdoptExisting()) {
+    if (await this.tryAdoptExisting()) {
       return;
     }
 
@@ -160,34 +160,11 @@ export class CorpGateway {
 
     this.process = proc;
 
-    // Parse dynamic port from gateway output + log
-    let portResolved = this._port > 0;
-    const portPromise = !portResolved ? new Promise<void>((resolvePort) => {
-      const timeout = setTimeout(() => resolvePort(), 15000); // Fallback timeout
-      proc.stdout?.on('data', (chunk: Buffer) => {
-        const line = chunk.toString().trim();
-        if (line) log(`[gateway] ${line}`);
-        // Parse "listening on ws://127.0.0.1:PORT"
-        if (!portResolved) {
-          const portMatch = line.match(/listening on ws:\/\/127\.0\.0\.1:(\d+)/);
-          if (portMatch) {
-            this._port = parseInt(portMatch[1]!, 10);
-            portResolved = true;
-            clearTimeout(timeout);
-            resolvePort();
-            log(`[gateway] Dynamic port resolved: ${this._port}`);
-          }
-        }
-      });
-    }) : Promise.resolve();
-
-    if (portResolved) {
-      proc.stdout?.on('data', (chunk: Buffer) => {
-        const line = chunk.toString().trim();
-        if (line) log(`[gateway] ${line}`);
-      });
-    }
-
+    // Log output
+    proc.stdout?.on('data', (chunk: Buffer) => {
+      const line = chunk.toString().trim();
+      if (line) log(`[gateway] ${line}`);
+    });
     proc.stderr?.on('data', (chunk: Buffer) => {
       const line = chunk.toString().trim();
       if (line) logError(`[gateway] ${line}`);
@@ -204,9 +181,6 @@ export class CorpGateway {
       this._status = 'stopped';
       this.process = null;
     });
-
-    // Wait for dynamic port resolution
-    await portPromise;
 
     // Health check
     await this.healthCheck();
