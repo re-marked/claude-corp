@@ -810,28 +810,26 @@ Always consider what happens when things go wrong.`,
       </Static>
       {/* Dynamic: streaming preview + indicators + input */}
       {hasStreamContent && (
-        <Box flexDirection="column" paddingX={1} marginTop={1}>
+        <Box flexDirection="column" marginBottom={1}>
           <Box gap={1}>
-            <Text color={COLORS.agent}>{'\u25CF'}</Text>
-            <Text bold color={COLORS.agent}>{channelStream!.agentName}</Text>
-            <Spinner type="dots" />
+            <Text color={COLORS.agentWorker}>{'\u25CF'}</Text>
+            <Text bold color={COLORS.agentWorker}>{channelStream!.agentName}</Text>
+            <Text color={COLORS.muted}><Spinner type="dots" /></Text>
           </Box>
-          <Box paddingLeft={3}>
+          <Box paddingLeft={2}>
             <Text wrap="wrap">{channelStream!.content}</Text>
           </Box>
         </Box>
       )}
       {!hasStreamContent && (isStreaming || thinking || dispatchingAgents.length > 0) && (
-        <Box gap={1} paddingX={1} paddingLeft={2}>
-          <Text color={COLORS.info}><Spinner type="dots" /></Text>
+        <Box gap={1} paddingLeft={1}>
+          <Text color={COLORS.muted}><Spinner type="dots" /></Text>
           <Text color={COLORS.subtle}>
             {activeToolCall
               ? `${activeToolCall.agentName} ${activeToolCall.toolName}...`
-              : isStreaming
-                ? `${channelStream!.agentName} is working...`
-                : thinkingAgents.length > 0
-                  ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                  : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
+              : thinkingAgents.length > 0
+                ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+                : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
           </Text>
         </Box>
       )}
