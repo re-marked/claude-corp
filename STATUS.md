@@ -86,9 +86,10 @@ NOT in scope: file read/write, code execution, git, web search — those stay na
 
 ## Next: Git Janitor + worktrees
 
-- [ ] Git Janitor agent (auto-resolves merge conflicts)
-- [ ] Per-agent git worktrees (isolated branches, no file conflicts during work)
-- [ ] Merge queue managed by Git Janitor (like Gas Town's Refinery)
+- [ ] Git Janitor agent — owns all merge operations
+- [ ] Per-agent git worktrees — each agent works in a full separate copy of the repo on disk. No shared files, no conflicts possible during work. Agents edit different directories simultaneously.
+- [ ] Workflow: agent gets task → Git Janitor creates a worktree for them → agent works in their isolated copy → agent finishes → Git Janitor merges the worktree back into main → worktree cleaned up
+- [ ] Conflict resolution is Git Janitor's sole responsibility — surfaces only at merge time, not during work
 
 ## Future / Open
 
