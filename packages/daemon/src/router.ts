@@ -328,6 +328,7 @@ export class MessageRouter {
 
     try {
       this.activeDispatches.add(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'busy');
 
       // Broadcast dispatch start + set streaming state
       this.daemon.events.broadcast({
@@ -427,6 +428,7 @@ export class MessageRouter {
 
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
       this.daemon.events.broadcast({
         type: 'stream_end',
         agentName: target.displayName,
@@ -474,6 +476,7 @@ export class MessageRouter {
           // Retry after delay
           this.daemon.streaming.delete(targetId);
           this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
           this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
           // Clear dedup so retry can go through
           this.dispatched.delete(`${msg.id}:${targetId}`);
@@ -502,6 +505,7 @@ export class MessageRouter {
         appendMessage(msgPath, failMsg);
         this.daemon.streaming.delete(targetId);
         this.activeDispatches.delete(target.displayName);
+        this.daemon.setAgentWorkStatus(targetId, target.displayName, 'broken');
         this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
         this.daemon.gitManager.markDirty(target.displayName);
         this.drainQueue(targetId);
@@ -543,6 +547,7 @@ export class MessageRouter {
         log(`[router] ${target.displayName} responded in thread in #${channel.name}`);
         this.daemon.streaming.delete(targetId);
         this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
         this.daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId: channel.id });
         this.daemon.gitManager.markDirty(target.displayName);
         this.drainQueue(targetId);
@@ -595,6 +600,7 @@ export class MessageRouter {
       // before the response triggers new dispatches via fs.watch
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
       this.daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId: channel.id });
       this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
 
@@ -608,6 +614,7 @@ export class MessageRouter {
       // in the gateway config (exponential backoff, profile rotation, session-sticky).
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
       this.daemon.events.broadcast({
         type: 'dispatch_end',
         agentName: target.displayName,

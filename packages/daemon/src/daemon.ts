@@ -6,6 +6,7 @@ import {
   type Channel,
   type ChannelMessage,
   type GlobalConfig,
+  type AgentWorkStatus,
   readConfig,
   appendMessage,
   generateId,
@@ -39,6 +40,10 @@ export class Daemon {
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
+  /** Computed work status per agent (memberId → status) */
+  agentWorkStatus = new Map<string, AgentWorkStatus>();
+  /** Callbacks for busy→idle transition (Phase 3: inbox system will use this) */
+  private onIdleCallbacks: ((memberId: string, displayName: string) => void)[] = [];
   /** WebSocket event bus for real-time TUI updates. */
   events = new EventBus();
   /** WebSocket to user's personal OpenClaw (for CEO dispatch with tool events). */
@@ -57,6 +62,41 @@ export class Daemon {
     this.heartbeat = new HeartbeatManager(this);
     this.taskWatcher = new TaskWatcher(this);
     this.hireWatcher = new HireWatcher(this);
+  }
+
+  // --- Agent Work Status Engine ---
+
+  /** Register a callback for when an agent transitions busy→idle */
+  onAgentIdle(cb: (memberId: string, displayName: string) => void): void {
+    this.onIdleCallbacks.push(cb);
+  }
+
+  /** Update agent work status + broadcast event + fire transition callbacks */
+  setAgentWorkStatus(memberId: string, displayName: string, status: AgentWorkStatus): void {
+    const prev = this.agentWorkStatus.get(memberId);
+    if (prev === status) return;
+    this.agentWorkStatus.set(memberId, status);
+    this.events.broadcast({ type: 'agent_status', agentName: displayName, status });
+    log(`[status] ${displayName}: ${prev ?? 'unknown'} → ${status}`);
+    if (prev === 'busy' && status === 'idle') {
+      for (const cb of this.onIdleCallbacks) cb(memberId, displayName);
+    }
+  }
+
+  /** Get computed work status for an agent */
+  getAgentWorkStatus(memberId: string): AgentWorkStatus {
+    return this.agentWorkStatus.get(memberId) ?? 'offline';
+  }
+
+  /** Initialize work status for all spawned agents */
+  initAgentWorkStatuses(): void {
+    for (const agent of this.processManager.listAgents()) {
+      const status: AgentWorkStatus = agent.status === 'ready' ? 'idle'
+        : agent.status === 'starting' ? 'starting'
+        : agent.status === 'crashed' ? 'broken'
+        : 'offline';
+      this.agentWorkStatus.set(agent.memberId, status);
+    }
   }
 
   async start(): Promise<number> {
@@ -161,6 +201,9 @@ export class Daemon {
         logError(`[daemon] Failed to spawn ${agent.displayName}: ${err}`);
       }
     }
+
+    // Initialize work status for all agents
+    this.initAgentWorkStatuses();
   }
 
   /**

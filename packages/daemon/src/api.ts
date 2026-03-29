@@ -39,8 +39,8 @@ export function createApi(daemon: Daemon): Server {
             displayName: a.displayName,
             port: a.port,
             status: a.status,
+            workStatus: daemon.getAgentWorkStatus(a.memberId),
           })),
-          dispatching: [...daemon.router.activeDispatches],
         });
         return;
       }
@@ -100,6 +100,7 @@ export function createApi(daemon: Daemon): Server {
           displayName: a.displayName,
           port: a.port,
           status: a.status,
+          workStatus: daemon.getAgentWorkStatus(a.memberId),
         })));
         return;
       }
