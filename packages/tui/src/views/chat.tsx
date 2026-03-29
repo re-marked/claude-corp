@@ -62,7 +62,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   // Clear screen + update tab title when switching channels
   useEffect(() => {
-    process.stdout.write('\x1b[2J\x1b[H'); // Clear terminal buffer so old channel messages don't linger
+    process.stdout.write('\x1b[3J\x1b[2J\x1b[H'); // Clear scrollback + screen so old channel messages are gone
     process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name}\x07`);
   }, [channel.id]);
 
