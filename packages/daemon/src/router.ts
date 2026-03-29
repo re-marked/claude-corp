@@ -392,7 +392,6 @@ export class MessageRouter {
               };
               appendMessage(msgPath, segMsg);
               this.daemon.streaming.delete(targetId);
-              this.daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId: channel.id });
             }
             this.daemon.events.broadcast({
               type: 'tool_start',
