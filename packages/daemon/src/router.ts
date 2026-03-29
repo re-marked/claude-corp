@@ -170,8 +170,8 @@ export class MessageRouter {
     // Don't dispatch system messages or task events
     if (msg.kind !== 'text') return;
 
-    // Depth guard
-    if (msg.depth >= MAX_DEPTH) {
+    // Depth guard — 0 = unlimited (default)
+    if (MAX_DEPTH > 0 && msg.depth >= MAX_DEPTH) {
       log(`[router] Depth limit reached (${msg.depth}) for message ${msg.id}`);
       return;
     }
