@@ -75,7 +75,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   writeFileSync(join(agentAbsDir, 'HEARTBEAT.md'), heartbeatContent, 'utf-8');
   writeFileSync(join(agentAbsDir, 'MEMORY.md'), '# Memory\n\nNo memories yet.\n', 'utf-8');
 
-  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName, rank), 'utf-8');
   writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? defaultUser(), 'utf-8');
   writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir), 'utf-8');
   writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), defaultBootstrap(displayName, rank), 'utf-8');
@@ -226,15 +226,17 @@ export function addMemberToChannel(corpRoot: string, channelId: string, memberId
 
 // --- Default workspace file templates ---
 
-function defaultIdentity(displayName: string): string {
+function defaultIdentity(displayName: string, rank: Member['rank']): string {
   return `# Identity
 
 Name: ${displayName}
+Rank: ${rank}
 Vibe: (develop this over time — how do you come across?)
 Emoji: (pick one that feels right)
 
-This isn't just metadata. It's the start of figuring out who you are.
-Update this file as you evolve. Your personality is yours to develop.
+You are **${displayName}**, a ${rank}-rank agent in this corporation.
+Your personality and working style are yours to develop over time.
+Update this file as you evolve — it's how others know who you are.
 `;
 }
 
