@@ -369,6 +369,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         );
         return (
           <ChatView
+            key={`chat-${ch.id}`}
             channel={ch}
             messagesPath={messagesPath}
             streamData={streamForChannel}
