@@ -58,23 +58,51 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## Next: cc tools — agent internal intercom (v1.0)
+
+Fast corp operations for agents. All visible conversation stays in channels with streaming.
+`cc` is the invisible intercom — fast, direct, operational.
+
+- [ ] `cc say <agent> "message"` — private direct dispatch, returns response inline
+- [ ] `cc ask <agent> "question"` — same but lighter context
+- [ ] `cc hire <name> <description>` — hire agent with defaults
+- [ ] `cc fire <agent>` — archive agent
+- [ ] `cc who` — list agents with status
+- [ ] `cc task <title> [--assign] [--priority]` — create task
+- [ ] `cc done <task-id>` — mark complete
+- [ ] `cc block <task-id> "reason"` — mark blocked + escalate
+- [ ] `cc tasks` — list assigned tasks
+- [ ] `cc status` — corp status
+- [ ] `cc inspect <agent>` — agent detail
+
+NOT in scope: file read/write, code execution, git, web search — those stay native tools.
+
+## Next: Deacon pattern — self-monitoring corp
+
+- [ ] Deacon agent — watchdog that monitors all agents on heartbeat
+- [ ] Detects stuck agents (task assigned but no progress in N minutes)
+- [ ] Pings stuck agents, escalates to CEO if unresponsive
+- [ ] Boot agent — watches the Deacon (who watches the watchman?)
+
+## Next: Git Janitor + worktrees
+
+- [ ] Git Janitor agent (auto-resolves merge conflicts)
+- [ ] Per-agent git worktrees (isolated branches, no file conflicts during work)
+- [ ] Merge queue managed by Git Janitor (like Gas Town's Refinery)
+
 ## Future / Open
 
-- [ ] Custom themes (name your own ranks, custom colors)
 - [ ] Agent suspension/resume/archival
-- [ ] Git Janitor agent (auto-resolves merge conflicts)
-- [ ] File locking system (agents built v3 with daemon HTTP endpoints — needs merge review)
 - [ ] Agent forking (copy SOUL.md + BRAIN, let it evolve independently)
 - [ ] Agent ELO / reputation system (track agent reliability over time)
-- [ ] /kudos command (public shoutouts with tracking)
-- [ ] /assign @agent <task> — inline task creation from chat
-- [ ] /standup — trigger all agents to report their current status
+- [ ] /kudos, /standup commands
 - [ ] Morning CEO briefings (daily summary of overnight work)
 - [ ] Web frontend (connects to same daemon, browser-based UI)
 - [ ] Tool usage auditing (detect when agents don't use required tools like web_search)
-- [ ] Steampunk aesthetic (direction set, old implementation removed, rebuild properly)
-- [ ] Per-run analytics dashboard (agent participation, timing, deliverables)
-- [ ] TASKS.md / HEARTBEAT.md merge (decide on single file for task inbox + heartbeat)
+- [ ] Agent Dreams — warm-start idle behavior (heartbeat loads context so task dispatch is instant)
+- [ ] TUI scrollback fix (Static items leak across view switches — needs alt screen or custom renderer)
+- [ ] TASKS.md / HEARTBEAT.md merge
+- [ ] Per-run analytics dashboard
 
 ---
 
