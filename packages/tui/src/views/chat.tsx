@@ -809,7 +809,7 @@ Always consider what happens when things go wrong.`,
         {(msg) => renderMsg(msg)}
       </Static>
       {/* Dynamic: streaming preview + indicators + input */}
-      {hasStreamContent && (
+      {hasStreamContent && dispatchingAgents.includes(channelStream!.agentName) && (
         <Box flexDirection="column" marginBottom={1}>
           <Box gap={1}>
             <Text color={COLORS.agentWorker}>{'\u25CF'}</Text>
