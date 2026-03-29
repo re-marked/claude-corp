@@ -6,22 +6,36 @@ import { homedir } from 'node:os';
 
 export interface ColorPalette {
   name: string;
+  // Brand
   primary: string;
   secondary: string;
+  // Semantic
   success: string;
   warning: string;
   danger: string;
   info: string;
+  // Neutral
   text: string;
   subtle: string;
   muted: string;
   border: string;
   borderActive: string;
-  user: string;
-  agent: string;
+  // Identity — hierarchy-based
+  user: string;        // Founder
   ceo: 'rainbow';
+  agentLeader: string; // leaders, directors
+  agentWorker: string; // workers, subagents
   system: string;
 }
+
+/** Resolve agent color by rank */
+export function agentColor(palette: ColorPalette, rank?: string): string {
+  if (rank === 'master') return palette.primary; // CEO uses primary (but rainbow overrides in rendering)
+  if (rank === 'leader') return palette.agentLeader;
+  return palette.agentWorker;
+}
+
+// --- Palettes ---
 
 const CORAL: ColorPalette = {
   name: 'coral',
@@ -37,9 +51,34 @@ const CORAL: ColorPalette = {
   border: '#3A3A3A',
   borderActive: '#E07B56',
   user: '#6CC490',
-  agent: '#6BAED6',
   ceo: 'rainbow',
+  agentLeader: '#E07B56',
+  agentWorker: '#6BAED6',
   system: '#5A5A5A',
+};
+
+const ROSE: ColorPalette = {
+  name: 'rose',
+  // Brand — vibrant rose
+  primary: '#D4728C',
+  secondary: '#D4A87E',
+  // Semantic — harmonized with rose
+  success: '#7EC8A0',
+  warning: '#D4A87E',
+  danger: '#D47070',
+  info: '#A090C0',
+  // Neutral — rose-tinted grays
+  text: '#E8E0E4',
+  subtle: '#A89BA0',
+  muted: '#706468',
+  border: '#443E40',
+  borderActive: '#D4728C',
+  // Identity — rose hierarchy
+  user: '#E0A8B8',       // warm light rose — Founder stands out
+  ceo: 'rainbow',
+  agentLeader: '#C888A0', // medium rose — leaders
+  agentWorker: '#9AAEC0', // rose-tinged slate — workers
+  system: '#706468',
 };
 
 const LAVENDER: ColorPalette = {
@@ -56,8 +95,9 @@ const LAVENDER: ColorPalette = {
   border: '#3A3842',
   borderActive: '#A78BDB',
   user: '#DB8BA7',
-  agent: '#5BBFB5',
   ceo: 'rainbow',
+  agentLeader: '#A78BDB',
+  agentWorker: '#5BBFB5',
   system: '#5A5864',
 };
 
@@ -75,28 +115,10 @@ const INDIGO: ColorPalette = {
   border: '#383848',
   borderActive: '#6B7FD7',
   user: '#7EC8A0',
-  agent: '#D4B96A',
   ceo: 'rainbow',
+  agentLeader: '#6B7FD7',
+  agentWorker: '#D4B96A',
   system: '#585868',
-};
-
-const ROSE: ColorPalette = {
-  name: 'rose',
-  primary: '#C87E8A',
-  secondary: '#D4B86A',
-  success: '#6CC490',
-  warning: '#D4B86A',
-  danger: '#D46B6B',
-  info: '#7E9BB5',
-  text: '#E8E4E0',
-  subtle: '#A49E98',
-  muted: '#5E5A56',
-  border: '#3E3A36',
-  borderActive: '#C87E8A',
-  user: '#8AB89C',
-  agent: '#7E9BB5',
-  ceo: 'rainbow',
-  system: '#5E5A56',
 };
 
 const MONO: ColorPalette = {
@@ -113,16 +135,17 @@ const MONO: ColorPalette = {
   border: '#383838',
   borderActive: '#CCCCCC',
   user: '#E8E8E8',
-  agent: '#CCCCCC',
   ceo: 'rainbow',
+  agentLeader: '#CCCCCC',
+  agentWorker: '#AAAAAA',
   system: '#555555',
 };
 
 export const PALETTES: Record<string, ColorPalette> = {
   coral: CORAL,
+  rose: ROSE,
   lavender: LAVENDER,
   indigo: INDIGO,
-  rose: ROSE,
   mono: MONO,
 };
 
@@ -145,7 +168,6 @@ function loadThemeName(): string {
 export function saveTheme(name: string): void {
   if (!PALETTES[name]) return;
   try { writeFileSync(THEME_PATH, name, 'utf-8'); } catch {}
-  // Update live COLORS
   Object.assign(COLORS, PALETTES[name]!);
   Object.assign(STATUS, buildStatus());
   Object.assign(TASK_STATUS, buildTaskStatus());
@@ -156,10 +178,9 @@ export function currentThemeName(): string {
   return loadThemeName();
 }
 
-// --- Live palette (mutable, updated by saveTheme) ---
+// --- Live palette ---
 
 const initial = PALETTES[loadThemeName()]!;
-
 export const COLORS: ColorPalette = { ...initial };
 
 function buildStatus() {

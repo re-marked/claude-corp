@@ -18,7 +18,7 @@ import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
 import { HireWizard } from './hire-wizard.js';
 import { ModelWizard } from './model-wizard.js';
-import { COLORS, BORDER_STYLE } from '../theme.js';
+import { COLORS, BORDER_STYLE, agentColor } from '../theme.js';
 import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
@@ -769,10 +769,11 @@ Always consider what happens when things go wrong.`,
 
     // Tool events — compact inline display
     if (msg.kind === 'tool_event') {
+      const toolColor = sender ? agentColor(COLORS, sender.rank) : COLORS.subtle;
       return (
         <Box key={msg.id} gap={1} paddingLeft={1}>
           <Text color={COLORS.muted}> {'\u2502'}</Text>
-          <Text color={COLORS.agent}>{name}</Text>
+          <Text color={toolColor}>{name}</Text>
           <Text color={COLORS.subtle}>{msg.content}</Text>
         </Box>
       );
@@ -780,7 +781,7 @@ Always consider what happens when things go wrong.`,
 
     const replyCount = threadCounts.get(msg.id) ?? 0;
     const isUser = sender?.type === 'user';
-    const nameColor = isUser ? COLORS.user : COLORS.agent;
+    const nameColor = isUser ? COLORS.user : agentColor(COLORS, sender?.rank);
     return (
       <Box key={msg.id} flexDirection="column" marginBottom={1}>
         <Box gap={1}>

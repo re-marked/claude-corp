@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
+import { COLORS } from '../theme.js';
 
 const LOGO = [
   '           mmmm                                mm                                                             ',
@@ -65,7 +66,7 @@ export function BootSequence({ onComplete }: Props) {
       {/* Logo */}
       <Box flexDirection="column" alignItems="center">
         {LOGO.slice(0, logoLines).map((line, i) => (
-          <Text key={i} color="#E07B56">{line}</Text>
+          <Text key={i} color={COLORS.primary}>{line}</Text>
         ))}
       </Box>
 
@@ -76,7 +77,7 @@ export function BootSequence({ onComplete }: Props) {
             const done = i < phase;
             const active = i === phase && phase < PHASES.length;
             return (
-              <Text key={i} color={done ? '#5A5A5A' : active ? '#E2E2E2' : '#5A5A5A'}>
+              <Text key={i} color={done ? COLORS.muted : active ? COLORS.text : COLORS.muted}>
                 {done ? '  ' : '> '}{p}{active ? dotStr : ''}
               </Text>
             );
