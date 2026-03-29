@@ -412,26 +412,15 @@ export class CorpGateway {
               fallbacks: fallbacks.map(m => `${this.globalConfig.defaults.provider}/${m}`),
             } : {}),
           },
-          compaction: {
-            mode: 'safeguard',
-            // Auto-save memories before context gets compacted
-            memoryFlush: { enabled: true },
-          },
+          compaction: { mode: 'safeguard' },
           verboseDefault: 'full',
           blockStreamingDefault: 'off',
           heartbeat: {
             every: '10m',
             prompt: 'Read your HEARTBEAT.md file. It contains your current tasks and instructions. Follow them. If nothing needs attention, reply HEARTBEAT_OK.',
-            // Cost optimization: isolated session + light context for heartbeat runs
-            isolatedSession: true,
-            lightContext: true,
           },
         },
         list: agentsList,
-      },
-      // Per-agent session isolation — prevents identity bleeding across DMs
-      session: {
-        dmScope: 'per-channel-peer',
       },
       gateway: {
         port: this._port,
