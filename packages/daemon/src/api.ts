@@ -1,4 +1,5 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import {
   createTask,
   listTasks,
@@ -9,6 +10,8 @@ import {
   listProjects,
   createTeam,
   listTeams,
+  readConfig,
+  writeConfig,
   KNOWN_MODELS,
   resolveModelAlias,
   writeGlobalConfig,
@@ -374,6 +377,23 @@ export function createApi(daemon: Daemon): Server {
         } catch {}
 
         json(res, { ok: true, fallbackChain: chain });
+        return;
+      }
+
+      // PATCH /channels/:id — update channel name or mode
+      const channelPatchMatch = path.match(/^\/channels\/([^/]+)$/);
+      if (method === 'PATCH' && channelPatchMatch) {
+        const channelId = decodeURIComponent(channelPatchMatch[1]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        const channels = readConfig<any[]>(join(daemon.corpRoot, 'channels.json'));
+        const ch = channels.find((c: any) => c.id === channelId);
+        if (!ch) { json(res, { error: 'Channel not found' }, 404); return; }
+
+        if (body.name && typeof body.name === 'string') ch.name = body.name;
+        if (body.mode && (body.mode === 'dm' || body.mode === 'mention' || body.mode === 'all')) ch.mode = body.mode;
+
+        writeConfig(join(daemon.corpRoot, 'channels.json'), channels);
+        json(res, { ok: true, channel: ch });
         return;
       }
 

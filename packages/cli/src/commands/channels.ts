@@ -13,7 +13,7 @@ export async function cmdChannels(opts: { json: boolean }) {
 
   console.log(`Channels (${channels.length}):\n`);
   for (const ch of channels) {
-    const mode = ch.mode ?? (ch.kind === 'direct' ? 'open' : 'mention');
-    console.log(`  ${ch.name.padEnd(28)} ${ch.kind.padEnd(10)} ${mode.padEnd(10)} ${ch.memberIds.length} members`);
+    const mode = ch.mode ?? (ch.kind === 'direct' ? 'dm' : 'mention');
+    console.log(`  ${ch.name.padEnd(28)} ${ch.kind.padEnd(10)} ${mode.padEnd(8)} ${ch.memberIds.length} members`);
   }
 }

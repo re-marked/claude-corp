@@ -194,12 +194,8 @@ export class MessageRouter {
     };
     if (!sender && msg.senderId !== 'system') return;
 
-    // Channel mode check — announce channels don't dispatch
-    const channelMode = channel.mode ?? (channel.kind === 'direct' ? 'open' : 'mention');
-    if (channelMode === 'announce') {
-      log(`[router] #${channel.name} is announce-mode — no dispatch`);
-      return;
-    }
+    // Resolve channel mode: dm (auto-dispatch), mention (@only), all (everyone)
+    const channelMode = channel.mode ?? (channel.kind === 'direct' ? 'dm' : 'mention');
 
     // Find dispatch targets
     let targetIds: string[] = [];
@@ -214,14 +210,13 @@ export class MessageRouter {
       const participantIds = new Set(threadMsgs.map((m) => m.senderId));
       const mentionedIds = resolveMentions(msg.content, members);
       for (const id of mentionedIds) participantIds.add(id);
-      // Remove the sender, keep only agents
       participantIds.delete(msg.senderId);
       targetIds = [...participantIds].filter((id) => {
         const m = members.find((mem) => mem.id === id);
         return m && m.type === 'agent';
       });
       log(`[router] Thread dispatch: ${targetIds.length} participants`);
-    } else if (channel.kind === 'direct') {
+    } else if (channelMode === 'dm') {
       // DM: auto-route to the other member
       const otherId = channel.memberIds.find((id) => id !== msg.senderId);
       if (otherId) {
@@ -230,9 +225,20 @@ export class MessageRouter {
           targetIds = [otherId];
         }
       }
+    } else if (channelMode === 'all') {
+      // All: every agent in the channel wakes up
+      targetIds = channel.memberIds.filter((id) => {
+        if (id === msg.senderId) return false;
+        const m = members.find((mem) => mem.id === id);
+        return m && m.type === 'agent';
+      });
+      log(`[router] All-mode dispatch: ${targetIds.length} agents in #${channel.name}`);
     } else {
-      // Broadcast/team/system: route to @mentioned agents only
-      const mentionedIds = resolveMentions(msg.content, members);
+      // Mention: route to @mentioned agents only
+      // Use pre-resolved msg.mentions first, fall back to content parsing
+      const mentionedIds = msg.mentions.length > 0
+        ? msg.mentions
+        : resolveMentions(msg.content, members);
       targetIds = mentionedIds.filter((id) => {
         const m = members.find((mem) => mem.id === id);
         return m && m.type === 'agent';

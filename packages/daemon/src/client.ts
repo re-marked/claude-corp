@@ -199,4 +199,15 @@ export class DaemonClient {
     });
     return resp.json() as Promise<any>;
   }
+
+  // --- Channel management ---
+
+  async updateChannel(channelId: string, updates: { name?: string; mode?: string }): Promise<{ ok: boolean; channel: unknown }> {
+    const resp = await fetch(`${this.baseUrl}/channels/${encodeURIComponent(channelId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    return resp.json() as Promise<any>;
+  }
 }

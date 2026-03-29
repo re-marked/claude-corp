@@ -59,14 +59,21 @@ export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onCom
     { id: 'c-project', label: '/project', kind: 'project', icon: '▸', action: () => onCommand('project') },
     { id: 'c-team', label: '/team', kind: 'command', icon: '▸', action: () => onCommand('team') },
     { id: 'c-dogfood', label: '/dogfood', kind: 'command', icon: '▸', action: () => onCommand('dogfood') },
-    // Channels
-    ...channels.map((ch) => ({
-      id: `ch-${ch.id}`,
-      label: unreadChannels.has(ch.id) ? `#${ch.name} ●` : `#${ch.name}`,
-      kind: 'channel' as const,
-      icon: ch.kind === 'direct' ? '◆' : '#',
-      action: () => onSelectChannel(ch),
-    })),
+    { id: 'c-theme', label: '/theme', kind: 'command', icon: '▸', action: () => onCommand('theme') },
+    { id: 'c-model', label: '/model', kind: 'command', icon: '▸', action: () => onCommand('model') },
+    // Channels — show mode badge
+    ...channels.map((ch) => {
+      const mode = ch.mode ?? (ch.kind === 'direct' ? 'dm' : 'mention');
+      const unread = unreadChannels.has(ch.id) ? ' ●' : '';
+      const modeBadge = mode === 'all' ? ' [all]' : mode === 'dm' ? '' : '';
+      return {
+        id: `ch-${ch.id}`,
+        label: `#${ch.name}${modeBadge}${unread}`,
+        kind: 'channel' as const,
+        icon: ch.kind === 'direct' ? '◆' : '#',
+        action: () => onSelectChannel(ch),
+      };
+    }),
     // Agents
     ...agents.map((m) => ({
       id: `ag-${m.id}`,

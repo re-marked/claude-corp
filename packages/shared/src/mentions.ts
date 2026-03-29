@@ -1,6 +1,6 @@
 import type { Member } from './types/index.js';
 
-// Matches @Name or @"Multi Word Name" — strips trailing punctuation from bare mentions
+// Matches @"Multi Word Name" or @SingleWord
 const MENTION_RE = /@"([^"]+)"|@([A-Za-z0-9][\w-]*)/g;
 
 export function extractMentionNames(content: string): string[] {
@@ -17,15 +17,28 @@ export function extractMentionNames(content: string): string[] {
 }
 
 export function resolveMentions(content: string, members: Member[]): string[] {
-  const names = extractMentionNames(content);
   const memberIds: string[] = [];
 
+  // First: regex-extracted names (handles @"Lead Coder" and @CEO)
+  const names = extractMentionNames(content);
   for (const name of names) {
     const lower = name.toLowerCase();
     const member = members.find(
       (m) => m.displayName.toLowerCase() === lower && m.status !== 'archived',
     );
-    if (member) memberIds.push(member.id);
+    if (member && !memberIds.includes(member.id)) memberIds.push(member.id);
+  }
+
+  // Second: unquoted multi-word @mentions by checking against known member names
+  // Catches @Lead Coder (without quotes) by matching "@" + memberName in content
+  for (const m of members) {
+    if (m.status === 'archived') continue;
+    if (memberIds.includes(m.id)) continue;
+    if (!m.displayName.includes(' ')) continue;
+    const pattern = `@${m.displayName}`;
+    if (content.toLowerCase().includes(pattern.toLowerCase())) {
+      memberIds.push(m.id);
+    }
   }
 
   return memberIds;
