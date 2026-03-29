@@ -246,9 +246,20 @@ export class MessageRouter {
 
     if (targetIds.length === 0) return;
 
-    // Dispatch to each target
+    // Human/system @mentions → immediate dispatch (bypass inbox)
+    // Agent @mentions → record in inbox, wait for heartbeat or idle transition
+    const isHumanOrSystem = senderOrSystem.type === 'user' || msg.senderId === 'system';
+
     for (const targetId of targetIds) {
-      this.dispatchToTarget(msg, channel, targetId, members, senderOrSystem);
+      if (isHumanOrSystem) {
+        this.dispatchToTarget(msg, channel, targetId, members, senderOrSystem);
+      } else {
+        // Agent mention → inbox
+        const target = members.find(m => m.id === targetId);
+        const isMention = true;
+        this.daemon.inbox.recordMessage(channel.id, channel.name, targetId, isMention, senderOrSystem.displayName);
+        log(`[router] Inbox: ${target?.displayName ?? targetId} has new mention in #${channel.name} from ${senderOrSystem.displayName}`);
+      }
     }
   }
 

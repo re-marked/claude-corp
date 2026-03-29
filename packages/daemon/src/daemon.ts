@@ -24,6 +24,7 @@ import { HeartbeatManager } from './heartbeat.js';
 import { TaskWatcher } from './task-watcher.js';
 import { HireWatcher } from './hire-watcher.js';
 import { EventBus, type DaemonEvent } from './events.js';
+import { InboxManager } from './inbox.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
@@ -42,6 +43,8 @@ export class Daemon {
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
   /** Computed work status per agent (memberId → status) */
   agentWorkStatus = new Map<string, AgentWorkStatus>();
+  /** Agent inbox system — tracks unread messages per channel per agent */
+  inbox = new InboxManager();
   /** Callbacks for busy→idle transition (Phase 3: inbox system will use this) */
   private onIdleCallbacks: ((memberId: string, displayName: string) => void)[] = [];
   /** WebSocket event bus for real-time TUI updates. */

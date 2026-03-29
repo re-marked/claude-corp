@@ -5,11 +5,15 @@ import {
   readConfig,
   listTasks,
   MEMBERS_JSON,
+  CHANNELS_JSON,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
+import { dispatchToAgent, type DispatchContext } from './dispatch.js';
+import { composeSystemMessage } from './fragments/index.js';
 import { log, logError } from './logger.js';
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // Refresh every 5 minutes
+const INBOX_CHECK_INTERVAL_MS = 60 * 1000; // Check inbox every 60 seconds
 const STALE_ASSIGNED_MS = 10 * 60 * 1000;
 const STALE_IN_PROGRESS_MS = 2 * 60 * 60 * 1000;
 
@@ -23,6 +27,7 @@ const STALE_IN_PROGRESS_MS = 2 * 60 * 60 * 1000;
 export class HeartbeatManager {
   private daemon: Daemon;
   private interval: ReturnType<typeof setInterval> | null = null;
+  private inboxInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -35,11 +40,102 @@ export class HeartbeatManager {
       this.refreshAll();
     }, REFRESH_INTERVAL_MS);
 
-    log('[heartbeat] TASKS.md refresh started (every 5m)');
+    // 60-second inbox heartbeat for idle agents
+    this.inboxInterval = setInterval(() => {
+      this.dispatchInboxSummaries();
+    }, INBOX_CHECK_INTERVAL_MS);
+
+    // Wire busy→idle inbox dump
+    this.daemon.onAgentIdle((memberId, displayName) => {
+      if (this.daemon.inbox.hasUnread(memberId)) {
+        log(`[heartbeat] ${displayName} became idle with unread inbox — dispatching summary`);
+        this.dispatchInboxToAgent(memberId);
+      }
+    });
+
+    log('[heartbeat] TASKS.md refresh (5m) + inbox heartbeat (60s) started');
   }
 
   stop(): void {
     if (this.interval) clearInterval(this.interval);
+    if (this.inboxInterval) clearInterval(this.inboxInterval);
+  }
+
+  /** Dispatch inbox summaries to all IDLE agents with unread items */
+  private dispatchInboxSummaries(): void {
+    try {
+      const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+      const agents = members.filter(m => m.type === 'agent' && m.agentDir);
+
+      for (const agent of agents) {
+        const status = this.daemon.getAgentWorkStatus(agent.id);
+        if (status !== 'idle') continue;
+        if (!this.daemon.inbox.hasUnread(agent.id)) continue;
+
+        this.dispatchInboxToAgent(agent.id);
+      }
+    } catch (err) {
+      logError(`[heartbeat] Inbox dispatch failed: ${err}`);
+    }
+  }
+
+  /** Dispatch inbox summary to a single agent */
+  private async dispatchInboxToAgent(memberId: string): Promise<void> {
+    try {
+      const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+      const agent = members.find(m => m.id === memberId);
+      if (!agent?.agentDir) return;
+
+      const agentProc = this.daemon.processManager.getAgent(memberId);
+      if (!agentProc || agentProc.status !== 'ready') return;
+
+      const summary = this.daemon.inbox.getSummary(memberId);
+      if (!summary) return;
+
+      // Build lightweight context for inbox dispatch
+      const corpRoot = this.daemon.corpRoot.replace(/\\/g, '/');
+      const agentDir = join(this.daemon.corpRoot, agent.agentDir).replace(/\\/g, '/');
+      const allMembers = members.map(m => ({ name: m.displayName, rank: m.rank, type: m.type, status: m.status }));
+
+      let supervisorName: string | null = null;
+      if (agent.spawnedBy) {
+        const sup = members.find(m => m.id === agent.spawnedBy);
+        supervisorName = sup?.displayName ?? null;
+      }
+
+      const context: DispatchContext = {
+        agentDir,
+        corpRoot,
+        channelName: 'inbox',
+        channelMembers: [agent.displayName],
+        corpMembers: allMembers,
+        recentHistory: [],
+        daemonPort: this.daemon.getPort(),
+        agentMemberId: agent.id,
+        agentRank: agent.rank,
+        agentDisplayName: agent.displayName,
+        channelKind: 'direct',
+        supervisorName,
+      };
+
+      // Mark busy during inbox dispatch
+      this.daemon.setAgentWorkStatus(memberId, agent.displayName, 'busy');
+
+      const wsClient = agentProc.mode === 'remote' ? this.daemon.openclawWS : this.daemon.corpGatewayWS;
+      const sessionKey = `inbox:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+
+      try {
+        const result = await dispatchToAgent(agentProc, summary, context, sessionKey, undefined, wsClient);
+        log(`[heartbeat] ${agent.displayName} inbox response: ${result.content.slice(0, 60)}`);
+      } catch (err) {
+        logError(`[heartbeat] ${agent.displayName} inbox dispatch failed: ${err}`);
+      }
+
+      this.daemon.setAgentWorkStatus(memberId, agent.displayName, 'idle');
+      this.daemon.inbox.clear(memberId);
+    } catch (err) {
+      logError(`[heartbeat] Inbox dispatch to ${memberId} failed: ${err}`);
+    }
   }
 
   /** Refresh TASKS.md for ALL agents. Called periodically + on task changes. */
