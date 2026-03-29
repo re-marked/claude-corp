@@ -7,6 +7,8 @@ import {
   readConfig,
   writeConfig,
   generateId,
+  formatProviderModel,
+  parseProviderModel,
 } from '@claudecorp/shared';
 import { log, logError } from './logger.js';
 
@@ -33,8 +35,9 @@ export class CorpGateway {
     this.globalConfig = globalConfig;
     this.gatewayDir = join(corpRoot, '.gateway');
     this.configPath = join(this.gatewayDir, 'openclaw.json');
-    // Allocate port from the top of the range (CEO local fallback uses bottom)
-    this._port = globalConfig.daemon.portRange[0];
+    // Random port from range — avoids conflicts between multiple corps
+    const [lo, hi] = globalConfig.daemon.portRange;
+    this._port = lo + Math.floor(Math.random() * (hi - lo));
     this._token = generateId() + generateId();
   }
 
@@ -333,12 +336,83 @@ export class CorpGateway {
     throw new Error(`Corp gateway failed to start on port ${this._port}`);
   }
 
+  /** Update the corp-wide default model. Gateway hot-reloads on config write. */
+  updateDefaultModel(model: string, provider: string): void {
+    if (!existsSync(this.configPath)) return;
+    const config = readConfig<Record<string, unknown>>(this.configPath);
+    const agents = (config.agents ?? {}) as Record<string, unknown>;
+    const defaults = (agents.defaults ?? {}) as Record<string, unknown>;
+    defaults.model = { primary: formatProviderModel(provider, model) };
+    agents.defaults = defaults;
+    config.agents = agents;
+    writeConfig(this.configPath, config);
+    log(`[gateway] Default model updated to ${provider}/${model}`);
+  }
+
+  /** Set a per-agent model override. Pass null to clear override. */
+  updateAgentModel(agentId: string, model: string | null, provider?: string): void {
+    if (!existsSync(this.configPath)) return;
+    const config = readConfig<Record<string, unknown>>(this.configPath);
+    const agents = (config.agents ?? {}) as Record<string, unknown>;
+    const list = (agents.list ?? []) as CorpGatewayAgent[];
+
+    const agent = list.find(a => a.id === agentId);
+    if (!agent) return;
+
+    if (model && provider) {
+      agent.model = { primary: formatProviderModel(provider, model) };
+      log(`[gateway] Agent ${agentId} model set to ${provider}/${model}`);
+    } else {
+      delete agent.model;
+      log(`[gateway] Agent ${agentId} model override cleared (using default)`);
+    }
+
+    agents.list = list;
+    // Touch agents.defaults.model.primary to trigger gateway hot-reload
+    // (gateway only watches defaults changes, not per-agent list changes)
+    const defaults = (agents.defaults ?? {}) as Record<string, unknown>;
+    const currentDefault = (defaults.model as Record<string, string>)?.primary
+      ?? formatProviderModel(this.globalConfig.defaults.provider, this.globalConfig.defaults.model);
+    defaults.model = { primary: currentDefault };
+    agents.defaults = defaults;
+    config.agents = agents;
+    writeConfig(this.configPath, config);
+  }
+
+  /** Get current model config: corp default + per-agent overrides. */
+  getModels(): { defaultModel: string; agents: { id: string; name: string; model: string | null }[] } {
+    if (!existsSync(this.configPath)) {
+      return { defaultModel: formatProviderModel(this.globalConfig.defaults.provider, this.globalConfig.defaults.model), agents: [] };
+    }
+    const config = readConfig<Record<string, unknown>>(this.configPath);
+    const agents = (config.agents ?? {}) as Record<string, unknown>;
+    const defaults = (agents.defaults ?? {}) as Record<string, unknown>;
+    const modelObj = (defaults.model ?? {}) as Record<string, string>;
+    const defaultModel = modelObj.primary ?? formatProviderModel(this.globalConfig.defaults.provider, this.globalConfig.defaults.model);
+
+    const list = (agents.list ?? []) as CorpGatewayAgent[];
+    const agentModels = list.map(a => ({
+      id: a.id,
+      name: a.name,
+      model: a.model?.primary ?? null,
+    }));
+
+    return { defaultModel, agents: agentModels };
+  }
+
   private buildConfig(agentsList: CorpGatewayAgent[]): Record<string, unknown> {
     const defaultModel = `${this.globalConfig.defaults.provider}/${this.globalConfig.defaults.model}`;
+    const fallbacks = this.globalConfig.defaults.fallbackChain;
     return {
       agents: {
         defaults: {
-          model: { primary: defaultModel },
+          model: {
+            primary: defaultModel,
+            // Native OpenClaw fallback chain — exponential backoff, profile rotation
+            ...(fallbacks && fallbacks.length > 0 ? {
+              fallbacks: fallbacks.map(m => `${this.globalConfig.defaults.provider}/${m}`),
+            } : {}),
+          },
           compaction: { mode: 'safeguard' },
           verboseDefault: 'full',
           blockStreamingDefault: 'off',

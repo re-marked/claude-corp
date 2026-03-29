@@ -1,32 +1,45 @@
 import type { Member } from './types/index.js';
 
-// Matches @Name or @"Multi Word Name" — strips trailing punctuation from bare mentions
-const MENTION_RE = /@"([^"]+)"|@([A-Za-z0-9][\w-]*)/g;
+/**
+ * Resolve @mentions in content to member IDs.
+ * Matches both display name (@Lead Coder) and slug (@lead-coder).
+ * Checks longest names first so "Lead Coder" matches before "Lead".
+ * Case-insensitive. No regex. No edge cases.
+ */
+export function resolveMentions(content: string, members: Member[]): string[] {
+  const lower = content.toLowerCase();
+  const ids: string[] = [];
 
+  // Sort by name length descending — longest match first
+  const sorted = [...members]
+    .filter(m => m.status !== 'archived')
+    .sort((a, b) => b.displayName.length - a.displayName.length);
+
+  for (const m of sorted) {
+    if (ids.includes(m.id)) continue;
+    const slug = memberSlug(m);
+    if (lower.includes(`@${m.displayName.toLowerCase()}`) || lower.includes(`@${slug}`)) {
+      ids.push(m.id);
+    }
+  }
+
+  return ids;
+}
+
+/** Convert member to slug: "Lead Coder" → "lead-coder" */
+export function memberSlug(m: Member): string {
+  return m.displayName.toLowerCase().replace(/\s+/g, '-');
+}
+
+/** Extract raw mention names from content (for display/highlighting). */
 export function extractMentionNames(content: string): string[] {
+  const re = /@"([^"]+)"|@([A-Za-z0-9][\w-]*)/g;
   const names: string[] = [];
   let match: RegExpExecArray | null;
-
-  MENTION_RE.lastIndex = 0;
-  while ((match = MENTION_RE.exec(content)) !== null) {
+  re.lastIndex = 0;
+  while ((match = re.exec(content)) !== null) {
     const name = match[1] ?? match[2];
     if (name) names.push(name);
   }
-
   return names;
-}
-
-export function resolveMentions(content: string, members: Member[]): string[] {
-  const names = extractMentionNames(content);
-  const memberIds: string[] = [];
-
-  for (const name of names) {
-    const lower = name.toLowerCase();
-    const member = members.find(
-      (m) => m.displayName.toLowerCase() === lower && m.status !== 'archived',
-    );
-    if (member) memberIds.push(member.id);
-  }
-
-  return memberIds;
 }

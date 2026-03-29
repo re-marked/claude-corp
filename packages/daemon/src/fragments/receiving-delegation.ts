@@ -14,10 +14,10 @@ When you get a task notification:
 5. Do NOT mark completed unless every acceptance criterion is met.
 
 ## If Something Is Unclear
-Start working with what you have. If you hit something unexpected mid-work — a file doesn't exist where expected, the API returns a different shape, a requirement contradicts another — @mention your supervisor (${ctx.supervisorName ?? 'the CEO'}) with a SPECIFIC question:
+Start working with what you have. If you hit something unexpected mid-work — a file doesn't exist where expected, the API returns a different shape, a requirement contradicts another — @mention your supervisor (@${(ctx.supervisorName ?? 'ceo').toLowerCase().replace(/\s+/g, '-')}) with a SPECIFIC question:
 
-Good: "@CEO the task says to modify api.ts line 50 but that line is a comment, not the handler. Should I look for the handler elsewhere?"
-Bad: "@CEO can you clarify the task?"
+Good: "@ceo the task says to modify api.ts line 50 but that line is a comment, not the handler. Should I look for the handler elsewhere?"
+Bad: "@ceo can you clarify the task?"
 
 ## When You Hit a Wall
 

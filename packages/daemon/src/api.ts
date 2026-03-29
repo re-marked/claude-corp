@@ -1,4 +1,5 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import {
   createTask,
   listTasks,
@@ -9,8 +10,15 @@ import {
   listProjects,
   createTeam,
   listTeams,
+  readConfig,
+  writeConfig,
+  KNOWN_MODELS,
+  resolveModelAlias,
+  writeGlobalConfig,
+  readGlobalConfig,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
+import { dispatchToAgent } from './dispatch.js';
 import { hireAgent } from './hire.js';
 import { writeTaskEvent, notifyTaskAssignment } from './task-events.js';
 import { logError } from './logger.js';
@@ -32,8 +40,8 @@ export function createApi(daemon: Daemon): Server {
             displayName: a.displayName,
             port: a.port,
             status: a.status,
+            workStatus: daemon.getAgentWorkStatus(a.memberId),
           })),
-          dispatching: [...daemon.router.activeDispatches],
         });
         return;
       }
@@ -93,6 +101,7 @@ export function createApi(daemon: Daemon): Server {
           displayName: a.displayName,
           port: a.port,
           status: a.status,
+          workStatus: daemon.getAgentWorkStatus(a.memberId),
         })));
         return;
       }
@@ -272,6 +281,202 @@ export function createApi(daemon: Daemon): Server {
         const projectId = url.searchParams.get('projectId') ?? undefined;
         const teams = listTeams(daemon.corpRoot, projectId);
         json(res, teams);
+        return;
+      }
+
+      // GET /models — current model config
+      if (method === 'GET' && path === '/models') {
+        const gw = daemon.processManager.corpGateway;
+        const gwModels = gw ? gw.getModels() : { defaultModel: `${daemon.globalConfig.defaults.provider}/${daemon.globalConfig.defaults.model}`, agents: [] };
+        json(res, {
+          corpDefault: {
+            model: daemon.globalConfig.defaults.model,
+            provider: daemon.globalConfig.defaults.provider,
+          },
+          fallbackChain: daemon.globalConfig.defaults.fallbackChain ?? [],
+          agents: gwModels.agents,
+          availableModels: KNOWN_MODELS,
+        });
+        return;
+      }
+
+      // POST /models/default — change corp-wide default model
+      if (method === 'POST' && path === '/models/default') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const modelInput = body.model as string;
+        const provider = (body.provider as string) ?? 'anthropic';
+        if (!modelInput) { json(res, { error: 'model is required' }, 400); return; }
+
+        const model = resolveModelAlias(modelInput) ?? modelInput;
+
+        // Update in-memory config
+        daemon.globalConfig.defaults.model = model;
+        daemon.globalConfig.defaults.provider = provider;
+
+        // Persist to disk
+        try {
+          const persisted = readGlobalConfig();
+          persisted.defaults.model = model;
+          persisted.defaults.provider = provider;
+          writeGlobalConfig(persisted);
+        } catch {}
+
+        // Update corp gateway
+        const gw = daemon.processManager.corpGateway;
+        if (gw) gw.updateDefaultModel(model, provider);
+
+        // Broadcast event
+        daemon.events.broadcast({ type: 'model_changed', agentName: null, model });
+
+        json(res, { ok: true, model, provider });
+        return;
+      }
+
+      // POST /models/agent/:name — set per-agent model override
+      const modelAgentMatch = path.match(/^\/models\/agent\/([^/]+)$/);
+      if (method === 'POST' && modelAgentMatch) {
+        const agentName = decodeURIComponent(modelAgentMatch[1]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        const modelInput = body.model as string;
+        const provider = (body.provider as string) ?? 'anthropic';
+        if (!modelInput) { json(res, { error: 'model is required' }, 400); return; }
+
+        const model = resolveModelAlias(modelInput) ?? modelInput;
+
+        const gw = daemon.processManager.corpGateway;
+        if (gw) gw.updateAgentModel(agentName, model, provider);
+
+        daemon.events.broadcast({ type: 'model_changed', agentName, model });
+
+        json(res, { ok: true, agentName, model, provider });
+        return;
+      }
+
+      // DELETE /models/agent/:name — clear per-agent override
+      if (method === 'DELETE' && modelAgentMatch) {
+        const agentName = decodeURIComponent(modelAgentMatch[1]!);
+        const gw = daemon.processManager.corpGateway;
+        if (gw) gw.updateAgentModel(agentName, null);
+
+        daemon.events.broadcast({ type: 'model_changed', agentName, model: daemon.globalConfig.defaults.model });
+
+        json(res, { ok: true, agentName, model: 'default' });
+        return;
+      }
+
+      // POST /models/fallback — set fallback chain
+      if (method === 'POST' && path === '/models/fallback') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const chain = body.chain as string[];
+        if (!Array.isArray(chain)) { json(res, { error: 'chain must be an array of model IDs' }, 400); return; }
+
+        daemon.globalConfig.defaults.fallbackChain = chain;
+
+        try {
+          const persisted = readGlobalConfig();
+          persisted.defaults.fallbackChain = chain;
+          writeGlobalConfig(persisted);
+        } catch {}
+
+        json(res, { ok: true, fallbackChain: chain });
+        return;
+      }
+
+      // PATCH /channels/:id — update channel name or mode
+      const channelPatchMatch = path.match(/^\/channels\/([^/]+)$/);
+      if (method === 'PATCH' && channelPatchMatch) {
+        const channelId = decodeURIComponent(channelPatchMatch[1]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        const channels = readConfig<any[]>(join(daemon.corpRoot, 'channels.json'));
+        const ch = channels.find((c: any) => c.id === channelId);
+        if (!ch) { json(res, { error: 'Channel not found' }, 404); return; }
+
+        if (body.name && typeof body.name === 'string') ch.name = body.name;
+        if (body.mode && (body.mode === 'dm' || body.mode === 'mention' || body.mode === 'all')) ch.mode = body.mode;
+
+        writeConfig(join(daemon.corpRoot, 'channels.json'), channels);
+        json(res, { ok: true, channel: ch });
+        return;
+      }
+
+      // POST /cc/say — direct agent-to-agent dispatch (synchronous, private, no JSONL)
+      if (method === 'POST' && path === '/cc/say') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const targetSlug = body.target as string;
+        const message = body.message as string;
+        if (!targetSlug || !message) {
+          json(res, { error: 'target and message are required' }, 400);
+          return;
+        }
+
+        // Resolve target agent by slug
+        const members = readConfig<any[]>(join(daemon.corpRoot, 'channels.json').replace('channels.json', 'members.json'));
+        const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+        const target = members.find((m: any) =>
+          m.type === 'agent' && (normalize(m.displayName) === normalize(targetSlug) || m.id === targetSlug),
+        );
+        if (!target) { json(res, { error: `Agent "${targetSlug}" not found` }, 404); return; }
+
+        const agentProc = daemon.processManager.getAgent(target.id);
+        if (!agentProc || agentProc.status !== 'ready') {
+          json(res, { error: `Agent "${target.displayName}" is not online` }, 503); return;
+        }
+
+        // Build lightweight context — no channel, minimal prompt
+        const corpRoot = daemon.corpRoot.replace(/\\/g, '/');
+        const agentDir = target.agentDir ? join(daemon.corpRoot, target.agentDir).replace(/\\/g, '/') : corpRoot;
+        const allMembers = members.map((m: any) => ({ name: m.displayName, rank: m.rank, type: m.type, status: m.status }));
+
+        let supervisorName: string | null = null;
+        if (target.spawnedBy) {
+          const sup = members.find((m: any) => m.id === target.spawnedBy);
+          supervisorName = sup?.displayName ?? null;
+        }
+
+        const context = {
+          agentDir,
+          corpRoot,
+          channelName: 'cc-direct',
+          channelMembers: [target.displayName],
+          corpMembers: allMembers,
+          recentHistory: [],
+          daemonPort: daemon.getPort(),
+          agentMemberId: target.id,
+          agentRank: target.rank,
+          agentDisplayName: target.displayName,
+          channelKind: 'direct' as const,
+          supervisorName,
+        };
+
+        // Set target busy
+        daemon.setAgentWorkStatus(target.id, target.displayName, 'busy');
+
+        try {
+          const wsClient = agentProc.mode === 'remote' ? daemon.openclawWS : daemon.corpGatewayWS;
+          const sessionKey = `cc-say:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+          const result = await dispatchToAgent(agentProc, message, context, sessionKey, undefined, wsClient);
+          daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
+
+          // Write to target agent's inbox.jsonl
+          const { appendFileSync } = await import('node:fs');
+          const now = new Date().toISOString();
+          const senderId = (body.senderId as string) ?? 'system';
+          const senderName = members.find((m: any) => m.id === senderId)?.displayName ?? 'unknown';
+          const inboxPath = join(daemon.corpRoot, target.agentDir ?? `agents/${targetSlug}/`, 'inbox.jsonl');
+
+          const question = JSON.stringify({ ts: now, from: senderName, to: target.displayName, content: message }) + '\n';
+          const answerLine = JSON.stringify({ ts: now, from: target.displayName, to: senderName, content: result.content }) + '\n';
+          try {
+            appendFileSync(inboxPath, question + answerLine, 'utf-8');
+          } catch (writeErr) {
+            logError(`[cc-say] Inbox write failed (${inboxPath}): ${writeErr}`);
+          }
+
+          json(res, { ok: true, from: target.displayName, response: result.content });
+        } catch (err) {
+          daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
+          json(res, { error: `Dispatch failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+        }
         return;
       }
 

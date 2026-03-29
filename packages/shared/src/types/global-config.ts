@@ -11,6 +11,8 @@ export interface GlobalConfig {
   defaults: {
     model: string;
     provider: string;
+    /** Ordered fallback models when primary is unavailable/overloaded. */
+    fallbackChain?: string[];
   };
   /** Auto-detected from ~/.openclaw/openclaw.json — not persisted to disk */
   userGateway?: {

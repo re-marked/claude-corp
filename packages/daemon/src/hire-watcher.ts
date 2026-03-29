@@ -78,7 +78,9 @@ export class HireWatcher {
   private async onHireFile(filePath: string): Promise<void> {
     if (this.processed.has(filePath)) return;
     if (this.processing.has(filePath)) return;
-    if (!existsSync(filePath)) return;
+    // Claim immediately to prevent fs.watch double-fire race
+    this.processing.add(filePath);
+    if (!existsSync(filePath)) { this.processing.delete(filePath); return; }
 
     let meta: HireRequest;
     let body: string;
@@ -88,6 +90,7 @@ export class HireWatcher {
       meta = parsed.meta;
       body = parsed.body;
     } catch {
+      this.processing.delete(filePath);
       return; // File might be partially written
     }
 
@@ -105,7 +108,6 @@ export class HireWatcher {
       return;
     }
 
-    this.processing.add(filePath);
     log(`[hire-watcher] Processing hire request: ${meta.displayName} (${meta.rank})`);
 
     try {

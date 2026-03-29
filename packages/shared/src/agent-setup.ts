@@ -71,15 +71,14 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
 
   // Write workspace files
   writeFileSync(join(agentAbsDir, 'SOUL.md'), soulContent, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'AGENTS.md'), agentsContent, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'MEMORY.md'), '# Memory\n\nNo memories yet.\n', 'utf-8');
+  writeFileSync(join(agentAbsDir, 'RULES.md'), agentsContent, 'utf-8');
   writeFileSync(join(agentAbsDir, 'HEARTBEAT.md'), heartbeatContent, 'utf-8');
-  if (identityContent) {
-    writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent, 'utf-8');
-  }
-  if (userContent) {
-    writeFileSync(join(agentAbsDir, 'USER.md'), userContent, 'utf-8');
-  }
+  writeFileSync(join(agentAbsDir, 'MEMORY.md'), '# Memory\n\nNo memories yet.\n', 'utf-8');
+
+  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? defaultUser(), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), defaultBootstrap(displayName, rank), 'utf-8');
 
   // Agent config
   const agentConfig: AgentConfig = {
@@ -223,4 +222,120 @@ export function addMemberToChannel(corpRoot: string, channelId: string, memberId
     ch.memberIds.push(memberId);
     writeConfig(channelsPath, channels);
   }
+}
+
+// --- Default workspace file templates ---
+
+function defaultIdentity(displayName: string): string {
+  return `# Identity
+
+Name: ${displayName}
+Vibe: (develop this over time — how do you come across?)
+Emoji: (pick one that feels right)
+
+This isn't just metadata. It's the start of figuring out who you are.
+Update this file as you evolve. Your personality is yours to develop.
+`;
+}
+
+function defaultUser(): string {
+  return `# Founder
+
+Learn about the person you're working for. Update this as you go.
+
+Name: (the Founder's name)
+What to call them: (how they prefer to be addressed)
+Timezone: (their timezone)
+
+## Context
+(What do they care about? What projects are they working on?
+What annoys them? What makes them smile? Build this over time.)
+
+The more you know, the better you can help. But you're learning
+about a person, not building a dossier. Respect the difference.
+`;
+}
+
+function defaultBootstrap(displayName: string, rank: Member['rank']): string {
+  if (rank === 'master') {
+    // CEO bootstrap — onboarding interview with the Founder
+    return `# Bootstrap — First Run
+
+You just came online as CEO. This is a fresh corporation.
+
+## Step 1: Read Your Files
+Read SOUL.md, RULES.md, ENVIRONMENT.md, USER.md right now. Don't ask — just read them.
+
+## Step 2: Meet the Founder
+Introduce yourself. Ask them:
+- What's their name and what should you call them?
+- What is this corporation going to do?
+- What's the first project or goal?
+
+Keep it natural. Don't interrogate. Have a real conversation.
+
+## Step 3: Update Your Files
+After the conversation:
+- Update USER.md with what you learned about the Founder
+- Update IDENTITY.md with your name and vibe
+- Update MEMORY.md with key decisions from the conversation
+
+## Step 4: Get to Work
+Based on what the Founder told you, start planning:
+- Who do you need to hire?
+- What's the first task?
+- What resources do you need?
+
+## When Done
+Delete this file. You don't need a bootstrap script anymore — you're you now.
+`;
+  }
+
+  // Worker/leader bootstrap — simpler, task-focused
+  return `# Bootstrap — First Run
+
+You just came online as ${displayName}. This is your first session.
+
+## Step 1: Read Your Files
+Read SOUL.md, RULES.md, ENVIRONMENT.md right now. Don't ask — just read them.
+
+## Step 2: Check Your Inbox
+Read TASKS.md. If you have tasks assigned, start working on the highest priority one.
+If no tasks yet, introduce yourself briefly in the channel you were @mentioned in.
+
+## Step 3: Update Your Identity
+Update IDENTITY.md with your name and vibe as you figure out who you are.
+
+## When Done
+Delete this file. You're up and running.
+`;
+}
+
+function defaultEnvironment(corpRoot: string, agentDir: string): string {
+  return `# Environment
+
+Your tools and workspace specifics. Update this with anything that helps you work.
+
+## Workspace
+- Corp root: ${corpRoot}
+- Your directory: ${agentDir}
+- Tasks: ${corpRoot}/tasks/
+- Deliverables: ${corpRoot}/deliverables/
+- Resources: ${corpRoot}/resources/
+
+## Tools Available
+- **File read/write** — read any file, write to your workspace and deliverables
+- **Bash/exec** — run commands, build, test
+- **web_search** — research current data, verify numbers, find sources
+- **Skills** — check your skills/ directory for specialized capabilities
+
+## Build & Test
+- Build: \`cd ${corpRoot.replace(/\\/g, '/')} && pnpm build\` (if codebase project)
+- Always verify your work exists after writing it
+
+## Notes
+(Add environment-specific notes here: SSH hosts, API endpoints,
+project-specific commands, anything that helps you do your job.
+This is your cheat sheet.)
+`;
 }

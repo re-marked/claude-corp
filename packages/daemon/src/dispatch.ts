@@ -112,7 +112,9 @@ export async function dispatchViaWebSocket(
     });
 
     // Listen for chat events (text deltas via chat stream)
-    const agentSessionKey = `agent:main:${sessionKey}`;
+    // Use the agent's name from model (openclaw:lead-coder → lead-coder, openclaw:main → main)
+    const agentName = agent.model.replace('openclaw:', '') || 'main';
+    const agentSessionKey = `agent:${agentName}:${sessionKey}`;
     const unsubChat = ws.onChatEvent(agentSessionKey, (event) => {
       if (event.state === 'final' && !resolved) {
         resolved = true;

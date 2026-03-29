@@ -3,10 +3,16 @@ import { Box, Text, useInput } from 'ink';
 import { getPasteFilter } from '../lib/paste-filter.js';
 import { COLORS } from '../theme.js';
 
+interface AgentInfo {
+  slug: string;
+  displayName: string;
+}
+
 interface Props {
   onSend: (text: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  agents?: AgentInfo[];
 }
 
 // --- Paste marker system ---
@@ -231,11 +237,34 @@ function renderInput(
 
 // --- Component ---
 
-export function MessageInput({ onSend, disabled, placeholder }: Props) {
+const COMMANDS = [
+  { name: '/hire', desc: 'hire an agent' },
+  { name: '/model', desc: 'change AI model' },
+  { name: '/theme', desc: 'switch color palette' },
+  { name: '/task', desc: 'create a task' },
+  { name: '/project', desc: 'create a project' },
+  { name: '/team', desc: 'create a team' },
+  { name: '/dogfood', desc: 'setup dev team' },
+  { name: '/who', desc: 'member roster' },
+  { name: '/stats', desc: 'corp statistics' },
+  { name: '/uptime', desc: 'daemon uptime' },
+  { name: '/channels', desc: 'list channels' },
+  { name: '/tm', desc: 'time machine' },
+  { name: '/logs', desc: 'daemon logs' },
+  { name: '/version', desc: 'package versions' },
+  { name: '/help', desc: 'all commands' },
+  { name: '/h', desc: 'hierarchy' },
+  { name: '/t', desc: 'task board' },
+  { name: '/home', desc: 'corp home' },
+  { name: '/ping', desc: 'pong!' },
+];
+
+export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Props) {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [pastes, setPastes] = useState<Map<number, PasteInfo>>(new Map());
   const [hueOffset, setHueOffset] = useState(0);
+  const [acIndex, setAcIndex] = useState(0); // Autocomplete selection index
   // Input history — up/down arrow recalls previous messages
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -287,8 +316,21 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
 
   useInput((input, key) => {
     if (disabled) return;
-    // Don't handle tab — let it bubble to channel switcher
-    if (key.tab || input === '\t') return;
+    // Tab — autocomplete selected item
+    if (key.tab || input === '\t') {
+      const ac = getAutocomplete();
+      if (ac && ac.items.length > 0) {
+        const selected = ac.items[Math.min(acIndex, ac.items.length - 1)]!;
+        const completion = selected.label + ' ';
+        const beforeCursor = value.slice(0, cursor);
+        const prefixStart = beforeCursor.length - ac.prefix.length;
+        const newValue = value.slice(0, prefixStart) + completion + value.slice(cursor);
+        setValue(newValue);
+        setCursor(prefixStart + completion.length);
+        setAcIndex(0);
+      }
+      return;
+    }
 
     if (key.return) {
       const sendValue = buildSendValue(value, pastes);
@@ -356,8 +398,13 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
       }
     }
 
-    // Input history — up/down arrow recall previous messages
+    // Up/down: autocomplete navigation OR input history
     if (key.upArrow) {
+      const ac = getAutocomplete();
+      if (ac && ac.items.length > 0) {
+        setAcIndex(i => Math.max(0, i - 1));
+        return;
+      }
       if (history.length === 0) return;
       if (historyIndex === -1) {
         setDraft(value);
@@ -374,6 +421,11 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
       return;
     }
     if (key.downArrow) {
+      const ac = getAutocomplete();
+      if (ac && ac.items.length > 0) {
+        setAcIndex(i => Math.min(ac.items.length - 1, i + 1));
+        return;
+      }
       if (historyIndex === -1) return;
       if (historyIndex < history.length - 1) {
         const idx = historyIndex + 1;
@@ -400,6 +452,7 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
 
       setValue((v) => v.slice(0, cursor) + input + v.slice(cursor));
       setCursor((c) => c + input.length);
+      setAcIndex(0); // Reset autocomplete selection on new input
     }
   });
 
@@ -407,88 +460,58 @@ export function MessageInput({ onSend, disabled, placeholder }: Props) {
   const segments = buildSegments(value, pastes);
   const hasPastes = pastes.size > 0;
 
-  // Show command hints
-  const trimmedValue = value.trim().toLowerCase();
-  const isTypingHire = !disabled && /^\/(h(i(r(e)?)?)?)?$/i.test(trimmedValue);
-  const isTypingTask = !disabled && /^\/(t(a(s(k(s)?)?)?)?)?$/i.test(trimmedValue) && !isTypingHire;
-  const isTypingProject = !disabled && /^\/(p(r(o(j(e(c(t)?)?)?)?)?)?)?$/i.test(trimmedValue);
-  const isTypingTeam = !disabled && /^\/(t(e(a(m)?)?)?)?$/i.test(trimmedValue) && !isTypingTask;
-  const isTypingHierarchy = !disabled && trimmedValue === '/h';
-  const isTypingTasks = !disabled && trimmedValue === '/t';
-  const isTypingAgents = !disabled && trimmedValue === '/a';
-  const isTypingWho = !disabled && /^\/(w(h(o)?)?|m(e(m(b(e(r(s)?)?)?)?)?)?)?$/i.test(trimmedValue);
-  const isTypingUptime = !disabled && /^\/(u(p(t(i(m(e)?)?)?)?)?)?$/i.test(trimmedValue);
-  const showNavHint = !disabled && trimmedValue === '/' && !isTypingHire && !isTypingTask;
+  // Autocomplete: detect @mention or /command being typed
+  const getAutocomplete = (): { type: 'agent' | 'command'; items: { label: string; desc: string }[]; prefix: string } | null => {
+    if (disabled || value.length === 0) return null;
+
+    // Find the word being typed at cursor position
+    const beforeCursor = value.slice(0, cursor);
+
+    // @mention autocomplete — find last @ before cursor
+    const atIdx = beforeCursor.lastIndexOf('@');
+    if (atIdx !== -1 && (atIdx === 0 || beforeCursor[atIdx - 1] === ' ')) {
+      const partial = beforeCursor.slice(atIdx + 1).toLowerCase();
+      const matches = agents
+        .filter(a => a.slug.includes(partial) || a.displayName.toLowerCase().includes(partial))
+        .slice(0, 8)
+        .map(a => ({ label: `@${a.slug}`, desc: a.displayName }));
+      if (matches.length > 0) return { type: 'agent', items: matches, prefix: beforeCursor.slice(atIdx) };
+    }
+
+    // /command autocomplete — only at start of input
+    if (beforeCursor.startsWith('/')) {
+      const partial = beforeCursor.toLowerCase();
+      const matches = COMMANDS
+        .filter(c => c.name.startsWith(partial))
+        .slice(0, 8)
+        .map(c => ({ label: c.name, desc: c.desc }));
+      if (matches.length > 0) return { type: 'command', items: matches, prefix: beforeCursor };
+    }
+
+    return null;
+  };
+
+  const autocomplete = getAutocomplete();
 
   return (
     <Box flexDirection="column">
-      {showNavHint && (
+      {autocomplete && (
         <Box paddingX={2} flexDirection="column">
-          <Text color="#E17055" bold>/hire</Text>
-          <Text color="#FDCB6E" bold>/task</Text>
-          <Text color="#E17055" bold>/project</Text>
-          <Text color="#FFEAA7" bold>/team</Text>
-          <Text color="#00B894" bold>/dogfood</Text>
-          <Text color="#B2BEC3" bold>/who <Text color="#636E72">roster</Text>  /uptime  /channels  /ping  /logs  /tm <Text color="#636E72">time-machine</Text></Text>
-          <Text color="#B2BEC3" bold>/h <Text color="#636E72">hierarchy</Text>  /t <Text color="#636E72">tasks</Text>  /a <Text color="#636E72">agents</Text>  /home</Text>
+          {autocomplete.items.map((item, i) => {
+            const selected = i === Math.min(acIndex, autocomplete.items.length - 1);
+            return (
+              <Box key={item.label} gap={1}>
+                <Text color={selected ? COLORS.primary : COLORS.muted}>{selected ? '\u25B8' : ' '}</Text>
+                <Text color={selected ? COLORS.primary : COLORS.subtle} bold={selected}>{item.label}</Text>
+                <Text color={COLORS.muted}>{item.desc}</Text>
+                {selected && <Text color={COLORS.muted} dimColor>Tab</Text>}
+              </Box>
+            );
+          })}
         </Box>
       )}
-      {isTypingHire && (
-        <Box paddingX={2}>
-          <Text color="#E17055" bold>/hire</Text>
-          <Text color="#636E72"> — open the agent hiring wizard</Text>
-        </Box>
-      )}
-      {isTypingTask && (
-        <Box paddingX={2}>
-          <Text color="#FDCB6E" bold>/task</Text>
-          <Text color="#636E72"> — create a new task</Text>
-        </Box>
-      )}
-      {isTypingHierarchy && !isTypingHire && (
-        <Box paddingX={2}>
-          <Text color="#B2BEC3" bold>/h</Text>
-          <Text color="#636E72"> — view org hierarchy</Text>
-        </Box>
-      )}
-      {isTypingTasks && !isTypingTask && (
-        <Box paddingX={2}>
-          <Text color="#B2BEC3" bold>/t</Text>
-          <Text color="#636E72"> — view task board</Text>
-        </Box>
-      )}
-      {isTypingAgents && (
-        <Box paddingX={2}>
-          <Text color="#B2BEC3" bold>/a</Text>
-          <Text color="#636E72"> — view agents</Text>
-        </Box>
-      )}
-      {isTypingProject && !isTypingHire && (
-        <Box paddingX={2}>
-          <Text color="#E17055" bold>/project</Text>
-          <Text color="#636E72"> — create a new project</Text>
-        </Box>
-      )}
-      {isTypingTeam && !isTypingTask && (
-        <Box paddingX={2}>
-          <Text color="#FFEAA7" bold>/team</Text>
-          <Text color="#636E72"> — create a new team</Text>
-        </Box>
-      )}
-      {isTypingWho && (
-        <Box paddingX={2}>
-          <Text color="#B2BEC3" bold>/who</Text>
-          <Text color="#636E72"> — show member roster (/m, /members)</Text>
-        </Box>
-      )}
-      {isTypingUptime && (
-        <Box paddingX={2}>
-          <Text color="#B2BEC3" bold>/uptime</Text>
-          <Text color="#636E72"> — show daemon uptime and message count</Text>
-        </Box>
-      )}
-      <Box borderStyle="round" borderColor={disabled ? '#4B5257' : '#7B8C94'} paddingX={1}>
-        <Text bold color="#E17055">&gt; </Text>
+      <Box borderStyle="round" borderColor={disabled ? '#3D3A36' : '#5C5751'} paddingX={1} marginTop={1}>
+        <Text bold color="#C2785C">&gt; </Text>
         {disabled ? (
           <Text color="#636E72">{placeholder ?? 'Waiting...'}</Text>
         ) : value.length === 0 ? (

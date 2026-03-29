@@ -2,10 +2,17 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type { DaemonClient } from '../lib/daemon-client.js';
+import { KNOWN_MODELS, type ModelEntry } from '@claudecorp/shared';
+import { COLORS } from '../theme.js';
 
-type Step = 'name' | 'rank' | 'description' | 'hiring' | 'done' | 'error';
+type Step = 'name' | 'rank' | 'model' | 'description' | 'hiring' | 'done' | 'error';
 
 const RANKS = ['worker', 'leader', 'subagent'] as const;
+
+const MODEL_OPTIONS: { entry: ModelEntry | null; label: string }[] = [
+  { entry: null, label: 'Corp default' },
+  ...KNOWN_MODELS.map(m => ({ entry: m, label: m.displayName })),
+];
 
 interface Props {
   daemonClient: DaemonClient;
@@ -18,6 +25,7 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
   const [rankIndex, setRankIndex] = useState(0);
+  const [modelIndex, setModelIndex] = useState(0);
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
   const [hiredName, setHiredName] = useState('');
@@ -29,13 +37,15 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
     }
 
     if (step === 'rank') {
-      if (key.upArrow) {
-        setRankIndex((i) => Math.max(0, i - 1));
-      } else if (key.downArrow) {
-        setRankIndex((i) => Math.min(RANKS.length - 1, i + 1));
-      } else if (key.return) {
-        setStep('description');
-      }
+      if (key.upArrow) setRankIndex(i => Math.max(0, i - 1));
+      else if (key.downArrow) setRankIndex(i => Math.min(RANKS.length - 1, i + 1));
+      else if (key.return) setStep('model');
+    }
+
+    if (step === 'model') {
+      if (key.upArrow) setModelIndex(i => Math.max(0, i - 1));
+      else if (key.downArrow) setModelIndex(i => Math.min(MODEL_OPTIONS.length - 1, i + 1));
+      else if (key.return) setStep('description');
     }
   });
 
@@ -54,6 +64,7 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
     const displayName = name;
     const rank = RANKS[rankIndex]!;
     const desc = val.trim();
+    const selectedModel = MODEL_OPTIONS[modelIndex]!;
 
     const soulContent = desc
       ? `# Identity\n\nYou are ${displayName}. ${desc}\n\n# Communication Style\n\nClear, professional, focused on results.`
@@ -66,6 +77,8 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
         displayName,
         rank,
         soulContent,
+        model: selectedModel.entry?.id,
+        provider: selectedModel.entry?.provider,
       });
       setHiredName(displayName);
       setStep('done');
@@ -75,6 +88,8 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
       setStep('error');
     }
   };
+
+  const selectedModelLabel = MODEL_OPTIONS[modelIndex]!.label;
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2} paddingY={1} width={60}>
@@ -114,13 +129,29 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
               </Text>
             </Box>
           ))}
-          <Box marginTop={1}><Text dimColor>↑↓ to select, Enter to confirm</Text></Box>
+          <Box marginTop={1}><Text dimColor>{'\u2191\u2193'} select  Enter confirm</Text></Box>
+        </Box>
+      )}
+
+      {step === 'model' && (
+        <Box flexDirection="column">
+          <Text>Name: <Text bold>{name}</Text>  Rank: <Text bold>{RANKS[rankIndex]}</Text></Text>
+          <Box marginTop={1}><Text>Select model:</Text></Box>
+          {MODEL_OPTIONS.map((opt, i) => (
+            <Box key={opt.label} gap={1}>
+              <Text color={i === modelIndex ? COLORS.primary : COLORS.muted} bold={i === modelIndex}>
+                {i === modelIndex ? '>' : ' '} {opt.label}
+              </Text>
+              {opt.entry && <Text dimColor>{opt.entry.id}</Text>}
+            </Box>
+          ))}
+          <Box marginTop={1}><Text dimColor>{'\u2191\u2193'} select  Enter confirm</Text></Box>
         </Box>
       )}
 
       {step === 'description' && (
         <Box flexDirection="column">
-          <Text>Name: <Text bold>{name}</Text>  Rank: <Text bold>{RANKS[rankIndex]}</Text></Text>
+          <Text>Name: <Text bold>{name}</Text>  Rank: <Text bold>{RANKS[rankIndex]}</Text>  Model: <Text bold>{selectedModelLabel}</Text></Text>
           <Box marginTop={1}><Text>What does this agent do? (optional, Enter to skip)</Text></Box>
           <Box>
             <Text bold color="green">&gt; </Text>

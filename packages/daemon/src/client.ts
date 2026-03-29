@@ -153,4 +153,72 @@ export class DaemonClient {
     const resp = await fetch(`${this.baseUrl}/git/forward`, { method: 'POST' });
     return resp.json() as Promise<{ result: string }>;
   }
+
+  // --- Model management ---
+
+  async getModels(): Promise<{
+    corpDefault: { model: string; provider: string };
+    fallbackChain: string[];
+    agents: { id: string; name: string; model: string | null }[];
+    availableModels: { id: string; provider: string; alias: string; displayName: string }[];
+  }> {
+    const resp = await fetch(`${this.baseUrl}/models`);
+    return resp.json() as Promise<any>;
+  }
+
+  async setDefaultModel(model: string, provider = 'anthropic'): Promise<{ ok: boolean; model: string; provider: string }> {
+    const resp = await fetch(`${this.baseUrl}/models/default`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, provider }),
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  async setAgentModel(agentName: string, model: string, provider = 'anthropic'): Promise<{ ok: boolean }> {
+    const resp = await fetch(`${this.baseUrl}/models/agent/${encodeURIComponent(agentName)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, provider }),
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  async clearAgentModel(agentName: string): Promise<{ ok: boolean }> {
+    const resp = await fetch(`${this.baseUrl}/models/agent/${encodeURIComponent(agentName)}`, {
+      method: 'DELETE',
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  async setFallbackChain(chain: string[]): Promise<{ ok: boolean }> {
+    const resp = await fetch(`${this.baseUrl}/models/fallback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chain }),
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  // --- Channel management ---
+
+  async updateChannel(channelId: string, updates: { name?: string; mode?: string }): Promise<{ ok: boolean; channel: unknown }> {
+    const resp = await fetch(`${this.baseUrl}/channels/${encodeURIComponent(channelId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  // --- cc say (direct agent-to-agent) ---
+
+  async say(agentSlug: string, message: string): Promise<{ ok: boolean; from: string; response: string }> {
+    const resp = await fetch(`${this.baseUrl}/cc/say`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: agentSlug, message }),
+    });
+    return resp.json() as Promise<any>;
+  }
 }

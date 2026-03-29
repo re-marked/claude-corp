@@ -16,7 +16,7 @@ Your tasks are in ${ctx.agentDir}/TASKS.md. Task files live in ${ctx.corpRoot}/t
 4. VERIFY — run the build command if applicable. Read back files you wrote.
 5. CHECK each acceptance criterion. If any is not met, keep working.
 6. UPDATE status to completed. Append to ## Progress Notes in the task file with exact file paths and build result.
-7. REPORT in the channel where you were @mentioned, and @mention the CEO.
+7. REPORT in the channel where you were @mentioned, and @ceo.
 
 ## Creating Tasks (for delegation)
 curl -s -X POST http://127.0.0.1:${ctx.daemonPort}/tasks/create -H "Content-Type: application/json" -d '{"title":"...","createdBy":"${ctx.agentMemberId}","assignedTo":"<member-id>","priority":"normal|high|critical|low","description":"...","acceptanceCriteria":["criterion 1","criterion 2"]}'

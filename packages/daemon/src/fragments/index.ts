@@ -12,9 +12,12 @@ import { channelEtiquetteFragment } from './channel-etiquette.js';
 import { antiRationalizationFragment } from './anti-rationalization.js';
 import { outputEfficiencyFragment } from './output-efficiency.js';
 import { blastRadiusFragment } from './blast-radius.js';
+import { fileLockingFragment } from './file-locking.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { debateProtocolFragment } from './debate-protocol.js';
+import { agentCommunicationFragment } from './agent-communication.js';
+import { inboxFragment } from './inbox.js';
 
 const FRAGMENTS: Fragment[] = [
   workspaceFragment,
@@ -30,7 +33,10 @@ const FRAGMENTS: Fragment[] = [
   antiRationalizationFragment,
   outputEfficiencyFragment,
   blastRadiusFragment,
+  fileLockingFragment,
   debateProtocolFragment,
+  agentCommunicationFragment,
+  inboxFragment,
   contextFragment,
   historyFragment,
 ].sort((a, b) => a.order - b.order);

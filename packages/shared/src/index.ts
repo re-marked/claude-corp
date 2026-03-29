@@ -5,6 +5,7 @@ export type {
   MemberStatus,
   MemberType,
   MemberScope,
+  AgentWorkStatus,
   Channel,
   ChannelKind,
   ChannelScope,
@@ -38,7 +39,7 @@ export {
 
 // Utilities
 export { generateId } from './id.js';
-export { extractMentionNames, resolveMentions } from './mentions.js';
+export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
 export * from './paths.js';
 export * from './constants.js';
 
@@ -96,3 +97,16 @@ export type { Theme, ThemeId } from './themes.js';
 // Tasks
 export { createTask, readTask, updateTask, listTasks, taskPath } from './tasks.js';
 export type { CreateTaskOpts, TaskFilter, TaskWithBody } from './tasks.js';
+
+// Models
+export {
+  KNOWN_MODELS,
+  DEFAULT_FALLBACK_CHAIN,
+  resolveModelAlias,
+  getModelEntry,
+  formatProviderModel,
+  parseProviderModel,
+  modelDisplayName,
+  modelAlias,
+} from './models.js';
+export type { ModelEntry } from './models.js';

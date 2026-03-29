@@ -17,7 +17,8 @@ import { MessageInput } from '../components/message-input.js';
 import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
 import { HireWizard } from './hire-wizard.js';
-import { COLORS, BORDER_STYLE } from '../theme.js';
+import { ModelWizard } from './model-wizard.js';
+import { COLORS, BORDER_STYLE, agentColor } from '../theme.js';
 import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
@@ -52,16 +53,16 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [thinkingAgents, setThinkingAgents] = useState<string[]>([]);
   const [members, setMembers] = useState(ctxMembers);
   const [showHireWizard, setShowHireWizard] = useState(false);
+  const [showModelWizard, setShowModelWizard] = useState(false);
   const [showTaskWizard, setShowTaskWizard] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
   const lastMsgCount = useRef(messages.length);
-
-  // Update tab title with channel name
+  // Update tab title when channel changes
   useEffect(() => {
     process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name}\x07`);
-  }, [channel.name]);
+  }, [channel.id]);
 
   // Refresh members when new messages arrive (new agents may have been hired)
   useEffect(() => {
@@ -108,7 +109,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
   useInput((input, key) => {
-    if (showHireWizard) return;
+    if (showHireWizard || showModelWizard) return;
     if (key.ctrl && input === 'm') {
       setShowMemberSidebar(prev => !prev);
     }
@@ -158,6 +159,31 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // /hire opens the wizard
     if (text.trim().toLowerCase() === '/hire') {
       setShowHireWizard(true);
+      return;
+    }
+
+    // /model opens the model selector
+    if (text.trim().toLowerCase() === '/model') {
+      setShowModelWizard(true);
+      return;
+    }
+
+    // /theme cycles through color palettes
+    if (text.trim().toLowerCase().startsWith('/theme')) {
+      const { PALETTE_NAMES, PALETTES, saveTheme, currentThemeName } = await import('../theme.js');
+      const arg = text.trim().split(/\s+/)[1]?.toLowerCase();
+      if (arg && PALETTES[arg]) {
+        saveTheme(arg);
+        process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
+        writeSystemMessage(`Theme: ${arg}`);
+      } else {
+        const current = currentThemeName();
+        const idx = PALETTE_NAMES.indexOf(current);
+        const next = PALETTE_NAMES[(idx + 1) % PALETTE_NAMES.length]!;
+        saveTheme(next);
+        process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
+        writeSystemMessage(`Theme: ${next} (${PALETTE_NAMES.join(' | ')})`);
+      }
       return;
     }
 
@@ -226,9 +252,11 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         '  /uptime            Show daemon uptime and message count',
         '  /logs              Show recent daemon logs',
         '  /tm                Open Time Machine (rewind/forward any snapshot)',
+        '  /theme [name]      Switch color palette (coral|lavender|indigo|rose|mono)',
         '',
         '⚙️ Management:',
         '  /hire              Open agent hiring wizard',
+        '  /model             View and change AI models',
         '  /task              Open task creation wizard',
         '  /project           Open project creation wizard',
         '  /team              Open team creation wizard',
@@ -705,6 +733,21 @@ Always consider what happens when things go wrong.`,
     );
   }
 
+  if (showModelWizard) {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+        <ModelWizard
+          daemonClient={daemonClient}
+          onClose={() => setShowModelWizard(false)}
+          onChanged={(target, model) => {
+            writeSystemMessage(`Model changed: ${target} → ${model}`);
+            setTimeout(() => setShowModelWizard(false), 1500);
+          }}
+        />
+      </Box>
+    );
+  }
+
   // Derive streaming state for this channel from props
   const channelStream = streamData?.channelId === channel.id ? streamData : null;
   const isStreaming = !!channelStream;
@@ -718,37 +761,41 @@ Always consider what happens when things go wrong.`,
 
     if (isSystem) {
       return (
-        <Box key={msg.id} flexDirection="column">
-          <Text color={COLORS.muted}> {'\u250A'} {name} {time}</Text>
-          <Text color={COLORS.muted}> {'\u250A'} {msg.content}</Text>
+        <Box key={msg.id} flexDirection="column" paddingLeft={1} marginBottom={0}>
+          <Text color={COLORS.muted}> {'\u2502'} {msg.content}</Text>
         </Box>
       );
     }
 
     // Tool events — compact inline display
     if (msg.kind === 'tool_event') {
+      const toolColor = sender ? agentColor(COLORS, sender.rank) : COLORS.subtle;
       return (
-        <Box key={msg.id} gap={1}>
-          <Text color={COLORS.muted}> {'\u250A'}</Text>
-          <Text color={COLORS.agent}>{name}</Text>
+        <Box key={msg.id} gap={1} paddingLeft={1}>
+          <Text color={COLORS.muted}> {'\u2502'}</Text>
+          <Text color={toolColor}>{name}</Text>
           <Text color={COLORS.subtle}>{msg.content}</Text>
         </Box>
       );
     }
 
     const replyCount = threadCounts.get(msg.id) ?? 0;
+    const isUser = sender?.type === 'user';
+    const nameColor = isUser ? COLORS.user : agentColor(COLORS, sender?.rank);
     return (
       <Box key={msg.id} flexDirection="column" marginBottom={1}>
         <Box gap={1}>
-          <Text bold color={sender?.type === 'user' ? COLORS.user : COLORS.agent}>{name}</Text>
-          <Text color={COLORS.subtle}>{time}</Text>
+          <Text color={nameColor}>{'\u25CF'}</Text>
+          <Text bold color={nameColor}>{name}</Text>
+          <Text color={COLORS.muted}>{time}</Text>
         </Box>
-        <Text wrap="wrap">{renderContent(msg.content, memberMap)}</Text>
+        <Box paddingLeft={2}>
+          <Text wrap="wrap">{renderContent(msg.content, memberMap)}</Text>
+        </Box>
         {replyCount > 0 && !activeThread && (
-          <Box borderStyle="round" borderColor={COLORS.muted} paddingX={1} marginTop={0} marginLeft={2}>
-            <Text color={COLORS.info} bold>Thread</Text>
-            <Text color={COLORS.subtle}> — {replyCount} {replyCount === 1 ? 'reply' : 'replies'}. </Text>
-            <Text color={COLORS.muted}>C-Y to open</Text>
+          <Box paddingLeft={2} marginTop={0}>
+            <Text color={COLORS.info}>  {replyCount} {replyCount === 1 ? 'reply' : 'replies'}</Text>
+            <Text color={COLORS.muted}> \u00B7 C-Y to open</Text>
           </Box>
         )}
       </Box>
@@ -757,31 +804,32 @@ Always consider what happens when things go wrong.`,
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* All messages in Static — terminal scroll buffer, never re-renders */}
+      {/* Messages — Static writes to terminal scrollback permanently */}
       <Static items={messages}>
         {(msg) => renderMsg(msg)}
       </Static>
       {/* Dynamic: streaming preview + indicators + input */}
-      {hasStreamContent && (
-        <Box flexDirection="column" paddingX={1}>
+      {hasStreamContent && dispatchingAgents.includes(channelStream!.agentName) && (
+        <Box flexDirection="column" marginBottom={1}>
           <Box gap={1}>
-            <Text bold color={COLORS.agent}>{channelStream!.agentName}</Text>
-            <Spinner type="dots" />
+            <Text color={COLORS.agentWorker}>{'\u25CF'}</Text>
+            <Text bold color={COLORS.agentWorker}>{channelStream!.agentName}</Text>
+            <Text color={COLORS.muted}><Spinner type="dots" /></Text>
           </Box>
-          <Text wrap="wrap">{channelStream!.content}</Text>
+          <Box paddingLeft={2}>
+            <Text wrap="wrap">{channelStream!.content}</Text>
+          </Box>
         </Box>
       )}
       {!hasStreamContent && (isStreaming || thinking || dispatchingAgents.length > 0) && (
-        <Box gap={1} paddingX={1}>
-          <Text color={COLORS.primary}><Spinner type="dots" /></Text>
+        <Box gap={1} paddingLeft={1}>
+          <Text color={COLORS.muted}><Spinner type="dots" /></Text>
           <Text color={COLORS.subtle}>
             {activeToolCall
               ? `${activeToolCall.agentName} ${activeToolCall.toolName}...`
-              : isStreaming
-                ? `${channelStream!.agentName} is working...`
-                : thinkingAgents.length > 0
-                  ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                  : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
+              : thinkingAgents.length > 0
+                ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+                : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
           </Text>
         </Box>
       )}
@@ -789,6 +837,7 @@ Always consider what happens when things go wrong.`,
         onSend={handleSend}
         disabled={sending}
         placeholder="Type a message... (/hire to add agents)"
+        agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
       />
       <Text color={COLORS.muted}> {activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  C-Y:thread  C-M:members  Esc:back</Text>
     </Box>

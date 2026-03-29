@@ -28,7 +28,7 @@ import { useDaemonEvents } from './hooks/use-daemon-events.js';
 import { CorpProvider } from './context/corp-context.js';
 import { COLORS } from './theme.js';
 import { setDaemonRef } from './lib/daemon-ref.js';
-import { BootSequence, getBootStyle } from './components/boot-sequence.js';
+import { BootSequence } from './components/boot-sequence.js';
 
 export function App({ forceNew: forceNewProp }: { forceNew?: boolean } = {}) {
   // All hooks MUST be before any early returns (React rules of hooks)
@@ -144,8 +144,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const [showSwitcher, setShowSwitcher] = useState(false);
   const lastVisitedRef = React.useRef<Map<string, string>>(new Map());
   const [, forceRender] = useState(0);
-  const bootStyle = getBootStyle();
-  const [bootDone, setBootDone] = useState(!bootStyle);
+  const [bootDone, setBootDone] = useState(false);
 
   // WebSocket event bus for real-time streaming + dispatch updates
   const events = useDaemonEvents(daemonPort);
@@ -153,6 +152,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const viewStack = useMemo(() => new ViewStack(), []);
 
   const navigate = useCallback((view: View) => {
+    process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
     if (view.type === 'corp-home') {
       viewStack.clear(view);
     } else {
@@ -162,6 +162,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   }, [viewStack]);
 
   const goBack = useCallback(() => {
+    process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
     viewStack.pop();
     forceRender((n) => n + 1);
   }, [viewStack]);
@@ -300,15 +301,9 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   }
 
   if (!ready || !client || !bootDone) {
-    if (bootStyle) {
-      return <BootSequence style={bootStyle} onComplete={() => setBootDone(true)} />;
-    }
-    return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
-        <Text color={COLORS.subtle}>{status}</Text>
-      </Box>
-    );
+    return <BootSequence onComplete={() => setBootDone(true)} />;
   }
+
 
   // Command palette overlay
   if (showSwitcher) {
@@ -369,14 +364,15 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         const messagesPath = join(corpPath, ch.path, 'messages.jsonl');
         // Mark channel as visited (for unread indicators)
         lastVisitedRef.current.set(ch.id, new Date().toISOString());
-        // Get streaming data for this channel from WebSocket events
-        const streamForChannel = events.streams.get(current.channelId) ?? null;
+        // Get streaming data for this channel — streams are keyed by agentName, find one matching this channel
+        const streamForChannel = [...events.streams.values()].find(s => s.channelId === current.channelId) ?? null;
         // Get tool activity for this channel
         const toolForChannel = [...events.toolActivity.values()].find(
           (t) => t.channelId === current.channelId,
         );
         return (
           <ChatView
+            key={`chat-${ch.id}`}
             channel={ch}
             messagesPath={messagesPath}
             streamData={streamForChannel}

@@ -31,6 +31,8 @@ export class MessageRouter {
   private dedupClearInterval: ReturnType<typeof setInterval> | null = null;
   /** Currently dispatching — agent displayNames that are actively processing. */
   activeDispatches = new Set<string>();
+  /** Retry counters for empty responses — key is "msgId:targetId" */
+  private retryCount = new Map<string, number>();
   /** Queued dispatches per agent — when agent is busy, messages wait here. */
   private dispatchQueue = new Map<string, { msg: ChannelMessage; channel: Channel; targetId: string; members: Member[]; sender: Member }[]>();
 
@@ -170,8 +172,8 @@ export class MessageRouter {
     // Don't dispatch system messages or task events
     if (msg.kind !== 'text') return;
 
-    // Depth guard
-    if (msg.depth >= MAX_DEPTH) {
+    // Depth guard — 0 = unlimited (default)
+    if (MAX_DEPTH > 0 && msg.depth >= MAX_DEPTH) {
       log(`[router] Depth limit reached (${msg.depth}) for message ${msg.id}`);
       return;
     }
@@ -194,12 +196,8 @@ export class MessageRouter {
     };
     if (!sender && msg.senderId !== 'system') return;
 
-    // Channel mode check — announce channels don't dispatch
-    const channelMode = channel.mode ?? (channel.kind === 'direct' ? 'open' : 'mention');
-    if (channelMode === 'announce') {
-      log(`[router] #${channel.name} is announce-mode — no dispatch`);
-      return;
-    }
+    // Resolve channel mode: dm (auto-dispatch), mention (@only), all (everyone)
+    const channelMode = channel.mode ?? (channel.kind === 'direct' ? 'dm' : 'mention');
 
     // Find dispatch targets
     let targetIds: string[] = [];
@@ -214,14 +212,13 @@ export class MessageRouter {
       const participantIds = new Set(threadMsgs.map((m) => m.senderId));
       const mentionedIds = resolveMentions(msg.content, members);
       for (const id of mentionedIds) participantIds.add(id);
-      // Remove the sender, keep only agents
       participantIds.delete(msg.senderId);
       targetIds = [...participantIds].filter((id) => {
         const m = members.find((mem) => mem.id === id);
         return m && m.type === 'agent';
       });
       log(`[router] Thread dispatch: ${targetIds.length} participants`);
-    } else if (channel.kind === 'direct') {
+    } else if (channelMode === 'dm') {
       // DM: auto-route to the other member
       const otherId = channel.memberIds.find((id) => id !== msg.senderId);
       if (otherId) {
@@ -230,8 +227,16 @@ export class MessageRouter {
           targetIds = [otherId];
         }
       }
+    } else if (channelMode === 'all') {
+      // All: every agent in the channel wakes up
+      targetIds = channel.memberIds.filter((id) => {
+        if (id === msg.senderId) return false;
+        const m = members.find((mem) => mem.id === id);
+        return m && m.type === 'agent';
+      });
+      log(`[router] All-mode dispatch: ${targetIds.length} agents in #${channel.name}`);
     } else {
-      // Broadcast/team/system: route to @mentioned agents only
+      // Mention: always resolve from content — one path, no shortcuts
       const mentionedIds = resolveMentions(msg.content, members);
       targetIds = mentionedIds.filter((id) => {
         const m = members.find((mem) => mem.id === id);
@@ -241,9 +246,20 @@ export class MessageRouter {
 
     if (targetIds.length === 0) return;
 
-    // Dispatch to each target
+    // Human/system @mentions → immediate dispatch (bypass inbox)
+    // Agent @mentions → record in inbox, wait for heartbeat or idle transition
+    const isHumanOrSystem = senderOrSystem.type === 'user' || msg.senderId === 'system';
+
     for (const targetId of targetIds) {
-      this.dispatchToTarget(msg, channel, targetId, members, senderOrSystem);
+      if (isHumanOrSystem) {
+        this.dispatchToTarget(msg, channel, targetId, members, senderOrSystem);
+      } else {
+        // Agent mention → inbox
+        const target = members.find(m => m.id === targetId);
+        const isMention = true;
+        this.daemon.inbox.recordMessage(channel.id, channel.name, targetId, isMention, senderOrSystem.displayName);
+        log(`[router] Inbox: ${target?.displayName ?? targetId} has new mention in #${channel.name} from ${senderOrSystem.displayName}`);
+      }
     }
   }
 
@@ -323,6 +339,7 @@ export class MessageRouter {
 
     try {
       this.activeDispatches.add(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'busy');
 
       // Broadcast dispatch start + set streaming state
       this.daemon.events.broadcast({
@@ -341,27 +358,52 @@ export class MessageRouter {
         ? this.daemon.openclawWS
         : this.daemon.corpGatewayWS;
 
+      // Track text segments between tool calls — flush text before each tool event
+      let lastFlushedLength = 0;
+      const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+
       const result = await dispatchToAgent(
         agentProc,
         messageContent,
         context,
-        `channel-${channel.id}-${msg.id}`,
+        `agent:${agentProc.model.replace('openclaw:', '')}:channel-${channel.id}-${msg.id}`,
         (accumulated) => {
           this.daemon.streaming.set(targetId, {
             agentName: target.displayName,
-            content: accumulated,
+            content: accumulated.slice(lastFlushedLength),
             channelId: channel.id,
           });
           this.daemon.events.broadcast({
             type: 'stream_token',
             agentName: target.displayName,
             channelId: channel.id,
-            content: accumulated,
+            content: accumulated.slice(lastFlushedLength),
           });
         },
         wsClient,
         {
           onToolStart: (tool) => {
+            // Flush any accumulated text BEFORE the tool event
+            const streaming = this.daemon.streaming.get(targetId);
+            if (streaming?.content?.trim()) {
+              const segText = streaming.content.trim();
+              lastFlushedLength += streaming.content.length;
+              const segMsg: ChannelMessage = {
+                id: generateId(),
+                channelId: channel.id,
+                senderId: targetId,
+                threadId: msg.threadId,
+                content: segText,
+                kind: 'text',
+                mentions: resolveMentions(segText, members),
+                metadata: { source: 'router', segment: true },
+                depth: msg.depth + 1,
+                originId: msg.originId,
+                timestamp: new Date().toISOString(),
+              };
+              appendMessage(msgPath, segMsg);
+              this.daemon.streaming.delete(targetId);
+            }
             this.daemon.events.broadcast({
               type: 'tool_start',
               agentName: target.displayName,
@@ -371,7 +413,6 @@ export class MessageRouter {
             });
           },
           onToolEnd: (tool) => {
-            // Write tool_event to JSONL AFTER tool completes — permanent history
             const toolMsg: ChannelMessage = {
               id: generateId(),
               channelId: channel.id,
@@ -385,7 +426,7 @@ export class MessageRouter {
               originId: msg.originId,
               timestamp: new Date().toISOString(),
             };
-            appendMessage(join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL), toolMsg);
+            appendMessage(msgPath, toolMsg);
             this.daemon.events.broadcast({
               type: 'tool_end',
               agentName: target.displayName,
@@ -398,26 +439,102 @@ export class MessageRouter {
 
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
       this.daemon.events.broadcast({
         type: 'stream_end',
         agentName: target.displayName,
         channelId: channel.id,
       });
 
-      // Parse [thread] marker — split into main channel + thread parts
-      const threadMarkerIdx = result.content.indexOf('[thread]');
-      let mainContent = result.content;
+      // Only the unflushed remainder goes into the final message
+      const remainingContent = result.content.slice(lastFlushedLength).trim();
+
+      // Skip if everything was already flushed via text segments
+      if (!remainingContent && lastFlushedLength > 0) {
+        log(`[router] ${target.displayName} — all text flushed as segments, no final message`);
+        this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
+        this.daemon.gitManager.markDirty(target.displayName);
+        this.drainQueue(targetId);
+        return;
+      }
+
+      // Empty response — retry up to 3 times with visible status
+      if (!remainingContent && lastFlushedLength === 0) {
+        const maxRetries = 3;
+        const retryKey = `${msg.id}:${targetId}`;
+        const attempt = (this.retryCount.get(retryKey) ?? 0) + 1;
+
+        if (attempt <= maxRetries) {
+          this.retryCount.set(retryKey, attempt);
+          log(`[router] ${target.displayName} returned empty — retry ${attempt}/${maxRetries} in 5s`);
+
+          // Write visible retry message
+          const retryMsg: ChannelMessage = {
+            id: generateId(),
+            channelId: channel.id,
+            senderId: 'system',
+            threadId: msg.threadId,
+            content: `${target.displayName} didn't respond. Retrying... (${attempt}/${maxRetries})`,
+            kind: 'system',
+            mentions: [],
+            metadata: { source: 'router' },
+            depth: msg.depth,
+            originId: msg.originId,
+            timestamp: new Date().toISOString(),
+          };
+          appendMessage(msgPath, retryMsg);
+
+          // Retry after delay
+          this.daemon.streaming.delete(targetId);
+          this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
+          this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
+          // Clear dedup so retry can go through
+          this.dispatched.delete(`${msg.id}:${targetId}`);
+          setTimeout(() => {
+            this.dispatchToTarget(msg, channel, targetId, members, sender);
+          }, 5000);
+          return;
+        }
+
+        // All retries exhausted
+        this.retryCount.delete(retryKey);
+        log(`[router] ${target.displayName} returned empty after ${maxRetries} retries — giving up`);
+        const failMsg: ChannelMessage = {
+          id: generateId(),
+          channelId: channel.id,
+          senderId: 'system',
+          threadId: msg.threadId,
+          content: `${target.displayName} failed to respond after ${maxRetries} attempts.`,
+          kind: 'system',
+          mentions: [],
+          metadata: { source: 'router' },
+          depth: msg.depth,
+          originId: msg.originId,
+          timestamp: new Date().toISOString(),
+        };
+        appendMessage(msgPath, failMsg);
+        this.daemon.streaming.delete(targetId);
+        this.activeDispatches.delete(target.displayName);
+        this.daemon.setAgentWorkStatus(targetId, target.displayName, 'broken');
+        this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
+        this.daemon.gitManager.markDirty(target.displayName);
+        this.drainQueue(targetId);
+        return;
+      }
+
+      // Parse [thread] marker on remaining content
+      const threadMarkerIdx = remainingContent.indexOf('[thread]');
+      let mainContent = remainingContent;
       let threadContent: string | null = null;
       let responseThreadId = msg.threadId;
 
       if (threadMarkerIdx !== -1) {
-        mainContent = result.content.slice(0, threadMarkerIdx).trim();
-        threadContent = result.content.slice(threadMarkerIdx + '[thread]'.length).trim();
+        mainContent = remainingContent.slice(0, threadMarkerIdx).trim();
+        threadContent = remainingContent.slice(threadMarkerIdx + '[thread]'.length).trim();
         responseThreadId = msg.threadId ?? msg.id;
         log(`[router] ${target.displayName} split response: main=${mainContent.length} chars, thread=${threadContent.length} chars`);
       }
-
-      const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
 
       // If agent used [thread] at the very start (no main content), entire response is threaded
       if (threadContent && !mainContent) {
@@ -441,6 +558,7 @@ export class MessageRouter {
         log(`[router] ${target.displayName} responded in thread in #${channel.name}`);
         this.daemon.streaming.delete(targetId);
         this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
         this.daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId: channel.id });
         this.daemon.gitManager.markDirty(target.displayName);
         this.drainQueue(targetId);
@@ -489,14 +607,25 @@ export class MessageRouter {
 
       log(`[router] ${target.displayName} responded in #${channel.name}`);
 
+      // Clear dispatch state IMMEDIATELY so TUI stops showing "Agent is working..."
+      // before the response triggers new dispatches via fs.watch
+      this.daemon.streaming.delete(targetId);
+      this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
+      this.daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId: channel.id });
+      this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
+
       // Mark corp as dirty for git commit
       this.daemon.gitManager.markDirty(target.displayName);
 
       // Drain queue — dispatch next waiting message for this agent
       this.drainQueue(targetId);
     } catch (err) {
+      // Model fallback is now handled natively by OpenClaw via agents.defaults.model.fallbacks
+      // in the gateway config (exponential backoff, profile rotation, session-sticky).
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
+      this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');
       this.daemon.events.broadcast({
         type: 'dispatch_end',
         agentName: target.displayName,

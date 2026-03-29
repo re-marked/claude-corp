@@ -10,7 +10,8 @@ export type DaemonEvent =
   | { type: 'agent_status'; agentName: string; status: string }
   | { type: 'message_written'; channelId: string; messageId: string }
   | { type: 'tool_start'; agentName: string; channelId: string; toolName: string; args?: Record<string, unknown> }
-  | { type: 'tool_end'; agentName: string; channelId: string; toolName: string; resultPreview?: string };
+  | { type: 'tool_end'; agentName: string; channelId: string; toolName: string; resultPreview?: string }
+  | { type: 'model_changed'; agentName: string | null; model: string };
 
 export class EventBus {
   private wss: WebSocketServer | null = null;
