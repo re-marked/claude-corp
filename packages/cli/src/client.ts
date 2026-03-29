@@ -15,7 +15,7 @@ import { isDaemonRunning, DaemonClient } from '@claudecorp/daemon';
 export function getClient(silent = false): DaemonClient {
   const { running, port } = isDaemonRunning();
   if (!running || !port) {
-    console.error('Daemon is not running. Start it with: claudecorp-cli start');
+    console.error('Daemon is not running. Start it with: cc-cli start');
     process.exit(1);
   }
   return new DaemonClient(port);
@@ -29,7 +29,7 @@ export async function verifyCorpMatch(client: DaemonClient, requestedCorp?: stri
 
   if (requestedCorp && !activeCorp.includes(requestedCorp)) {
     console.error(`Warning: --corp "${requestedCorp}" specified but daemon is serving "${corpName}" (${activeCorp})`);
-    console.error(`Stop the daemon and restart with: claudecorp-cli stop && claudecorp-cli start --corp ${requestedCorp}`);
+    console.error(`Stop the daemon and restart with: cc-cli stop && cc-cli start --corp ${requestedCorp}`);
     process.exit(1);
   }
 
@@ -63,13 +63,13 @@ export async function getCorpRoot(corpName?: string): Promise<string> {
   // Multiple corps with no daemon — can't silently pick one
   const corps = listCorps();
   if (corps.length === 0) {
-    console.error('No corporations found. Create one with: claudecorp-cli init');
+    console.error('No corporations found. Create one with: cc-cli init');
     process.exit(1);
   }
   if (corps.length > 1) {
     console.error('Multiple corporations found. Specify which one with --corp:');
     for (const c of corps) console.error(`  ${c.name.padEnd(20)} ${c.path}`);
-    console.error('\nOr start a daemon first: claudecorp-cli start --corp <name>');
+    console.error('\nOr start a daemon first: cc-cli start --corp <name>');
     process.exit(1);
   }
   return corps[0]!.path;
