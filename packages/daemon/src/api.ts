@@ -124,6 +124,20 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /agents/:id/restart
+      const restartMatch = path.match(/^\/agents\/([^/]+)\/restart$/);
+      if (method === 'POST' && restartMatch) {
+        const memberId = decodeURIComponent(restartMatch[1]!);
+        try {
+          await daemon.processManager.stopAgent(memberId);
+        } catch {}
+        await new Promise(r => setTimeout(r, 1000));
+        const agent = await daemon.processManager.spawnAgent(memberId);
+        daemon.setAgentWorkStatus(memberId, agent.displayName, 'idle');
+        json(res, { ok: true, status: agent.status });
+        return;
+      }
+
       // POST /agents/hire
       if (method === 'POST' && path === '/agents/hire') {
         const body = await readBody(req) as Record<string, unknown>;

@@ -22,6 +22,11 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  async restartAgent(memberId: string): Promise<{ ok: boolean; status: string }> {
+    const resp = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(memberId)}/restart`, { method: 'POST' });
+    return resp.json() as Promise<any>;
+  }
+
   async stopAgent(memberId: string): Promise<{ ok: boolean }> {
     const resp = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(memberId)}/stop`, {
       method: 'POST',
