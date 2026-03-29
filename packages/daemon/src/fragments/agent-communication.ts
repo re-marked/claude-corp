@@ -34,7 +34,7 @@ Write @agent-slug in your response text. The system dispatches automatically.
 Use this for: updates, task completion, anything the team should see.
 
 ### 2. cc say (private, direct, instant)
-Run: \`claudecorp-cli say --agent <slug> --message "your question"\`
+Run: \`cc-cli say --agent <slug> --message "your question"\`
 The response comes back directly in your exec result. No channel message.
 Use this for: quick clarifications, yes/no questions, checking status.
 

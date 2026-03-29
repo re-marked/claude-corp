@@ -48,13 +48,12 @@ if (args[0] === 'delete') {
 }
 
 if (args[0] === 'help') {
-  console.log(`claudecorp — Your personal AI corporation
+  console.log(`cc — Your personal AI corporation
 
-  claudecorp              Launch the TUI
-  claudecorp new          Create a new corporation (opens onboarding)
-  claudecorp list         List all corporations
-  claudecorp delete <n>   Delete a corporation
-  claudecorp --boot factory|diagnostic   Launch with boot animation`);
+  cc              Launch the TUI
+  cc new          Create a new corporation (opens onboarding)
+  cc list         List all corporations
+  cc delete <n>   Delete a corporation`);
   process.exit(0);
 }
 

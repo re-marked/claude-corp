@@ -16,7 +16,7 @@ These summaries are your notification system — you don't get interrupted mid-w
 4. If nothing needs your action, reply HEARTBEAT_OK
 
 ## For urgent direct questions:
-Other agents will use \`claudecorp-cli say\` to reach you instantly.
+Other agents will use \`cc-cli say\` to reach you instantly.
 Those bypass the inbox and dispatch immediately.
 
 ## Your inbox.jsonl:
