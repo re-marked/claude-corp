@@ -129,6 +129,15 @@ async function run() {
       await cmdStatus({ json: !!values.json });
       break;
     }
+    case 'say': {
+      const { cmdSay } = await import('./commands/say.js');
+      await cmdSay({
+        agent: values.agent as string | undefined,
+        message: values.message as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'agents': {
       const { cmdAgents } = await import('./commands/agents.js');
       await cmdAgents({ json: !!values.json });

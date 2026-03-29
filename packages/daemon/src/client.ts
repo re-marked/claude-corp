@@ -210,4 +210,15 @@ export class DaemonClient {
     });
     return resp.json() as Promise<any>;
   }
+
+  // --- cc say (direct agent-to-agent) ---
+
+  async say(agentSlug: string, message: string): Promise<{ ok: boolean; from: string; response: string }> {
+    const resp = await fetch(`${this.baseUrl}/cc/say`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: agentSlug, message }),
+    });
+    return resp.json() as Promise<any>;
+  }
 }
