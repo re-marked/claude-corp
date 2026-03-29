@@ -364,8 +364,8 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         const messagesPath = join(corpPath, ch.path, 'messages.jsonl');
         // Mark channel as visited (for unread indicators)
         lastVisitedRef.current.set(ch.id, new Date().toISOString());
-        // Get streaming data for this channel from WebSocket events
-        const streamForChannel = events.streams.get(current.channelId) ?? null;
+        // Get streaming data for this channel — streams are keyed by agentName, find one matching this channel
+        const streamForChannel = [...events.streams.values()].find(s => s.channelId === current.channelId) ?? null;
         // Get tool activity for this channel
         const toolForChannel = [...events.toolActivity.values()].find(
           (t) => t.channelId === current.channelId,
