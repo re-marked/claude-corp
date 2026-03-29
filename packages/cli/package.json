@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "claudecorp-cli": "./dist/index.js"
+    "cc-cli": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm",

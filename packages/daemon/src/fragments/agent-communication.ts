@@ -27,13 +27,23 @@ Example: @republican makes an argument → @democrat responds with @republican i
 ## CEO: stay out unless needed
 If agents are having a productive conversation, do NOT interject. Let them work. Only step in if the conversation derails or someone asks you directly.
 
-## NEVER use exec/curl to send messages
-Do NOT use exec, curl, or the daemon API to send messages to other agents. That bypasses streaming and the conversation system.
-Your response text IS the message. Write @agent-name in your response and the system dispatches automatically.
-The ONLY way to talk to another agent is by @mentioning them in your response text.
+## Two ways to talk to agents
+
+### 1. @mention in your response (public, visible, streaming)
+Write @agent-slug in your response text. The system dispatches automatically.
+Use this for: updates, task completion, anything the team should see.
+
+### 2. cc say (private, direct, instant)
+Run: \`cc-cli say --agent <slug> --message "your question"\`
+The response comes back directly in your exec result. No channel message.
+Use this for: quick clarifications, yes/no questions, checking status.
+
+## NEVER use exec/curl to send CHANNEL messages
+Do NOT use curl to POST to /messages/send. That bypasses streaming.
+Channel messages = @mention in your response. Direct questions = cc say.
 
 ## Don't @mention CEO unnecessarily
-Do NOT say "Thank you @ceo" or "@ceo here's my response" when responding to a task or debate. The CEO already sees your messages.
-Only @mention @ceo when you specifically need CEO's attention: task completion, blockers, or direct questions.
-If you're responding to another agent, @mention THEM — not the CEO.`,
+Do NOT say "Thank you @ceo" or "@ceo here's my response."
+Only @mention @ceo for: task completion, blockers, direct questions.
+If responding to another agent, @mention THEM — not the CEO.`,
 };

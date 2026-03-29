@@ -7,12 +7,12 @@ export async function cmdMembers(opts: { json: boolean }) {
   const corpRoot = await getCorpRoot();
   const members = readConfigOr<Member[]>(join(corpRoot, MEMBERS_JSON), []);
   const statusResult = await client.status();
-  const agentStatuses = new Map(statusResult.agents.map(a => [a.memberId, a.status]));
+  const agentStatuses = new Map(statusResult.agents.map((a: any) => [a.memberId, a.workStatus ?? 'offline']));
 
   if (opts.json) {
     const enriched = members.map(m => ({
       ...m,
-      processStatus: agentStatuses.get(m.id) ?? (m.type === 'user' ? 'active' : 'offline'),
+      workStatus: agentStatuses.get(m.id) ?? (m.type === 'user' ? 'active' : 'offline'),
     }));
     console.log(JSON.stringify(enriched, null, 2));
     return;
@@ -20,9 +20,8 @@ export async function cmdMembers(opts: { json: boolean }) {
 
   console.log('Members:\n');
   for (const m of members) {
-    const status = m.type === 'user' ? 'active' : (agentStatuses.get(m.id) ?? 'offline');
-    const icon = status === 'ready' || status === 'active' ? '\u25C6' : '\u25C7';
-    const statusLabel = status === 'ready' ? 'online' : status;
-    console.log(`  ${icon} ${m.displayName.padEnd(22)} ${m.rank.padEnd(8)} ${m.type.padEnd(6)} ${statusLabel}`);
+    const ws = m.type === 'user' ? 'active' : (agentStatuses.get(m.id) ?? 'offline');
+    const icon = ws === 'idle' || ws === 'busy' || ws === 'active' ? '\u25CF' : '\u25CB';
+    console.log(`  ${icon} ${m.displayName.padEnd(22)} ${m.rank.padEnd(8)} ${m.type.padEnd(6)} ${ws}`);
   }
 }

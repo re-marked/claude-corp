@@ -13,7 +13,8 @@ export async function cmdStatus(opts: { json: boolean }) {
   console.log(`Agents: ${result.agents.length}`);
   console.log('');
   for (const a of result.agents) {
-    const icon = a.status === 'ready' ? '\u25C6' : '\u25C7';
-    console.log(`  ${icon} ${a.displayName.padEnd(16)} ${a.status}`);
+    const ws = (a as any).workStatus ?? 'offline';
+    const icon = ws === 'idle' || ws === 'busy' ? '\u25CF' : '\u25CB';
+    console.log(`  ${icon} ${a.displayName.padEnd(16)} ${ws}`);
   }
 }

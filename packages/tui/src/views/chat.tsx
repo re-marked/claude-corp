@@ -193,6 +193,22 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /status shows agent work status inline
+    if (text.trim().toLowerCase() === '/status') {
+      try {
+        const status = await daemonClient.status();
+        const lines = status.agents.map((a: any) => {
+          const ws = a.workStatus ?? 'offline';
+          const icon = ws === 'idle' || ws === 'busy' ? '\u25CF' : '\u25CB';
+          return `${icon} ${a.displayName.padEnd(16)} ${ws}`;
+        });
+        writeSystemMessage(`Agent Status:\n${lines.join('\n')}`);
+      } catch {
+        writeSystemMessage('Failed to get status');
+      }
+      return;
+    }
+
     // /project opens the project wizard
     if (text.trim().toLowerCase() === '/project') {
       setShowProjectWizard(true);

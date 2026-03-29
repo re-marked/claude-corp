@@ -6,6 +6,7 @@ import {
   type Channel,
   type ChannelMessage,
   type GlobalConfig,
+  type AgentWorkStatus,
   readConfig,
   appendMessage,
   generateId,
@@ -23,6 +24,8 @@ import { HeartbeatManager } from './heartbeat.js';
 import { TaskWatcher } from './task-watcher.js';
 import { HireWatcher } from './hire-watcher.js';
 import { EventBus, type DaemonEvent } from './events.js';
+import { InboxManager } from './inbox.js';
+import { Failsafe } from './failsafe.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
@@ -36,9 +39,16 @@ export class Daemon {
   heartbeat: HeartbeatManager;
   taskWatcher: TaskWatcher;
   hireWatcher: HireWatcher;
+  failsafe: Failsafe;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
+  /** Computed work status per agent (memberId → status) */
+  agentWorkStatus = new Map<string, AgentWorkStatus>();
+  /** Agent inbox system — tracks unread messages per channel per agent */
+  inbox = new InboxManager();
+  /** Callbacks for busy→idle transition (Phase 3: inbox system will use this) */
+  private onIdleCallbacks: ((memberId: string, displayName: string) => void)[] = [];
   /** WebSocket event bus for real-time TUI updates. */
   events = new EventBus();
   /** WebSocket to user's personal OpenClaw (for CEO dispatch with tool events). */
@@ -57,6 +67,42 @@ export class Daemon {
     this.heartbeat = new HeartbeatManager(this);
     this.taskWatcher = new TaskWatcher(this);
     this.hireWatcher = new HireWatcher(this);
+    this.failsafe = new Failsafe(this);
+  }
+
+  // --- Agent Work Status Engine ---
+
+  /** Register a callback for when an agent transitions busy→idle */
+  onAgentIdle(cb: (memberId: string, displayName: string) => void): void {
+    this.onIdleCallbacks.push(cb);
+  }
+
+  /** Update agent work status + broadcast event + fire transition callbacks */
+  setAgentWorkStatus(memberId: string, displayName: string, status: AgentWorkStatus): void {
+    const prev = this.agentWorkStatus.get(memberId);
+    if (prev === status) return;
+    this.agentWorkStatus.set(memberId, status);
+    this.events.broadcast({ type: 'agent_status', agentName: displayName, status });
+    log(`[status] ${displayName}: ${prev ?? 'unknown'} → ${status}`);
+    if (prev === 'busy' && status === 'idle') {
+      for (const cb of this.onIdleCallbacks) cb(memberId, displayName);
+    }
+  }
+
+  /** Get computed work status for an agent */
+  getAgentWorkStatus(memberId: string): AgentWorkStatus {
+    return this.agentWorkStatus.get(memberId) ?? 'offline';
+  }
+
+  /** Initialize work status for all spawned agents */
+  initAgentWorkStatuses(): void {
+    for (const agent of this.processManager.listAgents()) {
+      const status: AgentWorkStatus = agent.status === 'ready' ? 'idle'
+        : agent.status === 'starting' ? 'starting'
+        : agent.status === 'crashed' ? 'broken'
+        : 'offline';
+      this.agentWorkStatus.set(agent.memberId, status);
+    }
   }
 
   async start(): Promise<number> {
@@ -105,6 +151,7 @@ export class Daemon {
     this.heartbeat.start();
     this.taskWatcher.start();
     this.hireWatcher.start();
+    this.failsafe.start();
   }
 
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
@@ -161,6 +208,9 @@ export class Daemon {
         logError(`[daemon] Failed to spawn ${agent.displayName}: ${err}`);
       }
     }
+
+    // Initialize work status for all agents
+    this.initAgentWorkStatuses();
   }
 
   /**
@@ -181,10 +231,15 @@ export class Daemon {
     const founder = members.find((m) => m.rank === 'owner');
     if (!founder) throw new Error('No founder found');
 
-    // Use provided senderId (for agents sending as themselves) or default to Founder
-    const actualSender = senderId
-      ? members.find((m) => m.id === senderId) ?? founder
-      : founder;
+    // Use provided senderId, or detect the currently-dispatching agent, or default to Founder
+    let actualSender: Member;
+    if (senderId) {
+      actualSender = members.find((m) => m.id === senderId) ?? founder;
+    } else {
+      // If an agent is currently busy (dispatching), it's likely the one sending this message via exec
+      const busyAgents = members.filter(m => m.type === 'agent' && this.agentWorkStatus.get(m.id) === 'busy');
+      actualSender = busyAgents.length === 1 ? busyAgents[0]! : founder;
+    }
     const isAgent = actualSender.type === 'agent';
 
     const messagesPath = join(this.corpRoot, channel.path, 'messages.jsonl');
@@ -239,6 +294,7 @@ export class Daemon {
     this.heartbeat.stop();
     this.taskWatcher.stop();
     this.hireWatcher.stop();
+    this.failsafe.stop();
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();

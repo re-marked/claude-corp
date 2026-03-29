@@ -19,6 +19,8 @@ const { values, positionals } = parseArgs({
     hash: { type: 'string' },
     title: { type: 'string' },
     description: { type: 'string' },
+    taskId: { type: 'string' },
+    reason: { type: 'string' },
     priority: { type: 'string' },
     project: { type: 'string' },
     lead: { type: 'string' },
@@ -41,9 +43,9 @@ const { values, positionals } = parseArgs({
 const cmd = positionals[0];
 
 if (!cmd || values.help) {
-  console.log(`claudecorp-cli — Non-interactive Claude Corp management
+  console.log(`cc-cli — Non-interactive Claude Corp management
 
-Usage: claudecorp-cli <command> [options]
+Usage: cc-cli <command> [options]
 
 Commands:
   init       Create a new corporation
@@ -89,16 +91,16 @@ Common flags:
   --help     Show this help
 
 Examples:
-  claudecorp-cli init --name my-corp --user Mark --theme corporate
-  claudecorp-cli start &
-  claudecorp-cli send --channel general --message "hello @CEO" --wait
-  claudecorp-cli hire --name Researcher --rank worker --model haiku
-  claudecorp-cli task create --title "Research competitors" --assigned researcher
-  claudecorp-cli models default --model opus
-  claudecorp-cli members
-  claudecorp-cli hierarchy
-  claudecorp-cli inspect --agent ceo
-  claudecorp-cli stats --json
+  cc-cli init --name my-corp --user Mark --theme corporate
+  cc-cli start &
+  cc-cli send --channel general --message "hello @CEO" --wait
+  cc-cli hire --name Researcher --rank worker --model haiku
+  cc-cli task create --title "Research competitors" --assigned researcher
+  cc-cli models default --model opus
+  cc-cli members
+  cc-cli hierarchy
+  cc-cli inspect --agent ceo
+  cc-cli stats --json
 `);
   process.exit(0);
 }
@@ -127,6 +129,15 @@ async function run() {
     case 'status': {
       const { cmdStatus } = await import('./commands/status.js');
       await cmdStatus({ json: !!values.json });
+      break;
+    }
+    case 'say': {
+      const { cmdSay } = await import('./commands/say.js');
+      await cmdSay({
+        agent: values.agent as string | undefined,
+        message: values.message as string | undefined,
+        json: !!values.json,
+      });
       break;
     }
     case 'agents': {
@@ -180,6 +191,11 @@ async function run() {
     case 'version': {
       const { cmdVersion } = await import('./commands/version.js');
       await cmdVersion({ json: !!values.json });
+      break;
+    }
+    case 'pulse': {
+      const { cmdPulse } = await import('./commands/pulse.js');
+      await cmdPulse({ action: positionals[1] as string | undefined, json: !!values.json });
       break;
     }
     case 'tm':
@@ -249,7 +265,7 @@ async function run() {
       const { cmdAgentControl } = await import('./commands/agent-control.js');
       const action = positionals[1];
       if (action !== 'start' && action !== 'stop') {
-        console.error('Usage: claudecorp-cli agent start|stop --agent <name>');
+        console.error('Usage: cc-cli agent start|stop --agent <name>');
         process.exit(1);
       }
       await cmdAgentControl({ action, agent: values.agent as string | undefined, json: !!values.json });
@@ -267,7 +283,7 @@ async function run() {
           json: !!values.json,
         });
       } else {
-        console.error('Usage: claudecorp-cli task create --title "..." [--priority high] [--assigned <id>]');
+        console.error('Usage: cc-cli task create --title "..." [--priority high] [--assigned <id>]');
         process.exit(1);
       }
       break;
@@ -297,7 +313,7 @@ async function run() {
       break;
     }
     default:
-      console.error(`Unknown command: ${cmd}. Run claudecorp-cli --help`);
+      console.error(`Unknown command: ${cmd}. Run cc-cli --help`);
       process.exit(1);
   }
 }

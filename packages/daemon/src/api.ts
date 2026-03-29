@@ -18,6 +18,7 @@ import {
   readGlobalConfig,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
+import { dispatchToAgent } from './dispatch.js';
 import { hireAgent } from './hire.js';
 import { writeTaskEvent, notifyTaskAssignment } from './task-events.js';
 import { logError } from './logger.js';
@@ -39,8 +40,8 @@ export function createApi(daemon: Daemon): Server {
             displayName: a.displayName,
             port: a.port,
             status: a.status,
+            workStatus: daemon.getAgentWorkStatus(a.memberId),
           })),
-          dispatching: [...daemon.router.activeDispatches],
         });
         return;
       }
@@ -100,6 +101,7 @@ export function createApi(daemon: Daemon): Server {
           displayName: a.displayName,
           port: a.port,
           status: a.status,
+          workStatus: daemon.getAgentWorkStatus(a.memberId),
         })));
         return;
       }
@@ -119,6 +121,20 @@ export function createApi(daemon: Daemon): Server {
         const memberId = decodeURIComponent(stopMatch[1]!);
         await daemon.processManager.stopAgent(memberId);
         json(res, { ok: true });
+        return;
+      }
+
+      // POST /agents/:id/restart
+      const restartMatch = path.match(/^\/agents\/([^/]+)\/restart$/);
+      if (method === 'POST' && restartMatch) {
+        const memberId = decodeURIComponent(restartMatch[1]!);
+        try {
+          await daemon.processManager.stopAgent(memberId);
+        } catch {}
+        await new Promise(r => setTimeout(r, 1000));
+        const agent = await daemon.processManager.spawnAgent(memberId);
+        daemon.setAgentWorkStatus(memberId, agent.displayName, 'idle');
+        json(res, { ok: true, status: agent.status });
         return;
       }
 
@@ -394,6 +410,87 @@ export function createApi(daemon: Daemon): Server {
 
         writeConfig(join(daemon.corpRoot, 'channels.json'), channels);
         json(res, { ok: true, channel: ch });
+        return;
+      }
+
+      // POST /cc/say — direct agent-to-agent dispatch (synchronous, private, no JSONL)
+      if (method === 'POST' && path === '/cc/say') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const targetSlug = body.target as string;
+        const message = body.message as string;
+        if (!targetSlug || !message) {
+          json(res, { error: 'target and message are required' }, 400);
+          return;
+        }
+
+        // Resolve target agent by slug
+        const members = readConfig<any[]>(join(daemon.corpRoot, 'channels.json').replace('channels.json', 'members.json'));
+        const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+        const target = members.find((m: any) =>
+          m.type === 'agent' && (normalize(m.displayName) === normalize(targetSlug) || m.id === targetSlug),
+        );
+        if (!target) { json(res, { error: `Agent "${targetSlug}" not found` }, 404); return; }
+
+        const agentProc = daemon.processManager.getAgent(target.id);
+        if (!agentProc || agentProc.status !== 'ready') {
+          json(res, { error: `Agent "${target.displayName}" is not online` }, 503); return;
+        }
+
+        // Build lightweight context — no channel, minimal prompt
+        const corpRoot = daemon.corpRoot.replace(/\\/g, '/');
+        const agentDir = target.agentDir ? join(daemon.corpRoot, target.agentDir).replace(/\\/g, '/') : corpRoot;
+        const allMembers = members.map((m: any) => ({ name: m.displayName, rank: m.rank, type: m.type, status: m.status }));
+
+        let supervisorName: string | null = null;
+        if (target.spawnedBy) {
+          const sup = members.find((m: any) => m.id === target.spawnedBy);
+          supervisorName = sup?.displayName ?? null;
+        }
+
+        const context = {
+          agentDir,
+          corpRoot,
+          channelName: 'cc-direct',
+          channelMembers: [target.displayName],
+          corpMembers: allMembers,
+          recentHistory: [],
+          daemonPort: daemon.getPort(),
+          agentMemberId: target.id,
+          agentRank: target.rank,
+          agentDisplayName: target.displayName,
+          channelKind: 'direct' as const,
+          supervisorName,
+        };
+
+        // Set target busy
+        daemon.setAgentWorkStatus(target.id, target.displayName, 'busy');
+
+        try {
+          const wsClient = agentProc.mode === 'remote' ? daemon.openclawWS : daemon.corpGatewayWS;
+          const sessionKey = `cc-say:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+          const result = await dispatchToAgent(agentProc, message, context, sessionKey, undefined, wsClient);
+          daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
+
+          // Write to target agent's inbox.jsonl
+          const { appendFileSync } = await import('node:fs');
+          const now = new Date().toISOString();
+          const senderId = (body.senderId as string) ?? 'system';
+          const senderName = members.find((m: any) => m.id === senderId)?.displayName ?? 'unknown';
+          const inboxPath = join(daemon.corpRoot, target.agentDir ?? `agents/${targetSlug}/`, 'inbox.jsonl');
+
+          const question = JSON.stringify({ ts: now, from: senderName, to: target.displayName, content: message }) + '\n';
+          const answerLine = JSON.stringify({ ts: now, from: target.displayName, to: senderName, content: result.content }) + '\n';
+          try {
+            appendFileSync(inboxPath, question + answerLine, 'utf-8');
+          } catch (writeErr) {
+            logError(`[cc-say] Inbox write failed (${inboxPath}): ${writeErr}`);
+          }
+
+          json(res, { ok: true, from: target.displayName, response: result.content });
+        } catch (err) {
+          daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
+          json(res, { error: `Dispatch failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+        }
         return;
       }
 

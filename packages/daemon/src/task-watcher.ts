@@ -23,6 +23,7 @@ export class TaskWatcher {
   private watcher: FSWatcher | null = null;
   private taskCache = new Map<string, { status: TaskStatus; assignedTo: string | null }>();
   private recentApiCreates = new Set<string>(); // Suppress duplicates from API + fs.watch
+  private processing = new Set<string>(); // Prevent fs.watch double-fire
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -86,6 +87,9 @@ export class TaskWatcher {
 
   private onTaskFileChange(filePath: string): void {
     if (!existsSync(filePath)) return;
+    if (this.processing.has(filePath)) return;
+    this.processing.add(filePath);
+    setTimeout(() => this.processing.delete(filePath), 500); // Debounce 500ms
 
     try {
       const { task } = readTask(filePath);
@@ -145,7 +149,7 @@ export class TaskWatcher {
                   channelId: taskChannel.id,
                   senderId: 'system',
                   threadId: null,
-                  content: `@${ceo.displayName} Task "${task.title}" has been marked as ${task.status} by ${assigneeName}. Go to your DM with the Founder and report what was done.`,
+                  content: `@${ceo.displayName.toLowerCase().replace(/\s+/g, '-')} Task "${task.title}" has been marked as ${task.status} by ${assigneeName}. Go to your DM with the Founder and report what was done.`,
                   kind: 'text',
                   mentions: [ceo.id],
                   metadata: null,
