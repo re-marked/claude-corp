@@ -152,6 +152,8 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const viewStack = useMemo(() => new ViewStack(), []);
 
   const navigate = useCallback((view: View) => {
+    // Clear screen BEFORE React renders — prevents Static items leaking from previous view
+    process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
     if (view.type === 'corp-home') {
       viewStack.clear(view);
     } else {
@@ -161,6 +163,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   }, [viewStack]);
 
   const goBack = useCallback(() => {
+    process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
     viewStack.pop();
     forceRender((n) => n + 1);
   }, [viewStack]);

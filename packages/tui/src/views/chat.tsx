@@ -59,17 +59,9 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showTeamWizard, setShowTeamWizard] = useState(false);
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
   const lastMsgCount = useRef(messages.length);
-  // Delay first render until after screen clear — prevents old Static items leaking
-  const [cleared, setCleared] = useState(false);
-
-  // Clear screen + update tab title — must complete BEFORE Static renders
+  // Update tab title when channel changes
   useEffect(() => {
-    setCleared(false);
-    process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
     process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name}\x07`);
-    // Wait one frame for the clear to flush before allowing Static to render
-    const timer = setTimeout(() => setCleared(true), 30);
-    return () => clearTimeout(timer);
   }, [channel.id]);
 
   // Refresh members when new messages arrive (new agents may have been hired)
@@ -812,12 +804,10 @@ Always consider what happens when things go wrong.`,
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Messages in Static — only render after screen clear to prevent leaking */}
-      {cleared && (
-        <Static items={messages}>
-          {(msg) => renderMsg(msg)}
-        </Static>
-      )}
+      {/* Messages — Static writes to terminal scrollback permanently */}
+      <Static items={messages}>
+        {(msg) => renderMsg(msg)}
+      </Static>
       {/* Dynamic: streaming preview + indicators + input */}
       {hasStreamContent && (
         <Box flexDirection="column" paddingX={1} marginTop={1}>
