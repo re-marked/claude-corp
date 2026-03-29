@@ -347,6 +347,10 @@ export class MessageRouter {
         ? this.daemon.openclawWS
         : this.daemon.corpGatewayWS;
 
+      // Track text segments between tool calls — flush text before each tool event
+      let lastFlushedLength = 0;
+      const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+
       const result = await dispatchToAgent(
         agentProc,
         messageContent,
@@ -355,19 +359,41 @@ export class MessageRouter {
         (accumulated) => {
           this.daemon.streaming.set(targetId, {
             agentName: target.displayName,
-            content: accumulated,
+            content: accumulated.slice(lastFlushedLength),
             channelId: channel.id,
           });
           this.daemon.events.broadcast({
             type: 'stream_token',
             agentName: target.displayName,
             channelId: channel.id,
-            content: accumulated,
+            content: accumulated.slice(lastFlushedLength),
           });
         },
         wsClient,
         {
           onToolStart: (tool) => {
+            // Flush any accumulated text BEFORE the tool event
+            const streaming = this.daemon.streaming.get(targetId);
+            if (streaming?.content?.trim()) {
+              const segText = streaming.content.trim();
+              lastFlushedLength += streaming.content.length;
+              const segMsg: ChannelMessage = {
+                id: generateId(),
+                channelId: channel.id,
+                senderId: targetId,
+                threadId: msg.threadId,
+                content: segText,
+                kind: 'text',
+                mentions: resolveMentions(segText, members),
+                metadata: { source: 'router', segment: true },
+                depth: msg.depth + 1,
+                originId: msg.originId,
+                timestamp: new Date().toISOString(),
+              };
+              appendMessage(msgPath, segMsg);
+              this.daemon.streaming.delete(targetId);
+              this.daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId: channel.id });
+            }
             this.daemon.events.broadcast({
               type: 'tool_start',
               agentName: target.displayName,
@@ -377,7 +403,6 @@ export class MessageRouter {
             });
           },
           onToolEnd: (tool) => {
-            // Write tool_event to JSONL AFTER tool completes — permanent history
             const toolMsg: ChannelMessage = {
               id: generateId(),
               channelId: channel.id,
@@ -391,7 +416,7 @@ export class MessageRouter {
               originId: msg.originId,
               timestamp: new Date().toISOString(),
             };
-            appendMessage(join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL), toolMsg);
+            appendMessage(msgPath, toolMsg);
             this.daemon.events.broadcast({
               type: 'tool_end',
               agentName: target.displayName,
@@ -410,29 +435,30 @@ export class MessageRouter {
         channelId: channel.id,
       });
 
-      // Skip empty responses — agent glitched or had nothing to say
-      if (!result.content || result.content.trim().length === 0) {
-        log(`[router] ${target.displayName} returned empty response — skipping write`);
+      // Only the unflushed remainder goes into the final message
+      const remainingContent = result.content.slice(lastFlushedLength).trim();
+
+      // Skip if everything was already flushed via text segments (or empty)
+      if (!remainingContent) {
+        log(`[router] ${target.displayName} — all text flushed as segments, no final message`);
         this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
         this.daemon.gitManager.markDirty(target.displayName);
         this.drainQueue(targetId);
         return;
       }
 
-      // Parse [thread] marker — split into main channel + thread parts
-      const threadMarkerIdx = result.content.indexOf('[thread]');
-      let mainContent = result.content;
+      // Parse [thread] marker on remaining content
+      const threadMarkerIdx = remainingContent.indexOf('[thread]');
+      let mainContent = remainingContent;
       let threadContent: string | null = null;
       let responseThreadId = msg.threadId;
 
       if (threadMarkerIdx !== -1) {
-        mainContent = result.content.slice(0, threadMarkerIdx).trim();
-        threadContent = result.content.slice(threadMarkerIdx + '[thread]'.length).trim();
+        mainContent = remainingContent.slice(0, threadMarkerIdx).trim();
+        threadContent = remainingContent.slice(threadMarkerIdx + '[thread]'.length).trim();
         responseThreadId = msg.threadId ?? msg.id;
         log(`[router] ${target.displayName} split response: main=${mainContent.length} chars, thread=${threadContent.length} chars`);
       }
-
-      const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
 
       // If agent used [thread] at the very start (no main content), entire response is threaded
       if (threadContent && !mainContent) {
