@@ -38,7 +38,7 @@ export {
 
 // Utilities
 export { generateId } from './id.js';
-export { extractMentionNames, resolveMentions } from './mentions.js';
+export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
 export * from './paths.js';
 export * from './constants.js';
 

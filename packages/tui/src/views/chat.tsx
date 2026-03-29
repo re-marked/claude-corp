@@ -837,6 +837,7 @@ Always consider what happens when things go wrong.`,
         onSend={handleSend}
         disabled={sending}
         placeholder="Type a message... (/hire to add agents)"
+        agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
       />
       <Text color={COLORS.muted}> {activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  C-Y:thread  C-M:members  Esc:back</Text>
     </Box>

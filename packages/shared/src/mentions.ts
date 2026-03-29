@@ -2,7 +2,7 @@ import type { Member } from './types/index.js';
 
 /**
  * Resolve @mentions in content to member IDs.
- * Dead simple: check if "@" + memberName appears in the content.
+ * Matches both display name (@Lead Coder) and slug (@lead-coder).
  * Checks longest names first so "Lead Coder" matches before "Lead".
  * Case-insensitive. No regex. No edge cases.
  */
@@ -17,13 +17,18 @@ export function resolveMentions(content: string, members: Member[]): string[] {
 
   for (const m of sorted) {
     if (ids.includes(m.id)) continue;
-    const pattern = `@${m.displayName.toLowerCase()}`;
-    if (lower.includes(pattern)) {
+    const slug = memberSlug(m);
+    if (lower.includes(`@${m.displayName.toLowerCase()}`) || lower.includes(`@${slug}`)) {
       ids.push(m.id);
     }
   }
 
   return ids;
+}
+
+/** Convert member to slug: "Lead Coder" → "lead-coder" */
+export function memberSlug(m: Member): string {
+  return m.displayName.toLowerCase().replace(/\s+/g, '-');
 }
 
 /** Extract raw mention names from content (for display/highlighting). */
