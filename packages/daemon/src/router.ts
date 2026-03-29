@@ -31,6 +31,8 @@ export class MessageRouter {
   private dedupClearInterval: ReturnType<typeof setInterval> | null = null;
   /** Currently dispatching — agent displayNames that are actively processing. */
   activeDispatches = new Set<string>();
+  /** Retry counters for empty responses — key is "msgId:targetId" */
+  private retryCount = new Map<string, number>();
   /** Queued dispatches per agent — when agent is busy, messages wait here. */
   private dispatchQueue = new Map<string, { msg: ChannelMessage; channel: Channel; targetId: string; members: Member[]; sender: Member }[]>();
 
@@ -434,9 +436,72 @@ export class MessageRouter {
       // Only the unflushed remainder goes into the final message
       const remainingContent = result.content.slice(lastFlushedLength).trim();
 
-      // Skip if everything was already flushed via text segments (or empty)
-      if (!remainingContent) {
+      // Skip if everything was already flushed via text segments
+      if (!remainingContent && lastFlushedLength > 0) {
         log(`[router] ${target.displayName} — all text flushed as segments, no final message`);
+        this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
+        this.daemon.gitManager.markDirty(target.displayName);
+        this.drainQueue(targetId);
+        return;
+      }
+
+      // Empty response — retry up to 3 times with visible status
+      if (!remainingContent && lastFlushedLength === 0) {
+        const maxRetries = 3;
+        const retryKey = `${msg.id}:${targetId}`;
+        const attempt = (this.retryCount.get(retryKey) ?? 0) + 1;
+
+        if (attempt <= maxRetries) {
+          this.retryCount.set(retryKey, attempt);
+          log(`[router] ${target.displayName} returned empty — retry ${attempt}/${maxRetries} in 5s`);
+
+          // Write visible retry message
+          const retryMsg: ChannelMessage = {
+            id: generateId(),
+            channelId: channel.id,
+            senderId: 'system',
+            threadId: msg.threadId,
+            content: `${target.displayName} didn't respond. Retrying... (${attempt}/${maxRetries})`,
+            kind: 'system',
+            mentions: [],
+            metadata: { source: 'router' },
+            depth: msg.depth,
+            originId: msg.originId,
+            timestamp: new Date().toISOString(),
+          };
+          appendMessage(msgPath, retryMsg);
+
+          // Retry after delay
+          this.daemon.streaming.delete(targetId);
+          this.activeDispatches.delete(target.displayName);
+          this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
+          // Clear dedup so retry can go through
+          this.dispatched.delete(`${msg.id}:${targetId}`);
+          setTimeout(() => {
+            this.dispatchToTarget(msg, channel, targetId, members, sender);
+          }, 5000);
+          return;
+        }
+
+        // All retries exhausted
+        this.retryCount.delete(retryKey);
+        log(`[router] ${target.displayName} returned empty after ${maxRetries} retries — giving up`);
+        const failMsg: ChannelMessage = {
+          id: generateId(),
+          channelId: channel.id,
+          senderId: 'system',
+          threadId: msg.threadId,
+          content: `${target.displayName} failed to respond after ${maxRetries} attempts.`,
+          kind: 'system',
+          mentions: [],
+          metadata: { source: 'router' },
+          depth: msg.depth,
+          originId: msg.originId,
+          timestamp: new Date().toISOString(),
+        };
+        appendMessage(msgPath, failMsg);
+        this.daemon.streaming.delete(targetId);
+        this.activeDispatches.delete(target.displayName);
         this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
         this.daemon.gitManager.markDirty(target.displayName);
         this.drainQueue(targetId);
