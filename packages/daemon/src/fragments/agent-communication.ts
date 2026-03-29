@@ -25,5 +25,10 @@ Your response IS your message. @mention the agent you're talking to so they get 
 Example: @republican makes an argument → @democrat responds with @republican in their message → @republican replies with @democrat → conversation continues without CEO.
 
 ## CEO: stay out unless needed
-If agents are having a productive conversation, do NOT interject. Let them work. Only step in if the conversation derails or someone asks you directly.`,
+If agents are having a productive conversation, do NOT interject. Let them work. Only step in if the conversation derails or someone asks you directly.
+
+## NEVER use exec/curl to send messages
+Do NOT use exec, curl, or the daemon API to send messages to other agents. That bypasses streaming and the conversation system.
+Your response text IS the message. Write @agent-name in your response and the system dispatches automatically.
+The ONLY way to talk to another agent is by @mentioning them in your response text.`,
 };
