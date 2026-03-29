@@ -234,11 +234,8 @@ export class MessageRouter {
       });
       log(`[router] All-mode dispatch: ${targetIds.length} agents in #${channel.name}`);
     } else {
-      // Mention: route to @mentioned agents only
-      // Use pre-resolved msg.mentions first, fall back to content parsing
-      const mentionedIds = msg.mentions.length > 0
-        ? msg.mentions
-        : resolveMentions(msg.content, members);
+      // Mention: always resolve from content — one path, no shortcuts
+      const mentionedIds = resolveMentions(msg.content, members);
       targetIds = mentionedIds.filter((id) => {
         const m = members.find((mem) => mem.id === id);
         return m && m.type === 'agent';

@@ -1,45 +1,40 @@
 import type { Member } from './types/index.js';
 
-// Matches @"Multi Word Name" or @SingleWord
-const MENTION_RE = /@"([^"]+)"|@([A-Za-z0-9][\w-]*)/g;
-
-export function extractMentionNames(content: string): string[] {
-  const names: string[] = [];
-  let match: RegExpExecArray | null;
-
-  MENTION_RE.lastIndex = 0;
-  while ((match = MENTION_RE.exec(content)) !== null) {
-    const name = match[1] ?? match[2];
-    if (name) names.push(name);
-  }
-
-  return names;
-}
-
+/**
+ * Resolve @mentions in content to member IDs.
+ * Dead simple: check if "@" + memberName appears in the content.
+ * Checks longest names first so "Lead Coder" matches before "Lead".
+ * Case-insensitive. No regex. No edge cases.
+ */
 export function resolveMentions(content: string, members: Member[]): string[] {
-  const memberIds: string[] = [];
+  const lower = content.toLowerCase();
+  const ids: string[] = [];
 
-  // First: regex-extracted names (handles @"Lead Coder" and @CEO)
-  const names = extractMentionNames(content);
-  for (const name of names) {
-    const lower = name.toLowerCase();
-    const member = members.find(
-      (m) => m.displayName.toLowerCase() === lower && m.status !== 'archived',
-    );
-    if (member && !memberIds.includes(member.id)) memberIds.push(member.id);
-  }
+  // Sort by name length descending — longest match first
+  const sorted = [...members]
+    .filter(m => m.status !== 'archived')
+    .sort((a, b) => b.displayName.length - a.displayName.length);
 
-  // Second: unquoted multi-word @mentions by checking against known member names
-  // Catches @Lead Coder (without quotes) by matching "@" + memberName in content
-  for (const m of members) {
-    if (m.status === 'archived') continue;
-    if (memberIds.includes(m.id)) continue;
-    if (!m.displayName.includes(' ')) continue;
-    const pattern = `@${m.displayName}`;
-    if (content.toLowerCase().includes(pattern.toLowerCase())) {
-      memberIds.push(m.id);
+  for (const m of sorted) {
+    if (ids.includes(m.id)) continue;
+    const pattern = `@${m.displayName.toLowerCase()}`;
+    if (lower.includes(pattern)) {
+      ids.push(m.id);
     }
   }
 
-  return memberIds;
+  return ids;
+}
+
+/** Extract raw mention names from content (for display/highlighting). */
+export function extractMentionNames(content: string): string[] {
+  const re = /@"([^"]+)"|@([A-Za-z0-9][\w-]*)/g;
+  const names: string[] = [];
+  let match: RegExpExecArray | null;
+  re.lastIndex = 0;
+  while ((match = re.exec(content)) !== null) {
+    const name = match[1] ?? match[2];
+    if (name) names.push(name);
+  }
+  return names;
 }
