@@ -13,7 +13,7 @@ Tried: <what you attempted, with commands and file paths>
 Failed: <exact error message or unexpected result>
 Need: <what you need to continue — access, decision, clarification>
 
-@mention ${ctx.supervisorName ?? 'the CEO'} with this format.
+@${(ctx.supervisorName ?? 'ceo').toLowerCase().replace(/\s+/g, '-')} with this format.
 
 Do NOT say "I'm blocked" without the details. Your supervisor cannot help without the error.`,
 };

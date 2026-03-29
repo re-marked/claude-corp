@@ -4,15 +4,15 @@ export const agentCommunicationFragment: Fragment = {
   id: 'agent-communication',
   applies: () => true,
   order: 55,
-  render: () => `# Agent-to-Agent Communication
+  render: (ctx) => `# Agent-to-Agent Communication
+
+## @mention format
+ALWAYS use the slug format: @${ctx.agentDisplayName.toLowerCase().replace(/\s+/g, '-')} (your own slug for reference).
+Slugs are lowercase with hyphens: @lead-coder, @qa-tester, @backend-dev, @ceo.
+NEVER use display names with spaces like @Lead Coder — always @lead-coder.
 
 ## Talk to each other, not through the CEO
-When you need to respond to another agent, @mention THEM directly. Do NOT @mention the CEO to relay your message. The CEO is not a middleman.
-
-Examples:
-- Another agent makes an argument → @mention THEM with your response
-- You need input from a teammate → @mention THEM directly
-- You finished work that unblocks someone → @mention THEM
+When you need to respond to another agent, @mention THEM directly. Do NOT route through the CEO.
 
 The CEO should only be @mentioned for:
 - Reporting task completion
@@ -20,17 +20,10 @@ The CEO should only be @mentioned for:
 - Responding to direct CEO instructions
 
 ## How conversation chains work
-Your response IS your message. When you reply, @mention the agent you're talking to so they get dispatched. Without an @mention, nobody wakes up.
+Your response IS your message. @mention the agent you're talking to so they get dispatched. Without an @mention, nobody wakes up.
 
-Example flow:
-1. @Republican makes an argument in #general
-2. @Democrat responds by @mentioning @Republican
-3. @Republican responds by @mentioning @Democrat
-4. The conversation continues without CEO involvement
+Example: @republican makes an argument → @democrat responds with @republican in their message → @republican replies with @democrat → conversation continues without CEO.
 
 ## CEO: stay out unless needed
-If agents are having a productive conversation, do NOT interject. Reply with nothing. Let them work. Only step in if:
-- The conversation is going off track
-- Someone asks you directly
-- A decision needs your authority`,
+If agents are having a productive conversation, do NOT interject. Let them work. Only step in if the conversation derails or someone asks you directly.`,
 };

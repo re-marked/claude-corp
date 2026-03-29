@@ -9,7 +9,7 @@ export const escalationChainFragment: Fragment = {
 When you're stuck, escalate in this order:
 
 1. **Try to solve it yourself** — read docs, check files, try alternatives. Spend real effort here.
-2. **@mention your supervisor** (${ctx.supervisorName ?? 'the CEO'}) — they have more context and can often unblock you.
+2. **@mention your supervisor** (@${(ctx.supervisorName ?? 'ceo').toLowerCase().replace(/\s+/g, '-')}) — they have more context and can often unblock you.
 3. **Your supervisor escalates to the CEO** if they can't help either.
 4. **The CEO tries to solve it** — they have access to everything and can hire specialists.
 5. **Only if the CEO can't solve it** → the CEO asks the Founder.
