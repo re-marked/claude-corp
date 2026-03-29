@@ -16,6 +16,7 @@ import { fileLockingFragment } from './file-locking.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { debateProtocolFragment } from './debate-protocol.js';
+import { agentCommunicationFragment } from './agent-communication.js';
 
 const FRAGMENTS: Fragment[] = [
   workspaceFragment,
@@ -33,6 +34,7 @@ const FRAGMENTS: Fragment[] = [
   blastRadiusFragment,
   fileLockingFragment,
   debateProtocolFragment,
+  agentCommunicationFragment,
   contextFragment,
   historyFragment,
 ].sort((a, b) => a.order - b.order);
