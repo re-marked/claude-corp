@@ -176,13 +176,15 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       const arg = text.trim().split(/\s+/)[1]?.toLowerCase();
       if (arg && PALETTES[arg]) {
         saveTheme(arg);
-        writeSystemMessage(`Theme switched to ${arg}. Restart TUI to see full effect.`);
+        process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
+        writeSystemMessage(`Theme: ${arg}`);
       } else {
         const current = currentThemeName();
         const idx = PALETTE_NAMES.indexOf(current);
         const next = PALETTE_NAMES[(idx + 1) % PALETTE_NAMES.length]!;
         saveTheme(next);
-        writeSystemMessage(`Theme: ${next} (${PALETTE_NAMES.join(' | ')}). Restart TUI to see full effect.`);
+        process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
+        writeSystemMessage(`Theme: ${next} (${PALETTE_NAMES.join(' | ')})`);
       }
       return;
     }
