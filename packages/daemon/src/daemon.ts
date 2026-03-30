@@ -161,43 +161,90 @@ export class Daemon {
     log('[daemon] Failsafe heartbeat timer started (every 5m)');
   }
 
-  /** Send "run your monitoring protocol" to Failsafe agent's DM via router. */
-  private dispatchFailsafeHeartbeat(): void {
+  /** Dispatch "run your monitoring protocol" directly to Failsafe agent. */
+  private async dispatchFailsafeHeartbeat(): Promise<void> {
     try {
       const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
       const failsafe = members.find(m => m.displayName === 'Failsafe' && m.type === 'agent');
-      if (!failsafe) return;
+      if (!failsafe?.agentDir) return;
 
-      // Check if Failsafe is already busy — don't pile up dispatches
+      // Don't pile up dispatches
       if (this.getAgentWorkStatus(failsafe.id) === 'busy') return;
 
-      const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
-      const founder = members.find(m => m.rank === 'owner');
-      const dmChannel = channels.find(
-        c => c.kind === 'direct' &&
-        c.memberIds.includes(failsafe.id) &&
-        (founder ? c.memberIds.includes(founder.id) : true),
-      );
-      if (!dmChannel) return;
+      const agentProc = this.processManager.getAgent(failsafe.id);
+      if (!agentProc || agentProc.status !== 'ready') return;
 
-      const msg: ChannelMessage = {
-        id: generateId(),
-        channelId: dmChannel.id,
-        senderId: 'system',
-        threadId: null,
-        content: 'Run your monitoring protocol. Check all agent statuses and report.',
-        kind: 'text',
-        mentions: [failsafe.id],
-        metadata: { source: 'failsafe-timer' },
-        depth: 0,
-        originId: '',
-        timestamp: new Date().toISOString(),
+      // Build context for direct dispatch (same pattern as inbox dispatch in heartbeat.ts)
+      const allMembers = members.map(m => ({ name: m.displayName, rank: m.rank, type: m.type, status: m.status }));
+      const agentDir = join(this.corpRoot, failsafe.agentDir).replace(/\\/g, '/');
+      const corpRoot = this.corpRoot.replace(/\\/g, '/');
+
+      let supervisorName: string | null = null;
+      if (failsafe.spawnedBy) {
+        const sup = members.find(m => m.id === failsafe.spawnedBy);
+        supervisorName = sup?.displayName ?? null;
+      }
+
+      const { dispatchToAgent } = await import('./dispatch.js');
+      const { composeSystemMessage } = await import('./fragments/index.js');
+
+      const context = {
+        agentDir,
+        corpRoot,
+        channelName: 'failsafe-heartbeat',
+        channelMembers: [failsafe.displayName],
+        corpMembers: allMembers,
+        recentHistory: [],
+        daemonPort: this.getPort(),
+        agentMemberId: failsafe.id,
+        agentRank: failsafe.rank,
+        agentDisplayName: failsafe.displayName,
+        channelKind: 'direct' as const,
+        supervisorName,
       };
-      msg.originId = msg.id;
-      appendMessage(join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
-      log('[daemon] Failsafe heartbeat dispatched');
+
+      this.setAgentWorkStatus(failsafe.id, failsafe.displayName, 'busy');
+
+      const wsClient = agentProc.mode === 'remote' ? this.openclawWS : this.corpGatewayWS;
+      const sessionKey = `failsafe-heartbeat:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+
+      try {
+        const result = await dispatchToAgent(agentProc, 'Run your monitoring protocol. Check all agent statuses via cc-cli status and report.', context, sessionKey, undefined, wsClient);
+        log(`[daemon] Failsafe heartbeat response: ${result.content.slice(0, 80)}`);
+
+        // Write response to Failsafe's DM so it's visible in TUI
+        const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
+        const founder = members.find(m => m.rank === 'owner');
+        const dmChannel = channels.find(
+          c => c.kind === 'direct' &&
+          c.memberIds.includes(failsafe.id) &&
+          (founder ? c.memberIds.includes(founder.id) : true),
+        );
+        if (dmChannel && result.content.trim()) {
+          const responseMsg: ChannelMessage = {
+            id: generateId(),
+            channelId: dmChannel.id,
+            senderId: failsafe.id,
+            threadId: null,
+            content: result.content,
+            kind: 'text',
+            mentions: [],
+            metadata: { source: 'failsafe-heartbeat' },
+            depth: 0,
+            originId: '',
+            timestamp: new Date().toISOString(),
+          };
+          responseMsg.originId = responseMsg.id;
+          appendMessage(join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), responseMsg);
+        }
+      } catch (err) {
+        logError(`[daemon] Failsafe heartbeat dispatch failed: ${err}`);
+      }
+
+      this.setAgentWorkStatus(failsafe.id, failsafe.displayName, 'idle');
+      log('[daemon] Failsafe heartbeat completed');
     } catch (err) {
-      logError(`[daemon] Failsafe heartbeat dispatch failed: ${err}`);
+      logError(`[daemon] Failsafe heartbeat failed: ${err}`);
     }
   }
 
@@ -276,6 +323,7 @@ export class Daemon {
     } catch (err) {
       logError(`[daemon] Failed to bootstrap Janitor agent: ${err}`);
     }
+
   }
 
   /**
@@ -325,6 +373,9 @@ export class Daemon {
     };
     userMsg.originId = userMsg.id;
     appendMessage(messagesPath, userMsg);
+
+    // Poke the router to process this channel (Windows fs.watch can miss appends)
+    setTimeout(() => this.router.pokeChannel(channelId), 100);
 
     // Mark for git commit
     this.gitManager.markDirty(founder.displayName);

@@ -161,6 +161,9 @@ export function dispatchTaskToDm(
     msg.originId = msg.id;
     appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
 
+    // Poke router to process (Windows fs.watch can miss appends on new files)
+    setTimeout(() => daemon.router.pokeChannel(dmChannel.id), 100);
+
     log(`[task-events] Dispatched task "${taskTitle}" to ${assignee.displayName}'s DM`);
   } catch (err) {
     logError(`[task-events] DM dispatch failed: ${err}`);
@@ -208,6 +211,7 @@ export function dispatchBlockerToDm(
     };
     msg.originId = msg.id;
     appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+    setTimeout(() => daemon.router.pokeChannel(dmChannel.id), 100);
 
     log(`[task-events] Blocker notification sent to ${creator.displayName}'s DM`);
   } catch (err) {
@@ -256,6 +260,7 @@ export function dispatchCompletionToCeo(
     };
     msg.originId = msg.id;
     appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+    setTimeout(() => daemon.router.pokeChannel(dmChannel.id), 100);
 
     log(`[task-events] Completion notification for "${taskTitle}" sent to CEO's DM`);
   } catch (err) {
