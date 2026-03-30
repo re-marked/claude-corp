@@ -32,19 +32,24 @@ interface StreamData {
   channelId: string;
 }
 
+interface ToolCallData {
+  agentName: string;
+  toolName: string;
+}
+
 interface Props {
   channel: Channel;
   messagesPath: string;
-  /** Streaming state from WebSocket events */
-  streamData?: StreamData | null;
+  /** Streaming state from WebSocket events — multiple agents can stream simultaneously */
+  streamData?: StreamData[] | null;
   /** Agent names currently dispatching */
   dispatchingAgents?: string[];
-  /** Active tool call (from WebSocket) */
-  activeToolCall?: { agentName: string; toolName: string } | null;
+  /** Active tool calls for this channel (multiple agents can use tools at once) */
+  activeToolCalls?: ToolCallData[];
   onNavigate?: (view: import('../navigation.js').View) => void;
 }
 
-export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCall, onNavigate }: Props) {
+export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCalls = [], onNavigate }: Props) {
   const { corpRoot, daemonClient, members: ctxMembers } = useCorp();
   const [activeThread, setActiveThread] = useState<string | undefined>(undefined);
   const { messages, threadCounts, refresh: refreshMessages } = useMessages(messagesPath, 50, activeThread);
@@ -915,9 +920,9 @@ Always consider what happens when things go wrong.`,
   }
 
   // Derive streaming state for this channel from props
-  const channelStream = streamData?.channelId === channel.id ? streamData : null;
-  const isStreaming = !!channelStream;
-  const hasStreamContent = !!(channelStream?.content);
+  const channelStreams = (streamData ?? []).filter(s => s.channelId === channel.id);
+  const isStreaming = channelStreams.length > 0;
+  const hasStreamContent = channelStreams.some(s => s.content);
 
   const renderMsg = (msg: ChannelMessage) => {
     const sender = members.find((m) => m.id === msg.senderId);
@@ -1005,28 +1010,46 @@ Always consider what happens when things go wrong.`,
       <Static items={messages.slice(-100)}>
         {(msg) => renderMsg(msg)}
       </Static>
-      {/* Dynamic: streaming preview + indicators + input */}
-      {hasStreamContent && dispatchingAgents.includes(channelStream!.agentName) && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Box gap={1}>
-            <Text color={COLORS.agentWorker}>{'\u25CF'}</Text>
-            <Text bold color={COLORS.agentWorker}>{channelStream!.agentName}</Text>
+      {/* Streaming messages — each renders inline like a real message in the chat */}
+      {channelStreams.filter(s => s.content).map(stream => {
+        const streamAgent = members.find(m => m.displayName === stream.agentName);
+        const streamColor = streamAgent ? agentColor(COLORS, streamAgent.rank) : COLORS.agentWorker;
+        const streamTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return (
+          <Box key={`stream-${stream.agentName}`} flexDirection="column" marginBottom={1}>
+            <Box gap={1}>
+              <Text color={streamColor}>{'\u25CF'}</Text>
+              <Text bold color={streamColor}>{stream.agentName}</Text>
+              <Text color={COLORS.muted}>{streamTime}</Text>
+              <Text color={COLORS.muted}><Spinner type="dots" /></Text>
+            </Box>
+            <Box paddingLeft={2}>
+              <Text wrap="wrap">{stream.content}</Text>
+            </Box>
+          </Box>
+        );
+      })}
+      {/* Tool activity indicators — each agent's active tool shown separately */}
+      {activeToolCalls.filter(tc => !channelStreams.some(s => s.content && s.agentName === tc.agentName)).map(tc => {
+        const toolAgent = members.find(m => m.displayName === tc.agentName);
+        const toolColor = toolAgent ? agentColor(COLORS, toolAgent.rank) : COLORS.agentWorker;
+        return (
+          <Box key={`tool-${tc.agentName}`} gap={1} paddingLeft={1}>
+            <Text color={toolColor}>{'\u25CF'}</Text>
+            <Text color={toolColor}>{tc.agentName}</Text>
             <Text color={COLORS.muted}><Spinner type="dots" /></Text>
+            <Text color={COLORS.subtle}>{tc.toolName}</Text>
           </Box>
-          <Box paddingLeft={2}>
-            <Text wrap="wrap">{channelStream!.content}</Text>
-          </Box>
-        </Box>
-      )}
-      {!hasStreamContent && (isStreaming || thinking || dispatchingAgents.length > 0) && (
+        );
+      })}
+      {/* Typing/working indicator — agents dispatching but not yet streaming */}
+      {!hasStreamContent && activeToolCalls.length === 0 && (isStreaming || thinking || dispatchingAgents.length > 0) && (
         <Box gap={1} paddingLeft={1}>
           <Text color={COLORS.muted}><Spinner type="dots" /></Text>
           <Text color={COLORS.subtle}>
-            {activeToolCall
-              ? `${activeToolCall.agentName} ${activeToolCall.toolName}...`
-              : thinkingAgents.length > 0
-                ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-                : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
+            {thinkingAgents.length > 0
+              ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
+              : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
           </Text>
         </Box>
       )}

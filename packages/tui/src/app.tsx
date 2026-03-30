@@ -371,20 +371,20 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         const messagesPath = join(corpPath, ch.path, 'messages.jsonl');
         // Mark channel as visited (for unread indicators)
         lastVisitedRef.current.set(ch.id, new Date().toISOString());
-        // Get streaming data for this channel — streams are keyed by agentName, find one matching this channel
-        const streamForChannel = [...events.streams.values()].find(s => s.channelId === current.channelId) ?? null;
-        // Get tool activity for this channel
-        const toolForChannel = [...events.toolActivity.values()].find(
-          (t) => t.channelId === current.channelId,
-        );
+        // Get ALL streaming data for this channel — multiple agents can stream simultaneously
+        const streamsForChannel = [...events.streams.values()].filter(s => s.channelId === current.channelId);
+        // Get ALL tool activity for this channel
+        const toolsForChannel = [...events.toolActivity.values()]
+          .filter(t => t.channelId === current.channelId)
+          .map(t => ({ agentName: t.agentName, toolName: t.toolName }));
         return (
           <ChatView
             key={`chat-${ch.id}`}
             channel={ch}
             messagesPath={messagesPath}
-            streamData={streamForChannel}
+            streamData={streamsForChannel}
             dispatchingAgents={[...events.dispatching]}
-            activeToolCall={toolForChannel ? { agentName: toolForChannel.agentName, toolName: toolForChannel.toolName } : null}
+            activeToolCalls={toolsForChannel}
             onNavigate={navigate}
           />
         );
