@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import type { Clock } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';
@@ -8,14 +8,11 @@ interface Props {
   onBack: () => void;
 }
 
-// Braille spinner frames — each clock offsets to avoid visual sync
-const SPINNER = ['\u280B', '\u2819', '\u2839', '\u2838', '\u283C', '\u2834', '\u2826', '\u2827', '\u2807', '\u280F'];
-const PAUSED_ICON = '\u25CB'; // ○
-const ERROR_ICON = '\u2717';  // ✗
-const STOPPED_ICON = '\u2013'; // –
-
-const BAR_WIDTH = 20;
-const BAR_CHAR = '\u2501'; // ━ (heavy horizontal line, same char for both — color differentiates)
+// Spinning square frames — rotates through quadrant arcs
+const SQUARE_FRAMES = ['\u25F0', '\u25F3', '\u25F2', '\u25F1']; // ◰ ◳ ◲ ◱
+const PAUSED_ICON = '\u25A1'; // □
+const ERROR_ICON = '\u25A0';  // ■
+const STOPPED_ICON = '\u25A1'; // □
 
 const TYPE_ORDER = ['heartbeat', 'timer', 'system', 'loop', 'cron'];
 const TYPE_LABELS: Record<string, string> = {
@@ -26,49 +23,53 @@ const TYPE_LABELS: Record<string, string> = {
   cron: 'CRONS',
 };
 
+/** Get color based on progress through interval: green → primary → warning → danger */
+function progressColor(progress: number): string {
+  if (progress < 0.3) return COLORS.success;    // Just fired, healthy green
+  if (progress < 0.7) return COLORS.primary;    // Middle, coral
+  if (progress < 0.9) return COLORS.warning;    // Getting close, yellow
+  return COLORS.danger;                          // About to fire, red
+}
+
 export function ClockView({ onBack }: Props) {
   const { daemonClient } = useCorp();
   const [clocks, setClocks] = useState<Clock[]>([]);
   const [frame, setFrame] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [now, setNow] = useState(Date.now());
   const { stdout } = useStdout();
   const termHeight = stdout?.rows ?? 40;
-  const fetchRef = useRef(0);
 
   // Fetch clocks from daemon
   const fetchClocks = async () => {
     try {
       const data = await daemonClient.listClocks();
       setClocks(data);
-    } catch {
-      // Daemon might be down
-    }
+    } catch {}
   };
 
-  // Initial fetch + periodic refresh (every 5s for fire count accuracy)
+  // Initial fetch + periodic refresh
   useEffect(() => {
     fetchClocks();
     const refresh = setInterval(() => fetchClocks(), 5000);
     return () => clearInterval(refresh);
   }, []);
 
-  // Animation loop — 10 FPS (100ms)
+  // Animation loop — 10 FPS
   useEffect(() => {
     const timer = setInterval(() => {
       setFrame(f => f + 1);
+      setNow(Date.now());
     }, 100);
     return () => clearInterval(timer);
   }, []);
 
-  // Selectable clocks (flat list, no headers)
   const selectableClocks = clocks.filter(c => c.status !== 'stopped');
 
   useInput((_input, key) => {
     if (key.escape) { onBack(); return; }
     if (key.upArrow) setSelectedIndex(i => Math.max(0, i - 1));
     if (key.downArrow) setSelectedIndex(i => Math.min(selectableClocks.length - 1, i + 1));
-
-    // P = pause/resume selected clock
     if (_input === 'p' || _input === 'P') {
       const clock = selectableClocks[selectedIndex];
       if (!clock) return;
@@ -89,7 +90,6 @@ export function ClockView({ onBack }: Props) {
     groups.set(c.type, group);
   }
 
-  const now = Date.now();
   let selectableIdx = 0;
 
   // Stats
@@ -98,20 +98,23 @@ export function ClockView({ onBack }: Props) {
   const paused = clocks.filter(c => c.status === 'paused').length;
   const totalFires = clocks.reduce((sum, c) => sum + c.fireCount, 0);
 
+  // Live clock display
+  const liveTime = new Date(now);
+  const timeStr = liveTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
   return (
     <Box flexDirection="column" flexGrow={1} height={Math.floor(termHeight * 0.9)}>
-      {/* Header */}
+      {/* Header with live clock */}
       <Box borderStyle={BORDER_STYLE} borderColor={COLORS.primary} paddingX={1} justifyContent="space-between">
-        <Text bold color={COLORS.primary}>CLOCKS</Text>
         <Box gap={2}>
-          <Text color={running > 0 ? COLORS.success : COLORS.muted}>
-            {running} running
-          </Text>
+          <Text bold color={COLORS.primary}>CLOCKS</Text>
+          <Text bold color={COLORS.text}>{timeStr}</Text>
+        </Box>
+        <Box gap={2}>
+          <Text color={running > 0 ? COLORS.success : COLORS.muted}>{running} running</Text>
           {errors > 0 && <Text color={COLORS.danger}>{errors} ERROR</Text>}
           {paused > 0 && <Text color={COLORS.warning}>{paused} paused</Text>}
-          <Text color={COLORS.muted}>
-            {formatCount(totalFires)} total fires
-          </Text>
+          <Text color={COLORS.muted}>{'\u00d7'}{formatCount(totalFires)} total</Text>
         </Box>
       </Box>
 
@@ -119,62 +122,84 @@ export function ClockView({ onBack }: Props) {
       <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
         {TYPE_ORDER.map(type => {
           const group = groups.get(type);
-          if (!group || group.length === 0) return null;
+          const label = TYPE_LABELS[type] ?? type.toUpperCase();
+
+          // Placeholder sections for loops and crons
+          if (!group || group.length === 0) {
+            if (type === 'loop') {
+              return (
+                <Box key={type} flexDirection="column" marginBottom={1}>
+                  <Text bold color={COLORS.muted}>{label}</Text>
+                  <Text color={COLORS.border}>  {STOPPED_ICON} No loops yet. Use /loop to create recurring commands.</Text>
+                </Box>
+              );
+            }
+            if (type === 'cron') {
+              return (
+                <Box key={type} flexDirection="column" marginBottom={1}>
+                  <Text bold color={COLORS.muted}>{label}</Text>
+                  <Text color={COLORS.border}>  {STOPPED_ICON} No cron jobs yet. Scheduled tasks coming soon.</Text>
+                </Box>
+              );
+            }
+            return null;
+          }
 
           return (
             <Box key={type} flexDirection="column" marginBottom={1}>
-              <Text bold color={COLORS.muted}>{TYPE_LABELS[type] ?? type.toUpperCase()}</Text>
-              {group.map((clock, clockIdx) => {
+              <Text bold color={COLORS.muted}>{label}</Text>
+              {group.map((clock) => {
                 const isSelected = selectableIdx === selectedIndex;
-                const currentSelectableIdx = selectableIdx;
+                const currentIdx = selectableIdx;
                 selectableIdx++;
 
-                // Spinner — each clock offset by its index
-                const spinnerIdx = (frame + currentSelectableIdx * 3) % SPINNER.length;
-                let indicator: string;
-                let indicatorColor: string;
-
-                if (clock.status === 'running') {
-                  indicator = SPINNER[spinnerIdx]!;
-                  indicatorColor = COLORS.success;
-                } else if (clock.status === 'paused') {
-                  indicator = PAUSED_ICON;
-                  indicatorColor = COLORS.warning;
-                } else if (clock.status === 'error') {
-                  // Pulse red: alternate between error icon and spinner
-                  indicator = frame % 10 < 5 ? ERROR_ICON : SPINNER[spinnerIdx]!;
-                  indicatorColor = COLORS.danger;
-                } else {
-                  indicator = STOPPED_ICON;
-                  indicatorColor = COLORS.muted;
-                }
-
-                // Progress bar — use lastFiredAt, or createdAt if never fired yet
+                // Progress through interval
                 let progress = 0;
                 let remaining = '';
+                let nextFireStr = '';
+
                 if (clock.status === 'paused') {
                   remaining = 'PAUSED';
+                  nextFireStr = '--:--:--';
                 } else {
                   const ref = clock.lastFiredAt ?? clock.createdAt;
                   const elapsed = now - ref;
                   progress = Math.min(1, elapsed / clock.intervalMs);
                   const remainingMs = Math.max(0, clock.intervalMs - elapsed);
                   remaining = formatRemaining(remainingMs);
+
+                  // Exact next fire time
+                  const nextAt = clock.nextFireAt ?? (ref + clock.intervalMs);
+                  const nextDate = new Date(nextAt);
+                  nextFireStr = nextDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
                 }
 
-                const filledCount = Math.floor(progress * BAR_WIDTH);
-                const emptyCount = BAR_WIDTH - filledCount;
+                // Spinning square — spins faster as it approaches fire time
+                // Base speed: 1 frame per 3 render ticks. Near fire: 1 frame per tick.
+                const speed = progress > 0.9 ? 1 : progress > 0.7 ? 2 : 3;
+                const squareIdx = Math.floor(frame / speed + currentIdx) % SQUARE_FRAMES.length;
 
-                // Bar color: filled = primary, empty = muted (color contrast, not char contrast)
-                const barColor = progress > 0.9 ? COLORS.warning : COLORS.primary;
+                let indicator: string;
+                let indicatorColor: string;
 
-                // Fire count
+                if (clock.status === 'running') {
+                  indicator = SQUARE_FRAMES[squareIdx]!;
+                  indicatorColor = progressColor(progress);
+                } else if (clock.status === 'paused') {
+                  indicator = PAUSED_ICON;
+                  indicatorColor = COLORS.warning;
+                } else if (clock.status === 'error') {
+                  // Pulse: alternate between error icon and spinning square
+                  indicator = frame % 8 < 4 ? ERROR_ICON : SQUARE_FRAMES[squareIdx]!;
+                  indicatorColor = COLORS.danger;
+                } else {
+                  indicator = STOPPED_ICON;
+                  indicatorColor = COLORS.muted;
+                }
+
                 const fires = formatCount(clock.fireCount);
-
-                // Error info
-                const errInfo = clock.consecutiveErrors > 0
-                  ? ` ERR:${clock.consecutiveErrors}`
-                  : '';
+                const interval = formatInterval(clock.intervalMs);
+                const errInfo = clock.consecutiveErrors > 0 ? ` ERR:${clock.consecutiveErrors}` : '';
 
                 return (
                   <Box key={clock.id}>
@@ -188,12 +213,11 @@ export function ClockView({ onBack }: Props) {
                     >
                       {clock.name.padEnd(22)}
                     </Text>
-                    <Text color={COLORS.muted}>[</Text>
-                    <Text color={barColor}>{BAR_CHAR.repeat(filledCount)}</Text>
-                    <Text color={COLORS.border}>{BAR_CHAR.repeat(emptyCount)}</Text>
-                    <Text color={COLORS.muted}>]</Text>
-                    <Text color={COLORS.subtle}> {remaining.padEnd(8)}</Text>
-                    <Text color={COLORS.muted}>{' \u00d7'}{fires}</Text>
+                    <Text color={COLORS.muted}>{interval.padEnd(7)}</Text>
+                    <Text color={progressColor(progress)}>{remaining.padEnd(9)}</Text>
+                    <Text color={COLORS.subtle}>next </Text>
+                    <Text color={COLORS.text}>{nextFireStr}</Text>
+                    <Text color={COLORS.muted}>  {'\u00d7'}{fires}</Text>
                     {errInfo && <Text color={COLORS.danger}>{errInfo}</Text>}
                   </Box>
                 );
@@ -209,25 +233,27 @@ export function ClockView({ onBack }: Props) {
 
       {/* Footer */}
       <Box borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={1} justifyContent="space-between">
-        <Text color={COLORS.muted}>
-          Last refresh: {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-        </Text>
-        <Text color={COLORS.muted}>
-          P:pause/resume  Esc:back
-        </Text>
+        <Text color={COLORS.muted}>P:pause/resume  Esc:back</Text>
+        <Text color={COLORS.muted}>10 FPS  {clocks.length} clocks</Text>
       </Box>
     </Box>
   );
 }
 
 function formatRemaining(ms: number): string {
-  if (ms <= 0) return 'now';
+  if (ms <= 0) return 'firing';
   if (ms >= 60_000) {
     const m = Math.floor(ms / 60_000);
     const s = Math.floor((ms % 60_000) / 1_000);
     return `${m}m ${s.toString().padStart(2, '0')}s`;
   }
   if (ms >= 1_000) return `${(ms / 1_000).toFixed(1)}s`;
+  return `${ms}ms`;
+}
+
+function formatInterval(ms: number): string {
+  if (ms >= 60_000) return `${Math.round(ms / 60_000)}m`;
+  if (ms >= 1_000) return `${(ms / 1_000).toFixed(0)}s`;
   return `${ms}ms`;
 }
 
