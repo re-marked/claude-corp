@@ -380,6 +380,8 @@ export class MessageRouter {
       // Track text segments between tool calls — flush text before each tool event
       let lastFlushedLength = 0;
       const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+      // Cache tool args from start events — end events often lack args
+      const toolArgsCache = new Map<string, Record<string, unknown>>();
 
       const result = await dispatchToAgent(
         agentProc,
@@ -401,7 +403,13 @@ export class MessageRouter {
         },
         wsClient,
         {
+          // Cache tool args from start events — end events often don't include them
           onToolStart: (tool) => {
+            // Cache args by toolCallId so onToolEnd can use them
+            if (tool.toolCallId && tool.args) {
+              toolArgsCache.set(tool.toolCallId, tool.args);
+            }
+
             // Flush any accumulated text BEFORE the tool event
             const streaming = this.daemon.streaming.get(targetId);
             if (streaming?.content?.trim()) {
@@ -432,15 +440,19 @@ export class MessageRouter {
             });
           },
           onToolEnd: (tool) => {
+            // Use cached args from start event if end event doesn't have them
+            const args = tool.args ?? toolArgsCache.get(tool.toolCallId);
+            toolArgsCache.delete(tool.toolCallId); // Clean up
+
             const toolMsg: ChannelMessage = {
               id: generateId(),
               channelId: channel.id,
               senderId: targetId,
               threadId: msg.threadId,
-              content: this.formatToolMessage(tool.name, tool.args),
+              content: this.formatToolMessage(tool.name, args),
               kind: 'tool_event',
               mentions: [],
-              metadata: { source: 'router', toolName: tool.name, toolCallId: tool.toolCallId },
+              metadata: { source: 'router', toolName: tool.name, toolCallId: tool.toolCallId, toolArgs: args },
               depth: msg.depth + 1,
               originId: msg.originId,
               timestamp: new Date().toISOString(),
