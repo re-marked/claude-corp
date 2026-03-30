@@ -5,6 +5,8 @@ import {
   type ChannelMessage,
   type Corporation,
   readConfig,
+  readTask,
+  taskPath,
   appendMessage,
   generateId,
   getTheme,
@@ -14,6 +16,8 @@ import {
   MESSAGES_JSONL,
   CORP_JSON,
 } from '@claudecorp/shared';
+import type { Daemon } from './daemon.js';
+import { log, logError } from './logger.js';
 
 /** Write a task event message to the #tasks channel (not dispatched — info only). */
 export function writeTaskEvent(corpRoot: string, content: string): void {
@@ -45,90 +49,187 @@ export function writeTaskEvent(corpRoot: string, content: string): void {
 }
 
 /**
- * Notify an agent about a task assignment via @mention in #tasks.
- * This is a kind: 'text' message so the router dispatches to the agent.
+ * Log a task assignment to #tasks as a read-only event (no @mention, no dispatch).
  */
-export function notifyTaskAssignment(
+export function logTaskAssignment(
   corpRoot: string,
   assigneeId: string,
   taskTitle: string,
 ): void {
   try {
-    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
     const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
-
-    const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
-    const theme = getTheme((corp.theme || 'corporate') as ThemeId);
-    const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
-    if (!tasksChannel) return;
-
     const assignee = members.find((m) => m.id === assigneeId);
-    if (!assignee) return;
-
-    // Make sure the assignee is a member of #tasks channel
-    if (!tasksChannel.memberIds.includes(assigneeId)) {
-      tasksChannel.memberIds.push(assigneeId);
-      readConfig; // Don't need to persist — router resolves from members.json
-    }
-
-    const msg: ChannelMessage = {
-      id: generateId(),
-      channelId: tasksChannel.id,
-      senderId: 'system',
-      threadId: null,
-      content: `@${assignee.displayName.toLowerCase().replace(/\s+/g, '-')} you have a new task: "${taskTitle}". Read your TASKS.md and start working.`,
-      kind: 'text',
-      mentions: [assigneeId],
-      metadata: null,
-      depth: 0,
-      originId: '',
-      timestamp: new Date().toISOString(),
-    };
-    msg.originId = msg.id;
-    appendMessage(join(corpRoot, tasksChannel.path, MESSAGES_JSONL), msg);
+    const name = assignee?.displayName ?? 'an agent';
+    writeTaskEvent(corpRoot, `"${taskTitle}" assigned to ${name}`);
   } catch {
     // Non-fatal
   }
 }
 
 /**
- * Notify a task's creator (supervisor) that the task is blocked.
- * Triggers a dispatch so the supervisor sees the blocker and can act.
+ * Dispatch a task to an agent's DM channel for immediate work.
+ * Writes a system message to the agent's DM — the router picks it up and dispatches.
  */
-export function notifyTaskBlocker(
-  corpRoot: string,
-  creatorId: string,
-  assigneeName: string,
+export function dispatchTaskToDm(
+  daemon: Daemon,
+  assigneeId: string,
   taskTitle: string,
+  taskId: string,
 ): void {
   try {
+    const corpRoot = daemon.corpRoot;
     const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
     const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
 
-    const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
-    const theme = getTheme((corp.theme || 'corporate') as ThemeId);
-    const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
-    if (!tasksChannel) return;
+    const assignee = members.find((m) => m.id === assigneeId);
+    if (!assignee) return;
 
-    const creator = members.find((m) => m.id === creatorId);
-    if (!creator) return;
+    // Find the agent's DM channel (kind=direct, includes assignee)
+    const founder = members.find((m) => m.rank === 'owner');
+    const dmChannel = channels.find(
+      (c) =>
+        c.kind === 'direct' &&
+        c.memberIds.includes(assigneeId) &&
+        (founder ? c.memberIds.includes(founder.id) : true),
+    );
+    if (!dmChannel) {
+      logError(`[task-events] No DM channel found for ${assignee.displayName}`);
+      return;
+    }
+
+    // Build rich task context
+    let taskContext = `New task assigned: "${taskTitle}"`;
+    try {
+      const tp = taskPath(corpRoot, taskId);
+      const { task, body } = readTask(tp);
+      taskContext = [
+        `New task assigned to you:`,
+        ``,
+        `**${task.title}** (Priority: ${task.priority.toUpperCase()})`,
+        `Task file: ${corpRoot.replace(/\\/g, '/')}/tasks/${taskId}.md`,
+        ``,
+        body.trim() ? body.trim() : '(No description)',
+        ``,
+        `Read the task file, update status to in_progress, and start working. Narrate what you're doing.`,
+      ].join('\n');
+    } catch {
+      // Fall back to basic message if task file can't be read
+    }
 
     const msg: ChannelMessage = {
       id: generateId(),
-      channelId: tasksChannel.id,
+      channelId: dmChannel.id,
       senderId: 'system',
       threadId: null,
-      content: `@${creator.displayName.toLowerCase().replace(/\s+/g, '-')} Task "${taskTitle}" is BLOCKED by ${assigneeName}. Read the task file for details and help unblock.`,
+      content: taskContext,
       kind: 'text',
-      mentions: [creatorId],
-      metadata: null,
+      mentions: [assigneeId],
+      metadata: { source: 'task-dispatch' },
       depth: 0,
       originId: '',
       timestamp: new Date().toISOString(),
     };
     msg.originId = msg.id;
-    appendMessage(join(corpRoot, tasksChannel.path, MESSAGES_JSONL), msg);
-  } catch {
-    // Non-fatal
+    appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+
+    log(`[task-events] Dispatched task "${taskTitle}" to ${assignee.displayName}'s DM`);
+  } catch (err) {
+    logError(`[task-events] DM dispatch failed: ${err}`);
+  }
+}
+
+/**
+ * Dispatch a blocker notification to a supervisor's DM.
+ */
+export function dispatchBlockerToDm(
+  daemon: Daemon,
+  creatorId: string,
+  assigneeName: string,
+  taskTitle: string,
+): void {
+  try {
+    const corpRoot = daemon.corpRoot;
+    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
+    const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+
+    const creator = members.find((m) => m.id === creatorId);
+    if (!creator) return;
+
+    const founder = members.find((m) => m.rank === 'owner');
+    const dmChannel = channels.find(
+      (c) =>
+        c.kind === 'direct' &&
+        c.memberIds.includes(creatorId) &&
+        (founder ? c.memberIds.includes(founder.id) : true),
+    );
+    if (!dmChannel) return;
+
+    const msg: ChannelMessage = {
+      id: generateId(),
+      channelId: dmChannel.id,
+      senderId: 'system',
+      threadId: null,
+      content: `Task "${taskTitle}" is BLOCKED by ${assigneeName}. Read the task file for details and help unblock.`,
+      kind: 'text',
+      mentions: [creatorId],
+      metadata: { source: 'task-blocker' },
+      depth: 0,
+      originId: '',
+      timestamp: new Date().toISOString(),
+    };
+    msg.originId = msg.id;
+    appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+
+    log(`[task-events] Blocker notification sent to ${creator.displayName}'s DM`);
+  } catch (err) {
+    logError(`[task-events] Blocker DM dispatch failed: ${err}`);
+  }
+}
+
+/**
+ * Dispatch a task completion/failure notification to the CEO's DM.
+ */
+export function dispatchCompletionToCeo(
+  daemon: Daemon,
+  taskTitle: string,
+  taskStatus: string,
+  assigneeName: string,
+): void {
+  try {
+    const corpRoot = daemon.corpRoot;
+    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
+    const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+
+    const ceo = members.find((m) => m.rank === 'master' && m.type === 'agent');
+    if (!ceo) return;
+
+    const founder = members.find((m) => m.rank === 'owner');
+    const dmChannel = channels.find(
+      (c) =>
+        c.kind === 'direct' &&
+        c.memberIds.includes(ceo.id) &&
+        (founder ? c.memberIds.includes(founder.id) : true),
+    );
+    if (!dmChannel) return;
+
+    const msg: ChannelMessage = {
+      id: generateId(),
+      channelId: dmChannel.id,
+      senderId: 'system',
+      threadId: null,
+      content: `Task "${taskTitle}" has been marked as ${taskStatus} by ${assigneeName}. Review and report to the Founder.`,
+      kind: 'text',
+      mentions: [ceo.id],
+      metadata: { source: 'task-completion' },
+      depth: 0,
+      originId: '',
+      timestamp: new Date().toISOString(),
+    };
+    msg.originId = msg.id;
+    appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+
+    log(`[task-events] Completion notification for "${taskTitle}" sent to CEO's DM`);
+  } catch (err) {
+    logError(`[task-events] CEO notification failed: ${err}`);
   }
 }
