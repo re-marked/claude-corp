@@ -357,6 +357,7 @@ export class HeartbeatManager {
 
       this.writeInboxMd(agent, agentDir, channels, members, allTasks);
       this.writeWorklogMd(agent, agentDir, channels, members, allTasks);
+      this.writeStatusMd(agent, agentDir, members, allTasks);
     } catch {
       // Non-fatal
     }
@@ -631,6 +632,92 @@ export class HeartbeatManager {
       lines.push('Read your TASKS.md and INBOX.md for current state. This worklog is for continuity only.');
 
       writeFileSync(join(agentDir, 'WORKLOG.md'), lines.join('\n'), 'utf-8');
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  /**
+   * STATUS.md — Corp Vitals. Situational awareness of the whole corp.
+   * Who's online, what they're working on, task health, clock health.
+   */
+  private writeStatusMd(
+    agent: Member,
+    agentDir: string,
+    members: Member[],
+    allTasks: { task: any; body: string }[],
+  ): void {
+    try {
+      const now = new Date();
+      const lines: string[] = [`# Corp Vitals — updated ${now.toISOString()}`, ''];
+
+      // --- Agent Status Grid ---
+      lines.push('## Agents', '');
+      const agents = members.filter(m => m.type === 'agent');
+      for (const a of agents) {
+        const workStatus = this.daemon.getAgentWorkStatus(a.id);
+        const icon = workStatus === 'idle' ? '\u25CB' : workStatus === 'busy' ? '\u25CF' : workStatus === 'broken' ? '\u2717' : '\u25CB';
+        const isYou = a.id === agent.id ? ' (you)' : '';
+
+        // Find what this agent is working on
+        let currentWork = '';
+        const agentTasks = allTasks.filter(t => t.task.assignedTo === a.id && t.task.status === 'in_progress');
+        if (agentTasks.length > 0) {
+          currentWork = ` — working on "${agentTasks[0]!.task.title}"`;
+        }
+
+        lines.push(`${icon} **${a.displayName}** (${a.rank}) ${workStatus}${currentWork}${isYou}`);
+      }
+      lines.push('');
+
+      // --- Task Health ---
+      const taskCounts = {
+        total: allTasks.length,
+        inProgress: allTasks.filter(t => t.task.status === 'in_progress').length,
+        assigned: allTasks.filter(t => t.task.status === 'assigned').length,
+        blocked: allTasks.filter(t => t.task.status === 'blocked').length,
+        completed: allTasks.filter(t => t.task.status === 'completed').length,
+        pending: allTasks.filter(t => t.task.status === 'pending').length,
+      };
+
+      lines.push('## Task Health', '');
+      const parts: string[] = [];
+      if (taskCounts.inProgress > 0) parts.push(`${taskCounts.inProgress} active`);
+      if (taskCounts.assigned > 0) parts.push(`${taskCounts.assigned} assigned`);
+      if (taskCounts.blocked > 0) parts.push(`\u26A0 ${taskCounts.blocked} BLOCKED`);
+      if (taskCounts.pending > 0) parts.push(`${taskCounts.pending} pending`);
+      if (taskCounts.completed > 0) parts.push(`${taskCounts.completed} done`);
+      lines.push(parts.length > 0 ? parts.join(' | ') : 'No tasks');
+      lines.push('');
+
+      // --- Blocked tasks (visible to all — someone might be able to help) ---
+      const blockedTasks = allTasks.filter(t => t.task.status === 'blocked');
+      if (blockedTasks.length > 0) {
+        lines.push('## Blocked Tasks (needs attention)', '');
+        for (const bt of blockedTasks) {
+          const assignee = members.find(m => m.id === bt.task.assignedTo);
+          const assigneeName = assignee?.displayName ?? 'unassigned';
+          lines.push(`- **${bt.task.title}** (${assigneeName}) — ${bt.task.id}.md`);
+        }
+        lines.push('');
+      }
+
+      // --- Clock Health (from daemon clocks) ---
+      try {
+        const clocks = this.daemon.clocks.list();
+        const errorClocks = clocks.filter(c => c.consecutiveErrors > 0);
+        if (errorClocks.length > 0) {
+          lines.push('## Clock Errors', '');
+          for (const c of errorClocks) {
+            lines.push(`- \u2717 ${c.name}: ${c.consecutiveErrors} consecutive errors — ${c.lastError?.slice(0, 80) ?? 'unknown'}`);
+          }
+          lines.push('');
+        }
+      } catch {}
+
+      lines.push('This file is auto-generated. Read-only. Updated every 5 minutes.');
+
+      writeFileSync(join(agentDir, 'STATUS.md'), lines.join('\n'), 'utf-8');
     } catch {
       // Non-fatal
     }
