@@ -20,6 +20,8 @@ export interface Task {
   parentTaskId: string | null;
   /** Task IDs that must complete before this task can start. */
   blockedBy: string[] | null;
+  /** Member ID of who handed this task (separate from createdBy — creator plans, hander dispatches). */
+  handedBy: string | null;
   teamId: string | null;
   acceptanceCriteria: string[] | null;
   dueAt: string | null;

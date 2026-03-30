@@ -135,6 +135,15 @@ export class TaskWatcher {
 
             // Notify CEO via DM
             dispatchCompletionToCeo(this.daemon, task.title, task.status, assigneeName);
+
+            // Notify the hander (if different from CEO) — they should know their handed task is done
+            if ((task as any).handedBy && (task as any).handedBy !== task.createdBy) {
+              const hander = members.find(m => m.id === (task as any).handedBy);
+              if (hander && hander.rank !== 'master') { // Don't double-notify CEO
+                dispatchCompletionToCeo(this.daemon, task.title, task.status, assigneeName);
+                // TODO: use a dedicated dispatchCompletionToHander when we split from CEO notification
+              }
+            }
           } catch {
             // Non-fatal
           }

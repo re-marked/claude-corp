@@ -273,9 +273,10 @@ export function createApi(daemon: Daemon): Server {
             return;
           }
 
-          // Update task assignment
+          // Update task assignment + record who handed it
+          const handedBy = (body.handedBy as string) ?? null;
           const filePath = taskPath(daemon.corpRoot, taskId);
-          const updated = updateTask(filePath, { assignedTo: target.id });
+          const updated = updateTask(filePath, { assignedTo: target.id, handedBy } as any);
 
           // Log to #tasks (read-only event) + dispatch to agent's DM
           logTaskAssignment(daemon.corpRoot, target.id, updated.title);
