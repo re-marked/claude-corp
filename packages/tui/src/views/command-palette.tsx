@@ -56,6 +56,7 @@ export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onClo
   allItems.push({ id: 'h-views', label: 'Views', kind: 'view', icon: '', action: () => {}, isHeader: true });
   allItems.push({ id: 'v-home', label: 'Corp Home', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'corp-home' }) });
   allItems.push({ id: 'v-tasks', label: 'Task Board', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'task-board' }) });
+  allItems.push({ id: 'v-clocks', label: 'Clocks', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'clock' }) });
 
   // --- Channels ---
   allItems.push({ id: 'h-channels', label: 'Channels', kind: 'channel', icon: '', action: () => {}, isHeader: true });
