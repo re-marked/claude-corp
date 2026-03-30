@@ -162,7 +162,9 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
         return;
       }
 
-      d.startRouter();
+      // NOTE: Do NOT call d.startRouter() here. This daemon is temporary —
+      // it only spawns agents and verifies health. The kickoff message written
+      // below will be dispatched by ResumeView's daemon, preventing double dispatch.
 
       const allMembers = readConfig<Member[]>(join(root, MEMBERS_JSON));
       const allChannels = readConfig<Channel[]>(join(root, CHANNELS_JSON));
