@@ -16,6 +16,7 @@ import {
   resolveModelAlias,
   writeGlobalConfig,
   readGlobalConfig,
+  MEMBERS_JSON,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { dispatchToAgent } from './dispatch.js';
@@ -185,8 +186,10 @@ export function createApi(daemon: Daemon): Server {
         daemon.taskWatcher.suppressNextCreate(taskPath(daemon.corpRoot, task.id));
         daemon.heartbeat.refreshAll();
 
-        // Log to #tasks (read-only event) + dispatch to agent's DM
-        if (task.assignedTo) {
+        // Creating a task does NOT dispatch. Only "hand" dispatches.
+        // If handTo is provided, hand the task immediately (create + hand shorthand).
+        const handTo = body.handTo as string | undefined;
+        if (handTo && task.assignedTo) {
           logTaskAssignment(daemon.corpRoot, task.assignedTo, task.title);
           dispatchTaskToDm(daemon, task.assignedTo, task.title, task.id);
         }
@@ -241,6 +244,47 @@ export function createApi(daemon: Daemon): Server {
           daemon.heartbeat.refreshAll();
 
           json(res, { ok: true, task: updated });
+        } catch {
+          json(res, { error: 'Task not found' }, 404);
+        }
+        return;
+      }
+
+      // POST /tasks/:id/hand — hand a task to an agent (assign + dispatch + refresh)
+      const taskHandMatch = path.match(/^\/tasks\/([^/]+)\/hand$/);
+      if (method === 'POST' && taskHandMatch) {
+        const taskId = decodeURIComponent(taskHandMatch[1]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        const toSlug = body.to as string;
+        if (!toSlug) {
+          json(res, { error: '"to" (agent slug) is required' }, 400);
+          return;
+        }
+
+        try {
+          // Resolve agent by slug or ID
+          const members = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
+          const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+          const target = members.find((m: any) =>
+            m.type === 'agent' && (normalize(m.displayName) === normalize(toSlug) || m.id === toSlug),
+          );
+          if (!target) {
+            json(res, { error: `Agent "${toSlug}" not found` }, 404);
+            return;
+          }
+
+          // Update task assignment
+          const filePath = taskPath(daemon.corpRoot, taskId);
+          const updated = updateTask(filePath, { assignedTo: target.id });
+
+          // Log to #tasks (read-only event) + dispatch to agent's DM
+          logTaskAssignment(daemon.corpRoot, target.id, updated.title);
+          dispatchTaskToDm(daemon, target.id, updated.title, taskId);
+
+          // Refresh all agents' TASKS.md + casket files
+          daemon.heartbeat.refreshAll();
+
+          json(res, { ok: true, task: updated, handedTo: target.displayName });
         } catch {
           json(res, { error: 'Task not found' }, 404);
         }
@@ -425,7 +469,7 @@ export function createApi(daemon: Daemon): Server {
         }
 
         // Resolve target agent by slug
-        const members = readConfig<any[]>(join(daemon.corpRoot, 'channels.json').replace('channels.json', 'members.json'));
+        const members = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
         const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
         const target = members.find((m: any) =>
           m.type === 'agent' && (normalize(m.displayName) === normalize(targetSlug) || m.id === targetSlug),

@@ -30,6 +30,8 @@ const { values, positionals } = parseArgs({
     last: { type: 'string' },
     status: { type: 'string' },
     assigned: { type: 'string' },
+    to: { type: 'string' },
+    task: { type: 'string' },
     repo: { type: 'string' },
     soul: { type: 'string' },
     corp: { type: 'string' },
@@ -271,6 +273,15 @@ async function run() {
       await cmdAgentControl({ action, agent: values.agent as string | undefined, json: !!values.json });
       break;
     }
+    case 'hand': {
+      const { cmdHand } = await import('./commands/hand.js');
+      await cmdHand({
+        task: values.task as string | undefined,
+        to: values.to as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'task': {
       const action = positionals[1];
       if (action === 'create') {
@@ -280,10 +291,11 @@ async function run() {
           description: values.description as string | undefined,
           priority: values.priority as string | undefined,
           assigned: values.assigned as string | undefined,
+          to: values.to as string | undefined,
           json: !!values.json,
         });
       } else {
-        console.error('Usage: cc-cli task create --title "..." [--priority high] [--assigned <id>]');
+        console.error('Usage: cc-cli task create --title "..." [--to <agent>] [--priority high]');
         process.exit(1);
       }
       break;

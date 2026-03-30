@@ -216,6 +216,17 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  // --- Hand (task assignment) ---
+
+  async handTask(taskId: string, toSlug: string): Promise<{ ok: boolean; task: unknown; handedTo: string }> {
+    const resp = await fetch(`${this.baseUrl}/tasks/${encodeURIComponent(taskId)}/hand`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: toSlug }),
+    });
+    return resp.json() as Promise<any>;
+  }
+
   // --- cc say (direct agent-to-agent) ---
 
   async say(agentSlug: string, message: string): Promise<{ ok: boolean; from: string; response: string }> {

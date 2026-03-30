@@ -97,7 +97,7 @@ export class TaskWatcher {
           this.recentApiCreates.delete(filePath);
           return;
         }
-        // Agent-created task (written directly to tasks/) — post event + DM dispatch
+        // Agent-created task (written directly to tasks/) — agent set assignedTo intentionally = implicit hand
         writeTaskEvent(this.daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
         if (task.assignedTo) {
           logTaskAssignment(this.daemon.corpRoot, task.assignedTo, task.title);
