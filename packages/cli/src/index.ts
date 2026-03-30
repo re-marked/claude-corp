@@ -30,6 +30,8 @@ const { values, positionals } = parseArgs({
     last: { type: 'string' },
     status: { type: 'string' },
     assigned: { type: 'string' },
+    to: { type: 'string' },
+    task: { type: 'string' },
     repo: { type: 'string' },
     soul: { type: 'string' },
     corp: { type: 'string' },
@@ -163,6 +165,7 @@ async function run() {
         rank: values.rank as string,
         soul: values.soul as string | undefined,
         model: values.model as string | undefined,
+        project: values.project as string | undefined,
         json: !!values.json,
       });
       break;
@@ -240,6 +243,18 @@ async function run() {
       await cmdLogs({ last: parseInt(values.last as string) || 50 });
       break;
     }
+    case 'activity':
+    case 'feed': {
+      const { cmdActivity } = await import('./commands/activity.js');
+      await cmdActivity({
+        agent: values.agent as string | undefined,
+        channel: values.channel as string | undefined,
+        last: parseInt(values.last as string) || undefined,
+        verbose: false,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'stats': {
       const { cmdStats } = await import('./commands/stats.js');
       await cmdStats({ json: !!values.json });
@@ -271,6 +286,23 @@ async function run() {
       await cmdAgentControl({ action, agent: values.agent as string | undefined, json: !!values.json });
       break;
     }
+    case 'jack': {
+      const { cmdJack } = await import('./commands/jack.js');
+      await cmdJack({
+        agent: values.agent as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'hand': {
+      const { cmdHand } = await import('./commands/hand.js');
+      await cmdHand({
+        task: values.task as string | undefined,
+        to: values.to as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'task': {
       const action = positionals[1];
       if (action === 'create') {
@@ -280,10 +312,11 @@ async function run() {
           description: values.description as string | undefined,
           priority: values.priority as string | undefined,
           assigned: values.assigned as string | undefined,
+          to: values.to as string | undefined,
           json: !!values.json,
         });
       } else {
-        console.error('Usage: cc-cli task create --title "..." [--priority high] [--assigned <id>]');
+        console.error('Usage: cc-cli task create --title "..." [--to <agent>] [--priority high]');
         process.exit(1);
       }
       break;

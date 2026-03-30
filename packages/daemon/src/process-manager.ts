@@ -13,6 +13,15 @@ import { log, logError } from './logger.js';
 
 export type AgentProcessStatus = 'starting' | 'ready' | 'stopped' | 'crashed';
 
+/**
+ * Extract agent slug from agentDir path.
+ * Handles both corp-scoped (agents/<name>/) and project-scoped (projects/<proj>/agents/<name>/) paths.
+ */
+export function extractAgentSlug(agentDir: string): string {
+  const parts = agentDir.replace(/\/$/, '').split('/');
+  return parts[parts.length - 1]!;
+}
+
 export interface AgentProcess {
   memberId: string;
   displayName: string;
@@ -72,7 +81,7 @@ export class ProcessManager {
     );
 
     for (const worker of workers) {
-      const agentName = worker.agentDir!.replace(/^agents\//, '').replace(/\/$/, '');
+      const agentName = extractAgentSlug(worker.agentDir!);
       const workspace = join(this.corpRoot, worker.agentDir!).replace(/\\/g, '/');
       const agentDir = join(this.corpRoot, '.gateway', 'agents', agentName, 'agent').replace(/\\/g, '/');
 
@@ -130,7 +139,7 @@ export class ProcessManager {
         member = members.find((m) => m.id === memberId);
         if (!member) throw new Error(`Member ${memberId} not found`);
       }
-      const agentName = member.agentDir!.replace(/^agents\//, '').replace(/\/$/, '');
+      const agentName = extractAgentSlug(member.agentDir!);
       const agentProc: AgentProcess = {
         memberId,
         displayName: member.displayName,
@@ -151,7 +160,7 @@ export class ProcessManager {
       if (!member) throw new Error(`Member ${memberId} not found`);
     }
 
-    const agentName = member.agentDir!.replace(/^agents\//, '').replace(/\/$/, '');
+    const agentName = extractAgentSlug(member.agentDir!);
 
     const agentProc: AgentProcess = {
       memberId,

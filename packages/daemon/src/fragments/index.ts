@@ -19,6 +19,7 @@ import { debateProtocolFragment } from './debate-protocol.js';
 import { agentCommunicationFragment } from './agent-communication.js';
 import { inboxFragment } from './inbox.js';
 import { ccCliFragment } from './cc-cli.js';
+import { dredgeFragment } from './dredge.js';
 
 const FRAGMENTS: Fragment[] = [
   workspaceFragment,
@@ -38,6 +39,7 @@ const FRAGMENTS: Fragment[] = [
   debateProtocolFragment,
   agentCommunicationFragment,
   inboxFragment,
+  dredgeFragment,
   ccCliFragment,
   contextFragment,
   historyFragment,

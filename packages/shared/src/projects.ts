@@ -34,12 +34,11 @@ export function createProject(corpRoot: string, opts: CreateProjectOpts): Projec
     createdAt: now,
   };
 
-  // Create project directory (for workspace type or deliverables)
+  // Create project directory with full structure
   const projectDir = join(corpRoot, 'projects', project.name);
-  mkdirSync(projectDir, { recursive: true });
-  if (project.type === 'workspace') {
-    mkdirSync(join(projectDir, 'deliverables'), { recursive: true });
-  }
+  mkdirSync(join(projectDir, 'agents'), { recursive: true });
+  mkdirSync(join(projectDir, 'tasks'), { recursive: true });
+  mkdirSync(join(projectDir, 'deliverables'), { recursive: true });
 
   // Save to projects.json
   const projectsPath = join(corpRoot, PROJECTS_JSON);

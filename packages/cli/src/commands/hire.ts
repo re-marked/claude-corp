@@ -1,8 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { getClient, getCorpRoot, getFounder, getCeo } from '../client.js';
-import { resolveModelAlias } from '@claudecorp/shared';
+import { resolveModelAlias, getProjectByName } from '@claudecorp/shared';
 
-export async function cmdHire(opts: { name: string; rank: string; soul?: string; model?: string; json: boolean }) {
+export async function cmdHire(opts: {
+  name: string;
+  rank: string;
+  soul?: string;
+  model?: string;
+  project?: string;
+  json: boolean;
+}) {
   if (!opts.name) {
     console.error('--name is required');
     process.exit(1);
@@ -26,6 +33,19 @@ export async function cmdHire(opts: { name: string; rank: string; soul?: string;
 
   const model = opts.model ? (resolveModelAlias(opts.model) ?? opts.model) : undefined;
 
+  // Resolve project scope
+  let scope: string | undefined;
+  let scopeId: string | undefined;
+  if (opts.project) {
+    const project = getProjectByName(corpRoot, opts.project);
+    if (!project) {
+      console.error(`Project "${opts.project}" not found. Create it first: cc-cli projects create --name "${opts.project}" --type workspace`);
+      process.exit(1);
+    }
+    scope = 'project';
+    scopeId = project.id;
+  }
+
   const result = await client.hireAgent({
     creatorId,
     agentName,
@@ -33,11 +53,14 @@ export async function cmdHire(opts: { name: string; rank: string; soul?: string;
     rank: opts.rank,
     soulContent,
     model,
-  });
+    scope,
+    scopeId,
+  } as any);
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
-    console.log(`Hired ${opts.name} (${opts.rank}) as ${agentName}${model ? ` on ${model}` : ''}.`);
+    const projectInfo = opts.project ? ` into project "${opts.project}"` : '';
+    console.log(`Hired ${opts.name} (${opts.rank}) as ${agentName}${model ? ` on ${model}` : ''}${projectInfo}.`);
   }
 }

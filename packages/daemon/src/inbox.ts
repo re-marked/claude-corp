@@ -102,6 +102,11 @@ export class InboxManager {
     return `Inbox update:\n${lines.join('\n')}\n\nRead what matters, respond where needed. Reply HEARTBEAT_OK if nothing requires action.`;
   }
 
+  /** Read-only inbox snapshot for Casket file generation (does NOT clear). */
+  getInboxSnapshot(agentId: string): string {
+    return this.getSummary(agentId);
+  }
+
   /** Clear message inbox for an agent (after they've checked it) */
   clear(agentId: string): void {
     this.inboxes.delete(agentId);
