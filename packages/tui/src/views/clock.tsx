@@ -55,12 +55,12 @@ export function ClockView({ onBack }: Props) {
     return () => clearInterval(refresh);
   }, []);
 
-  // Animation loop — 2 FPS (500ms) to avoid Yoga WASM memory crash
+  // Animation loop — 4 FPS (250ms) — balance between alive feel and Yoga stability
   useEffect(() => {
     const timer = setInterval(() => {
       setFrame(f => f + 1);
       setNow(Date.now());
-    }, 500);
+    }, 250);
     return () => clearInterval(timer);
   }, []);
 
