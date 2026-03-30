@@ -296,9 +296,10 @@ export class DaemonClient {
 
   // --- cc say (direct agent-to-agent) ---
 
-  async say(agentSlug: string, message: string, sessionKey?: string): Promise<{ ok: boolean; from: string; response: string }> {
+  async say(agentSlug: string, message: string, sessionKey?: string, channelId?: string): Promise<{ ok: boolean; from: string; response: string }> {
     const payload: Record<string, string> = { target: agentSlug, message };
     if (sessionKey) payload.sessionKey = sessionKey;
+    if (channelId) payload.channelId = channelId;
     const resp = await fetch(`${this.baseUrl}/cc/say`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

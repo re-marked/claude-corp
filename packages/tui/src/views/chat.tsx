@@ -786,7 +786,7 @@ Always consider what happens when things go wrong.`,
       // Send raw message — OpenClaw manages conversation history via persistent session key.
       // No client-side history stuffing. Proper turn structure > flat text dump.
       try {
-        const result = await daemonClient.say(jackMode.agentSlug, text, jackMode.sessionKey);
+        const result = await daemonClient.say(jackMode.agentSlug, text, jackMode.sessionKey, channel.id);
 
         if (result.ok && result.response) {
           // Write agent response to DM JSONL

@@ -521,6 +521,9 @@ export function createApi(daemon: Daemon): Server {
         // Set target busy
         daemon.setAgentWorkStatus(target.id, target.displayName, 'busy');
 
+        // Channel ID for WebSocket events (Jack passes this so TUI gets streaming)
+        const channelId = (body.channelId as string) ?? '';
+
         try {
           const wsClient = agentProc.mode === 'remote' ? daemon.openclawWS : daemon.corpGatewayWS;
           // Persistent sessions by default — ALL communication has memory.
@@ -531,7 +534,69 @@ export function createApi(daemon: Daemon): Server {
           const targetSlugNorm = normalize(target.displayName);
           const sessionKey = (body.sessionKey as string)
             ?? `say:${senderSlug}:${targetSlugNorm}`;
-          const result = await dispatchToAgent(agentProc, message, context, sessionKey, undefined, wsClient);
+
+          // Emit WebSocket events so TUI gets streaming + tool indicators
+          if (channelId) {
+            daemon.events.broadcast({
+              type: 'dispatch_start',
+              agentName: target.displayName,
+              channelId,
+            });
+            daemon.streaming.set(target.id, {
+              agentName: target.displayName,
+              content: '',
+              channelId,
+            });
+          }
+
+          const result = await dispatchToAgent(
+            agentProc,
+            message,
+            context,
+            sessionKey,
+            // onToken — stream content to TUI
+            channelId ? (accumulated) => {
+              daemon.streaming.set(target.id, {
+                agentName: target.displayName,
+                content: accumulated,
+                channelId,
+              });
+              daemon.events.broadcast({
+                type: 'stream_token',
+                agentName: target.displayName,
+                channelId,
+                content: accumulated,
+              });
+            } : undefined,
+            wsClient,
+            // Tool callbacks — emit tool_start/tool_end events
+            channelId ? {
+              onToolStart: (tool) => {
+                daemon.events.broadcast({
+                  type: 'tool_start',
+                  agentName: target.displayName,
+                  channelId,
+                  toolName: tool.name,
+                  args: tool.args,
+                });
+              },
+              onToolEnd: (tool) => {
+                daemon.events.broadcast({
+                  type: 'tool_end',
+                  agentName: target.displayName,
+                  channelId,
+                  toolName: tool.name,
+                });
+              },
+            } : undefined,
+          );
+
+          // Clean up streaming state + emit end events
+          if (channelId) {
+            daemon.streaming.delete(target.id);
+            daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId });
+            daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId });
+          }
           daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
 
           // Write to target agent's inbox.jsonl
@@ -551,6 +616,12 @@ export function createApi(daemon: Daemon): Server {
 
           json(res, { ok: true, from: target.displayName, response: result.content });
         } catch (err) {
+          // Clean up streaming state on failure — prevents infinite spinner in TUI
+          if (channelId) {
+            daemon.streaming.delete(target.id);
+            daemon.events.broadcast({ type: 'stream_end', agentName: target.displayName, channelId });
+            daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId });
+          }
           daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
           json(res, { error: `Dispatch failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
         }
