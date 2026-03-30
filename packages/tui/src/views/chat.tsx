@@ -933,14 +933,45 @@ Always consider what happens when things go wrong.`,
       );
     }
 
-    // Tool events — compact inline display
+    // Tool events — compact inline display with result tree
     if (msg.kind === 'tool_event') {
       const toolColor = sender ? agentColor(COLORS, sender.rank) : COLORS.subtle;
+      const meta = msg.metadata as Record<string, unknown> | null;
+      const rawResult = meta?.toolResult as string | undefined;
+
+      // Clean up tool result — strip JSON wrappers, extract meaningful text
+      let resultPreview = '';
+      if (rawResult) {
+        let cleaned = rawResult;
+        // Strip cc-cli JSON wrapper: {"content":[{"type":"text","text":"actual text...
+        try {
+          const parsed = JSON.parse(cleaned);
+          if (parsed?.content?.[0]?.text) {
+            cleaned = parsed.content[0].text;
+          } else if (typeof parsed === 'string') {
+            cleaned = parsed;
+          }
+        } catch {
+          // Not JSON — use as-is
+        }
+        // Take first meaningful line, truncate
+        const firstLine = cleaned.split('\n').find((l: string) => l.trim())?.trim() ?? '';
+        resultPreview = firstLine.length > 100 ? firstLine.slice(0, 97) + '...' : firstLine;
+      }
+
       return (
-        <Box key={msg.id} gap={1} paddingLeft={1}>
-          <Text color={COLORS.muted}> {'\u2502'}</Text>
-          <Text color={toolColor}>{name}</Text>
-          <Text color={COLORS.subtle}>{msg.content}</Text>
+        <Box key={msg.id} flexDirection="column" paddingLeft={1}>
+          <Box gap={1}>
+            <Text color={COLORS.muted}> {'\u2502'}</Text>
+            <Text color={toolColor}>{name}</Text>
+            <Text color={COLORS.subtle}> {msg.content}</Text>
+          </Box>
+          {resultPreview && (
+            <Box gap={1} paddingLeft={1}>
+              <Text color={COLORS.border}>{'\u2514'}</Text>
+              <Text color={COLORS.muted} italic>{resultPreview}</Text>
+            </Box>
+          )}
         </Box>
       );
     }
@@ -970,8 +1001,8 @@ Always consider what happens when things go wrong.`,
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Messages — Static writes to terminal scrollback permanently */}
-      <Static items={messages}>
+      {/* Messages — Static writes to terminal scrollback. Cap at 100 to prevent heap OOM. */}
+      <Static items={messages.slice(-100)}>
         {(msg) => renderMsg(msg)}
       </Static>
       {/* Dynamic: streaming preview + indicators + input */}

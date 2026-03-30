@@ -4,92 +4,142 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## What WORKS today (v0.9.0)
+## What WORKS today (v0.10.5 + bugfixes in progress)
 
-### Core
-- Layer 1-9: Foundation, CEO, messaging, tasks, autonomy, views, CLI, streaming, state — ALL COMPLETE
-- **25 CLI commands** with full TUI parity (`cc-cli`)
-- **Themes**: Corporate / Mafia / Military + 5 color palettes (coral, rose, lavender, indigo, mono) with `/theme` hot reload
-- **50 bundled skills** from 6 repos with `when_to_use` triggers and XML injection
+### Primitives (shipped v0.10.0–v0.10.5)
+- **Casket** — sealed agent workspace: TASKS.md + INBOX.md + WORKLOG.md + STATUS.md auto-generated
+- **Dredge** — session recovery fragment, extracts Session Summary from WORKLOG.md
+- **Hand** — task assignment verb (`cc-cli hand --task <id> --to <agent>`). Creating = planning, handing = action.
+- **Jack** — persistent session mode, DEFAULT for all DMs. Deterministic session keys per agent pair (say:ceo:lead-coder)
+- **Clock** — unified timer primitive. 7 daemon clocks registered. Animated /clock TUI view with spinning squares + color cycling
+- **Contract** — bundle of tasks inside a Project. draft → active → review → completed/rejected. ContractWatcher auto-triggers Warden
+- **Blueprint** — structured playbooks with cc-cli commands. 4 defaults: ship-feature, onboard-agent, run-research, sprint-review
+- **Project** — real primitive with scoped agent workspaces (projects/<name>/agents/<agent>/) and project channels
+
+### System Agents (5 auto-hired on bootstrap)
+- **CEO** — runs the corp, delegates (falls back to local gateway if remote OpenClaw unavailable)
+- **Failsafe** — health monitoring via say() every 5 min
+- **Janitor** — git merge placeholder (active when worktrees ship)
+- **Warden** — contract review quality gate. Reviews all tasks, checks acceptance criteria, approves/rejects
+- **Herald** — Haiku narrator. Writes NARRATION.md every 5 min. Injected into STATUS.md + Corp Home banner
 
 ### Communication
-- **@mention dispatch**: human mentions bypass inbox (instant), agent mentions go to inbox
-- **cc say**: `cc-cli say --agent <slug> --message "..."` — direct agent-to-agent intercom, writes to inbox.jsonl
-- **Slug-based mentions**: @lead-coder format everywhere, autocomplete with Tab in TUI
-- **Interleaved tool events**: text segments flush before tool calls (like Claude Code)
-- **Multi-word mention resolution**: checks both slug and display name
-- **Channel modes**: dm (auto-dispatch), mention (@only), all (everyone)
+- **Persistent sessions** — ALL say() calls use deterministic session keys. Every agent-to-agent conversation has memory
+- **@mention dispatch** — human mentions bypass inbox (instant), agent mentions go to inbox queue
+- **cc-cli say** — instant direct message with persistent session
+- **Task DM dispatch** — tasks handed via Hand arrive in agent's DM
+- **Inbox priority queue** — one task at a time, priority sorted. Persists to inbox-state.json across daemon restarts
 
-### Agent System
-- **Inbox System**: agents accumulate notifications, check on 60s heartbeat or busy→idle transition
-- **Agent Status Engine**: idle/busy/offline/broken/starting per agent with WebSocket events
-- **Workspace Files**: SOUL.md (universal personality), IDENTITY.md (name/rank), RULES.md (behavioral rules), HEARTBEAT.md, MEMORY.md, USER.md, ENVIRONMENT.md, BOOTSTRAP.md
-- **Per-agent session keys**: `agent:<name>:channel-<id>` — no identity bleeding
-- **Empty response retry**: 3 attempts with visible "Agent didn't respond. Retrying..." messages
-- **Model selector**: corp-wide default + per-agent override, native OpenClaw fallback chain
-
-### Monitoring
-- **Failsafe**: watchdog agent monitoring stuck/broken agents (`cc-cli failsafe start/stop/status`), auto-hired on corp bootstrap
-- **Pulse**: daemon-level timer (2 min) — auto-restarts broken agents, monitors Failsafe agent itself
-- **Agent restart**: `POST /agents/:id/restart` endpoint
+### Monitoring & Analytics
+- **ClockManager** — 7 daemon timers as Clocks with fire counts, error tracking, overlap guard
+- **Analytics Engine** — tasks created/completed/failed, dispatches, messages, per-agent utilization/streaks. Persists to analytics.json
+- **Corp Vitals (STATUS.md)** — per-agent: who's online + current work + your metrics + recent completions + Herald narration + clock errors
+- **cc-cli activity/feed** — 4-section dashboard: PROBLEMS, AGENTS, TASKS, EVENTS
+- **cc-cli stats** — beefed with analytics: top performer, utilization %, streaks, dispatches per agent
 
 ### TUI
-- **Boot sequence**: ASCII logo with animated phases
-- **Streaming preview**: looks like a normal message with spinner
-- **Autocomplete**: `@` shows agent slugs, `/` shows commands, arrow keys + Tab
-- **Channel clear**: scrollback clears on channel switch
-- **Status bar**: breadcrumbs + hints
-- **`/status`**: inline agent status in chat
-- **`/theme`**: hot reload color palettes
+- **Corp Home** — agent grid + Herald banner + activity feed + task summary
+- **/clock view** — animated spinning squares with color cycling, progress bars, exact fire times, live clock
+- **Sectioned Ctrl+K palette** — Views / Channels / Agents (hierarchy as DM navigator)
+- **Jack mode default** — auto-jacks on DM entry. /unjack for async (deprecated)
+- **DM mode onboarding** — choice at corp creation with async deprecated warning
+- **Tool call details** — shows actual file paths + commands + result tree with └
+- **Corp selector** — scans filesystem for all corps (not just index)
 
-### Reliability
-- **Random gateway ports**: no more port 18800 conflicts between corps
-- **Task watcher debounce**: 500ms processing lock prevents duplicate events
-- **HireWatcher debounce**: claim lock before file read
-- **CEO exec attribution**: messages sent via exec correctly attributed to agent (not Founder)
+### Fragments (10 rewritten for v0.10.x primitives)
+- workspace, task-execution, delegation, receiving-delegation, agent-communication, cc-cli, inbox, context, back-reporting, blocker-escalation
+- All teach: Hand dispatch, Casket, Dredge, inbox queue, task DM, blockedBy auto-notification, Contract workflow, Blueprint reference
 
-### Binaries
-- `cc` = TUI (was `claudecorp`)
-- `cc-cli` = CLI (was `claudecorp-cli`)
-
----
-
-## Next: Phase 6 — Git Worktrees + Janitor
-
-- [ ] Per-agent git worktrees — each agent works in a full separate copy of the repo on disk
-- [ ] Workflow: task assigned → Git Janitor creates worktree → agent works in isolation → finishes → Git Janitor merges back → worktree cleaned up
-- [ ] Conflict resolution is Git Janitor's sole responsibility
-
-## Next: Phase 7 — Polish
-
-- [ ] Agent Dreams — idle heartbeat pre-loads context for instant task startup
-- [ ] `cc-cli hire` in agent fragments — agents use CLI for hiring instead of file writes
-- [ ] System-level channel throttling — auto-batch notifications on high volume
-- [ ] Per-run analytics — track agent participation, response times, token usage
-- [ ] TUI scrollback fix — Static items leak across view switches, needs alt screen or virtual scroll
-- [ ] TASKS.md / HEARTBEAT.md merge decision
-
-## Future / Open
-
-- [ ] External bridges (Telegram, Discord, Slack, WhatsApp)
-- [ ] Agent suspension/resume/archival
-- [ ] Agent forking (copy SOUL.md + BRAIN, let it evolve independently)
-- [ ] Agent ELO / reputation system
-- [ ] /kudos, /standup commands
-- [ ] Morning CEO briefings
-- [ ] Web frontend (connects to same daemon)
-- [ ] Tool usage auditing (detect when agents skip required tools)
-- [ ] Steampunk aesthetic rebuild
+### CLI Commands (~30+)
+- Core: status, agents, members, hierarchy, channels, uptime, version
+- Tasks: task create, tasks, hand
+- Contracts: contract create/list/show/activate
+- Blueprints: blueprint list/show
+- Communication: say, send, jack
+- Monitoring: activity/feed, clock/clocks, stats
+- Management: hire, agent start/stop, projects create/list, models
+- System: failsafe, time-machine, inspect, dogfood
 
 ---
 
-## Critical Path — COMPLETE (20 items)
+## v0.10.6 Bugfixes (IN PROGRESS — branch: feature/v0.10.6-bugfixes)
 
-1. ~~Foundation~~ 2. ~~CEO chat~~ 3. ~~Daemon router~~ 4. ~~Agent creation~~
-5. ~~Tasks~~ 6. ~~Autonomous loop~~ 7. ~~Views~~ 8. ~~Themes~~
-9. ~~Projects & Teams~~ 10. ~~CLI (25 commands)~~ 11. ~~Streaming~~
-12. ~~State~~ 13. ~~Escalation~~ 14. ~~TUI polish~~ 15. ~~WebSocket dispatch~~
-16. ~~Threads~~ 17. ~~Skills (50 bundled)~~ 18. ~~Model selector~~
-19. ~~Agent identity (session keys, workspace files, BOOTSTRAP.md)~~
-20. ~~Reliability (retries, mentions, channel clear, file size guard)~~
-21. ~~Inbox system (agent status engine, cc say, inbox heartbeat, Pulse/Failsafe)~~
+### Fixed (9 commits)
+- ✅ isDaemonRunning trusts port file, skips unreliable PID check (Windows cross-process)
+- ✅ Tool call details — cache args from start events, show file paths + commands
+- ✅ Tool result [object Object] — JSON.stringify non-string results
+- ✅ Agents not dispatched after hire — pokeChannel resets offset for new channels
+- ✅ Contract create @ prefix crash — strips @, guards toLowerCase
+- ✅ Heap OOM crash — Static items capped at 100 (was unbounded)
+- ✅ Duplicate task/contract events — 2s debounce (was 500ms)
+- ✅ [TASK] [TASK] double prefix — callers control prefix
+- ✅ DM dispatch for system messages — find agent member, not "other" member (ROOT CAUSE of agents not working)
+- ✅ CEO remote OpenClaw failure falls back to local gateway
+
+### Still needs fixing
+- ❌ Streaming preview → stream directly into chat (bigger refactor)
+- ❌ Ctrl+H not working in some contexts (terminal intercepts)
+- ❌ Herald cc-cli commands fail from inside agent shell (PATH issue)
+- ❌ Memory investigation (Static component + daemon events accumulation)
+
+---
+
+## Planned but NOT yet built
+
+### v0.10.7+ — Loops & Crons (Clock placeholders exist)
+- /loop command: `cc-cli loop 5m cc-cli status` — recurring commands
+- Cron jobs: scheduled tasks
+- Both register as Clock entries, visible in /clock view
+
+### Future — Escalation
+- Severity-routed blockers: P0 → Founder, P1 → CEO, P2 → team leader
+- `cc-cli escalate --severity P1 "description"`
+- Tracked escalation beads routed through hierarchy
+
+### Future — Scheduler
+- Capacity governor: `cc-cli config set scheduler.max_agents 5`
+- Caps concurrent dispatches to prevent API rate limit exhaustion
+- Queues excess work, feeds when slot opens
+
+### Future — Project Worktrees
+- Per-project git isolation (not per-agent — that was wrong)
+- Each agent working on a project gets `projects/<name>/wt/<agent-slug>`
+- Janitor merges worktrees back to project main branch
+- Git worktree methods already in shared/git.ts (createWorktree, mergeWorktree, etc.)
+
+### Future — Agent Dreams
+- Warm-start idle behavior via heartbeat context pre-loading
+- Agents pre-load workspace context during idle, ready to respond faster
+
+### Future — Herald on Haiku 4.5
+- Currently uses default model. Should use Haiku for speed + cost savings
+- Needs per-agent model override to work in corp gateway config
+
+---
+
+## Architecture Notes
+
+### Key Design Decisions (v0.10.x)
+- **Jack is default** — all communication uses persistent OpenClaw sessions
+- **Hand separates planning from action** — creating a task ≠ starting work
+- **Contracts live inside Projects** — Projects are containers, Contracts are work units
+- **Blueprints are documentation, not code** — CEO follows them as playbooks
+- **Warden signs off** — nothing closes without quality review
+- **Herald narrates** — NARRATION.md → STATUS.md + Corp Home banner
+- **Clock unifies timers** — every setInterval is observable + pauseable
+- **Casket is the agent's world** — 9+ files, daemon generates TASKS/INBOX/WORKLOG/STATUS
+- **Inbox queues one task at a time** — priority sorted, blocked tasks held, persisted across restarts
+- **Analytics track everything** — per-agent utilization, streaks, dispatch counts
+
+### Naming Convention for Primitives
+| Name | What | Verb |
+|------|------|------|
+| Casket | Sealed agent workspace | "Check your casket" |
+| Dredge | Session recovery | "Dredge your last session" |
+| Hand | Task assignment | "Hand it to @agent" |
+| Jack | Live persistent session | "Jack into the CEO" |
+| Clock | Timer/interval primitive | "Check the clocks" |
+| Contract | Task bundle with goal | "Open a contract" |
+| Blueprint | Workflow playbook | "Follow the blueprint" |
+| Warden | Quality gate agent | "Warden reviews" |
+| Herald | Narrator agent | "Herald says" |

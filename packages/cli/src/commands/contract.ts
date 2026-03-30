@@ -44,9 +44,10 @@ export async function cmdContract(opts: {
     let leadId: string | undefined;
     if (opts.lead) {
       const members = getMembers(corpRoot);
-      const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+      const leadStr = String(opts.lead).replace(/^@/, ''); // Strip @ prefix if present
+      const normalize = (s: string) => String(s).toLowerCase().replace(/\s+/g, '-');
       const lead = members.find(m =>
-        m.type === 'agent' && (normalize(m.displayName) === normalize(opts.lead!) || m.id === opts.lead),
+        m.type === 'agent' && (normalize(m.displayName) === normalize(leadStr) || m.id === leadStr),
       );
       if (!lead) {
         console.error(`Agent "${opts.lead}" not found.`);

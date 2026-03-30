@@ -85,7 +85,7 @@ export class TaskWatcher {
     if (!existsSync(filePath)) return;
     if (this.processing.has(filePath)) return;
     this.processing.add(filePath);
-    setTimeout(() => this.processing.delete(filePath), 500); // Debounce 500ms
+    setTimeout(() => this.processing.delete(filePath), 2000); // Debounce 2s (Windows fs.watch fires many times)
 
     try {
       const { task } = readTask(filePath);
@@ -101,7 +101,7 @@ export class TaskWatcher {
         }
         // Agent-created task (written directly to tasks/) — agent set assignedTo intentionally = implicit hand
         this.daemon.analytics.trackTaskCreated();
-        writeTaskEvent(this.daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
+        writeTaskEvent(this.daemon.corpRoot, `[TASK] "${task.title}" created (priority: ${task.priority})`);
         if (task.assignedTo) {
           logTaskAssignment(this.daemon.corpRoot, task.assignedTo, task.title);
           dispatchTaskToDm(this.daemon, task.assignedTo, task.title, task.id);
@@ -114,7 +114,7 @@ export class TaskWatcher {
       if (task.status !== cached.status) {
         writeTaskEvent(
           this.daemon.corpRoot,
-          `"${task.title}" → ${task.status}`,
+          `[TASK] "${task.title}" → ${task.status}`,
         );
 
         // When task is BLOCKED, notify the creator AND hander
@@ -216,7 +216,7 @@ export class TaskWatcher {
                   dispatchTaskToDm(this.daemon, downstream.task.assignedTo!, downstream.task.title, downstream.task.id);
                   writeTaskEvent(
                     this.daemon.corpRoot,
-                    `"${downstream.task.title}" UNBLOCKED — all dependencies resolved ("${task.title}" completed) — auto-handed to assignee`,
+                    `[TASK] "${downstream.task.title}" UNBLOCKED — all dependencies resolved ("${task.title}" completed) — auto-handed to assignee`,
                   );
                   log(`[task-watcher] Auto-unblock: "${downstream.task.title}" unblocked + auto-handed (dependency "${task.title}" completed)`);
                 }
@@ -232,7 +232,7 @@ export class TaskWatcher {
       if (task.assignedTo !== cached.assignedTo && task.assignedTo) {
         writeTaskEvent(
           this.daemon.corpRoot,
-          `"${task.title}" assigned to ${task.assignedTo}`,
+          `[TASK] "${task.title}" assigned to ${task.assignedTo}`,
         );
       }
 

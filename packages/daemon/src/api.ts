@@ -182,7 +182,7 @@ export function createApi(daemon: Daemon): Server {
         });
 
         // Post task event + suppress TaskWatcher duplicate + refresh TASKS.md + analytics
-        writeTaskEvent(daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
+        writeTaskEvent(daemon.corpRoot, `[TASK] "${task.title}" created (priority: ${task.priority})`);
         daemon.analytics.trackTaskCreated();
         daemon.taskWatcher.suppressNextCreate(taskPath(daemon.corpRoot, task.id));
         daemon.heartbeat.refreshAll();

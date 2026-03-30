@@ -33,7 +33,7 @@ export function writeTaskEvent(corpRoot: string, content: string): void {
       channelId: tasksChannel.id,
       senderId: 'system',
       threadId: null,
-      content: `[TASK] ${content}`,
+      content,
       kind: 'task_event',
       mentions: [],
       metadata: null,
@@ -60,7 +60,7 @@ export function logTaskAssignment(
     const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
     const assignee = members.find((m) => m.id === assigneeId);
     const name = assignee?.displayName ?? 'an agent';
-    writeTaskEvent(corpRoot, `"${taskTitle}" assigned to ${name}`);
+    writeTaskEvent(corpRoot, `[TASK] "${taskTitle}" assigned to ${name}`);
   } catch {
     // Non-fatal
   }

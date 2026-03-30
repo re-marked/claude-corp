@@ -90,7 +90,7 @@ export class ContractWatcher {
     if (!existsSync(filePath)) return;
     if (this.processing.has(filePath)) return;
     this.processing.add(filePath);
-    setTimeout(() => this.processing.delete(filePath), 500);
+    setTimeout(() => this.processing.delete(filePath), 2000); // Debounce 2s
 
     try {
       const { contract } = readContract(filePath);

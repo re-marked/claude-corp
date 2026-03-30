@@ -113,6 +113,9 @@ export class MessageRouter {
     // Ensure we're watching this channel
     if (!this.watchers.has(channel.id)) {
       this.watchChannel(channel);
+      // For newly watched channels, reset offset to 0 so we read ALL existing messages
+      // (watchChannel defaults to end-of-file, which would skip the message that triggered the poke)
+      this.offsets.set(msgPath, 0);
     }
     this.onFileChange(channel, msgPath);
   }
@@ -238,13 +241,14 @@ export class MessageRouter {
       });
       log(`[router] Thread dispatch: ${targetIds.length} participants`);
     } else if (channelMode === 'dm') {
-      // DM: auto-route to the other member
-      const otherId = channel.memberIds.find((id) => id !== msg.senderId);
-      if (otherId) {
-        const other = members.find((m) => m.id === otherId);
-        if (other && other.type === 'agent') {
-          targetIds = [otherId];
-        }
+      // DM: auto-route to the agent member in this channel
+      // For system messages (task dispatch, etc.), senderId='system' is NOT a channel member.
+      // So we find the agent member directly, not "the other member".
+      const agentMember = channel.memberIds
+        .map(id => members.find(m => m.id === id))
+        .find(m => m && m.type === 'agent' && m.id !== msg.senderId);
+      if (agentMember) {
+        targetIds = [agentMember.id];
       }
     } else if (channelMode === 'all') {
       // All: every agent in the channel wakes up
@@ -380,6 +384,8 @@ export class MessageRouter {
       // Track text segments between tool calls — flush text before each tool event
       let lastFlushedLength = 0;
       const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+      // Cache tool args from start events — end events often lack args
+      const toolArgsCache = new Map<string, Record<string, unknown>>();
 
       const result = await dispatchToAgent(
         agentProc,
@@ -401,7 +407,13 @@ export class MessageRouter {
         },
         wsClient,
         {
+          // Cache tool args from start events — end events often don't include them
           onToolStart: (tool) => {
+            // Cache args by toolCallId so onToolEnd can use them
+            if (tool.toolCallId && tool.args) {
+              toolArgsCache.set(tool.toolCallId, tool.args);
+            }
+
             // Flush any accumulated text BEFORE the tool event
             const streaming = this.daemon.streaming.get(targetId);
             if (streaming?.content?.trim()) {
@@ -432,15 +444,27 @@ export class MessageRouter {
             });
           },
           onToolEnd: (tool) => {
+            // Use cached args from start event if end event doesn't have them
+            const args = tool.args ?? toolArgsCache.get(tool.toolCallId);
+            toolArgsCache.delete(tool.toolCallId); // Clean up
+
             const toolMsg: ChannelMessage = {
               id: generateId(),
               channelId: channel.id,
               senderId: targetId,
               threadId: msg.threadId,
-              content: this.formatToolMessage(tool.name, tool.args),
+              content: this.formatToolMessage(tool.name, args),
               kind: 'tool_event',
               mentions: [],
-              metadata: { source: 'router', toolName: tool.name, toolCallId: tool.toolCallId },
+              metadata: {
+                source: 'router',
+                toolName: tool.name,
+                toolCallId: tool.toolCallId,
+                toolArgs: args,
+                toolResult: tool.result
+                  ? (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result)).slice(0, 300)
+                  : undefined,
+              },
               depth: msg.depth + 1,
               originId: msg.originId,
               timestamp: new Date().toISOString(),
