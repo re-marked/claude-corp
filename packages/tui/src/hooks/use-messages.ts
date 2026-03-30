@@ -1,15 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { watch, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { type ChannelMessage, tailMessages, readMessages } from '@claudecorp/shared';
 
-/** Only show messages written by our system. External OpenClaw writes are hidden. */
+/** Only show messages written by our system. External OpenClaw writes (no source tag) are hidden. */
 function filterExternal(msgs: ChannelMessage[]): ChannelMessage[] {
   return msgs.filter((msg) => {
     if (msg.kind !== 'text') return true;                        // system/task events always show
     if (msg.senderId === 'system') return true;                   // system sender always show
     const meta = msg.metadata as Record<string, unknown> | null;
-    return meta?.source === 'router' || meta?.source === 'user'; // only our tagged writes
+    if (meta?.source) return true;                                // any tagged source = our write
+    return false;                                                 // no source = external OpenClaw write
   });
 }
 
@@ -107,5 +108,37 @@ export function useMessages(messagesPath: string, initialCount = 50, threadId?: 
     return () => watcher.close();
   }, [messagesPath, threadId]);
 
-  return { messages, threadCounts };
+  // Manual refresh — call after self-writes (jack mode) to bypass fs.watch
+  const refresh = useCallback(() => {
+    try {
+      const newMsgs = lastIdRef.current
+        ? readMessages(messagesPath, { after: lastIdRef.current })
+        : tailMessages(messagesPath, initialCount * 2);
+
+      if (newMsgs.length > 0) {
+        lastIdRef.current = newMsgs[newMsgs.length - 1]!.id;
+        const newFiltered = filterExternal(newMsgs);
+        allMsgsRef.current = [...allMsgsRef.current, ...newFiltered].slice(-200);
+
+        const counts = new Map<string, number>();
+        for (const m of allMsgsRef.current) {
+          if (m.threadId) counts.set(m.threadId, (counts.get(m.threadId) ?? 0) + 1);
+        }
+        setThreadCounts(counts);
+
+        const viewMsgs = threadId
+          ? newFiltered.filter((m) => m.threadId === threadId || m.id === threadId)
+          : newFiltered.filter((m) => !m.threadId);
+
+        if (viewMsgs.length > 0) {
+          setMessages((prev) => {
+            const combined = [...prev, ...viewMsgs];
+            return combined.length > 200 ? combined.slice(-200) : combined;
+          });
+        }
+      }
+    } catch {}
+  }, [messagesPath, threadId]);
+
+  return { messages, threadCounts, refresh };
 }
