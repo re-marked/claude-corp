@@ -167,9 +167,39 @@ function registerCorp(name: string, path: string): void {
 }
 
 export function listCorps(): { name: string; path: string }[] {
+  // Scan ~/.claudecorp/ for ALL directories with members.json (not just the index)
+  // This catches corps created before the index existed or after index resets
+  const found = new Map<string, { name: string; path: string }>();
+
+  // 1. Read index entries
   const index = readConfigOr<CorpsIndex>(CORPS_INDEX_PATH, { corps: [] });
-  // Filter out entries where the directory was deleted
-  return index.corps.filter((c) => existsSync(join(c.path, MEMBERS_JSON)));
+  for (const c of index.corps) {
+    if (existsSync(join(c.path, MEMBERS_JSON))) {
+      found.set(c.name, c);
+    }
+  }
+
+  // 2. Scan ~/.claudecorp/ for unregistered corps
+  try {
+    const { readdirSync } = require('node:fs');
+    const dirs = readdirSync(CLAUDECORP_HOME, { withFileTypes: true });
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue;
+      if (dir.name === 'corps' || dir.name === 'skills' || dir.name.startsWith('.')) continue;
+      const corpPath = join(CLAUDECORP_HOME, dir.name);
+      if (existsSync(join(corpPath, MEMBERS_JSON)) && !found.has(dir.name)) {
+        found.set(dir.name, { name: dir.name, path: corpPath });
+        // Auto-register in index for next time
+        index.corps.push({ name: dir.name, path: corpPath });
+      }
+    }
+    // Save updated index
+    if (found.size > index.corps.length) {
+      writeConfig(CORPS_INDEX_PATH, index);
+    }
+  } catch {}
+
+  return [...found.values()];
 }
 
 export function findCorp(name: string): string | null {
