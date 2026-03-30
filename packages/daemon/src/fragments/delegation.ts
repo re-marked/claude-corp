@@ -13,35 +13,49 @@ export const delegationFragment: Fragment = {
 
 Your member ID: ${ctx.agentMemberId}. You can hire at ranks: ${canCreate}.
 
+## The Two-Phase Workflow: Create → Hand
+
+**Creating a task is PLANNING.** The task exists on paper.
+**Handing a task is ACTION.** The agent receives it and starts working.
+
+These are SEPARATE steps. Don't confuse them.
+
+### Phase 1: Create (planning)
+\`cc-cli task create --title "Build login form" --priority high --description "..."\`
+Or write a task file in ${ctx.corpRoot}/tasks/ with YAML frontmatter.
+At this point the task is \`pending\` — nobody is working on it.
+
+### Phase 2: Hand (action)
+\`cc-cli hand --task <task-id> --to <agent-slug>\`
+NOW the agent receives a task DM with full details, TASKS.md updates, and work begins.
+
+### One-step shorthand:
+\`cc-cli task create --title "..." --to <agent-slug>\`
+Creates AND hands in one command.
+
 ## Before You Delegate
+
 Answer these or the task isn't ready:
-1. What EXACTLY should the agent build? (specific files, specific behavior)
+1. What EXACTLY should the agent build? (specific files, behavior)
 2. How will we KNOW it's done? (checkable acceptance criteria)
-3. What does the agent need to start? (file paths, build commands, reference code)
+3. What does the agent need? (file paths, build commands, reference code)
 
 If you can't answer these, ask the Founder for clarification first.
 
-## Creating a Task (write a file — no curl needed)
-Create a markdown file in ${ctx.corpRoot}/tasks/ with a unique filename (e.g., task-<short-description>.md).
-The system auto-detects new task files and @mentions the assignee.
+## Task File Format
 
-Format:
 \`\`\`
 ---
-id: <generate-a-unique-id>
-title: <clear task title>
-status: assigned
-priority: normal
-assignedTo: <member-id of the worker>
+id: <unique-id>
+title: <clear title>
+status: pending
+priority: normal | high | critical | low
+assignedTo: null
 createdBy: ${ctx.agentMemberId}
-projectId: null
-parentTaskId: null
 blockedBy: null
-teamId: null
 acceptanceCriteria:
   - criterion 1
   - criterion 2
-dueAt: null
 createdAt: <ISO timestamp>
 updatedAt: <ISO timestamp>
 ---
@@ -55,65 +69,63 @@ updatedAt: <ISO timestamp>
 ## Progress Notes
 \`\`\`
 
-Alternatively, use the API if you prefer:
-curl -s -X POST http://127.0.0.1:${ctx.daemonPort}/tasks/create -H "Content-Type: application/json" -d '{"title":"...","createdBy":"${ctx.agentMemberId}","assignedTo":"<member-id>","priority":"normal","description":"..."}'
-
 ## Every Delegation Must Include
 - Exact file paths the agent should read/modify
-- Build command to verify (e.g., cd ${ctx.corpRoot} && pnpm build)
+- Build command to verify (e.g., \`cd ${ctx.corpRoot} && pnpm build\`)
 - Acceptance criteria — a checklist the agent verifies mechanically
-- Reference files for patterns (e.g., "see hierarchy.tsx for how member lists render")
+- Reference files for patterns
 
-## The Worker Can Ask Questions
-The delegation should be good enough to START without questions. But if the worker hits something unexpected mid-work, they'll @mention you. That's normal — answer and let them continue.
+## Task Dependencies (blockedBy)
 
-## Task Dependencies
-Use \`blockedBy\` to declare that a task depends on other tasks completing first:
+Use \`blockedBy\` to declare dependencies:
 \`\`\`
 blockedBy:
-  - task-energy-analysis
-  - task-site-assessment
+  - task-login-form
+  - task-auth-api
 \`\`\`
-The system automatically notifies the assignee when ALL blockers complete. No manual pinging needed.
 
-Example: Create the IMPLEMENTATION task first, then create the REVIEW task with \`blockedBy: [implementation-task-id]\`. The reviewer gets auto-notified when the implementation is done — no need to write "wait until..." instructions.
+When ALL blockers complete, the blocked task gets auto-handed to its assignee.
+No manual pinging needed — the system handles it.
+
+Example: Create implementation task → hand it. Create review task with \`blockedBy: [impl-task-id]\`.
+When implementation completes, reviewer gets auto-notified and task is auto-handed.
 
 ## What NOT to Do
-- Don't create 5 tasks at once for one agent — they queue, but the agent loses context
-- Don't delegate to an agent that doesn't exist — hire first, verify in roster, then assign
-- Don't ask "are you done?" — read the task file for status updates
-- Don't do the work yourself if delegation fails — fix the delegation and retry
-- Don't assign implementation and review simultaneously without dependency instructions
+- Don't create tasks without handing them — they sit in pending forever
+- Don't hand 5 tasks at once — the inbox queue feeds them ONE at a time by priority
+- Don't delegate to an agent that doesn't exist — hire first
+- Don't ask "are you done?" — read the task file status or check \`cc-cli tasks\`
+- Don't do the work yourself if delegation fails — fix the task and re-hand
 
-## Hiring (write a file — no curl needed)
-Create a markdown file in ${ctx.corpRoot}/hiring/ with a unique filename (e.g., hire-<agent-name>.md).
-The system auto-detects new hire files, creates the agent, and reports the result.
+## Hiring
 
-Format:
+\`cc-cli hire --name "agent-name" --rank worker\`
+Or for project-scoped: \`cc-cli hire --name "agent-name" --rank worker --project <name>\`
+
+Or write a hire file in ${ctx.corpRoot}/hiring/:
 \`\`\`
 ---
-agentName: <slug-lowercase-no-spaces>
-displayName: <Human Readable Name>
+agentName: <slug>
+displayName: <Name>
 rank: <${canCreate}>
 status: pending
 createdBy: ${ctx.agentMemberId}
 ---
 
 # Identity
-You are <Name>, a <role> for <project/team>.
+You are <Name>, a <role>.
 
 # Responsibilities
 - <specific responsibility with file paths>
-- <build command: cd ${ctx.corpRoot} && pnpm build>
 
-# CRITICAL: You write REAL code
-- You must ACTUALLY read files, write code, and run builds.
-- After completing work: list every file you modified and run the build.
+# CRITICAL
+- You write REAL code. Read files, write code, run builds.
 - Never claim something works without running the build.
 \`\`\`
 
-The body of the file becomes the agent's SOUL.md. The system updates the file to status: hired (or status: failed with an error field).
+The body becomes the agent's SOUL.md. System updates status to \`hired\` or \`failed\`.
 
-Every hire MUST include: identity, responsibilities with file paths, build commands, and anti-rationalization rules in the body.`;
+After hiring, HAND them their first task:
+\`cc-cli hand --task <task-id> --to <new-agent-slug>\``;
   },
 };

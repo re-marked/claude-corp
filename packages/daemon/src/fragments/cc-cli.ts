@@ -4,39 +4,44 @@ export const ccCliFragment: Fragment = {
   id: 'cc-cli',
   applies: () => true,
   order: 15, // After workspace (10), before behavioral fragments
-  render: () => `## cc-cli Commands
-The corp CLI. Use these for ALL corp operations — do NOT use curl or raw API calls.
+  render: () => `## cc-cli — Corp Command Line
+Use these for ALL corp operations. Do NOT use curl or raw API calls.
+
+### Tasks (Hand = when work begins)
+- \`cc-cli task create --title "..." --priority high\` — create task (PLANNING only, no dispatch)
+- \`cc-cli task create --title "..." --to <agent-slug>\` — create AND hand (starts work immediately)
+- \`cc-cli hand --task <id> --to <agent-slug>\` — hand existing task to agent (THIS is when work begins)
+- \`cc-cli tasks\` — list all tasks (\`--status pending\`, \`--assigned <id>\` to filter)
 
 ### Communication
-- \`cc-cli say --agent <slug> --message "..."\` — direct private message to any agent (instant, bypasses inbox)
-- \`cc-cli send --channel <name> --message "..."\` — send message to a channel
+- \`cc-cli say --agent <slug> --message "..."\` — instant private message (bypasses inbox, direct dispatch)
+- \`cc-cli send --channel <name> --message "..."\` — send to a channel (goes through inbox for agents)
 
 ### Monitoring
 - \`cc-cli status\` — all agent states (idle/busy/broken/offline)
-- \`cc-cli agents\` — list all agents
-- \`cc-cli members\` / \`cc-cli who\` — list all members (agents + founder)
-
-### Tasks
-- \`cc-cli tasks\` — list all tasks (add \`--status pending\` or \`--assigned <id>\` to filter)
-- \`cc-cli task create --title "..." --priority high\` — create a task (planning only, does NOT dispatch)
-- \`cc-cli task create --title "..." --to <agent-slug>\` — create AND hand a task (starts work immediately)
-- \`cc-cli hand --task <id> --to <agent-slug>\` — hand an existing task to an agent (this is when work begins)
+- \`cc-cli agents\` — list all agents with status
+- \`cc-cli activity\` / \`cc-cli feed\` — corp-wide dashboard (agents, tasks, events, problems)
+- \`cc-cli clock\` — all registered clocks with fire counts, timing, errors
+- \`cc-cli members\` / \`cc-cli who\` — all members (agents + founder)
 
 ### Hiring
-- \`cc-cli hire --name "agent-name" --rank worker\` — hire a corp-level agent
-- \`cc-cli hire --name "agent-name" --rank worker --project <name>\` — hire into a specific project
-- Add \`--model <model>\` for a specific model
+- \`cc-cli hire --name "agent-name" --rank worker\` — hire corp-level agent
+- \`cc-cli hire --name "agent-name" --rank worker --project <name>\` — hire into a project
 
 ### Agent Control
 - \`cc-cli agent start --agent <slug>\` — start an offline agent
 - \`cc-cli agent stop --agent <slug>\` — stop a running agent
 
+### Projects
+- \`cc-cli projects create --name "..." --type workspace\` — create a project
+- \`cc-cli projects list\` — list all projects
+
 ### Info
 - \`cc-cli channels\` — list all channels
 - \`cc-cli hierarchy\` — show org chart
 - \`cc-cli inspect --agent <slug>\` — detailed agent info
-- \`cc-cli messages --channel <name> --last 10\` — read recent messages
+- \`cc-cli messages --channel <name> --last 10\` — read channel messages
 - \`cc-cli stats\` — corp statistics
 - \`cc-cli uptime\` — daemon uptime
-- \`cc-cli models\` — list available models`,
+- \`cc-cli models\` — available models`,
 };

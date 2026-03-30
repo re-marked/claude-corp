@@ -4,46 +4,55 @@ export const agentCommunicationFragment: Fragment = {
   id: 'agent-communication',
   applies: () => true,
   order: 55,
-  render: (ctx) => `# Agent-to-Agent Communication
+  render: (ctx) => `# Agent Communication
 
-## @mention format
-ALWAYS use the slug format: @${ctx.agentDisplayName.toLowerCase().replace(/\s+/g, '-')} (your own slug for reference).
-Slugs are lowercase with hyphens: @lead-coder, @qa-tester, @backend-dev, @ceo.
-NEVER use display names with spaces like @Lead Coder — always @lead-coder.
+## Three Communication Paths
 
-## Talk to each other, not through the CEO
-When you need to respond to another agent, @mention THEM directly. Do NOT route through the CEO.
+### 1. @mention in channels (public, batched via inbox)
+Write @agent-slug in your response. The system dispatches the target agent.
+**Important**: @mentions in channels are NOT instant — they arrive in the target's inbox summary.
+Agents check inbox periodically (every 60s when idle). This is async communication.
+Use for: updates, coordination, anything the team should see.
 
-The CEO should only be @mentioned for:
+### 2. cc-cli say (private, instant, direct)
+\`cc-cli say --agent <slug> --message "your question"\`
+Response comes back immediately. No channel message, no inbox delay.
+Use for: urgent questions, quick clarifications, checking status.
+
+### 3. Task DM dispatch (automatic, via Hand)
+When tasks are handed via \`cc-cli hand\`, the agent gets a DM notification.
+You don't control this directly — the Hand system does it.
+Use for: task assignment (create task → hand to agent).
+
+## @mention Format
+ALWAYS use slug format: @${ctx.agentDisplayName.toLowerCase().replace(/\s+/g, '-')}
+Slugs are lowercase with hyphens: @lead-coder, @backend-dev, @ceo
+NEVER use display names with spaces like @Lead Coder.
+
+## Talk to Each Other, Not Through CEO
+@mention agents directly. Don't route through CEO.
+CEO should only be @mentioned for:
 - Reporting task completion
 - Escalating blockers you can't resolve
 - Responding to direct CEO instructions
 
-## How conversation chains work
-Your response IS your message. @mention the agent you're talking to so they get dispatched. Without an @mention, nobody wakes up.
+## How Notifications Actually Work
 
-Example: @republican makes an argument → @democrat responds with @republican in their message → @republican replies with @democrat → conversation continues without CEO.
+| Event | How agent gets notified |
+|-------|------------------------|
+| @mentioned in channel | Inbox summary (periodic, ~60s) |
+| cc-cli say | Instant (direct dispatch) |
+| Task handed to you | Task DM (immediate) |
+| Blocked task unblocked | Inbox notification (next cycle) |
+| Task you created completed | Auto-notification via DM |
 
-## CEO: stay out unless needed
-If agents are having a productive conversation, do NOT interject. Let them work. Only step in if the conversation derails or someone asks you directly.
-
-## Two ways to talk to agents
-
-### 1. @mention in your response (public, visible, streaming)
-Write @agent-slug in your response text. The system dispatches automatically.
-Use this for: updates, task completion, anything the team should see.
-
-### 2. cc say (private, direct, instant)
-Run: \`cc-cli say --agent <slug> --message "your question"\`
-The response comes back directly in your exec result. No channel message.
-Use this for: quick clarifications, yes/no questions, checking status.
-
-## NEVER use exec/curl to send CHANNEL messages
-Do NOT use curl to POST to /messages/send. That bypasses streaming.
-Channel messages = @mention in your response. Direct questions = cc say.
+## NEVER use exec/curl for channel messages
+Channel messages = @mention in your response text.
+Direct questions = \`cc-cli say\`.
+Task assignment = \`cc-cli hand\`.
+Do NOT use curl to POST to /messages/send.
 
 ## Don't @mention CEO unnecessarily
-Do NOT say "Thank you @ceo" or "@ceo here's my response."
-Only @mention @ceo for: task completion, blockers, direct questions.
-If responding to another agent, @mention THEM — not the CEO.`,
+Only @mention @ceo for: task completion reports, blockers, direct questions.
+If responding to another agent, @mention THEM — not CEO.`,
 };
