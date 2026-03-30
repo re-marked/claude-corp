@@ -32,4 +32,5 @@ export type {
 export type { Corporation, DmMode } from './corp.js';
 export type { Project, ProjectType } from './project.js';
 export type { AgentConfig } from './agent-config.js';
+export type { Clock, ClockType, ClockStatus } from './clock.js';
 export type { GlobalConfig } from './global-config.js';

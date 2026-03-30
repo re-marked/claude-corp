@@ -21,6 +21,9 @@ export type {
   ProjectType,
   AgentConfig,
   GlobalConfig,
+  Clock,
+  ClockType,
+  ClockStatus,
 } from './types/index.js';
 
 // Parsers
