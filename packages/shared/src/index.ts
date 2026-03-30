@@ -45,7 +45,7 @@ export * from './constants.js';
 
 // Git
 export { corpGit } from './git.js';
-export type { CorpGit } from './git.js';
+export type { CorpGit, WorktreeInfo, MergeResult } from './git.js';
 
 // Global config
 export {
