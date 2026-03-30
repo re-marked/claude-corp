@@ -1001,8 +1001,8 @@ Always consider what happens when things go wrong.`,
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Messages — Static writes to terminal scrollback permanently */}
-      <Static items={messages}>
+      {/* Messages — Static writes to terminal scrollback. Cap at 100 to prevent heap OOM. */}
+      <Static items={messages.slice(-100)}>
         {(msg) => renderMsg(msg)}
       </Static>
       {/* Dynamic: streaming preview + indicators + input */}
