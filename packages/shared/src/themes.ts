@@ -9,10 +9,8 @@ export interface Theme {
   ranks: Record<MemberRank, string>;
   channels: {
     general: string;
-    system: string;
-    heartbeat: string;
     tasks: string;
-    errors: string;
+    logs: string;
   };
   ceoSoulFlavor: string;
   hireVerb: string;
@@ -33,10 +31,8 @@ const CORPORATE: Theme = {
   },
   channels: {
     general: 'general',
-    system: 'system',
-    heartbeat: 'heartbeat',
     tasks: 'tasks',
-    errors: 'errors',
+    logs: 'logs',
   },
   ceoSoulFlavor: 'You are professional, strategic, and data-driven. You lead with clarity and delegate with confidence.',
   hireVerb: 'Hired',
@@ -57,10 +53,8 @@ const MAFIA: Theme = {
   },
   channels: {
     general: 'the-backroom',
-    system: 'the-wire',
-    heartbeat: 'the-pulse',
     tasks: 'the-job-board',
-    errors: 'the-heat',
+    logs: 'the-wire',
   },
   ceoSoulFlavor: 'You are the Underboss. You don\'t ask twice. You don\'t sugarcoat. When the Godfather speaks, you make it happen — fast, clean, no loose ends. Loyalty is everything. Results are non-negotiable. The family eats first.',
   hireVerb: 'Made',
@@ -81,10 +75,8 @@ const MILITARY: Theme = {
   },
   channels: {
     general: 'command-post',
-    system: 'comms',
-    heartbeat: 'sitrep',
     tasks: 'operations',
-    errors: 'casualties',
+    logs: 'comms',
   },
   ceoSoulFlavor: 'You are the General. Mission-focused, disciplined, clear chain of command. Every order is precise. Every report is concise. Mission success above all.',
   hireVerb: 'Enlisted',

@@ -2,17 +2,20 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { join } from 'node:path';
-import { type Channel, type Member, tailMessages, MESSAGES_JSONL } from '@claudecorp/shared';
+import { type Channel, tailMessages, MESSAGES_JSONL } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
 import { useCorp } from '../context/corp-context.js';
 
+type PaletteItemKind = 'view' | 'channel' | 'agent';
+
 interface PaletteItem {
   id: string;
   label: string;
-  kind: 'channel' | 'agent' | 'view' | 'command' | 'project';
+  kind: PaletteItemKind;
   icon: string;
   action: () => void;
+  isHeader?: boolean;
 }
 
 interface Props {
@@ -23,12 +26,10 @@ interface Props {
   onClose: () => void;
 }
 
-export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onCommand, onClose }: Props) {
+export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onClose }: Props) {
   const { channels, members, corpRoot } = useCorp();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-
-  const agents = members.filter((m) => m.type === 'agent');
 
   // Check which channels have unread messages
   const unreadChannels = new Set<string>();
@@ -42,75 +43,69 @@ export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onCom
           unreadChannels.add(ch.id);
         }
       }
-    } catch {
-      // Channel may not have messages yet
-    }
+    } catch {}
   }
 
-  // Build all items
-  const items: PaletteItem[] = [
-    // Views
-    { id: 'v-home', label: 'Corp Home', kind: 'view', icon: '◆', action: () => onNavigate({ type: 'corp-home' }) },
-    { id: 'v-hierarchy', label: 'Hierarchy', kind: 'view', icon: '◇', action: () => onNavigate({ type: 'hierarchy' }) },
-    { id: 'v-tasks', label: 'Task Board', kind: 'view', icon: '◆', action: () => onNavigate({ type: 'task-board' }) },
-    // Commands
-    { id: 'c-hire', label: '/hire', kind: 'command', icon: '▸', action: () => onCommand('hire') },
-    { id: 'c-task', label: '/task', kind: 'command', icon: '▸', action: () => onCommand('task') },
-    { id: 'c-project', label: '/project', kind: 'project', icon: '▸', action: () => onCommand('project') },
-    { id: 'c-team', label: '/team', kind: 'command', icon: '▸', action: () => onCommand('team') },
-    { id: 'c-dogfood', label: '/dogfood', kind: 'command', icon: '▸', action: () => onCommand('dogfood') },
-    { id: 'c-theme', label: '/theme', kind: 'command', icon: '▸', action: () => onCommand('theme') },
-    { id: 'c-model', label: '/model', kind: 'command', icon: '▸', action: () => onCommand('model') },
-    // Channels — show mode badge
-    ...channels.map((ch) => {
-      const mode = ch.mode ?? (ch.kind === 'direct' ? 'dm' : 'mention');
-      const unread = unreadChannels.has(ch.id) ? ' ●' : '';
-      const modeBadge = mode === 'all' ? ' [all]' : mode === 'dm' ? '' : '';
-      return {
-        id: `ch-${ch.id}`,
-        label: `#${ch.name}${modeBadge}${unread}`,
-        kind: 'channel' as const,
-        icon: ch.kind === 'direct' ? '◆' : '#',
-        action: () => onSelectChannel(ch),
-      };
-    }),
-    // Agents
-    ...agents.map((m) => ({
-      id: `ag-${m.id}`,
-      label: m.displayName,
-      kind: 'agent' as const,
-      icon: '◆',
-      action: () => onNavigate({ type: 'agent-inspector', memberId: m.id }),
-    })),
-  ];
+  // Non-DM channels only
+  const corpChannels = channels.filter(ch => ch.kind !== 'direct');
+
+  // Build sectioned items
+  const allItems: PaletteItem[] = [];
+
+  // --- Views ---
+  allItems.push({ id: 'h-views', label: 'Views', kind: 'view', icon: '', action: () => {}, isHeader: true });
+  allItems.push({ id: 'v-home', label: 'Corp Home', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'corp-home' }) });
+  allItems.push({ id: 'v-tasks', label: 'Task Board', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'task-board' }) });
+
+  // --- Channels ---
+  allItems.push({ id: 'h-channels', label: 'Channels', kind: 'channel', icon: '', action: () => {}, isHeader: true });
+  for (const ch of corpChannels) {
+    const unread = unreadChannels.has(ch.id) ? ' \u25CF' : '';
+    allItems.push({
+      id: `ch-${ch.id}`,
+      label: `#${ch.name}${unread}`,
+      kind: 'channel',
+      icon: '#',
+      action: () => onSelectChannel(ch),
+    });
+  }
+
+  // --- Agents ---
+  allItems.push({ id: 'h-agents', label: 'Agents', kind: 'agent', icon: '', action: () => {}, isHeader: true });
+  allItems.push({
+    id: 'v-hierarchy',
+    label: 'Agent Hierarchy \u2192',
+    kind: 'agent',
+    icon: '\u25C7',
+    action: () => onNavigate({ type: 'hierarchy' }),
+  });
 
   // Filter
   const q = query.toLowerCase();
   const filtered = q
-    ? items.filter((item) => item.label.toLowerCase().includes(q) || item.kind.includes(q))
-    : items;
+    ? allItems.filter(item => !item.isHeader && item.label.toLowerCase().includes(q))
+    : allItems;
+
+  // Get selectable items (skip headers)
+  const selectableIndices = filtered.map((item, i) => item.isHeader ? -1 : i).filter(i => i >= 0);
+
+  // Map selectedIndex to actual filtered array index
+  const actualIndex = selectableIndices[selectedIndex] ?? 0;
 
   useInput((input, key) => {
-    // Ctrl+K toggles (closes) the palette
-    if (key.ctrl && input === 'k') {
-      onClose();
-      return;
-    }
-    if (key.escape || key.tab || input === '\t') {
-      onClose();
-      return;
-    }
+    if (key.ctrl && input === 'k') { onClose(); return; }
+    if (key.escape || key.tab || input === '\t') { onClose(); return; }
     if (key.upArrow) {
-      setSelectedIndex((i) => Math.max(0, i - 1));
+      setSelectedIndex(i => Math.max(0, i - 1));
       return;
     }
     if (key.downArrow) {
-      setSelectedIndex((i) => Math.min(filtered.length - 1, i + 1));
+      setSelectedIndex(i => Math.min(selectableIndices.length - 1, i + 1));
       return;
     }
     if (key.return) {
-      const selected = filtered[selectedIndex];
-      if (selected) selected.action();
+      const selected = filtered[actualIndex];
+      if (selected && !selected.isHeader) selected.action();
       return;
     }
   });
@@ -121,11 +116,9 @@ export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onCom
   };
 
   const kindColor: Record<string, string> = {
+    view: COLORS.subtle,
     channel: COLORS.primary,
     agent: COLORS.secondary,
-    view: COLORS.subtle,
-    command: COLORS.success,
-    project: COLORS.info,
   };
 
   return (
@@ -135,7 +128,7 @@ export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onCom
       borderColor={COLORS.primary}
       paddingX={2}
       paddingY={1}
-      width={60}
+      width={50}
       alignSelf="center"
     >
       <Box>
@@ -143,42 +136,32 @@ export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onCom
         <TextInput
           value={query}
           onChange={handleQueryChange}
-          placeholder="Search channels, agents, views..."
+          placeholder="Search..."
         />
       </Box>
       <Box flexDirection="column" marginTop={0}>
-        {(() => {
-          const maxVisible = 20;
-          let start = 0;
-          if (selectedIndex >= maxVisible) {
-            start = selectedIndex - maxVisible + 1;
+        {filtered.slice(0, 20).map((item, i) => {
+          if (item.isHeader) {
+            return (
+              <Box key={item.id} marginTop={i > 0 ? 1 : 0}>
+                <Text bold color={COLORS.muted}>  {item.label}</Text>
+              </Box>
+            );
           }
-          return filtered.slice(start, start + maxVisible);
-        })().map((item, i) => {
-          const maxVisible = 20;
-          const start = selectedIndex >= maxVisible ? selectedIndex - maxVisible + 1 : 0;
-          const actualIndex = start + i;
-          const isSelected = actualIndex === selectedIndex;
+          const isSelected = i === actualIndex;
           return (
             <Box key={item.id} gap={1}>
               <Text color={isSelected ? COLORS.primary : COLORS.muted}>
-                {isSelected ? '▸' : ' '}
+                {isSelected ? '\u25B8' : ' '}
               </Text>
-              <Text
-                bold={isSelected}
-                color={isSelected ? COLORS.text : COLORS.subtle}
-              >
-                {item.label}
+              <Text color={isSelected ? COLORS.text : COLORS.subtle}>
+                {item.icon} {item.label}
               </Text>
-              <Text color={kindColor[item.kind] ?? COLORS.muted}>{item.kind}</Text>
             </Box>
           );
         })}
         {filtered.length === 0 && (
           <Text color={COLORS.muted}>  No results</Text>
-        )}
-        {filtered.length > 20 && (
-          <Text color={COLORS.muted}>  +{filtered.length - 20} more — type to filter</Text>
         )}
       </Box>
     </Box>

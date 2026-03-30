@@ -20,7 +20,7 @@ import {
 import type { Daemon } from './daemon.js';
 import { dispatchToAgent } from './dispatch.js';
 import { hireAgent } from './hire.js';
-import { writeTaskEvent, notifyTaskAssignment } from './task-events.js';
+import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm } from './task-events.js';
 import { logError } from './logger.js';
 
 export function createApi(daemon: Daemon): Server {
@@ -185,9 +185,10 @@ export function createApi(daemon: Daemon): Server {
         daemon.taskWatcher.suppressNextCreate(taskPath(daemon.corpRoot, task.id));
         daemon.heartbeat.refreshAll();
 
-        // @mention the assignee so the router dispatches immediately
+        // Log to #tasks (read-only event) + dispatch to agent's DM
         if (task.assignedTo) {
-          notifyTaskAssignment(daemon.corpRoot, task.assignedTo, task.title);
+          logTaskAssignment(daemon.corpRoot, task.assignedTo, task.title);
+          dispatchTaskToDm(daemon, task.assignedTo, task.title, task.id);
         }
 
         json(res, { ok: true, task });

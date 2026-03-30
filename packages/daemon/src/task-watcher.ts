@@ -3,18 +3,12 @@ import { join } from 'node:path';
 import {
   type TaskStatus,
   type Member,
-  type Channel,
-  type ChannelMessage,
   readTask,
   listTasks,
   readConfig,
-  appendMessage,
-  generateId,
   MEMBERS_JSON,
-  CHANNELS_JSON,
-  MESSAGES_JSONL,
 } from '@claudecorp/shared';
-import { writeTaskEvent, notifyTaskAssignment, notifyTaskBlocker } from './task-events.js';
+import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm, dispatchBlockerToDm, dispatchCompletionToCeo } from './task-events.js';
 import type { Daemon } from './daemon.js';
 import { log } from './logger.js';
 
@@ -99,14 +93,15 @@ export class TaskWatcher {
         // New task file
         this.taskCache.set(filePath, { status: task.status, assignedTo: task.assignedTo });
         if (this.recentApiCreates.has(filePath)) {
-          // API already posted the event + @mention — skip
+          // API already posted the event + DM dispatch — skip
           this.recentApiCreates.delete(filePath);
           return;
         }
-        // Agent-created task (written directly to tasks/) — post event AND @mention
+        // Agent-created task (written directly to tasks/) — post event + DM dispatch
         writeTaskEvent(this.daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
         if (task.assignedTo) {
-          notifyTaskAssignment(this.daemon.corpRoot, task.assignedTo, task.title);
+          logTaskAssignment(this.daemon.corpRoot, task.assignedTo, task.title);
+          dispatchTaskToDm(this.daemon, task.assignedTo, task.title, task.id);
         }
         this.daemon.heartbeat.refreshAll();
         return;
@@ -119,55 +114,32 @@ export class TaskWatcher {
           `"${task.title}" → ${task.status}`,
         );
 
-        // When task is BLOCKED, notify the creator (supervisor) so they can help
+        // When task is BLOCKED, notify the creator (supervisor) via DM
         if (task.status === 'blocked' && task.createdBy) {
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
             const assignee = members.find(m => m.id === task.assignedTo);
             const assigneeName = assignee?.displayName ?? 'an agent';
-            notifyTaskBlocker(this.daemon.corpRoot, task.createdBy, assigneeName, task.title);
+            dispatchBlockerToDm(this.daemon, task.createdBy, assigneeName, task.title);
           } catch {
             // Non-fatal
           }
         }
 
-        // When task completes or fails, notify the CEO in #tasks
+        // When task completes or fails, notify CEO via DM + handle dependencies
         if (task.status === 'completed' || task.status === 'failed') {
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
-            const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
-            if (ceo) {
-              const channels = readConfig<Channel[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
-              const taskChannel = channels.find(c =>
-                c.name.includes('tasks') || c.name.includes('job-board') || c.name.includes('operations'),
-              );
-              if (taskChannel) {
-                const assignee = members.find(m => m.id === task.assignedTo);
-                const assigneeName = assignee?.displayName ?? 'an agent';
-                const notifyMsg: ChannelMessage = {
-                  id: generateId(),
-                  channelId: taskChannel.id,
-                  senderId: 'system',
-                  threadId: null,
-                  content: `@${ceo.displayName.toLowerCase().replace(/\s+/g, '-')} Task "${task.title}" has been marked as ${task.status} by ${assigneeName}. Go to your DM with the Founder and report what was done.`,
-                  kind: 'text',
-                  mentions: [ceo.id],
-                  metadata: null,
-                  depth: 0,
-                  originId: '',
-                  timestamp: new Date().toISOString(),
-                };
-                notifyMsg.originId = notifyMsg.id;
-                appendMessage(join(this.daemon.corpRoot, taskChannel.path, MESSAGES_JSONL), notifyMsg);
-              }
-            }
+            const assignee = members.find(m => m.id === task.assignedTo);
+            const assigneeName = assignee?.displayName ?? 'an agent';
+
+            // Notify CEO via DM
+            dispatchCompletionToCeo(this.daemon, task.title, task.status, assigneeName);
           } catch {
-            // Non-fatal — notification is best-effort
+            // Non-fatal
           }
 
-          // Dependency enforcement: when a task completes, check for sibling tasks
-          // (same parentTaskId) that are 'assigned' and waiting. Notify their assignees
-          // so they know their dependency is resolved and they can start.
+          // Dependency enforcement: sibling tasks with same parentTaskId
           if (task.status === 'completed' && task.parentTaskId) {
             try {
               const allTasks = listTasks(this.daemon.corpRoot);
@@ -178,21 +150,16 @@ export class TaskWatcher {
                 t.task.assignedTo,
               );
               for (const sibling of waitingSiblings) {
-                notifyTaskAssignment(
-                  this.daemon.corpRoot,
-                  sibling.task.assignedTo!,
-                  sibling.task.title,
-                );
-                log(`[task-watcher] Dependency resolved: notifying ${sibling.task.assignedTo} that "${sibling.task.title}" can start (sibling "${task.title}" completed)`);
+                logTaskAssignment(this.daemon.corpRoot, sibling.task.assignedTo!, sibling.task.title);
+                dispatchTaskToDm(this.daemon, sibling.task.assignedTo!, sibling.task.title, sibling.task.id);
+                log(`[task-watcher] Dependency resolved: dispatching "${sibling.task.title}" to ${sibling.task.assignedTo} (sibling "${task.title}" completed)`);
               }
             } catch {
               // Non-fatal
             }
           }
 
-          // blockedBy resolution: when a task completes, find tasks that have
-          // this task's ID in their blockedBy array. If ALL their blockers are
-          // now completed, notify the assignee that they're unblocked.
+          // blockedBy resolution: find tasks blocked by this one
           if (task.status === 'completed') {
             try {
               const allTasks = listTasks(this.daemon.corpRoot);
@@ -209,11 +176,8 @@ export class TaskWatcher {
                   return blocker?.task.status === 'completed';
                 });
                 if (allBlockersResolved) {
-                  notifyTaskAssignment(
-                    this.daemon.corpRoot,
-                    downstream.task.assignedTo!,
-                    downstream.task.title,
-                  );
+                  logTaskAssignment(this.daemon.corpRoot, downstream.task.assignedTo!, downstream.task.title);
+                  dispatchTaskToDm(this.daemon, downstream.task.assignedTo!, downstream.task.title, downstream.task.id);
                   writeTaskEvent(
                     this.daemon.corpRoot,
                     `"${downstream.task.title}" unblocked — all dependencies resolved (${task.title} completed)`,

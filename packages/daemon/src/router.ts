@@ -98,6 +98,20 @@ export class MessageRouter {
     }
   }
 
+  /** Force-process a channel's messages (bypasses fs.watch — for Windows reliability). */
+  pokeChannel(channelId: string): void {
+    const channels = this.loadChannels();
+    const channel = channels.find(c => c.id === channelId);
+    if (!channel) return;
+    const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
+    if (!existsSync(msgPath)) return;
+    // Ensure we're watching this channel
+    if (!this.watchers.has(channel.id)) {
+      this.watchChannel(channel);
+    }
+    this.onFileChange(channel, msgPath);
+  }
+
   watchChannel(channel: Channel): void {
     const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
     if (!existsSync(msgPath)) return;

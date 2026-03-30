@@ -27,6 +27,7 @@ import { EventBus, type DaemonEvent } from './events.js';
 import { InboxManager } from './inbox.js';
 import { Pulse } from './pulse.js';
 import { hireFailsafe } from './failsafe.js';
+import { hireJanitor } from './janitor.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
@@ -41,6 +42,7 @@ export class Daemon {
   taskWatcher: TaskWatcher;
   hireWatcher: HireWatcher;
   pulse: Pulse;
+  private failsafeTimer: ReturnType<typeof setInterval> | null = null;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -153,6 +155,97 @@ export class Daemon {
     this.taskWatcher.start();
     this.hireWatcher.start();
     this.pulse.start();
+
+    // Failsafe heartbeat: dispatch monitoring protocol to Failsafe every 5 min
+    this.failsafeTimer = setInterval(() => this.dispatchFailsafeHeartbeat(), 5 * 60 * 1000);
+    log('[daemon] Failsafe heartbeat timer started (every 5m)');
+  }
+
+  /** Dispatch "run your monitoring protocol" directly to Failsafe agent. */
+  private async dispatchFailsafeHeartbeat(): Promise<void> {
+    try {
+      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+      const failsafe = members.find(m => m.displayName === 'Failsafe' && m.type === 'agent');
+      if (!failsafe?.agentDir) return;
+
+      // Don't pile up dispatches
+      if (this.getAgentWorkStatus(failsafe.id) === 'busy') return;
+
+      const agentProc = this.processManager.getAgent(failsafe.id);
+      if (!agentProc || agentProc.status !== 'ready') return;
+
+      // Build context for direct dispatch (same pattern as inbox dispatch in heartbeat.ts)
+      const allMembers = members.map(m => ({ name: m.displayName, rank: m.rank, type: m.type, status: m.status }));
+      const agentDir = join(this.corpRoot, failsafe.agentDir).replace(/\\/g, '/');
+      const corpRoot = this.corpRoot.replace(/\\/g, '/');
+
+      let supervisorName: string | null = null;
+      if (failsafe.spawnedBy) {
+        const sup = members.find(m => m.id === failsafe.spawnedBy);
+        supervisorName = sup?.displayName ?? null;
+      }
+
+      const { dispatchToAgent } = await import('./dispatch.js');
+      const { composeSystemMessage } = await import('./fragments/index.js');
+
+      const context = {
+        agentDir,
+        corpRoot,
+        channelName: 'failsafe-heartbeat',
+        channelMembers: [failsafe.displayName],
+        corpMembers: allMembers,
+        recentHistory: [],
+        daemonPort: this.getPort(),
+        agentMemberId: failsafe.id,
+        agentRank: failsafe.rank,
+        agentDisplayName: failsafe.displayName,
+        channelKind: 'direct' as const,
+        supervisorName,
+      };
+
+      this.setAgentWorkStatus(failsafe.id, failsafe.displayName, 'busy');
+
+      const wsClient = agentProc.mode === 'remote' ? this.openclawWS : this.corpGatewayWS;
+      const sessionKey = `failsafe-heartbeat:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+
+      try {
+        const result = await dispatchToAgent(agentProc, 'Run your monitoring protocol. Check all agent statuses via cc-cli status and report.', context, sessionKey, undefined, wsClient);
+        log(`[daemon] Failsafe heartbeat response: ${result.content.slice(0, 80)}`);
+
+        // Write response to Failsafe's DM so it's visible in TUI
+        const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
+        const founder = members.find(m => m.rank === 'owner');
+        const dmChannel = channels.find(
+          c => c.kind === 'direct' &&
+          c.memberIds.includes(failsafe.id) &&
+          (founder ? c.memberIds.includes(founder.id) : true),
+        );
+        if (dmChannel && result.content.trim()) {
+          const responseMsg: ChannelMessage = {
+            id: generateId(),
+            channelId: dmChannel.id,
+            senderId: failsafe.id,
+            threadId: null,
+            content: result.content,
+            kind: 'text',
+            mentions: [],
+            metadata: { source: 'failsafe-heartbeat' },
+            depth: 0,
+            originId: '',
+            timestamp: new Date().toISOString(),
+          };
+          responseMsg.originId = responseMsg.id;
+          appendMessage(join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), responseMsg);
+        }
+      } catch (err) {
+        logError(`[daemon] Failsafe heartbeat dispatch failed: ${err}`);
+      }
+
+      this.setAgentWorkStatus(failsafe.id, failsafe.displayName, 'idle');
+      log('[daemon] Failsafe heartbeat completed');
+    } catch (err) {
+      logError(`[daemon] Failsafe heartbeat failed: ${err}`);
+    }
   }
 
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
@@ -217,15 +310,20 @@ export class Daemon {
     await this.bootstrapSystemAgents();
   }
 
-  /** Ensure system agents (Failsafe) exist — auto-hire if missing. */
+  /** Ensure system agents (Failsafe, Janitor) exist — auto-hire if missing. */
   private async bootstrapSystemAgents(): Promise<void> {
     try {
       await hireFailsafe(this);
-      // Tell Pulse timer to re-scan for the Failsafe agent
       this.pulse.refreshFailsafe();
     } catch (err) {
       logError(`[daemon] Failed to bootstrap Failsafe agent: ${err}`);
     }
+    try {
+      await hireJanitor(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Janitor agent: ${err}`);
+    }
+
   }
 
   /**
@@ -276,6 +374,9 @@ export class Daemon {
     userMsg.originId = userMsg.id;
     appendMessage(messagesPath, userMsg);
 
+    // Poke the router to process this channel (Windows fs.watch can miss appends)
+    setTimeout(() => this.router.pokeChannel(channelId), 100);
+
     // Mark for git commit
     this.gitManager.markDirty(founder.displayName);
 
@@ -310,6 +411,7 @@ export class Daemon {
     this.taskWatcher.stop();
     this.hireWatcher.stop();
     this.pulse.stop();
+    if (this.failsafeTimer) clearInterval(this.failsafeTimer);
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();

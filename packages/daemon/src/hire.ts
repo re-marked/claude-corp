@@ -89,6 +89,10 @@ export async function hireAgent(
     remote: true,
   });
 
+  // FIXME(v0.10.1): Per-agent worktrees disabled — needs project-scoped repos first.
+  // Worktree of the whole corp is wrong (stale members.json, channels, tasks).
+  // Will enable when projects land: worktree per project, not per agent.
+
   // 3. Add member to registry
   addMemberToRegistry(corpRoot, member);
 
@@ -115,7 +119,7 @@ export async function hireAgent(
     addChannelToRegistry(corpRoot, dmChannel);
   }
 
-  // 5. Add to #general and #tasks (themed names)
+  // 5. Add to #general, #tasks, and #logs (themed names)
   const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
   const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
   const theme = getTheme((corp.theme || 'corporate') as ThemeId);
@@ -126,6 +130,10 @@ export async function hireAgent(
   const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
   if (tasksChannel) {
     addMemberToChannel(corpRoot, tasksChannel.id, member.id);
+  }
+  const logsChannel = channels.find((c) => c.name === theme.channels.logs);
+  if (logsChannel) {
+    addMemberToChannel(corpRoot, logsChannel.id, member.id);
   }
 
   // 6. Add to corp gateway — start if first agent, hot-reload if running

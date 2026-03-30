@@ -48,10 +48,8 @@ export async function scaffoldCorp(
     corpRoot,
     join(corpRoot, 'agents'),
     join(corpRoot, 'channels', theme.channels.general),
-    join(corpRoot, 'channels', theme.channels.system),
-    join(corpRoot, 'channels', theme.channels.heartbeat),
     join(corpRoot, 'channels', theme.channels.tasks),
-    join(corpRoot, 'channels', theme.channels.errors),
+    join(corpRoot, 'channels', theme.channels.logs),
     join(corpRoot, 'tasks'),
     join(corpRoot, 'projects'),
     join(corpRoot, 'resources'),
@@ -103,10 +101,8 @@ export async function scaffoldCorp(
   const ch = theme.channels;
   const channels: Channel[] = [
     makeChannel(ch.general, 'broadcast', 'corp', corpName, userId, `channels/${ch.general}/`, now),
-    makeChannel(ch.system, 'system', 'corp', corpName, userId, `channels/${ch.system}/`, now),
-    makeChannel(ch.heartbeat, 'system', 'corp', corpName, userId, `channels/${ch.heartbeat}/`, now),
     makeChannel(ch.tasks, 'system', 'corp', corpName, userId, `channels/${ch.tasks}/`, now),
-    makeChannel(ch.errors, 'system', 'corp', corpName, userId, `channels/${ch.errors}/`, now),
+    makeChannel(ch.logs, 'system', 'corp', corpName, userId, `channels/${ch.logs}/`, now),
   ];
 
   // Founder is auto-added to general
