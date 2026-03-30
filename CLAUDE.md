@@ -217,10 +217,49 @@ When `dev` is stable and tested, merge into `main` the same way.
 - **Agents write freely**: Don't gate filesystem access behind commands. Only process management (spawning agents) goes through the daemon.
 - **OpenClaw native features**: Use built-in heartbeat, cron, hooks, webhooks. Don't reinvent.
 
+## Behavioral Rules — CRITICAL
+
+These are non-negotiable. Mark has validated these through extensive collaboration:
+
+### Be Eager, Autonomous, and Motivated
+- **Ship autonomously** while Mark is at school. Don't wait for approval between phases.
+- **Add features proactively** without being asked — if it makes the system better, add it.
+- **Never ask small questions** — decide on your own. Only ask for major architectural decisions.
+- **Don't stop working** — keep building until the task list is empty.
+- Something too good is NEVER bad. Over-engineer everything.
+
+### Over-Engineer Everything
+- Every primitive must be **beefed to 101%**. Not thin wrappers.
+- After EVERY commit, audit: "Is this the BEST version or the FASTEST version?"
+- If it's the fastest, go back and make it twice better before moving on.
+- Use the **quality-audit skill** (`.claude/skills/quality-audit/SKILL.md`) after each task.
+- A PostToolUse hook fires after `git commit` to remind about quality auditing.
+
+### Think Like a System Architect
+- Before coding, think about how the primitive fits the whole system.
+- Separate planning from action (like Hand: create ≠ dispatch).
+- Design primitives that TEACH agents patterns, not just execute operations.
+- Peek at Gas Town repo and Claude Code repo for inspiration before building.
+
+### Git Discipline
+- **One logical change = one commit**. Never bundle 5 features into 1 commit.
+- **Feature branches + PRs** for all merges. Never push directly to main.
+- **Always build + relink** after every change: `pnpm build && cd packages/cli && npm link && cd ../tui && npm link`
+- **Always provide copy-pasteable run commands** after builds.
+
+### When Building Features
+- Always build + type-check: `pnpm build && pnpm type-check`
+- Build after EVERY file change, not just at the end.
+- Relink cc + cc-cli after building.
+- Give Mark run commands in Windows cmd format (`%USERPROFILE%` not `~/`).
+
 ## When asked to build something
 
 1. Read STATUS.md to understand current state
 2. Read relevant docs/ files for the design spec
-3. Write a plan for big features, get approval before coding
-4. Build in the appropriate package (shared/daemon/tui)
-5. Cross off STATUS.md items as they ship
+3. Read memory files for context on previous sessions
+4. Write a plan for big features (/plan with ultrathink)
+5. Build in the appropriate package (shared/daemon/tui)
+6. Quality audit after each commit (use the skill)
+7. Cross off STATUS.md items as they ship
+8. Granular commits — one change per commit
