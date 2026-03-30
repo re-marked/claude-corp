@@ -740,7 +740,43 @@ export class HeartbeatManager {
         }
       } catch {}
 
-      lines.push('This file is auto-generated. Read-only. Updated every 5 minutes.');
+      // --- Your Metrics (self-awareness) ---
+      try {
+        const myAnalytics = this.daemon.analytics.getSnapshot().agents[agent.id];
+        if (myAnalytics) {
+          const totalTime = (myAnalytics.busyTimeMs ?? 0) + (myAnalytics.idleTimeMs ?? 0);
+          const utilization = totalTime > 0 ? Math.round((myAnalytics.busyTimeMs / totalTime) * 100) : 0;
+          lines.push('## Your Metrics', '');
+          lines.push(`- Utilization: ${utilization}%`);
+          lines.push(`- Tasks completed: ${myAnalytics.tasksCompleted}`);
+          lines.push(`- Current streak: ${myAnalytics.streak} (best: ${myAnalytics.bestStreak})`);
+          lines.push(`- Dispatches: ${myAnalytics.dispatchCount}`);
+          if (myAnalytics.errorCount > 0) lines.push(`- Errors: ${myAnalytics.errorCount}`);
+          lines.push('');
+        }
+      } catch {}
+
+      // --- Recent Completions (momentum) ---
+      const recentCompleted = allTasks
+        .filter(t => t.task.status === 'completed' && t.task.updatedAt)
+        .sort((a, b) => new Date(b.task.updatedAt).getTime() - new Date(a.task.updatedAt).getTime())
+        .slice(0, 5);
+      if (recentCompleted.length > 0) {
+        lines.push('## Recent Completions', '');
+        for (const t of recentCompleted) {
+          const assignee = members.find(m => m.id === t.task.assignedTo);
+          const name = assignee?.displayName ?? '?';
+          const time = new Date(t.task.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+          lines.push(`- \u2713 "${t.task.title}" by ${name} at ${time}`);
+        }
+        lines.push('');
+      }
+
+      // --- Corp Uptime ---
+      const uptimeMs = Date.now() - this.daemon.startedAt;
+      const hours = Math.floor(uptimeMs / 3_600_000);
+      const mins = Math.floor((uptimeMs % 3_600_000) / 60_000);
+      lines.push(`Uptime: ${hours}h ${mins}m | This file is auto-generated every 5 minutes.`);
 
       writeFileSync(join(agentDir, 'STATUS.md'), lines.join('\n'), 'utf-8');
     } catch {

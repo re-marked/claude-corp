@@ -523,9 +523,14 @@ export function createApi(daemon: Daemon): Server {
 
         try {
           const wsClient = agentProc.mode === 'remote' ? daemon.openclawWS : daemon.corpGatewayWS;
-          // Support persistent session keys for Jack mode (live interactive sessions)
+          // Persistent sessions by default — ALL communication has memory.
+          // Deterministic key per sender→target pair: OpenClaw accumulates conversation history.
+          // Explicit sessionKey (from Jack/TUI) overrides. Otherwise: persistent per pair.
+          const saySenderId = (body.senderId as string) ?? 'founder';
+          const senderSlug = members.find((m: any) => m.id === saySenderId)?.displayName?.toLowerCase().replace(/\s+/g, '-') ?? 'system';
+          const targetSlugNorm = normalize(target.displayName);
           const sessionKey = (body.sessionKey as string)
-            ?? `cc-say:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+            ?? `say:${senderSlug}:${targetSlugNorm}`;
           const result = await dispatchToAgent(agentProc, message, context, sessionKey, undefined, wsClient);
           daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
 
