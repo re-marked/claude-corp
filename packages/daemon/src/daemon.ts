@@ -196,6 +196,17 @@ export class Daemon {
       description: 'Herald summarizes corp activity → writes NARRATION.md',
       callback: () => this.dispatchHeraldNarration(),
     });
+
+    // Register Agent Recovery as a Clock — self-healing for crashed agents
+    this.clocks.register({
+      id: 'agent-recovery',
+      name: 'Agent Recovery',
+      type: 'system',
+      intervalMs: 30 * 1000, // Every 30 seconds
+      target: 'Daemon',
+      description: 'Detects crashed agents and attempts respawn — self-healing at daemon level',
+      callback: () => this.recoverCrashedAgents(),
+    });
   }
 
   /** Dispatch narration request to Herald via say(). Response = NARRATION.md content. */
@@ -232,6 +243,84 @@ export class Daemon {
       }
     } catch (err) {
       logError(`[daemon] Herald narration failed: ${err}`);
+    }
+  }
+
+  /**
+   * Self-healing: detect crashed agents and attempt to respawn them.
+   * Runs every 30 seconds. Tracks consecutive failures per agent to avoid
+   * infinite retry loops — gives up after 5 consecutive failures and logs.
+   */
+  private recoveryAttempts = new Map<string, number>();
+  private static MAX_RECOVERY_ATTEMPTS = 5;
+
+  private async recoverCrashedAgents(): Promise<void> {
+    const agents = this.processManager.listAgents();
+    const crashed = agents.filter(a => a.status === 'crashed');
+
+    if (crashed.length === 0) {
+      // Reset all recovery counters when everything is healthy
+      this.recoveryAttempts.clear();
+      return;
+    }
+
+    for (const agent of crashed) {
+      const attempts = this.recoveryAttempts.get(agent.memberId) ?? 0;
+
+      if (attempts >= Daemon.MAX_RECOVERY_ATTEMPTS) {
+        // Already gave up on this one — log once at threshold, then stay quiet
+        if (attempts === Daemon.MAX_RECOVERY_ATTEMPTS) {
+          logError(`[recovery] ${agent.displayName} — gave up after ${attempts} attempts. Manual restart needed.`);
+          this.recoveryAttempts.set(agent.memberId, attempts + 1); // Prevent re-logging
+          this.analytics.trackError(agent.memberId);
+        }
+        continue;
+      }
+
+      this.recoveryAttempts.set(agent.memberId, attempts + 1);
+      log(`[recovery] ${agent.displayName} crashed — attempting respawn (attempt ${attempts + 1}/${Daemon.MAX_RECOVERY_ATTEMPTS})`);
+
+      try {
+        // Stop the old crashed process cleanly
+        await this.processManager.stopAgent(agent.memberId);
+
+        // Wait a beat for port release
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Respawn
+        const respawned = await this.processManager.spawnAgent(agent.memberId);
+
+        if (respawned.status === 'ready' || respawned.status === 'starting') {
+          log(`[recovery] ${agent.displayName} respawned successfully (status: ${respawned.status})`);
+          this.recoveryAttempts.delete(agent.memberId);
+
+          // Reconnect WebSocket if this was the CEO (remote mode)
+          if (respawned.mode === 'remote' || respawned.mode === 'local') {
+            // Re-establish WebSocket for tool events
+            try {
+              this.openclawWS = new OpenClawWS(respawned.port, respawned.gatewayToken);
+              await this.openclawWS.connect();
+            } catch {
+              // Non-fatal — HTTP fallback still works
+            }
+          }
+
+          // Update work status
+          this.agentWorkStatus.set(agent.memberId, 'idle');
+
+          // Flush any queued tasks for this agent
+          const queued = this.inbox.peekNext(agent.memberId);
+          if (queued) {
+            log(`[recovery] ${agent.displayName} has queued work — inbox will dispatch on next idle`);
+          }
+
+          this.analytics.trackStatusChange(agent.memberId, agent.displayName, 'idle');
+        } else {
+          logError(`[recovery] ${agent.displayName} respawn returned status: ${respawned.status}`);
+        }
+      } catch (err) {
+        logError(`[recovery] ${agent.displayName} respawn failed: ${err}`);
+      }
     }
   }
 
