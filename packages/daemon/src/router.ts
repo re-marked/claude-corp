@@ -457,7 +457,9 @@ export class MessageRouter {
                 toolName: tool.name,
                 toolCallId: tool.toolCallId,
                 toolArgs: args,
-                toolResult: tool.result ? String(tool.result).slice(0, 200) : undefined,
+                toolResult: tool.result
+                  ? (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result)).slice(0, 300)
+                  : undefined,
               },
               depth: msg.depth + 1,
               originId: msg.originId,
