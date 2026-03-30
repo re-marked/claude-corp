@@ -349,7 +349,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const hints: Record<string, string> = {
     'chat': globalHints,
     'task-board': `Enter:detail  Tab:filter  ${globalHints}`,
-    'hierarchy': `Enter:inspect  ${globalHints}`,
+    'hierarchy': `Enter:open DM  ${globalHints}`,
     'agent-inspector': globalHints,
     'task-detail': globalHints,
     'corp-home': `Enter:open  ${globalHints}`,
@@ -393,6 +393,10 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         return (
           <HierarchyView
             onNavigate={navigate}
+            onSelectChannel={(ch) => {
+              viewStack.replace({ type: 'chat', channelId: ch.id });
+              forceRender((n: number) => n + 1);
+            }}
             onBack={goBack}
           />
         );

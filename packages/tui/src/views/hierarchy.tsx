@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { type Member, readConfig, buildHierarchy, type HierarchyNode, MEMBERS_JSON } from '@claudecorp/shared';
+import { type Member, type Channel, readConfig, buildHierarchy, type HierarchyNode, MEMBERS_JSON, CHANNELS_JSON } from '@claudecorp/shared';
 import { join } from 'node:path';
 import { COLORS, STATUS, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
@@ -8,6 +8,7 @@ import { useCorp } from '../context/corp-context.js';
 
 interface Props {
   onNavigate: (view: View) => void;
+  onSelectChannel?: (channel: Channel) => void;
   onBack: () => void;
 }
 
@@ -33,13 +34,15 @@ function flattenTree(node: HierarchyNode, prefix = '', isLast = true, depth = 0)
   return result;
 }
 
-export function HierarchyView({ onNavigate, onBack }: Props) {
+export function HierarchyView({ onNavigate, onSelectChannel, onBack }: Props) {
   const { corpRoot } = useCorp();
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
   const tree = buildHierarchy(members);
   const flat = tree ? flattenTree(tree) : [];
+  const founder = members.find(m => m.rank === 'owner');
 
   useInput((_input, key) => {
     if (key.upArrow) {
@@ -48,7 +51,22 @@ export function HierarchyView({ onNavigate, onBack }: Props) {
       setSelectedIndex((i) => Math.min(flat.length - 1, i + 1));
     } else if (key.return) {
       const node = flat[selectedIndex];
-      if (node && node.member.type === 'agent') {
+      if (!node) return;
+
+      // Try to open the agent's DM channel
+      if (node.member.type === 'agent' && onSelectChannel && founder) {
+        const dm = channels.find(
+          ch => ch.kind === 'direct' &&
+          ch.memberIds.includes(node.member.id) &&
+          ch.memberIds.includes(founder.id),
+        );
+        if (dm) {
+          onSelectChannel(dm);
+          return;
+        }
+      }
+      // Fallback: open agent inspector
+      if (node.member.type === 'agent') {
         onNavigate({ type: 'agent-inspector', memberId: node.member.id });
       }
     }
@@ -58,7 +76,8 @@ export function HierarchyView({ onNavigate, onBack }: Props) {
     <Box flexDirection="column" flexGrow={1}>
       <Box borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={1}>
         <Text bold color={COLORS.primary}>Hierarchy</Text>
-        <Text color={COLORS.muted}>  {members.filter((m) => m.type === 'agent').length} agents</Text>
+        <Text color={COLORS.muted}>  {members.filter((m) => m.type === 'agent').length} agents  </Text>
+        <Text color={COLORS.subtle}>Enter = open DM</Text>
       </Box>
 
       <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
