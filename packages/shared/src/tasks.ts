@@ -49,6 +49,8 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
     projectId: opts.projectId ?? null,
     parentTaskId: opts.parentTaskId ?? null,
     blockedBy: opts.blockedBy ?? null,
+    handedBy: null,
+    handedAt: null,
     teamId: null,
     acceptanceCriteria: opts.acceptanceCriteria ?? null,
     dueAt: opts.dueAt ?? null,

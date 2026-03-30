@@ -536,6 +536,7 @@ export class MessageRouter {
         this.daemon.streaming.delete(targetId);
         this.activeDispatches.delete(target.displayName);
         this.daemon.setAgentWorkStatus(targetId, target.displayName, 'broken');
+        this.daemon.analytics.trackError(targetId);
         this.daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId: channel.id });
         this.daemon.gitManager.markDirty(target.displayName);
         this.drainQueue(targetId);
@@ -640,8 +641,8 @@ export class MessageRouter {
       // Drain queue — dispatch next waiting message for this agent
       this.drainQueue(targetId);
     } catch (err) {
-      // Model fallback is now handled natively by OpenClaw via agents.defaults.model.fallbacks
-      // in the gateway config (exponential backoff, profile rotation, session-sticky).
+      // Dispatch failed — track error in analytics
+      this.daemon.analytics.trackError(targetId);
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
       this.daemon.setAgentWorkStatus(targetId, target.displayName, 'idle');

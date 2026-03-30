@@ -20,5 +20,7 @@ export { Pulse } from './pulse.js';
 export { hireFailsafe } from './failsafe.js';
 export { hireJanitor } from './janitor.js';
 export { ClockManager } from './clock-manager.js';
+export { AnalyticsEngine } from './analytics.js';
+export type { CorpAnalytics, AgentMetrics } from './analytics.js';
 export { OpenClawWS } from './openclaw-ws.js';
 export type { AgentEvent, ChatEvent, ToolEvent } from './openclaw-ws.js';

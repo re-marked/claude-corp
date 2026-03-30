@@ -181,8 +181,9 @@ export function createApi(daemon: Daemon): Server {
           dueAt: (body.dueAt as string) ?? undefined,
         });
 
-        // Post task event + suppress TaskWatcher duplicate + refresh TASKS.md
+        // Post task event + suppress TaskWatcher duplicate + refresh TASKS.md + analytics
         writeTaskEvent(daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
+        daemon.analytics.trackTaskCreated();
         daemon.taskWatcher.suppressNextCreate(taskPath(daemon.corpRoot, task.id));
         daemon.heartbeat.refreshAll();
 
@@ -273,9 +274,19 @@ export function createApi(daemon: Daemon): Server {
             return;
           }
 
-          // Update task assignment
+          // Resolve who is handing (explicit handedBy, or detect from members)
+          const founder = members.find((m: any) => m.rank === 'owner');
+          const handedBy = (body.handedBy as string) ?? founder?.id ?? null;
+          const hander = members.find((m: any) => m.id === handedBy);
+          const handerName = hander?.displayName ?? 'system';
+
+          // Update task: assign + record hander + timestamp
           const filePath = taskPath(daemon.corpRoot, taskId);
-          const updated = updateTask(filePath, { assignedTo: target.id });
+          const updated = updateTask(filePath, {
+            assignedTo: target.id,
+            handedBy,
+            handedAt: new Date().toISOString(),
+          } as any);
 
           // Log to #tasks (read-only event) + dispatch to agent's DM
           logTaskAssignment(daemon.corpRoot, target.id, updated.title);
@@ -284,7 +295,7 @@ export function createApi(daemon: Daemon): Server {
           // Refresh all agents' TASKS.md + casket files
           daemon.heartbeat.refreshAll();
 
-          json(res, { ok: true, task: updated, handedTo: target.displayName });
+          json(res, { ok: true, task: updated, handedTo: target.displayName, handedBy: handerName });
         } catch {
           json(res, { error: 'Task not found' }, 404);
         }
@@ -512,9 +523,14 @@ export function createApi(daemon: Daemon): Server {
 
         try {
           const wsClient = agentProc.mode === 'remote' ? daemon.openclawWS : daemon.corpGatewayWS;
-          // Support persistent session keys for Jack mode (live interactive sessions)
+          // Persistent sessions by default — ALL communication has memory.
+          // Deterministic key per sender→target pair: OpenClaw accumulates conversation history.
+          // Explicit sessionKey (from Jack/TUI) overrides. Otherwise: persistent per pair.
+          const saySenderId = (body.senderId as string) ?? 'founder';
+          const senderSlug = members.find((m: any) => m.id === saySenderId)?.displayName?.toLowerCase().replace(/\s+/g, '-') ?? 'system';
+          const targetSlugNorm = normalize(target.displayName);
           const sessionKey = (body.sessionKey as string)
-            ?? `cc-say:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+            ?? `say:${senderSlug}:${targetSlugNorm}`;
           const result = await dispatchToAgent(agentProc, message, context, sessionKey, undefined, wsClient);
           daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
 
@@ -595,6 +611,20 @@ export function createApi(daemon: Daemon): Server {
         } catch (e) {
           json(res, { error: String(e) }, 404);
         }
+        return;
+      }
+
+      // --- Analytics endpoints ---
+
+      // GET /analytics — full analytics snapshot
+      if (method === 'GET' && path === '/analytics') {
+        json(res, daemon.analytics.getSnapshot());
+        return;
+      }
+
+      // GET /analytics/stats — corp-wide stats summary
+      if (method === 'GET' && path === '/analytics/stats') {
+        json(res, daemon.analytics.getCorpStats());
         return;
       }
 

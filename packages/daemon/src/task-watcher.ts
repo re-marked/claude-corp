@@ -4,11 +4,13 @@ import {
   type TaskStatus,
   type Member,
   readTask,
+  updateTask,
+  taskPath,
   listTasks,
   readConfig,
   MEMBERS_JSON,
 } from '@claudecorp/shared';
-import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm, dispatchBlockerToDm, dispatchCompletionToCeo } from './task-events.js';
+import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm, dispatchBlockerToDm, dispatchCompletionToCeo, dispatchToHander } from './task-events.js';
 import type { Daemon } from './daemon.js';
 import { log } from './logger.js';
 
@@ -98,6 +100,7 @@ export class TaskWatcher {
           return;
         }
         // Agent-created task (written directly to tasks/) — agent set assignedTo intentionally = implicit hand
+        this.daemon.analytics.trackTaskCreated();
         writeTaskEvent(this.daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
         if (task.assignedTo) {
           logTaskAssignment(this.daemon.corpRoot, task.assignedTo, task.title);
@@ -114,20 +117,37 @@ export class TaskWatcher {
           `"${task.title}" → ${task.status}`,
         );
 
-        // When task is BLOCKED, notify the creator (supervisor) via DM
-        if (task.status === 'blocked' && task.createdBy) {
+        // When task is BLOCKED, notify the creator AND hander
+        if (task.status === 'blocked') {
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
             const assignee = members.find(m => m.id === task.assignedTo);
             const assigneeName = assignee?.displayName ?? 'an agent';
-            dispatchBlockerToDm(this.daemon, task.createdBy, assigneeName, task.title);
+
+            // Notify creator (supervisor)
+            if (task.createdBy) {
+              dispatchBlockerToDm(this.daemon, task.createdBy, assigneeName, task.title);
+            }
+
+            // Notify hander (sponsor) if different from creator
+            const handedBy = (task as any).handedBy;
+            if (handedBy && handedBy !== task.createdBy) {
+              dispatchToHander(this.daemon, handedBy, task.title, 'blocked', assigneeName);
+            }
           } catch {
             // Non-fatal
           }
         }
 
-        // When task completes or fails, notify CEO via DM + handle dependencies
+        // When task completes or fails, track analytics + notify CEO + handle dependencies
         if (task.status === 'completed' || task.status === 'failed') {
+          // Analytics tracking
+          if (task.status === 'completed' && task.assignedTo) {
+            this.daemon.analytics.trackTaskCompleted(task.assignedTo);
+          } else if (task.status === 'failed' && task.assignedTo) {
+            this.daemon.analytics.trackTaskFailed(task.assignedTo);
+          }
+
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
             const assignee = members.find(m => m.id === task.assignedTo);
@@ -135,6 +155,16 @@ export class TaskWatcher {
 
             // Notify CEO via DM
             dispatchCompletionToCeo(this.daemon, task.title, task.status, assigneeName);
+
+            // Notify the hander (sponsor) — they delegated this work and care about the outcome
+            const handedBy = (task as any).handedBy;
+            if (handedBy) {
+              // Don't double-notify if hander IS the CEO (already notified above)
+              const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+              if (handedBy !== ceo?.id) {
+                dispatchToHander(this.daemon, handedBy, task.title, task.status, assigneeName);
+              }
+            }
           } catch {
             // Non-fatal
           }
@@ -176,13 +206,19 @@ export class TaskWatcher {
                   return blocker?.task.status === 'completed';
                 });
                 if (allBlockersResolved) {
+                  // Auto-unblock: update status from blocked → assigned, then hand immediately
+                  try {
+                    const downstreamPath = taskPath(this.daemon.corpRoot, downstream.task.id);
+                    updateTask(downstreamPath, { status: 'assigned' });
+                  } catch {}
+
                   logTaskAssignment(this.daemon.corpRoot, downstream.task.assignedTo!, downstream.task.title);
                   dispatchTaskToDm(this.daemon, downstream.task.assignedTo!, downstream.task.title, downstream.task.id);
                   writeTaskEvent(
                     this.daemon.corpRoot,
-                    `"${downstream.task.title}" unblocked — all dependencies resolved (${task.title} completed)`,
+                    `"${downstream.task.title}" UNBLOCKED — all dependencies resolved ("${task.title}" completed) — auto-handed to assignee`,
                   );
-                  log(`[task-watcher] blockedBy resolved: "${downstream.task.title}" unblocked by "${task.title}" completing`);
+                  log(`[task-watcher] Auto-unblock: "${downstream.task.title}" unblocked + auto-handed (dependency "${task.title}" completed)`);
                 }
               }
             } catch {

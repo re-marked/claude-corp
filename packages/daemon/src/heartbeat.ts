@@ -203,13 +203,45 @@ export class HeartbeatManager {
       const now = new Date();
       const corpRoot = this.daemon.corpRoot.replace(/\\/g, '/');
 
+      // Also scan project task directories for project-scoped agents
+      const projectTasksCache = new Map<string, typeof allTasks>();
+
       for (const agent of agents) {
-        const myTasks = allTasks.filter((t) => t.task.assignedTo === agent.id);
-        const unassigned = allTasks.filter(
+        let myTasks = allTasks.filter((t) => t.task.assignedTo === agent.id);
+        let unassigned = allTasks.filter(
           (t) => !t.task.assignedTo && t.task.status === 'pending',
         );
 
-        const content = this.buildTasksMd(corpRoot, myTasks, unassigned, now);
+        // For project-scoped agents, also include project-specific tasks
+        if (agent.scope === 'project' && agent.scopeId) {
+          try {
+            const { getProject } = require('@claudecorp/shared');
+            const project = getProject(this.daemon.corpRoot, agent.scopeId);
+            if (project) {
+              let projectTasks = projectTasksCache.get(project.name);
+              if (!projectTasks) {
+                const projectTasksDir = join(this.daemon.corpRoot, 'projects', project.name, 'tasks');
+                if (existsSync(projectTasksDir)) {
+                  // listTasks reads from corpRoot/tasks/ — scan project dir manually
+                  const { readdirSync } = require('node:fs');
+                  const files = readdirSync(projectTasksDir).filter((f: string) => f.endsWith('.md'));
+                  projectTasks = files.map((f: string) => {
+                    try { return readTask(join(projectTasksDir, f)); } catch { return null; }
+                  }).filter(Boolean) as typeof allTasks;
+                  projectTasksCache.set(project.name, projectTasks);
+                }
+              }
+              if (projectTasks) {
+                const myProjectTasks = projectTasks.filter(t => t.task.assignedTo === agent.id);
+                const unassignedProject = projectTasks.filter(t => !t.task.assignedTo && t.task.status === 'pending');
+                myTasks = [...myTasks, ...myProjectTasks];
+                unassigned = [...unassigned, ...unassignedProject];
+              }
+            }
+          } catch {}
+        }
+
+        const content = this.buildTasksMd(corpRoot, myTasks, unassigned, now, allTasks, members);
 
         try {
           const agentDir = join(this.daemon.corpRoot, agent.agentDir!);
@@ -254,9 +286,11 @@ export class HeartbeatManager {
 
   private buildTasksMd(
     corpRoot: string,
-    myTasks: { task: { id: string; title: string; status: string; priority: string; updatedAt: string }; body: string }[],
-    unassigned: { task: { id: string; title: string; status: string; priority: string }; body: string }[],
+    myTasks: { task: any; body: string }[],
+    unassigned: { task: any; body: string }[],
     now: Date,
+    allTasks?: { task: any; body: string }[],
+    members?: Member[],
   ): string {
     const lines: string[] = [`# Tasks — updated ${now.toISOString()}`, ''];
 
@@ -279,6 +313,29 @@ export class HeartbeatManager {
         lines.push(`- **[${t.task.id}]** ${t.task.title}`);
         lines.push(`  Status: ${t.task.status} | Priority: ${t.task.priority.toUpperCase()}${note}`);
         lines.push(`  File: ${corpRoot}/tasks/${t.task.id}.md`);
+
+        // Dependency chain visualization
+        if (t.task.blockedBy?.length && allTasks) {
+          const blockerInfo = (t.task.blockedBy as string[]).map(blockerId => {
+            const blocker = allTasks.find(bt => bt.task.id === blockerId);
+            if (!blocker) return `${blockerId} (unknown)`;
+            const icon = blocker.task.status === 'completed' ? '\u2713' : blocker.task.status === 'in_progress' ? '\u25CF' : '\u25CB';
+            return `${icon} "${blocker.task.title}" (${blocker.task.status})`;
+          });
+          const resolved = (t.task.blockedBy as string[]).filter(id => {
+            const b = allTasks.find(bt => bt.task.id === id);
+            return b?.task.status === 'completed';
+          }).length;
+          lines.push(`  Depends on (${resolved}/${(t.task.blockedBy as string[]).length} resolved): ${blockerInfo.join(', ')}`);
+        }
+
+        // Handed-by info (who delegated this to you)
+        if (t.task.handedBy && members) {
+          const hander = members.find(m => m.id === t.task.handedBy);
+          const handerName = hander?.displayName ?? 'unknown';
+          const handedAt = t.task.handedAt ? new Date(t.task.handedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+          lines.push(`  Handed by: @${handerName.toLowerCase().replace(/\s+/g, '-')}${handedAt ? ` at ${handedAt}` : ''}`);
+        }
         lines.push('');
       }
     }
@@ -325,6 +382,7 @@ export class HeartbeatManager {
 
       this.writeInboxMd(agent, agentDir, channels, members, allTasks);
       this.writeWorklogMd(agent, agentDir, channels, members, allTasks);
+      this.writeStatusMd(agent, agentDir, members, allTasks);
     } catch {
       // Non-fatal
     }
@@ -599,6 +657,128 @@ export class HeartbeatManager {
       lines.push('Read your TASKS.md and INBOX.md for current state. This worklog is for continuity only.');
 
       writeFileSync(join(agentDir, 'WORKLOG.md'), lines.join('\n'), 'utf-8');
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  /**
+   * STATUS.md — Corp Vitals. Situational awareness of the whole corp.
+   * Who's online, what they're working on, task health, clock health.
+   */
+  private writeStatusMd(
+    agent: Member,
+    agentDir: string,
+    members: Member[],
+    allTasks: { task: any; body: string }[],
+  ): void {
+    try {
+      const now = new Date();
+      const lines: string[] = [`# Corp Vitals — updated ${now.toISOString()}`, ''];
+
+      // --- Agent Status Grid ---
+      lines.push('## Agents', '');
+      const agents = members.filter(m => m.type === 'agent');
+      for (const a of agents) {
+        const workStatus = this.daemon.getAgentWorkStatus(a.id);
+        const icon = workStatus === 'idle' ? '\u25CB' : workStatus === 'busy' ? '\u25CF' : workStatus === 'broken' ? '\u2717' : '\u25CB';
+        const isYou = a.id === agent.id ? ' (you)' : '';
+
+        // Find what this agent is working on
+        let currentWork = '';
+        const agentTasks = allTasks.filter(t => t.task.assignedTo === a.id && t.task.status === 'in_progress');
+        if (agentTasks.length > 0) {
+          currentWork = ` — working on "${agentTasks[0]!.task.title}"`;
+        }
+
+        lines.push(`${icon} **${a.displayName}** (${a.rank}) ${workStatus}${currentWork}${isYou}`);
+      }
+      lines.push('');
+
+      // --- Task Health ---
+      const taskCounts = {
+        total: allTasks.length,
+        inProgress: allTasks.filter(t => t.task.status === 'in_progress').length,
+        assigned: allTasks.filter(t => t.task.status === 'assigned').length,
+        blocked: allTasks.filter(t => t.task.status === 'blocked').length,
+        completed: allTasks.filter(t => t.task.status === 'completed').length,
+        pending: allTasks.filter(t => t.task.status === 'pending').length,
+      };
+
+      lines.push('## Task Health', '');
+      const parts: string[] = [];
+      if (taskCounts.inProgress > 0) parts.push(`${taskCounts.inProgress} active`);
+      if (taskCounts.assigned > 0) parts.push(`${taskCounts.assigned} assigned`);
+      if (taskCounts.blocked > 0) parts.push(`\u26A0 ${taskCounts.blocked} BLOCKED`);
+      if (taskCounts.pending > 0) parts.push(`${taskCounts.pending} pending`);
+      if (taskCounts.completed > 0) parts.push(`${taskCounts.completed} done`);
+      lines.push(parts.length > 0 ? parts.join(' | ') : 'No tasks');
+      lines.push('');
+
+      // --- Blocked tasks (visible to all — someone might be able to help) ---
+      const blockedTasks = allTasks.filter(t => t.task.status === 'blocked');
+      if (blockedTasks.length > 0) {
+        lines.push('## Blocked Tasks (needs attention)', '');
+        for (const bt of blockedTasks) {
+          const assignee = members.find(m => m.id === bt.task.assignedTo);
+          const assigneeName = assignee?.displayName ?? 'unassigned';
+          lines.push(`- **${bt.task.title}** (${assigneeName}) — ${bt.task.id}.md`);
+        }
+        lines.push('');
+      }
+
+      // --- Clock Health (from daemon clocks) ---
+      try {
+        const clocks = this.daemon.clocks.list();
+        const errorClocks = clocks.filter(c => c.consecutiveErrors > 0);
+        if (errorClocks.length > 0) {
+          lines.push('## Clock Errors', '');
+          for (const c of errorClocks) {
+            lines.push(`- \u2717 ${c.name}: ${c.consecutiveErrors} consecutive errors — ${c.lastError?.slice(0, 80) ?? 'unknown'}`);
+          }
+          lines.push('');
+        }
+      } catch {}
+
+      // --- Your Metrics (self-awareness) ---
+      try {
+        const myAnalytics = this.daemon.analytics.getSnapshot().agents[agent.id];
+        if (myAnalytics) {
+          const totalTime = (myAnalytics.busyTimeMs ?? 0) + (myAnalytics.idleTimeMs ?? 0);
+          const utilization = totalTime > 0 ? Math.round((myAnalytics.busyTimeMs / totalTime) * 100) : 0;
+          lines.push('## Your Metrics', '');
+          lines.push(`- Utilization: ${utilization}%`);
+          lines.push(`- Tasks completed: ${myAnalytics.tasksCompleted}`);
+          lines.push(`- Current streak: ${myAnalytics.streak} (best: ${myAnalytics.bestStreak})`);
+          lines.push(`- Dispatches: ${myAnalytics.dispatchCount}`);
+          if (myAnalytics.errorCount > 0) lines.push(`- Errors: ${myAnalytics.errorCount}`);
+          lines.push('');
+        }
+      } catch {}
+
+      // --- Recent Completions (momentum) ---
+      const recentCompleted = allTasks
+        .filter(t => t.task.status === 'completed' && t.task.updatedAt)
+        .sort((a, b) => new Date(b.task.updatedAt).getTime() - new Date(a.task.updatedAt).getTime())
+        .slice(0, 5);
+      if (recentCompleted.length > 0) {
+        lines.push('## Recent Completions', '');
+        for (const t of recentCompleted) {
+          const assignee = members.find(m => m.id === t.task.assignedTo);
+          const name = assignee?.displayName ?? '?';
+          const time = new Date(t.task.updatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+          lines.push(`- \u2713 "${t.task.title}" by ${name} at ${time}`);
+        }
+        lines.push('');
+      }
+
+      // --- Corp Uptime ---
+      const uptimeMs = Date.now() - this.daemon.startedAt;
+      const hours = Math.floor(uptimeMs / 3_600_000);
+      const mins = Math.floor((uptimeMs % 3_600_000) / 60_000);
+      lines.push(`Uptime: ${hours}h ${mins}m | This file is auto-generated every 5 minutes.`);
+
+      writeFileSync(join(agentDir, 'STATUS.md'), lines.join('\n'), 'utf-8');
     } catch {
       // Non-fatal
     }

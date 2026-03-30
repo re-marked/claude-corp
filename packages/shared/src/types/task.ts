@@ -20,6 +20,10 @@ export interface Task {
   parentTaskId: string | null;
   /** Task IDs that must complete before this task can start. */
   blockedBy: string[] | null;
+  /** Member ID of who handed this task (the sponsor — gets notified on completion/failure/blocked). */
+  handedBy: string | null;
+  /** When the task was handed (ISO timestamp). null if not yet handed. */
+  handedAt: string | null;
   teamId: string | null;
   acceptanceCriteria: string[] | null;
   dueAt: string | null;

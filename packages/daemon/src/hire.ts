@@ -161,6 +161,17 @@ export async function hireAgent(
     addMemberToChannel(corpRoot, logsChannel.id, member.id);
   }
 
+  // 5b. If project-scoped, also add to project channels
+  if (projectName) {
+    const projectChannels = channels.filter(
+      c => c.scope === 'project' && (c.name.startsWith(projectName) || c.scopeId === opts.scopeId),
+    );
+    for (const pch of projectChannels) {
+      addMemberToChannel(corpRoot, pch.id, member.id);
+    }
+    log(`[hire] Added ${opts.displayName} to ${projectChannels.length} project channel(s)`);
+  }
+
   // 6. Add to corp gateway — start if first agent, hot-reload if running
   const gw = daemon.processManager.corpGateway;
   if (gw) {

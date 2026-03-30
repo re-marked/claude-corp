@@ -29,6 +29,7 @@ import { Pulse } from './pulse.js';
 import { hireFailsafe } from './failsafe.js';
 import { hireJanitor } from './janitor.js';
 import { ClockManager } from './clock-manager.js';
+import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
@@ -44,6 +45,7 @@ export class Daemon {
   hireWatcher: HireWatcher;
   pulse: Pulse;
   clocks: ClockManager;
+  analytics: AnalyticsEngine;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -73,6 +75,8 @@ export class Daemon {
     this.hireWatcher = new HireWatcher(this);
     this.pulse = new Pulse(this);
     this.clocks = new ClockManager(this.events);
+    this.analytics = new AnalyticsEngine(this);
+    this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
   }
 
   // --- Agent Work Status Engine ---
@@ -82,13 +86,18 @@ export class Daemon {
     this.onIdleCallbacks.push(cb);
   }
 
-  /** Update agent work status + broadcast event + fire transition callbacks */
+  /** Update agent work status + broadcast event + fire transition callbacks + analytics */
   setAgentWorkStatus(memberId: string, displayName: string, status: AgentWorkStatus): void {
     const prev = this.agentWorkStatus.get(memberId);
     if (prev === status) return;
     this.agentWorkStatus.set(memberId, status);
     this.events.broadcast({ type: 'agent_status', agentName: displayName, status });
     log(`[status] ${displayName}: ${prev ?? 'unknown'} → ${status}`);
+
+    // Track status transitions for analytics (utilization calculation)
+    this.analytics.trackStatusChange(memberId, displayName, status);
+    if (status === 'busy') this.analytics.trackDispatch(memberId);
+
     if (prev === 'busy' && status === 'idle') {
       for (const cb of this.onIdleCallbacks) cb(memberId, displayName);
     }
@@ -158,6 +167,8 @@ export class Daemon {
     this.hireWatcher.start();
     this.pulse.start();
 
+    this.analytics.start();
+
     // Register Failsafe heartbeat as a Clock
     this.clocks.register({
       id: 'failsafe-heartbeat',
@@ -170,58 +181,40 @@ export class Daemon {
     });
   }
 
-  /** Dispatch "run your monitoring protocol" directly to Failsafe agent. */
+  /**
+   * Dispatch monitoring protocol to Failsafe via say() — the proven Jack path.
+   * Calls the daemon's own /cc/say endpoint internally.
+   * This is more reliable than direct dispatchToAgent() because say() handles
+   * session management, status tracking, and inbox logging automatically.
+   */
   private async dispatchFailsafeHeartbeat(): Promise<void> {
     try {
+      // Quick checks before making the HTTP call
       const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
       const failsafe = members.find(m => m.displayName === 'Failsafe' && m.type === 'agent');
-      if (!failsafe?.agentDir) return;
-
-      // Don't pile up dispatches
+      if (!failsafe) return;
       if (this.getAgentWorkStatus(failsafe.id) === 'busy') return;
 
       const agentProc = this.processManager.getAgent(failsafe.id);
       if (!agentProc || agentProc.status !== 'ready') return;
 
-      // Build context for direct dispatch (same pattern as inbox dispatch in heartbeat.ts)
-      const allMembers = members.map(m => ({ name: m.displayName, rank: m.rank, type: m.type, status: m.status }));
-      const agentDir = join(this.corpRoot, failsafe.agentDir).replace(/\\/g, '/');
-      const corpRoot = this.corpRoot.replace(/\\/g, '/');
+      // Call our own /cc/say endpoint — same path that Jack uses, proven reliable
+      const resp = await fetch(`http://127.0.0.1:${this.port}/cc/say`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: 'failsafe',
+          message: 'Run your monitoring protocol. Check all agent statuses via cc-cli status and report.',
+          sessionKey: `failsafe-heartbeat:${Date.now()}`,
+        }),
+        signal: AbortSignal.timeout(90_000), // 90s timeout
+      });
 
-      let supervisorName: string | null = null;
-      if (failsafe.spawnedBy) {
-        const sup = members.find(m => m.id === failsafe.spawnedBy);
-        supervisorName = sup?.displayName ?? null;
-      }
+      const data = await resp.json() as any;
+      if (data.ok) {
+        log(`[daemon] Failsafe heartbeat response: ${data.response?.slice(0, 80) ?? 'ok'}`);
 
-      const { dispatchToAgent } = await import('./dispatch.js');
-      const { composeSystemMessage } = await import('./fragments/index.js');
-
-      const context = {
-        agentDir,
-        corpRoot,
-        channelName: 'failsafe-heartbeat',
-        channelMembers: [failsafe.displayName],
-        corpMembers: allMembers,
-        recentHistory: [],
-        daemonPort: this.getPort(),
-        agentMemberId: failsafe.id,
-        agentRank: failsafe.rank,
-        agentDisplayName: failsafe.displayName,
-        channelKind: 'direct' as const,
-        supervisorName,
-      };
-
-      this.setAgentWorkStatus(failsafe.id, failsafe.displayName, 'busy');
-
-      const wsClient = agentProc.mode === 'remote' ? this.openclawWS : this.corpGatewayWS;
-      const sessionKey = `failsafe-heartbeat:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
-
-      try {
-        const result = await dispatchToAgent(agentProc, 'Run your monitoring protocol. Check all agent statuses via cc-cli status and report.', context, sessionKey, undefined, wsClient);
-        log(`[daemon] Failsafe heartbeat response: ${result.content.slice(0, 80)}`);
-
-        // Write response to Failsafe's DM so it's visible in TUI
+        // Write response to Failsafe's DM for TUI visibility
         const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
         const founder = members.find(m => m.rank === 'owner');
         const dmChannel = channels.find(
@@ -229,13 +222,13 @@ export class Daemon {
           c.memberIds.includes(failsafe.id) &&
           (founder ? c.memberIds.includes(founder.id) : true),
         );
-        if (dmChannel && result.content.trim()) {
+        if (dmChannel && data.response?.trim()) {
           const responseMsg: ChannelMessage = {
             id: generateId(),
             channelId: dmChannel.id,
             senderId: failsafe.id,
             threadId: null,
-            content: result.content,
+            content: data.response,
             kind: 'text',
             mentions: [],
             metadata: { source: 'failsafe-heartbeat' },
@@ -246,12 +239,9 @@ export class Daemon {
           responseMsg.originId = responseMsg.id;
           appendMessage(join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), responseMsg);
         }
-      } catch (err) {
-        logError(`[daemon] Failsafe heartbeat dispatch failed: ${err}`);
+      } else {
+        logError(`[daemon] Failsafe say() failed: ${data.error ?? 'unknown'}`);
       }
-
-      this.setAgentWorkStatus(failsafe.id, failsafe.displayName, 'idle');
-      log('[daemon] Failsafe heartbeat completed');
     } catch (err) {
       logError(`[daemon] Failsafe heartbeat failed: ${err}`);
     }
@@ -386,6 +376,7 @@ export class Daemon {
     };
     userMsg.originId = userMsg.id;
     appendMessage(messagesPath, userMsg);
+    this.analytics.trackMessage();
 
     // Poke the router to process this channel (Windows fs.watch can miss appends)
     setTimeout(() => this.router.pokeChannel(channelId), 100);
@@ -425,6 +416,8 @@ export class Daemon {
     this.hireWatcher.stop();
     this.pulse.stop();
     this.clocks.stopAll();
+    this.inbox.flush(); // Persist inbox state before shutdown
+    this.analytics.stop(); // Persist analytics before shutdown
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();
