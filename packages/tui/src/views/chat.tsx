@@ -585,6 +585,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       onNavigate?.({ type: 'corp-home' });
       return;
     }
+    if (cmd === '/clock' || cmd === '/clocks') {
+      onNavigate?.({ type: 'clock' });
+      return;
+    }
 
     // /dogfood — set up a dev project pointing at this repo with a team and task
     if (cmd === '/dogfood') {

@@ -41,8 +41,7 @@ export class HeartbeatManager {
   }
 
   start(): void {
-    this.refreshAll();
-
+    // No manual pre-call needed — ClockManager fires immediately on register
     this.interval = this.daemon.clocks.register({
       id: 'tasks-refresh',
       name: 'Tasks Refresh',
