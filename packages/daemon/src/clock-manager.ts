@@ -1,0 +1,254 @@
+import type { Clock, ClockType, ClockStatus } from '@claudecorp/shared';
+import type { EventBus } from './events.js';
+import { log, logError } from './logger.js';
+
+const ALARM_THRESHOLD = 3; // Consecutive errors before alarm
+
+interface ClockEntry {
+  clock: Clock;
+  callback: () => void | Promise<void>;
+  handle: ReturnType<typeof setInterval> | null;
+  firing: boolean; // Guard against overlapping async fires
+}
+
+export interface RegisterClockOpts {
+  id: string;
+  name: string;
+  type: ClockType;
+  intervalMs: number;
+  target: string;
+  description: string;
+  callback: () => void | Promise<void>;
+}
+
+/**
+ * ClockManager — centralized registry for ALL periodic operations.
+ *
+ * Every setInterval in the daemon becomes a Clock with:
+ * - Millisecond-precise timestamp tracking
+ * - Fire count + error count + consecutive error tracking
+ * - Pause/resume/stop lifecycle management
+ * - WebSocket event broadcasting on each tick
+ * - Overlap guard for async callbacks
+ *
+ * The /clock TUI view reads from this to show animated spinners,
+ * progress bars, and real-time fire counts.
+ */
+export class ClockManager {
+  private entries = new Map<string, ClockEntry>();
+  private events: EventBus | null;
+
+  constructor(events?: EventBus | null) {
+    this.events = events ?? null;
+  }
+
+  /**
+   * Register a new clock. Creates the setInterval and starts tracking.
+   * Returns the interval handle for backward compatibility (existing code
+   * stores handles for clearInterval — double-clear is a safe no-op).
+   */
+  register(opts: RegisterClockOpts): ReturnType<typeof setInterval> {
+    // Don't duplicate
+    if (this.entries.has(opts.id)) {
+      const existing = this.entries.get(opts.id)!;
+      log(`[clock] ${opts.id} already registered — skipping`);
+      return existing.handle!;
+    }
+
+    const now = Date.now();
+    const clock: Clock = {
+      id: opts.id,
+      name: opts.name,
+      type: opts.type,
+      intervalMs: opts.intervalMs,
+      target: opts.target,
+      status: 'running',
+      lastFiredAt: null,
+      nextFireAt: now + opts.intervalMs,
+      fireCount: 0,
+      errorCount: 0,
+      consecutiveErrors: 0,
+      lastError: null,
+      description: opts.description,
+      createdAt: now,
+    };
+
+    const entry: ClockEntry = {
+      clock,
+      callback: opts.callback,
+      handle: null,
+      firing: false,
+    };
+
+    // Create the interval with wrapped callback
+    entry.handle = setInterval(() => this.tick(opts.id), opts.intervalMs);
+    this.entries.set(opts.id, entry);
+
+    log(`[clock] Registered: ${opts.name} (${opts.id}) — every ${this.formatInterval(opts.intervalMs)}`);
+    return entry.handle;
+  }
+
+  /** Internal tick handler — wraps the callback with metadata tracking. */
+  private async tick(id: string): Promise<void> {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+
+    // Overlap guard — skip if previous fire is still in progress
+    if (entry.firing) {
+      log(`[clock] ${entry.clock.name} skipped — previous fire still in progress`);
+      return;
+    }
+
+    entry.firing = true;
+    const firedAt = Date.now();
+
+    try {
+      // Execute the callback (handles both sync and async)
+      await Promise.resolve(entry.callback());
+
+      // Success — update metadata
+      entry.clock.lastFiredAt = firedAt;
+      entry.clock.nextFireAt = firedAt + entry.clock.intervalMs;
+      entry.clock.fireCount++;
+      entry.clock.consecutiveErrors = 0;
+      if (entry.clock.status === 'error') {
+        entry.clock.status = 'running'; // Recovered from error
+      }
+
+      // Broadcast tick event
+      this.broadcastTick(entry.clock);
+    } catch (err) {
+      // Error — track it
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      entry.clock.errorCount++;
+      entry.clock.consecutiveErrors++;
+      entry.clock.lastError = errorMsg;
+      entry.clock.status = 'error';
+      entry.clock.lastFiredAt = firedAt; // Still counts as a fire attempt
+      entry.clock.nextFireAt = firedAt + entry.clock.intervalMs;
+
+      logError(`[clock] ${entry.clock.name} error (${entry.clock.consecutiveErrors}/${ALARM_THRESHOLD}): ${errorMsg}`);
+
+      // Alarm on consecutive errors
+      if (entry.clock.consecutiveErrors >= ALARM_THRESHOLD) {
+        logError(`[clock] ALARM: ${entry.clock.name} has ${entry.clock.consecutiveErrors} consecutive errors`);
+        this.broadcastAlarm(entry.clock);
+      }
+    } finally {
+      entry.firing = false;
+    }
+  }
+
+  /** Pause a clock — stops the interval, preserves metadata. */
+  pause(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) throw new Error(`Clock "${id}" not found`);
+    if (entry.clock.status === 'paused') return;
+
+    if (entry.handle) {
+      clearInterval(entry.handle);
+      entry.handle = null;
+    }
+    entry.clock.status = 'paused';
+    entry.clock.nextFireAt = null;
+    log(`[clock] Paused: ${entry.clock.name}`);
+  }
+
+  /** Resume a paused clock — recreates the interval. */
+  resume(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) throw new Error(`Clock "${id}" not found`);
+    if (entry.clock.status === 'running') return;
+
+    entry.handle = setInterval(() => this.tick(id), entry.clock.intervalMs);
+    entry.clock.status = 'running';
+    entry.clock.nextFireAt = Date.now() + entry.clock.intervalMs;
+    log(`[clock] Resumed: ${entry.clock.name}`);
+  }
+
+  /** Stop a clock permanently. */
+  stop(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+
+    if (entry.handle) {
+      clearInterval(entry.handle);
+      entry.handle = null;
+    }
+    entry.clock.status = 'stopped';
+    entry.clock.nextFireAt = null;
+  }
+
+  /** Stop all clocks. Called during daemon shutdown. */
+  stopAll(): void {
+    for (const [id] of this.entries) {
+      this.stop(id);
+    }
+    log(`[clock] All ${this.entries.size} clocks stopped`);
+  }
+
+  /** Record an error manually (for callbacks that handle their own try/catch). */
+  recordError(id: string, message: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+
+    entry.clock.errorCount++;
+    entry.clock.consecutiveErrors++;
+    entry.clock.lastError = message;
+    entry.clock.status = 'error';
+
+    if (entry.clock.consecutiveErrors >= ALARM_THRESHOLD) {
+      logError(`[clock] ALARM: ${entry.clock.name} — ${message}`);
+      this.broadcastAlarm(entry.clock);
+    }
+  }
+
+  /** Get all clocks as metadata (no handles, no callbacks). */
+  list(): Clock[] {
+    return [...this.entries.values()].map(e => ({ ...e.clock }));
+  }
+
+  /** Get a single clock by ID. */
+  get(id: string): Clock | undefined {
+    const entry = this.entries.get(id);
+    return entry ? { ...entry.clock } : undefined;
+  }
+
+  /** Number of registered clocks. */
+  get size(): number {
+    return this.entries.size;
+  }
+
+  // --- Event broadcasting ---
+
+  private broadcastTick(clock: Clock): void {
+    if (!this.events) return;
+    this.events.broadcast({
+      type: 'clock_tick',
+      clockId: clock.id,
+      clockName: clock.name,
+      firedAt: clock.lastFiredAt!,
+      nextFireAt: clock.nextFireAt!,
+      fireCount: clock.fireCount,
+    } as any);
+  }
+
+  private broadcastAlarm(clock: Clock): void {
+    if (!this.events) return;
+    this.events.broadcast({
+      type: 'clock_alarm',
+      clockId: clock.id,
+      clockName: clock.name,
+      consecutiveErrors: clock.consecutiveErrors,
+      lastError: clock.lastError,
+    } as any);
+  }
+
+  // --- Formatting helpers ---
+
+  private formatInterval(ms: number): string {
+    if (ms >= 60_000) return `${Math.round(ms / 60_000)}m`;
+    if (ms >= 1_000) return `${Math.round(ms / 1_000)}s`;
+    return `${ms}ms`;
+  }
+}

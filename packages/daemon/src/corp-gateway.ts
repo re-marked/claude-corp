@@ -10,6 +10,7 @@ import {
   formatProviderModel,
   parseProviderModel,
 } from '@claudecorp/shared';
+import type { ClockManager } from './clock-manager.js';
 import { log, logError } from './logger.js';
 
 export interface CorpGatewayAgent {
@@ -29,6 +30,8 @@ export class CorpGateway {
   private _token: string;
   private process: ResultPromise | null = null;
   private _status: 'stopped' | 'starting' | 'ready' | 'restarting' = 'stopped';
+  /** Optional ClockManager for timer observability. Set by Daemon after construction. */
+  clocks: ClockManager | null = null;
 
   constructor(corpRoot: string, globalConfig: GlobalConfig) {
     this.corpRoot = corpRoot;
@@ -263,9 +266,9 @@ export class CorpGateway {
 
   /** Periodically check if the gateway is still alive. Auto-restart if dead. */
   private startHealthMonitor(): void {
-    const interval = setInterval(async () => {
+    const healthCheck = async () => {
       if (this._status !== 'ready') {
-        clearInterval(interval);
+        if (this.clocks) this.clocks.stop('gateway-health');
         return;
       }
       try {
@@ -282,10 +285,24 @@ export class CorpGateway {
         logError(`[gateway] Corp gateway died — auto-restarting...`);
         this._status = 'stopped';
         this.process = null;
-        clearInterval(interval);
+        if (this.clocks) this.clocks.stop('gateway-health');
         this.autoRestart();
       }
-    }, 30_000); // Check every 30s
+    };
+
+    if (this.clocks) {
+      this.clocks.register({
+        id: 'gateway-health',
+        name: 'Gateway Health',
+        type: 'timer',
+        intervalMs: 30_000,
+        target: 'corp gateway',
+        description: 'Checks if corp gateway process is alive, auto-restarts if dead',
+        callback: healthCheck,
+      });
+    } else {
+      setInterval(healthCheck, 30_000);
+    }
   }
 
   /** Re-copy auth profiles for all registered agents (in case keys changed). */
