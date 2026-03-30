@@ -4,8 +4,8 @@ import type { Daemon } from './daemon.js';
 import { log, logError } from './logger.js';
 
 const CHECK_INTERVAL_MS = 2 * 60 * 1000; // Every 2 minutes
-const STUCK_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes busy = stuck
-const FAILSAFE_STALE_MS = 10 * 60 * 1000; // If Failsafe agent hasn't responded in 10 min, restart
+const STUCK_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes busy = stuck
+const FAILSAFE_STALE_MS = 5 * 60 * 1000; // If Failsafe agent hasn't responded in 5 min, restart
 
 /**
  * Pulse — daemon-level heartbeat timer.
