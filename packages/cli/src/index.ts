@@ -286,6 +286,14 @@ async function run() {
       await cmdAgentControl({ action, agent: values.agent as string | undefined, json: !!values.json });
       break;
     }
+    case 'jack': {
+      const { cmdJack } = await import('./commands/jack.js');
+      await cmdJack({
+        agent: values.agent as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'hand': {
       const { cmdHand } = await import('./commands/hand.js');
       await cmdHand({
