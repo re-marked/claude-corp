@@ -614,6 +614,94 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // --- Contract endpoints ---
+
+      // POST /contracts/create
+      if (method === 'POST' && path === '/contracts/create') {
+        const { createContract: cc, getProjectByName: gpbn } = await import('@claudecorp/shared');
+        const body = await readBody(req) as Record<string, unknown>;
+        if (!body.projectName || !body.title || !body.goal || !body.createdBy) {
+          json(res, { error: 'projectName, title, goal, and createdBy are required' }, 400);
+          return;
+        }
+        const project = gpbn(daemon.corpRoot, body.projectName as string);
+        if (!project) { json(res, { error: `Project "${body.projectName}" not found` }, 404); return; }
+
+        const contract = cc(daemon.corpRoot, {
+          title: body.title as string,
+          goal: body.goal as string,
+          projectId: project.id,
+          projectName: project.name,
+          leadId: (body.leadId as string) ?? null,
+          priority: (body.priority as any) ?? 'normal',
+          deadline: (body.deadline as string) ?? null,
+          blueprintId: (body.blueprintId as string) ?? null,
+          createdBy: body.createdBy as string,
+          description: (body.description as string) ?? undefined,
+        });
+
+        writeTaskEvent(daemon.corpRoot, `[CONTRACT] "${contract.title}" created in project ${project.name}`);
+        daemon.analytics.trackTaskCreated(); // Contracts count as high-level task creation
+
+        json(res, { ok: true, contract });
+        return;
+      }
+
+      // GET /contracts?project=<name>&status=<status>
+      if (method === 'GET' && path === '/contracts') {
+        const { listContracts: lc, listAllContracts: lac } = await import('@claudecorp/shared');
+        const projectName = url.searchParams.get('project');
+        const status = url.searchParams.get('status');
+        const filter = status ? { status: status as any } : undefined;
+
+        const contracts = projectName
+          ? lc(daemon.corpRoot, projectName, filter)
+          : lac(daemon.corpRoot, filter);
+
+        json(res, contracts.map(c => c.contract));
+        return;
+      }
+
+      // GET /contracts/:project/:id
+      const contractGetMatch = path.match(/^\/contracts\/([^/]+)\/([^/]+)$/);
+      if (method === 'GET' && contractGetMatch) {
+        const { readContract: rc, contractPath: cp, getContractProgress: gcp } = await import('@claudecorp/shared');
+        const projectName = decodeURIComponent(contractGetMatch[1]!);
+        const contractId = decodeURIComponent(contractGetMatch[2]!);
+        try {
+          const filePath = cp(daemon.corpRoot, projectName, contractId);
+          const { contract, body: contractBody } = rc(filePath);
+          const progress = gcp(daemon.corpRoot, contract);
+          json(res, { contract, body: contractBody, progress });
+        } catch {
+          json(res, { error: 'Contract not found' }, 404);
+        }
+        return;
+      }
+
+      // PATCH /contracts/:project/:id
+      const contractPatchMatch = path.match(/^\/contracts\/([^/]+)\/([^/]+)$/);
+      if (method === 'PATCH' && contractPatchMatch) {
+        const { updateContract: uc, contractPath: cp } = await import('@claudecorp/shared');
+        const projectName = decodeURIComponent(contractPatchMatch[1]!);
+        const contractId = decodeURIComponent(contractPatchMatch[2]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        try {
+          const filePath = cp(daemon.corpRoot, projectName, contractId);
+          const updated = uc(filePath, body as any);
+
+          if (body.status) {
+            writeTaskEvent(daemon.corpRoot, `[CONTRACT] "${updated.title}" → ${updated.status}`);
+          }
+
+          daemon.heartbeat.refreshAll();
+          json(res, { ok: true, contract: updated });
+        } catch {
+          json(res, { error: 'Contract not found' }, 404);
+        }
+        return;
+      }
+
       // --- Analytics endpoints ---
 
       // GET /analytics — full analytics snapshot
