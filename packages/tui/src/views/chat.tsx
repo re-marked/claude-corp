@@ -933,14 +933,32 @@ Always consider what happens when things go wrong.`,
       );
     }
 
-    // Tool events — compact inline display
+    // Tool events — compact inline display with result tree
     if (msg.kind === 'tool_event') {
       const toolColor = sender ? agentColor(COLORS, sender.rank) : COLORS.subtle;
+      const meta = msg.metadata as Record<string, unknown> | null;
+      const toolResult = meta?.toolResult as string | undefined;
+
+      // Truncate result to first line, max 80 chars
+      let resultPreview = '';
+      if (toolResult) {
+        const firstLine = toolResult.split('\n')[0]?.trim() ?? '';
+        resultPreview = firstLine.length > 80 ? firstLine.slice(0, 77) + '...' : firstLine;
+      }
+
       return (
-        <Box key={msg.id} gap={1} paddingLeft={1}>
-          <Text color={COLORS.muted}> {'\u2502'}</Text>
-          <Text color={toolColor}>{name}</Text>
-          <Text color={COLORS.subtle}>{msg.content}</Text>
+        <Box key={msg.id} flexDirection="column" paddingLeft={1}>
+          <Box gap={1}>
+            <Text color={COLORS.muted}> {'\u2502'}</Text>
+            <Text color={toolColor}>{name}</Text>
+            <Text color={COLORS.subtle}>{msg.content}</Text>
+          </Box>
+          {resultPreview && (
+            <Box gap={1}>
+              <Text color={COLORS.border}> {'\u23BF'}</Text>
+              <Text color={COLORS.muted}>{resultPreview}</Text>
+            </Box>
+          )}
         </Box>
       );
     }
