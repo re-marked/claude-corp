@@ -4,7 +4,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## What WORKS today (v0.10.5 + bugfixes in progress)
+## What WORKS today (v0.10.7)
 
 ### Primitives (shipped v0.10.0–v0.10.5)
 - **Casket** — sealed agent workspace: TASKS.md + INBOX.md + WORKLOG.md + STATUS.md auto-generated
@@ -31,7 +31,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - **Inbox priority queue** — one task at a time, priority sorted. Persists to inbox-state.json across daemon restarts
 
 ### Monitoring & Analytics
-- **ClockManager** — 7 daemon timers as Clocks with fire counts, error tracking, overlap guard
+- **ClockManager** — 10 daemon clocks registered (7 core + 3 recovery). Fire counts, error tracking, overlap guard
 - **Analytics Engine** — tasks created/completed/failed, dispatches, messages, per-agent utilization/streaks. Persists to analytics.json
 - **Corp Vitals (STATUS.md)** — per-agent: who's online + current work + your metrics + recent completions + Herald narration + clock errors
 - **cc-cli activity/feed** — 4-section dashboard: PROBLEMS, AGENTS, TASKS, EVENTS
@@ -45,6 +45,8 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - **DM mode onboarding** — choice at corp creation with async deprecated warning
 - **Tool call details** — shows actual file paths + commands + result tree with └
 - **Corp selector** — scans filesystem for all corps (not just index)
+- **Inline streaming** — agent responses stream directly in chat (not preview panel), multi-agent simultaneous
+- **First-boot restart warning** — recommends TUI restart after corp creation for clean agent init
 
 ### Fragments (10 rewritten for v0.10.x primitives)
 - workspace, task-execution, delegation, receiving-delegation, agent-communication, cc-cli, inbox, context, back-reporting, blocker-escalation
@@ -62,9 +64,8 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v0.10.6 Bugfixes (IN PROGRESS — branch: feature/v0.10.6-bugfixes)
+## v0.10.6 Bugfixes (MERGED)
 
-### Fixed (9 commits)
 - ✅ isDaemonRunning trusts port file, skips unreliable PID check (Windows cross-process)
 - ✅ Tool call details — cache args from start events, show file paths + commands
 - ✅ Tool result [object Object] — JSON.stringify non-string results
@@ -76,17 +77,28 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - ✅ DM dispatch for system messages — find agent member, not "other" member (ROOT CAUSE of agents not working)
 - ✅ CEO remote OpenClaw failure falls back to local gateway
 
+## v0.10.7 Streaming & Self-Healing (MERGED)
+
+- ✅ Inline streaming — responses stream directly in chat as real messages (not preview panel)
+- ✅ Multi-agent simultaneous streaming — each agent gets own inline message with color + spinner
+- ✅ Jack mode WebSocket events — /cc/say emits dispatch_start, stream_token, tool events, dispatch_end
+- ✅ No more double dispatch — router skips Jack messages, say() handles everything
+- ✅ No more double CEO dispatch on first boot — onboarding daemon doesn't start router
+- ✅ First-boot restart warning after corp creation
+- ✅ Agent Recovery clock (30s) — detects crashed agents, respawns with 5-attempt limit
+- ✅ CEO Gateway Recovery clock (30s) — health pings CEO, marks crashed after 3 failures, reconnects WebSocket
+- ✅ Corp Gateway Recovery clock (60s) — picks up after autoRestart exhaustion, 10-attempt limit, updates all workers
+- ✅ TUI memory — investigated, already well-managed (Static@100, messages@200, proper cleanup)
+
 ### Still needs fixing
-- ❌ Streaming preview → stream directly into chat (bigger refactor)
 - ❌ Ctrl+H not working in some contexts (terminal intercepts)
 - ❌ Herald cc-cli commands fail from inside agent shell (PATH issue)
-- ❌ Memory investigation (Static component + daemon events accumulation)
 
 ---
 
 ## Planned but NOT yet built
 
-### v0.10.7+ — Loops & Crons (Clock placeholders exist)
+### v0.11.0 — Loops & Crons (Clock placeholders exist)
 - /loop command: `cc-cli loop 5m cc-cli status` — recurring commands
 - Cron jobs: scheduled tasks
 - Both register as Clock entries, visible in /clock view
