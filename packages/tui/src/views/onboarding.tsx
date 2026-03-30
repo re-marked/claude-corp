@@ -265,7 +265,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
                       {t.ranks.owner} → {t.ranks.master} → {t.ranks.leader} → {t.ranks.worker} → {t.ranks.subagent}
                     </Text>
                     <Text color={COLORS.muted}>
-                      Channels: #{t.channels.general}  #{t.channels.tasks}  #{t.channels.system}
+                      Channels: #{t.channels.general}  #{t.channels.tasks}  #{t.channels.logs}
                     </Text>
                   </Box>
                 )}

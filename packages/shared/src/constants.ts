@@ -23,13 +23,16 @@ export const MEMBERS_JSON = 'members.json';
 export const CHANNELS_JSON = 'channels.json';
 export const MESSAGES_JSONL = 'messages.jsonl';
 
-export const SYSTEM_CHANNELS = ['general', 'system', 'heartbeat', 'tasks', 'errors'] as const;
+export const SYSTEM_CHANNELS = ['general', 'tasks', 'logs'] as const;
 
 export const GITIGNORE_CONTENT = `# Agent secrets (injected by daemon, never committed)
 auth-profiles.json
 
 # Corp gateway runtime state (OpenClaw workspaces, sessions, configs)
 .gateway/
+
+# Agent git worktrees
+wt/
 
 # OS
 .DS_Store
