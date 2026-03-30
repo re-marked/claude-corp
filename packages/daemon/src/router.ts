@@ -241,13 +241,14 @@ export class MessageRouter {
       });
       log(`[router] Thread dispatch: ${targetIds.length} participants`);
     } else if (channelMode === 'dm') {
-      // DM: auto-route to the other member
-      const otherId = channel.memberIds.find((id) => id !== msg.senderId);
-      if (otherId) {
-        const other = members.find((m) => m.id === otherId);
-        if (other && other.type === 'agent') {
-          targetIds = [otherId];
-        }
+      // DM: auto-route to the agent member in this channel
+      // For system messages (task dispatch, etc.), senderId='system' is NOT a channel member.
+      // So we find the agent member directly, not "the other member".
+      const agentMember = channel.memberIds
+        .map(id => members.find(m => m.id === id))
+        .find(m => m && m.type === 'agent' && m.id !== msg.senderId);
+      if (agentMember) {
+        targetIds = [agentMember.id];
       }
     } else if (channelMode === 'all') {
       // All: every agent in the channel wakes up
