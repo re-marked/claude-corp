@@ -4,6 +4,8 @@ import {
   type TaskStatus,
   type Member,
   readTask,
+  updateTask,
+  taskPath,
   listTasks,
   readConfig,
   MEMBERS_JSON,
@@ -185,13 +187,19 @@ export class TaskWatcher {
                   return blocker?.task.status === 'completed';
                 });
                 if (allBlockersResolved) {
+                  // Auto-unblock: update status from blocked → assigned, then hand immediately
+                  try {
+                    const downstreamPath = taskPath(this.daemon.corpRoot, downstream.task.id);
+                    updateTask(downstreamPath, { status: 'assigned' });
+                  } catch {}
+
                   logTaskAssignment(this.daemon.corpRoot, downstream.task.assignedTo!, downstream.task.title);
                   dispatchTaskToDm(this.daemon, downstream.task.assignedTo!, downstream.task.title, downstream.task.id);
                   writeTaskEvent(
                     this.daemon.corpRoot,
-                    `"${downstream.task.title}" unblocked — all dependencies resolved (${task.title} completed)`,
+                    `"${downstream.task.title}" UNBLOCKED — all dependencies resolved ("${task.title}" completed) — auto-handed to assignee`,
                   );
-                  log(`[task-watcher] blockedBy resolved: "${downstream.task.title}" unblocked by "${task.title}" completing`);
+                  log(`[task-watcher] Auto-unblock: "${downstream.task.title}" unblocked + auto-handed (dependency "${task.title}" completed)`);
                 }
               }
             } catch {

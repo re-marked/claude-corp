@@ -241,7 +241,7 @@ export class HeartbeatManager {
           } catch {}
         }
 
-        const content = this.buildTasksMd(corpRoot, myTasks, unassigned, now);
+        const content = this.buildTasksMd(corpRoot, myTasks, unassigned, now, allTasks);
 
         try {
           const agentDir = join(this.daemon.corpRoot, agent.agentDir!);
@@ -286,9 +286,10 @@ export class HeartbeatManager {
 
   private buildTasksMd(
     corpRoot: string,
-    myTasks: { task: { id: string; title: string; status: string; priority: string; updatedAt: string }; body: string }[],
-    unassigned: { task: { id: string; title: string; status: string; priority: string }; body: string }[],
+    myTasks: { task: any; body: string }[],
+    unassigned: { task: any; body: string }[],
     now: Date,
+    allTasks?: { task: any; body: string }[],
   ): string {
     const lines: string[] = [`# Tasks — updated ${now.toISOString()}`, ''];
 
@@ -311,6 +312,17 @@ export class HeartbeatManager {
         lines.push(`- **[${t.task.id}]** ${t.task.title}`);
         lines.push(`  Status: ${t.task.status} | Priority: ${t.task.priority.toUpperCase()}${note}`);
         lines.push(`  File: ${corpRoot}/tasks/${t.task.id}.md`);
+
+        // Dependency chain visualization
+        if (t.task.blockedBy?.length && allTasks) {
+          const blockerInfo = (t.task.blockedBy as string[]).map(blockerId => {
+            const blocker = allTasks.find(bt => bt.task.id === blockerId);
+            if (!blocker) return `${blockerId} (unknown)`;
+            const icon = blocker.task.status === 'completed' ? '\u2713' : blocker.task.status === 'in_progress' ? '\u25CF' : '\u25CB';
+            return `${icon} "${blocker.task.title}" (${blocker.task.status})`;
+          });
+          lines.push(`  Depends on: ${blockerInfo.join(', ')}`);
+        }
         lines.push('');
       }
     }
