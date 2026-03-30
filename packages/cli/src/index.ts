@@ -242,6 +242,18 @@ async function run() {
       await cmdLogs({ last: parseInt(values.last as string) || 50 });
       break;
     }
+    case 'activity':
+    case 'feed': {
+      const { cmdActivity } = await import('./commands/activity.js');
+      await cmdActivity({
+        agent: values.agent as string | undefined,
+        channel: values.channel as string | undefined,
+        last: parseInt(values.last as string) || undefined,
+        verbose: false,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'stats': {
       const { cmdStats } = await import('./commands/stats.js');
       await cmdStats({ json: !!values.json });
