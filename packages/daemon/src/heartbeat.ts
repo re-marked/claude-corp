@@ -9,6 +9,7 @@ import {
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { dispatchToAgent, type DispatchContext } from './dispatch.js';
+import { dispatchTaskToDm } from './task-events.js';
 import { composeSystemMessage } from './fragments/index.js';
 import { log, logError } from './logger.js';
 
@@ -45,8 +46,15 @@ export class HeartbeatManager {
       this.dispatchInboxSummaries();
     }, INBOX_CHECK_INTERVAL_MS);
 
-    // Wire busy→idle inbox dump
+    // Wire busy→idle: task queue FIRST, then inbox summary
     this.daemon.onAgentIdle((memberId, displayName) => {
+      // Priority 1: queued tasks — feed the next one
+      if (this.daemon.inbox.hasQueuedTasks(memberId)) {
+        log(`[heartbeat] ${displayName} became idle with queued tasks — dispatching next task`);
+        this.dispatchNextQueuedTask(memberId);
+        return;
+      }
+      // Priority 2: unread inbox messages
       if (this.daemon.inbox.hasUnread(memberId)) {
         log(`[heartbeat] ${displayName} became idle with unread inbox — dispatching summary`);
         this.dispatchInboxToAgent(memberId);
@@ -61,7 +69,7 @@ export class HeartbeatManager {
     if (this.inboxInterval) clearInterval(this.inboxInterval);
   }
 
-  /** Dispatch inbox summaries to all IDLE agents with unread items */
+  /** Dispatch queued tasks or inbox summaries to all IDLE agents */
   private dispatchInboxSummaries(): void {
     try {
       const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
@@ -70,6 +78,14 @@ export class HeartbeatManager {
       for (const agent of agents) {
         const status = this.daemon.getAgentWorkStatus(agent.id);
         if (status !== 'idle') continue;
+
+        // Priority 1: queued tasks
+        if (this.daemon.inbox.hasQueuedTasks(agent.id)) {
+          this.dispatchNextQueuedTask(agent.id);
+          continue;
+        }
+
+        // Priority 2: inbox messages
         if (!this.daemon.inbox.hasUnread(agent.id)) continue;
 
         this.dispatchInboxToAgent(agent.id);
@@ -135,6 +151,26 @@ export class HeartbeatManager {
       this.daemon.inbox.clear(memberId);
     } catch (err) {
       logError(`[heartbeat] Inbox dispatch to ${memberId} failed: ${err}`);
+    }
+  }
+
+  /** Dequeue and dispatch the next queued task to an agent's DM. */
+  private dispatchNextQueuedTask(memberId: string): void {
+    try {
+      // Build set of completed task IDs for blocker resolution
+      const allTasks = listTasks(this.daemon.corpRoot);
+      const completedIds = new Set(
+        allTasks.filter(t => t.task.status === 'completed').map(t => t.task.id),
+      );
+
+      const task = this.daemon.inbox.dequeueNext(memberId, completedIds);
+      if (!task) return;
+
+      // Dispatch to DM via the same path as direct task assignment
+      dispatchTaskToDm(this.daemon, task.assigneeId, task.taskTitle, task.taskId);
+      log(`[heartbeat] Fed queued task "${task.taskTitle}" to agent ${memberId}`);
+    } catch (err) {
+      logError(`[heartbeat] Failed to dispatch queued task to ${memberId}: ${err}`);
     }
   }
 

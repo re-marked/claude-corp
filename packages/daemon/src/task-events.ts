@@ -78,11 +78,40 @@ export function dispatchTaskToDm(
 ): void {
   try {
     const corpRoot = daemon.corpRoot;
-    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
     const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
 
     const assignee = members.find((m) => m.id === assigneeId);
     if (!assignee) return;
+
+    // If agent is busy, enqueue in the priority task queue instead
+    const agentStatus = daemon.getAgentWorkStatus(assigneeId);
+    if (agentStatus === 'busy') {
+      try {
+        const { task } = readTask(taskPath(corpRoot, taskId));
+        daemon.inbox.enqueueTask(assigneeId, {
+          taskId: task.id,
+          taskTitle: task.title,
+          taskPriority: task.priority,
+          assigneeId,
+          timestamp: new Date().toISOString(),
+          blockedBy: task.blockedBy ?? null,
+        });
+        log(`[task-events] Agent ${assignee.displayName} is busy — queued "${taskTitle}"`);
+      } catch {
+        // If task file can't be read, still try to enqueue with basic info
+        daemon.inbox.enqueueTask(assigneeId, {
+          taskId,
+          taskTitle,
+          taskPriority: 'normal',
+          assigneeId,
+          timestamp: new Date().toISOString(),
+          blockedBy: null,
+        });
+      }
+      return;
+    }
+
+    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
 
     // Find the agent's DM channel (kind=direct, includes assignee)
     const founder = members.find((m) => m.rank === 'owner');
