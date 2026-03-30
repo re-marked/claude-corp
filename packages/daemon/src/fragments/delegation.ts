@@ -97,6 +97,17 @@ When implementation completes, reviewer gets auto-notified and task is auto-hand
 - Don't ask "are you done?" — read the task file status or check \`cc-cli tasks\`
 - Don't do the work yourself if delegation fails — fix the task and re-hand
 
+## Contracts (for significant features)
+
+For features with multiple tasks, use a Contract instead of loose tasks:
+1. Create contract: \`cc-cli contract create --project <name> --title "..." --goal "..." --lead @<slug>\`
+2. Lead decomposes into tasks and hands them to workers
+3. Activate: \`cc-cli contract activate --id <id> --project <name>\`
+4. When ALL tasks complete → Warden automatically reviews
+5. Warden approves → contract closes. Warden rejects → remediation tasks created.
+
+Follow a Blueprint for structured execution: \`cc-cli blueprint show ship-feature\`
+
 ## Hiring
 
 \`cc-cli hire --name "agent-name" --rank worker\`
