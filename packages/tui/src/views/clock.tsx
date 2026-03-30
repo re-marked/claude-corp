@@ -15,8 +15,7 @@ const ERROR_ICON = '\u2717';  // ✗
 const STOPPED_ICON = '\u2013'; // –
 
 const BAR_WIDTH = 20;
-const BAR_FILLED = '\u2588'; // █
-const BAR_EMPTY = '\u2591';  // ░
+const BAR_CHAR = '\u2501'; // ━ (heavy horizontal line, same char for both — color differentiates)
 
 const TYPE_ORDER = ['heartbeat', 'timer', 'system', 'loop', 'cron'];
 const TYPE_LABELS: Record<string, string> = {
@@ -150,23 +149,23 @@ export function ClockView({ onBack }: Props) {
                   indicatorColor = COLORS.muted;
                 }
 
-                // Progress bar
+                // Progress bar — use lastFiredAt, or createdAt if never fired yet
                 let progress = 0;
                 let remaining = '';
-                if (clock.lastFiredAt && clock.status !== 'paused') {
-                  const elapsed = now - clock.lastFiredAt;
+                if (clock.status === 'paused') {
+                  remaining = 'PAUSED';
+                } else {
+                  const ref = clock.lastFiredAt ?? clock.createdAt;
+                  const elapsed = now - ref;
                   progress = Math.min(1, elapsed / clock.intervalMs);
                   const remainingMs = Math.max(0, clock.intervalMs - elapsed);
                   remaining = formatRemaining(remainingMs);
-                } else if (clock.status === 'paused') {
-                  remaining = 'PAUSED';
                 }
 
                 const filledCount = Math.floor(progress * BAR_WIDTH);
                 const emptyCount = BAR_WIDTH - filledCount;
-                const bar = BAR_FILLED.repeat(filledCount) + BAR_EMPTY.repeat(emptyCount);
 
-                // Bar color: gradient from primary to success as it fills
+                // Bar color: filled = primary, empty = muted (color contrast, not char contrast)
                 const barColor = progress > 0.9 ? COLORS.warning : COLORS.primary;
 
                 // Fire count
@@ -189,9 +188,12 @@ export function ClockView({ onBack }: Props) {
                     >
                       {clock.name.padEnd(22)}
                     </Text>
-                    <Text color={barColor}>[{bar}]</Text>
+                    <Text color={COLORS.muted}>[</Text>
+                    <Text color={barColor}>{BAR_CHAR.repeat(filledCount)}</Text>
+                    <Text color={COLORS.border}>{BAR_CHAR.repeat(emptyCount)}</Text>
+                    <Text color={COLORS.muted}>]</Text>
                     <Text color={COLORS.subtle}> {remaining.padEnd(8)}</Text>
-                    <Text color={COLORS.muted}> \u00D7{fires}</Text>
+                    <Text color={COLORS.muted}>{' \u00d7'}{fires}</Text>
                     {errInfo && <Text color={COLORS.danger}>{errInfo}</Text>}
                   </Box>
                 );
