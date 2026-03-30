@@ -249,8 +249,8 @@ These are non-negotiable. Mark has validated these through extensive collaborati
 
 ### When Building Features
 - Always build + type-check: `pnpm build && pnpm type-check`
-- Build after EVERY file change, not just at the end.
-- Relink cc + cc-cli after building.
+- Build after each COMMIT, NOT after every file edit. Edit multiple files, THEN build once before committing.
+- Relink cc + cc-cli after building: `cd packages/cli && npm link && cd ../tui && npm link`
 - Give Mark run commands in Windows cmd format (`%USERPROFILE%` not `~/`).
 
 ## When asked to build something
