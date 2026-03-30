@@ -203,11 +203,43 @@ export class HeartbeatManager {
       const now = new Date();
       const corpRoot = this.daemon.corpRoot.replace(/\\/g, '/');
 
+      // Also scan project task directories for project-scoped agents
+      const projectTasksCache = new Map<string, typeof allTasks>();
+
       for (const agent of agents) {
-        const myTasks = allTasks.filter((t) => t.task.assignedTo === agent.id);
-        const unassigned = allTasks.filter(
+        let myTasks = allTasks.filter((t) => t.task.assignedTo === agent.id);
+        let unassigned = allTasks.filter(
           (t) => !t.task.assignedTo && t.task.status === 'pending',
         );
+
+        // For project-scoped agents, also include project-specific tasks
+        if (agent.scope === 'project' && agent.scopeId) {
+          try {
+            const { getProject } = require('@claudecorp/shared');
+            const project = getProject(this.daemon.corpRoot, agent.scopeId);
+            if (project) {
+              let projectTasks = projectTasksCache.get(project.name);
+              if (!projectTasks) {
+                const projectTasksDir = join(this.daemon.corpRoot, 'projects', project.name, 'tasks');
+                if (existsSync(projectTasksDir)) {
+                  // listTasks reads from corpRoot/tasks/ — scan project dir manually
+                  const { readdirSync } = require('node:fs');
+                  const files = readdirSync(projectTasksDir).filter((f: string) => f.endsWith('.md'));
+                  projectTasks = files.map((f: string) => {
+                    try { return readTask(join(projectTasksDir, f)); } catch { return null; }
+                  }).filter(Boolean) as typeof allTasks;
+                  projectTasksCache.set(project.name, projectTasks);
+                }
+              }
+              if (projectTasks) {
+                const myProjectTasks = projectTasks.filter(t => t.task.assignedTo === agent.id);
+                const unassignedProject = projectTasks.filter(t => !t.task.assignedTo && t.task.status === 'pending');
+                myTasks = [...myTasks, ...myProjectTasks];
+                unassigned = [...unassigned, ...unassignedProject];
+              }
+            }
+          } catch {}
+        }
 
         const content = this.buildTasksMd(corpRoot, myTasks, unassigned, now);
 
