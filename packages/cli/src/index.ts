@@ -165,6 +165,7 @@ async function run() {
         rank: values.rank as string,
         soul: values.soul as string | undefined,
         model: values.model as string | undefined,
+        project: values.project as string | undefined,
         json: !!values.json,
       });
       break;

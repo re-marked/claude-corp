@@ -56,16 +56,40 @@ export async function hireAgent(
     throw new Error(`${creator.displayName} (${creator.rank}) cannot hire at rank ${opts.rank}`);
   }
 
-  // Check for duplicate agent name
-  const agentDir = `agents/${opts.agentName}/`;
-  if (members.some((m) => m.agentDir === agentDir)) {
-    throw new Error(`Agent "${opts.agentName}" already exists`);
-  }
-
+  // Resolve scope + project
   const scope = opts.scope ?? 'corp';
   const scopeId = opts.scopeId ?? '';
   const model = opts.model ?? globalConfig.defaults.model;
   const provider = opts.provider ?? globalConfig.defaults.provider;
+
+  // Resolve project name for project-scoped agents
+  let projectName: string | undefined;
+  if (scope === 'project' && scopeId) {
+    const { getProject } = await import('@claudecorp/shared');
+    const project = getProject(corpRoot, scopeId);
+    if (project) {
+      projectName = project.name;
+    } else {
+      // Try scopeId as project name directly
+      const { getProjectByName } = await import('@claudecorp/shared');
+      const byName = getProjectByName(corpRoot, scopeId);
+      if (byName) {
+        projectName = byName.name;
+      }
+    }
+  }
+
+  // Check for duplicate agent name (check both corp and project paths)
+  const agentDir = projectName
+    ? `projects/${projectName}/agents/${opts.agentName}/`
+    : `agents/${opts.agentName}/`;
+  if (members.some((m) => m.agentDir === agentDir)) {
+    throw new Error(`Agent "${opts.agentName}" already exists`);
+  }
+  // Also check by name across all paths
+  if (members.some((m) => m.displayName === opts.displayName)) {
+    throw new Error(`Agent "${opts.displayName}" already exists`);
+  }
 
   // 2. Create workspace (remote: true — no .openclaw/ dir, gateway handles state)
   const soulContent = opts.soulContent ?? defaultSoul(opts.displayName, opts.rank, scope);
@@ -87,6 +111,7 @@ export async function hireAgent(
     heartbeatContent,
     globalConfig,
     remote: true,
+    projectName,
   });
 
   // FIXME(v0.10.1): Per-agent worktrees disabled — needs project-scoped repos first.

@@ -23,7 +23,9 @@ The corp CLI. Use these for ALL corp operations — do NOT use curl or raw API c
 - \`cc-cli hand --task <id> --to <agent-slug>\` — hand an existing task to an agent (this is when work begins)
 
 ### Hiring
-- \`cc-cli hire --name "agent-name" --rank worker\` — hire a new agent (add \`--model <model>\` for specific model)
+- \`cc-cli hire --name "agent-name" --rank worker\` — hire a corp-level agent
+- \`cc-cli hire --name "agent-name" --rank worker --project <name>\` — hire into a specific project
+- Add \`--model <model>\` for a specific model
 
 ### Agent Control
 - \`cc-cli agent start --agent <slug>\` — start an offline agent

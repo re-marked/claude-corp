@@ -28,6 +28,8 @@ export interface AgentSetupOpts {
   globalConfig: GlobalConfig;
   /** If true, skip creating .openclaw/ state dir (agent uses an external gateway) */
   remote?: boolean;
+  /** Project name (resolved from scopeId) for project-scoped agents. */
+  projectName?: string;
 }
 
 export interface AgentSetupResult {
@@ -56,7 +58,11 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     remote,
   } = opts;
 
-  const agentRelDir = `agents/${agentName}/`;
+  // Project-scoped agents live at projects/<project>/agents/<name>/
+  // Corp-scoped agents live at agents/<name>/
+  const agentRelDir = scope === 'project' && opts.projectName
+    ? `projects/${opts.projectName}/agents/${agentName}/`
+    : `agents/${agentName}/`;
   const agentAbsDir = join(corpRoot, agentRelDir);
   const memberId = generateId();
   const now = new Date().toISOString();
@@ -77,7 +83,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
 
   writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName, rank), 'utf-8');
   writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? defaultUser(), 'utf-8');
-  writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir, opts.projectName), 'utf-8');
   writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), defaultBootstrap(displayName, rank), 'utf-8');
 
   // Agent config
@@ -313,7 +319,16 @@ Delete this file. You're up and running.
 `;
 }
 
-function defaultEnvironment(corpRoot: string, agentDir: string): string {
+function defaultEnvironment(corpRoot: string, agentDir: string, projectName?: string): string {
+  const projectSection = projectName ? `
+## Project
+- Project: ${projectName}
+- Project root: ${corpRoot}/projects/${projectName}/
+- Project tasks: ${corpRoot}/projects/${projectName}/tasks/
+- Project deliverables: ${corpRoot}/projects/${projectName}/deliverables/
+- You are scoped to this project. Focus your work here.
+` : '';
+
   return `# Environment
 
 Your tools and workspace specifics. Update this with anything that helps you work.
@@ -321,9 +336,10 @@ Your tools and workspace specifics. Update this with anything that helps you wor
 ## Workspace
 - Corp root: ${corpRoot}
 - Your directory: ${agentDir}
-- Tasks: ${corpRoot}/tasks/
-- Deliverables: ${corpRoot}/deliverables/
+- Tasks: ${projectName ? `${corpRoot}/projects/${projectName}/tasks/` : `${corpRoot}/tasks/`}
+- Deliverables: ${projectName ? `${corpRoot}/projects/${projectName}/deliverables/` : `${corpRoot}/deliverables/`}
 - Resources: ${corpRoot}/resources/
+${projectSection}
 
 ## Tools Available
 - **File read/write** — read any file, write to your workspace and deliverables
