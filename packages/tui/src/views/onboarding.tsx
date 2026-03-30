@@ -24,7 +24,7 @@ import { CorpProvider } from '../context/corp-context.js';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import { CLAUDE_CORP_LOGO, asciiName } from '../ascii.js';
 
-type Step = 'your-name' | 'corp-name' | 'theme' | 'spawning' | 'ready';
+type Step = 'your-name' | 'corp-name' | 'theme' | 'dm-mode' | 'spawning' | 'ready';
 
 const RECONNECT_INTERVAL = 5;
 
@@ -35,6 +35,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
   const [userName, setUserName] = useState('');
   const [corpName, setCorpName] = useState('');
   const [themeIndex, setThemeIndex] = useState(0);
+  const [dmModeIndex, setDmModeIndex] = useState(0); // 0 = jack (recommended), 1 = async
   const [error, setError] = useState('');
   const [statusText, setStatusText] = useState('');
   const [daemon, setDaemon] = useState<Daemon | null>(null);
@@ -79,10 +80,17 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
 
   // Theme selection keyboard
   useInput((input, key) => {
-    if (step !== 'theme') return;
-    if (key.upArrow) setThemeIndex((i) => Math.max(0, i - 1));
-    if (key.downArrow) setThemeIndex((i) => Math.min(THEMES.length - 1, i + 1));
-    if (key.return) startSetup();
+    if (step === 'theme') {
+      if (key.upArrow) setThemeIndex((i) => Math.max(0, i - 1));
+      if (key.downArrow) setThemeIndex((i) => Math.min(THEMES.length - 1, i + 1));
+      if (key.return) { setStep('dm-mode'); setError(''); }
+      return;
+    }
+    if (step === 'dm-mode') {
+      if (key.upArrow || key.downArrow) setDmModeIndex((i) => i === 0 ? 1 : 0);
+      if (key.return) startSetup();
+      return;
+    }
   });
 
   const startSetup = async () => {
@@ -92,8 +100,9 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
     try {
       const globalConfig = ensureGlobalConfig();
 
+      const selectedDmMode = dmModeIndex === 0 ? 'jack' : 'async' as const;
       setStatusText('Creating corporation...');
-      const root = await scaffoldCorp(corpName, userName, selectedTheme.id as ThemeId);
+      const root = await scaffoldCorp(corpName, userName, selectedTheme.id as ThemeId, selectedDmMode);
       setCorpRoot(root);
 
       setStatusText(`${selectedTheme.ranks.master} is waking up...`);
@@ -272,6 +281,49 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
               </Box>
             );
           })}
+
+          <Box marginTop={1}>
+            <Text color={COLORS.muted}>↑↓ to select, Enter to confirm</Text>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (step === 'dm-mode') {
+    const modes = [
+      { id: 'jack', name: 'Jack (recommended)', desc: 'Live persistent sessions. Agents remember your conversation. Efficient — no history re-sent.' },
+      { id: 'async', name: 'Async (deprecated)', desc: 'Stateless messages. Each dispatch is independent. History re-sent every time. Will be removed in v1.' },
+    ];
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
+        <Box flexDirection="column" borderStyle={BORDER_STYLE} borderColor={COLORS.primary} paddingX={3} paddingY={1} width={60}>
+          <Box marginBottom={1}>
+            <Text bold color={COLORS.primary}>DM mode</Text>
+          </Box>
+
+          {modes.map((m, i) => {
+            const isSel = i === dmModeIndex;
+            return (
+              <Box key={m.id} flexDirection="column" marginBottom={1}>
+                <Box gap={1}>
+                  <Text color={isSel ? COLORS.primary : COLORS.muted}>{isSel ? '▸' : ' '}</Text>
+                  <Text bold={isSel} color={isSel ? COLORS.text : COLORS.subtle}>{m.name}</Text>
+                </Box>
+                {isSel && (
+                  <Box paddingLeft={3}>
+                    <Text color={COLORS.subtle}>{m.desc}</Text>
+                  </Box>
+                )}
+              </Box>
+            );
+          })}
+
+          {dmModeIndex === 1 && (
+            <Box marginTop={1}>
+              <Text color={COLORS.danger}>Warning: async mode is deprecated and will be removed.</Text>
+            </Box>
+          )}
 
           <Box marginTop={1}>
             <Text color={COLORS.muted}>↑↓ to select, Enter to confirm</Text>

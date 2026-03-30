@@ -47,7 +47,7 @@ interface Props {
 export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCall, onNavigate }: Props) {
   const { corpRoot, daemonClient, members: ctxMembers } = useCorp();
   const [activeThread, setActiveThread] = useState<string | undefined>(undefined);
-  const { messages, threadCounts } = useMessages(messagesPath, 50, activeThread);
+  const { messages, threadCounts, refresh: refreshMessages } = useMessages(messagesPath, 50, activeThread);
   const [sending, setSending] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [thinkingAgents, setThinkingAgents] = useState<string[]>([]);
@@ -58,6 +58,50 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
+
+  // Jack mode — persistent conversation session with an agent
+  // Default: jack is ON for DMs (corp.json defaultDmMode, defaults to 'jack')
+  const [jackMode, setJackMode] = useState<{
+    active: boolean;
+    sessionKey: string;
+    agentSlug: string;
+    agentName: string;
+    agentId: string;
+  } | null>(null);
+
+  // Auto-jack on DM channel entry
+  useEffect(() => {
+    if (channel.kind !== 'direct') {
+      setJackMode(null);
+      return;
+    }
+
+    // Read corp defaultDmMode (defaults to 'jack')
+    let dmMode: 'jack' | 'async' = 'jack';
+    try {
+      const { readConfig, CORP_JSON } = require('@claudecorp/shared');
+      const corp = readConfig(join(corpRoot, CORP_JSON));
+      if (corp.defaultDmMode === 'async') dmMode = 'async';
+    } catch {}
+
+    if (dmMode !== 'jack') return;
+
+    // Find the agent in this DM
+    const founder = members.find(m => m.rank === 'owner');
+    const agent = members.find(m =>
+      m.type === 'agent' && channel.memberIds.includes(m.id) && m.id !== founder?.id,
+    );
+    if (!agent) return;
+
+    const slug = agent.displayName.toLowerCase().replace(/\s+/g, '-');
+    setJackMode({
+      active: true,
+      sessionKey: `jack:${slug}:${Date.now()}`,
+      agentSlug: slug,
+      agentName: agent.displayName,
+      agentId: agent.id,
+    });
+  }, [channel.id]); // Re-run on channel switch
   const lastMsgCount = useRef(messages.length);
   // Update tab title when channel changes
   useEffect(() => {
@@ -156,6 +200,47 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   };
 
   const handleSend = useCallback(async (text: string) => {
+    // /jack — re-enter live session (if previously unjacked)
+    if (text.trim().toLowerCase() === '/jack') {
+      if (channel.kind !== 'direct') {
+        writeSystemMessage('Jack only works in DM channels. Navigate to an agent DM first.');
+        return;
+      }
+      if (jackMode?.active) {
+        writeSystemMessage('Already jacked. Type /unjack to switch to async mode.');
+        return;
+      }
+      const founder = members.find(m => m.rank === 'owner');
+      const agent = members.find(m =>
+        m.type === 'agent' && channel.memberIds.includes(m.id) && m.id !== founder?.id,
+      );
+      if (!agent) {
+        writeSystemMessage('No agent found in this DM channel.');
+        return;
+      }
+      const slug = agent.displayName.toLowerCase().replace(/\s+/g, '-');
+      setJackMode({
+        active: true,
+        sessionKey: `jack:${slug}:${Date.now()}`,
+        agentSlug: slug,
+        agentName: agent.displayName,
+        agentId: agent.id,
+      });
+      writeSystemMessage(`Jacked into ${agent.displayName}. Live session — persistent memory. /unjack to switch to async.`);
+      return;
+    }
+
+    // /unjack or /async-deprecated — drop to stateless async mode
+    if (text.trim().toLowerCase() === '/unjack' || text.trim().toLowerCase() === '/async-deprecated') {
+      if (!jackMode?.active) {
+        writeSystemMessage('Already in async mode. Type /jack to enter live session.');
+        return;
+      }
+      setJackMode(null);
+      writeSystemMessage('Unjacked. Async mode (deprecated) — each message is stateless. /jack to re-enter live session.');
+      return;
+    }
+
     // /hire opens the wizard
     if (text.trim().toLowerCase() === '/hire') {
       setShowHireWizard(true);
@@ -665,6 +750,67 @@ Always consider what happens when things go wrong.`,
       return;
     }
 
+    // --- JACK MODE: use say() with persistent session key ---
+    if (jackMode?.active) {
+      setSending(true);
+      setThinking(true);
+      setThinkingAgents([jackMode.agentName]);
+
+      // Write user message to DM JSONL (so it appears in chat history)
+      const userMsg: ChannelMessage = {
+        id: generateId(),
+        channelId: channel.id,
+        senderId: members.find(m => m.rank === 'owner')?.id ?? 'system',
+        threadId: null,
+        content: text,
+        kind: 'text',
+        mentions: [],
+        metadata: { source: 'jack' },
+        depth: 0,
+        originId: '',
+        timestamp: new Date().toISOString(),
+      };
+      userMsg.originId = userMsg.id;
+      appendMessage(messagesPath, userMsg);
+      setTimeout(() => refreshMessages(), 50); // Force re-read after self-write
+
+      // Send raw message — OpenClaw manages conversation history via persistent session key.
+      // No client-side history stuffing. Proper turn structure > flat text dump.
+      try {
+        const result = await daemonClient.say(jackMode.agentSlug, text, jackMode.sessionKey);
+
+        if (result.ok && result.response) {
+          // Write agent response to DM JSONL
+          const agentMsg: ChannelMessage = {
+            id: generateId(),
+            channelId: channel.id,
+            senderId: jackMode.agentId,
+            threadId: null,
+            content: result.response,
+            kind: 'text',
+            mentions: [],
+            metadata: { source: 'jack' },
+            depth: 0,
+            originId: '',
+            timestamp: new Date().toISOString(),
+          };
+          agentMsg.originId = agentMsg.id;
+          appendMessage(messagesPath, agentMsg);
+          setTimeout(() => refreshMessages(), 50); // Force re-read after self-write
+        } else {
+          writeSystemMessage(`Jack dispatch failed: ${(result as any).error ?? 'No response'}`);
+        }
+      } catch (err) {
+        writeSystemMessage(`Jack error: ${err instanceof Error ? err.message : String(err)}. Session continues.`);
+      }
+
+      setThinking(false);
+      setThinkingAgents([]);
+      setSending(false);
+      return;
+    }
+
+    // --- NORMAL MODE: write to channel, let router dispatch ---
     setSending(true);
     try {
       const { dispatching, dispatchTargets } = await daemonClient.sendMessage(channel.id, text);
@@ -676,7 +822,7 @@ Always consider what happens when things go wrong.`,
       // Message send failed
     }
     setSending(false);
-  }, [channel.id, daemonClient]);
+  }, [channel.id, daemonClient, jackMode, messagesPath, members]);
 
   const founder = members.find((m) => m.rank === 'owner');
 
@@ -852,10 +998,10 @@ Always consider what happens when things go wrong.`,
       <MessageInput
         onSend={handleSend}
         disabled={sending}
-        placeholder="Type a message... (/hire to add agents)"
+        placeholder={jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
         agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
       />
-      <Text color={COLORS.muted}> {activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  C-Y:thread  C-M:members  Esc:back</Text>
+      <Text color={jackMode?.active ? COLORS.warning : COLORS.muted}> {jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  Esc:back</Text>
     </Box>
   );
 }

@@ -27,6 +27,7 @@ export async function scaffoldCorp(
   corpName: string,
   userName: string,
   themeId: ThemeId = 'corporate',
+  defaultDmMode: 'jack' | 'async' = 'jack',
 ): Promise<string> {
   const corpRoot = join(CLAUDECORP_HOME, corpName);
 
@@ -77,6 +78,7 @@ export async function scaffoldCorp(
     ceo: null,
     description: '',
     theme: themeId,
+    defaultDmMode,
     createdAt: now,
   };
   writeConfig(join(corpRoot, CORP_JSON), corp);
