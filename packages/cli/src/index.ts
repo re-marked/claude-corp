@@ -255,6 +255,12 @@ async function run() {
       });
       break;
     }
+    case 'clock':
+    case 'clocks': {
+      const { cmdClock } = await import('./commands/clock.js');
+      await cmdClock({ json: !!values.json });
+      break;
+    }
     case 'stats': {
       const { cmdStats } = await import('./commands/stats.js');
       await cmdStats({ json: !!values.json });

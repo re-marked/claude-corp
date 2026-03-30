@@ -554,6 +554,50 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // --- Clock endpoints ---
+
+      // GET /clocks — list all registered clocks
+      if (method === 'GET' && path === '/clocks') {
+        json(res, daemon.clocks.list());
+        return;
+      }
+
+      // GET /clocks/:id — single clock detail
+      const clockGetMatch = path.match(/^\/clocks\/([^/]+)$/);
+      if (method === 'GET' && clockGetMatch) {
+        const id = decodeURIComponent(clockGetMatch[1]!);
+        const clock = daemon.clocks.get(id);
+        if (!clock) { json(res, { error: 'Clock not found' }, 404); return; }
+        json(res, clock);
+        return;
+      }
+
+      // POST /clocks/:id/pause
+      const clockPauseMatch = path.match(/^\/clocks\/([^/]+)\/pause$/);
+      if (method === 'POST' && clockPauseMatch) {
+        const id = decodeURIComponent(clockPauseMatch[1]!);
+        try {
+          daemon.clocks.pause(id);
+          json(res, { ok: true, clock: daemon.clocks.get(id) });
+        } catch (e) {
+          json(res, { error: String(e) }, 404);
+        }
+        return;
+      }
+
+      // POST /clocks/:id/resume
+      const clockResumeMatch = path.match(/^\/clocks\/([^/]+)\/resume$/);
+      if (method === 'POST' && clockResumeMatch) {
+        const id = decodeURIComponent(clockResumeMatch[1]!);
+        try {
+          daemon.clocks.resume(id);
+          json(res, { ok: true, clock: daemon.clocks.get(id) });
+        } catch (e) {
+          json(res, { error: String(e) }, 404);
+        }
+        return;
+      }
+
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

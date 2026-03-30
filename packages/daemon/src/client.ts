@@ -216,6 +216,28 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  // --- Clocks ---
+
+  async listClocks(): Promise<any[]> {
+    const resp = await fetch(`${this.baseUrl}/clocks`);
+    return resp.json() as Promise<any>;
+  }
+
+  async getClock(id: string): Promise<any> {
+    const resp = await fetch(`${this.baseUrl}/clocks/${encodeURIComponent(id)}`);
+    return resp.json() as Promise<any>;
+  }
+
+  async pauseClock(id: string): Promise<any> {
+    const resp = await fetch(`${this.baseUrl}/clocks/${encodeURIComponent(id)}/pause`, { method: 'POST' });
+    return resp.json() as Promise<any>;
+  }
+
+  async resumeClock(id: string): Promise<any> {
+    const resp = await fetch(`${this.baseUrl}/clocks/${encodeURIComponent(id)}/resume`, { method: 'POST' });
+    return resp.json() as Promise<any>;
+  }
+
   // --- Hand (task assignment) ---
 
   async handTask(taskId: string, toSlug: string): Promise<{ ok: boolean; task: unknown; handedTo: string }> {
