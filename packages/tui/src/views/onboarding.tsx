@@ -24,7 +24,7 @@ import { CorpProvider } from '../context/corp-context.js';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import { CLAUDE_CORP_LOGO, asciiName } from '../ascii.js';
 
-type Step = 'your-name' | 'corp-name' | 'theme' | 'dm-mode' | 'spawning' | 'ready';
+type Step = 'your-name' | 'corp-name' | 'theme' | 'dm-mode' | 'spawning' | 'restart-warning' | 'ready';
 
 const RECONNECT_INTERVAL = 5;
 
@@ -89,6 +89,17 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
     if (step === 'dm-mode') {
       if (key.upArrow || key.downArrow) setDmModeIndex((i) => i === 0 ? 1 : 0);
       if (key.return) startSetup();
+      return;
+    }
+    if (step === 'restart-warning') {
+      if (key.return) {
+        // Continue without restart — try to resume normally
+        if (onComplete) {
+          onComplete();
+        } else {
+          setStep('ready');
+        }
+      }
       return;
     }
   });
@@ -185,12 +196,9 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       d.stop();
       setDaemon(null);
 
-      // Transition to ResumeView (which shows Corp Home)
-      if (onComplete) {
-        onComplete();
-        return;
-      }
-      setStep('ready');
+      // Show restart warning — first boot can have stale agent state
+      setStatusText('Corp created! Restart recommended on first boot.');
+      setStep('restart-warning');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -348,6 +356,30 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
               <Text color={COLORS.muted}>Reconnecting in {countdown}s...</Text>
             </Box>
           )}
+        </Box>
+      </Box>
+    );
+  }
+
+  if (step === 'restart-warning') {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
+        <Text color={COLORS.primary}>{asciiName(corpName)}</Text>
+        <Box flexDirection="column" borderStyle={BORDER_STYLE} borderColor={COLORS.warning} paddingX={3} paddingY={1} width={56} marginTop={1}>
+          <Box marginBottom={1}>
+            <Text bold color={COLORS.warning}>Corp created successfully!</Text>
+          </Box>
+          <Box flexDirection="column" gap={0}>
+            <Text color={COLORS.text}>For the best experience on first boot, restart the TUI:</Text>
+            <Text color={COLORS.muted}> </Text>
+            <Text color={COLORS.info}>  Close this window and run the command again.</Text>
+            <Text color={COLORS.muted}> </Text>
+            <Text color={COLORS.subtle}>Some agents may not initialize properly on the very first</Text>
+            <Text color={COLORS.subtle}>launch. A restart ensures everything connects cleanly.</Text>
+          </Box>
+          <Box marginTop={1} flexDirection="column">
+            <Text color={COLORS.muted}>Press Enter to continue without restarting</Text>
+          </Box>
         </Box>
       </Box>
     );
