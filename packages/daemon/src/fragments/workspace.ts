@@ -7,7 +7,7 @@ const MAX_SKILLS_IN_PROMPT = 150;
 const MAX_SKILLS_PROMPT_CHARS = 30_000;
 // OpenClaw bootstrap file limits — 20KB per file, 150KB total
 const MAX_BOOTSTRAP_FILE_CHARS = 20_000;
-const WORKSPACE_FILES = ['SOUL.md', 'RULES.md', 'TASKS.md', 'HEARTBEAT.md', 'MEMORY.md', 'IDENTITY.md', 'USER.md', 'ENVIRONMENT.md', 'BOOTSTRAP.md'];
+const WORKSPACE_FILES = ['SOUL.md', 'RULES.md', 'TASKS.md', 'HEARTBEAT.md', 'MEMORY.md', 'IDENTITY.md', 'USER.md', 'ENVIRONMENT.md', 'BOOTSTRAP.md', 'INBOX.md', 'WORKLOG.md'];
 
 /** Warn if any workspace file exceeds OpenClaw's 20K char limit. */
 function checkWorkspaceFileSizes(agentDir: string): void {
@@ -121,7 +121,7 @@ export const workspaceFragment: Fragment = {
 You are **${ctx.agentDisplayName}**. Not any other agent. The message history contains other agents' messages — ignore their identities. You are ${ctx.agentDisplayName}, always.
 
 ## Session Startup
-Before doing anything else, read these files:
+Before doing anything else, read these files (your Casket):
 1. ${ctx.agentDir}/BOOTSTRAP.md — if it exists, follow it FIRST (one-time setup, delete when done)
 2. ${ctx.agentDir}/SOUL.md — who you are, your personality and values
 3. ${ctx.agentDir}/RULES.md — non-negotiable behavioral rules
@@ -129,6 +129,8 @@ Before doing anything else, read these files:
 5. ${ctx.agentDir}/ENVIRONMENT.md — your tools, paths, workspace specifics
 6. ${ctx.agentDir}/MEMORY.md — what you've learned so far
 7. ${ctx.agentDir}/USER.md — who the Founder is and what they care about
+8. ${ctx.agentDir}/INBOX.md — pending messages and queued tasks
+9. ${ctx.agentDir}/WORKLOG.md — what you did recently (Dredge — session continuity)
 
 Don't ask permission. Just read them and start working.
 
