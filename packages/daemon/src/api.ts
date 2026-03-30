@@ -181,8 +181,9 @@ export function createApi(daemon: Daemon): Server {
           dueAt: (body.dueAt as string) ?? undefined,
         });
 
-        // Post task event + suppress TaskWatcher duplicate + refresh TASKS.md
+        // Post task event + suppress TaskWatcher duplicate + refresh TASKS.md + analytics
         writeTaskEvent(daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
+        daemon.analytics.trackTaskCreated();
         daemon.taskWatcher.suppressNextCreate(taskPath(daemon.corpRoot, task.id));
         daemon.heartbeat.refreshAll();
 
@@ -605,6 +606,20 @@ export function createApi(daemon: Daemon): Server {
         } catch (e) {
           json(res, { error: String(e) }, 404);
         }
+        return;
+      }
+
+      // --- Analytics endpoints ---
+
+      // GET /analytics — full analytics snapshot
+      if (method === 'GET' && path === '/analytics') {
+        json(res, daemon.analytics.getSnapshot());
+        return;
+      }
+
+      // GET /analytics/stats — corp-wide stats summary
+      if (method === 'GET' && path === '/analytics/stats') {
+        json(res, daemon.analytics.getCorpStats());
         return;
       }
 

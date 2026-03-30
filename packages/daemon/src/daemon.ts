@@ -86,13 +86,18 @@ export class Daemon {
     this.onIdleCallbacks.push(cb);
   }
 
-  /** Update agent work status + broadcast event + fire transition callbacks */
+  /** Update agent work status + broadcast event + fire transition callbacks + analytics */
   setAgentWorkStatus(memberId: string, displayName: string, status: AgentWorkStatus): void {
     const prev = this.agentWorkStatus.get(memberId);
     if (prev === status) return;
     this.agentWorkStatus.set(memberId, status);
     this.events.broadcast({ type: 'agent_status', agentName: displayName, status });
     log(`[status] ${displayName}: ${prev ?? 'unknown'} → ${status}`);
+
+    // Track status transitions for analytics (utilization calculation)
+    this.analytics.trackStatusChange(memberId, displayName, status);
+    if (status === 'busy') this.analytics.trackDispatch(memberId);
+
     if (prev === 'busy' && status === 'idle') {
       for (const cb of this.onIdleCallbacks) cb(memberId, displayName);
     }
@@ -161,6 +166,8 @@ export class Daemon {
     this.taskWatcher.start();
     this.hireWatcher.start();
     this.pulse.start();
+
+    this.analytics.start();
 
     // Register Failsafe heartbeat as a Clock
     this.clocks.register({
@@ -369,6 +376,7 @@ export class Daemon {
     };
     userMsg.originId = userMsg.id;
     appendMessage(messagesPath, userMsg);
+    this.analytics.trackMessage();
 
     // Poke the router to process this channel (Windows fs.watch can miss appends)
     setTimeout(() => this.router.pokeChannel(channelId), 100);
@@ -409,6 +417,7 @@ export class Daemon {
     this.pulse.stop();
     this.clocks.stopAll();
     this.inbox.flush(); // Persist inbox state before shutdown
+    this.analytics.stop(); // Persist analytics before shutdown
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();

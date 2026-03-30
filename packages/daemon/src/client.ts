@@ -216,6 +216,18 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  // --- Analytics ---
+
+  async getAnalytics(): Promise<any> {
+    const resp = await fetch(`${this.baseUrl}/analytics`);
+    return resp.json() as Promise<any>;
+  }
+
+  async getCorpStats(): Promise<any> {
+    const resp = await fetch(`${this.baseUrl}/analytics/stats`);
+    return resp.json() as Promise<any>;
+  }
+
   // --- Clocks ---
 
   async listClocks(): Promise<any[]> {

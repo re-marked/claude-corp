@@ -100,6 +100,7 @@ export class TaskWatcher {
           return;
         }
         // Agent-created task (written directly to tasks/) — agent set assignedTo intentionally = implicit hand
+        this.daemon.analytics.trackTaskCreated();
         writeTaskEvent(this.daemon.corpRoot, `"${task.title}" created (priority: ${task.priority})`);
         if (task.assignedTo) {
           logTaskAssignment(this.daemon.corpRoot, task.assignedTo, task.title);
@@ -138,8 +139,15 @@ export class TaskWatcher {
           }
         }
 
-        // When task completes or fails, notify CEO via DM + handle dependencies
+        // When task completes or fails, track analytics + notify CEO + handle dependencies
         if (task.status === 'completed' || task.status === 'failed') {
+          // Analytics tracking
+          if (task.status === 'completed' && task.assignedTo) {
+            this.daemon.analytics.trackTaskCompleted(task.assignedTo);
+          } else if (task.status === 'failed' && task.assignedTo) {
+            this.daemon.analytics.trackTaskFailed(task.assignedTo);
+          }
+
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
             const assignee = members.find(m => m.id === task.assignedTo);
