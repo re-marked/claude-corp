@@ -1,77 +1,122 @@
+import { readConfig, type Member, MEMBERS_JSON } from '@claudecorp/shared';
+import { join } from 'node:path';
 import type { Daemon } from './daemon.js';
-import { hireAgent } from './hire.js';
-import { log } from './logger.js';
+import { log, logError } from './logger.js';
 
-const PULSE_RULES = `# Rules — Pulse Agent
-
-You are the corp's watchdog. Your ONLY job is monitoring other agents.
-
-## Every heartbeat cycle:
-1. Run \`cc-cli status\` — check who's idle, busy, broken, offline
-2. If any agent is \`broken\` — run \`cc-cli agent restart --agent <slug>\`
-3. If any agent has been \`busy\` for unusually long — \`cc-cli say --agent <slug> --message "Status check: are you stuck? Report what you're working on."\`
-4. If a stuck agent doesn't respond after your next cycle — escalate: \`cc-cli say --agent ceo --message "Agent X appears stuck. No response to status check."\`
-
-## What you do NOT do:
-- Do NOT assign tasks
-- Do NOT make decisions
-- Do NOT intervene in conversations
-- Do NOT respond in channels unless asked directly
-- ONLY monitor and escalate
-
-## Monitoring protocol:
-- \`broken\` → restart immediately
-- \`busy\` > 10 minutes → ping via cc say
-- \`busy\` > 15 minutes after ping → escalate to CEO
-- \`offline\` → attempt restart via \`cc-cli agent start --agent <slug>\`
-- \`idle\` → normal, no action needed
-
-## Reply format:
-If everything is healthy: HEARTBEAT_OK
-If action taken: brief report of what you did
-`;
-
-const PULSE_HEARTBEAT = `# Heartbeat — Pulse Agent
-
-On each wake cycle, run your monitoring protocol:
-
-1. \`cc-cli status\` — get all agent states
-2. Check for broken/stuck/offline agents
-3. Take action per your RULES.md protocol
-4. Report or HEARTBEAT_OK
-
-You are the safety net. If you stop working, the Failsafe will restart you.
-`;
+const CHECK_INTERVAL_MS = 2 * 60 * 1000; // Every 2 minutes
+const STUCK_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes busy = stuck
+const FAILSAFE_STALE_MS = 10 * 60 * 1000; // If Failsafe agent hasn't responded in 10 min, restart
 
 /**
- * Hire the Pulse (watchdog) agent into a corp.
+ * Pulse — daemon-level heartbeat timer.
+ * Monitors all agents for broken/stuck state. Restarts broken agents.
+ * Also monitors the Failsafe agent itself.
  */
-export async function hirePulse(daemon: Daemon): Promise<void> {
-  const members = (await import('@claudecorp/shared')).readConfig(
-    (await import('node:path')).join(daemon.corpRoot, 'members.json'),
-  ) as any[];
+export class Pulse {
+  private daemon: Daemon;
+  private interval: ReturnType<typeof setInterval> | null = null;
+  /** Track when each agent entered busy state */
+  private busySince = new Map<string, number>();
+  private failsafeAgentId: string | null = null;
+  private failsafeLastSeen = 0;
 
-  // Check if Pulse already exists
-  if (members.some((m: any) => m.displayName === 'Pulse')) {
-    log('[pulse] Pulse agent already exists');
-    return;
+  constructor(daemon: Daemon) {
+    this.daemon = daemon;
   }
 
-  // Find the CEO to use as creator
-  const ceo = members.find((m: any) => m.rank === 'master');
-  if (!ceo) {
-    log('[pulse] No CEO found — cannot hire Pulse');
-    return;
+  start(): void {
+    this.findFailsafe();
+
+    // Track busy transitions via the existing onAgentIdle callback
+    this.daemon.onAgentIdle((memberId) => {
+      this.busySince.delete(memberId);
+      if (memberId === this.failsafeAgentId) {
+        this.failsafeLastSeen = Date.now();
+      }
+    });
+
+    this.interval = setInterval(() => {
+      this.check();
+    }, CHECK_INTERVAL_MS);
+
+    log('[pulse] Started (checking every 2m)');
   }
 
-  await hireAgent(daemon, {
-    creatorId: ceo.id,
-    agentName: 'pulse',
-    displayName: 'Pulse',
-    rank: 'worker',
-    agentsContent: PULSE_RULES,
-    heartbeatContent: PULSE_HEARTBEAT,
-  });
+  stop(): void {
+    if (this.interval) clearInterval(this.interval);
+  }
 
-  log('[pulse] Pulse agent hired and configured');
+  /** Re-scan members for Failsafe agent (called after bootstrap) */
+  refreshFailsafe(): void {
+    this.findFailsafe();
+  }
+
+  private findFailsafe(): void {
+    try {
+      const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+      const failsafe = members.find(m => m.displayName === 'Failsafe' && m.type === 'agent');
+      if (failsafe) {
+        this.failsafeAgentId = failsafe.id;
+        this.failsafeLastSeen = Date.now();
+        log(`[pulse] Failsafe agent found: ${failsafe.id}`);
+      }
+    } catch {}
+  }
+
+  private async check(): Promise<void> {
+    const now = Date.now();
+
+    try {
+      const agents = this.daemon.processManager.listAgents();
+
+      for (const agent of agents) {
+        const workStatus = this.daemon.getAgentWorkStatus(agent.memberId);
+
+        // Track busy start times
+        if (workStatus === 'busy' && !this.busySince.has(agent.memberId)) {
+          this.busySince.set(agent.memberId, now);
+        }
+
+        // Restart broken agents
+        if (workStatus === 'broken') {
+          log(`[pulse] ${agent.displayName} is broken — restarting`);
+          try {
+            await this.daemon.processManager.stopAgent(agent.memberId);
+            await new Promise(r => setTimeout(r, 1000));
+            await this.daemon.processManager.spawnAgent(agent.memberId);
+            this.daemon.setAgentWorkStatus(agent.memberId, agent.displayName, 'idle');
+            log(`[pulse] ${agent.displayName} restarted successfully`);
+          } catch (err) {
+            logError(`[pulse] Failed to restart ${agent.displayName}: ${err}`);
+          }
+        }
+
+        // Detect stuck agents (busy for too long)
+        if (workStatus === 'busy') {
+          const since = this.busySince.get(agent.memberId);
+          if (since && (now - since) > STUCK_THRESHOLD_MS) {
+            log(`[pulse] ${agent.displayName} stuck (busy ${Math.round((now - since) / 60000)}m)`);
+          }
+        }
+      }
+
+      // Monitor Failsafe agent
+      if (this.failsafeAgentId && this.failsafeLastSeen > 0) {
+        if ((now - this.failsafeLastSeen) > FAILSAFE_STALE_MS) {
+          log(`[pulse] Failsafe agent stale — restarting`);
+          try {
+            await this.daemon.processManager.stopAgent(this.failsafeAgentId);
+            await new Promise(r => setTimeout(r, 1000));
+            await this.daemon.processManager.spawnAgent(this.failsafeAgentId);
+            this.daemon.setAgentWorkStatus(this.failsafeAgentId, 'Failsafe', 'idle');
+            this.failsafeLastSeen = Date.now();
+          } catch (err) {
+            logError(`[pulse] Failed to restart Failsafe: ${err}`);
+          }
+        }
+      }
+    } catch (err) {
+      logError(`[pulse] Check failed: ${err}`);
+    }
+  }
 }

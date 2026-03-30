@@ -29,8 +29,8 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - **Model selector**: corp-wide default + per-agent override, native OpenClaw fallback chain
 
 ### Monitoring
-- **Pulse**: watchdog agent monitoring stuck/broken agents (`cc-cli pulse start/stop/status`)
-- **Failsafe**: daemon-level timer (2 min) — auto-restarts broken agents, monitors Pulse itself
+- **Failsafe**: watchdog agent monitoring stuck/broken agents (`cc-cli failsafe start/stop/status`), auto-hired on corp bootstrap
+- **Pulse**: daemon-level timer (2 min) — auto-restarts broken agents, monitors Failsafe agent itself
 - **Agent restart**: `POST /agents/:id/restart` endpoint
 
 ### TUI

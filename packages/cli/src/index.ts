@@ -193,9 +193,9 @@ async function run() {
       await cmdVersion({ json: !!values.json });
       break;
     }
-    case 'pulse': {
-      const { cmdPulse } = await import('./commands/pulse.js');
-      await cmdPulse({ action: positionals[1] as string | undefined, json: !!values.json });
+    case 'failsafe': {
+      const { cmdFailsafe } = await import('./commands/failsafe.js');
+      await cmdFailsafe({ action: positionals[1] as string | undefined, json: !!values.json });
       break;
     }
     case 'tm':
