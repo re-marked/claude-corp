@@ -596,24 +596,31 @@ export class Daemon {
 
 export function isDaemonRunning(): { running: boolean; port: number | null } {
   try {
-    if (!existsSync(DAEMON_PID_PATH) || !existsSync(DAEMON_PORT_PATH)) {
+    // Port file is the source of truth. If it exists and has a valid port, trust it.
+    // PID checks are unreliable on Windows (fail across process trees, MSYS2 vs cmd.exe).
+    // The actual HTTP call from DaemonClient will verify connectivity.
+    if (!existsSync(DAEMON_PORT_PATH)) {
       return { running: false, port: null };
     }
-    const pid = parseInt(readFileSync(DAEMON_PID_PATH, 'utf-8').trim(), 10);
     const port = parseInt(readFileSync(DAEMON_PORT_PATH, 'utf-8').trim(), 10);
-
-    // Check if process is alive (works same-process-tree on all platforms)
-    try {
-      process.kill(pid, 0);
-      return { running: true, port };
-    } catch {
-      // On Windows, process.kill(pid, 0) fails across process trees.
-      // Fall back to checking if the port is actually responding.
-      if (process.platform === 'win32' && port > 0) {
-        return { running: true, port }; // Trust the port file; HTTP call will verify
-      }
+    if (!port || port <= 0) {
       return { running: false, port: null };
     }
+
+    // Optional PID check (best-effort, non-blocking)
+    if (existsSync(DAEMON_PID_PATH)) {
+      const pid = parseInt(readFileSync(DAEMON_PID_PATH, 'utf-8').trim(), 10);
+      if (pid > 0) {
+        try {
+          process.kill(pid, 0); // Works if same process tree
+        } catch {
+          // PID check failed — but port file exists. Trust the port.
+          // On Windows this always fails across process trees. That's fine.
+        }
+      }
+    }
+
+    return { running: true, port };
   } catch {
     return { running: false, port: null };
   }
