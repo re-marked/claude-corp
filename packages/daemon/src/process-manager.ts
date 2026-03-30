@@ -114,12 +114,17 @@ export class ProcessManager {
     if (member.type !== 'agent') throw new Error(`Member ${memberId} is not an agent`);
     if (!member.agentDir) throw new Error(`Member ${memberId} has no agentDir`);
 
-    // CEO (rank master) with user's OpenClaw → connect remotely
+    // CEO (rank master) with user's OpenClaw → try remote, fallback to local
     if (member.rank === 'master' && this.globalConfig.userGateway) {
-      return this.connectRemoteAgent(memberId, member);
+      try {
+        return await this.connectRemoteAgent(memberId, member);
+      } catch {
+        log(`[daemon] CEO remote connection failed — falling back to local gateway`);
+        // Fall through to local spawn below
+      }
     }
 
-    // CEO without user's OpenClaw → local fallback
+    // CEO without user's OpenClaw (or remote failed) → local fallback
     if (member.rank === 'master') {
       const agentAbsDir = join(this.corpRoot, member.agentDir);
       const openclawStateDir = join(agentAbsDir, '.openclaw');
