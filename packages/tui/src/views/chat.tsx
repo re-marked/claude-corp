@@ -586,7 +586,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
     if (cmd === '/clock' || cmd === '/clocks') {
-      onNavigate?.({ type: 'clock' });
+      setTimeout(() => onNavigate?.({ type: 'clock' }), 10);
       return;
     }
 

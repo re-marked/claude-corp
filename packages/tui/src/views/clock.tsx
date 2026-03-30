@@ -55,12 +55,12 @@ export function ClockView({ onBack }: Props) {
     return () => clearInterval(refresh);
   }, []);
 
-  // Animation loop — 10 FPS
+  // Animation loop — 2 FPS (500ms) to avoid Yoga WASM memory crash
   useEffect(() => {
     const timer = setInterval(() => {
       setFrame(f => f + 1);
       setNow(Date.now());
-    }, 100);
+    }, 500);
     return () => clearInterval(timer);
   }, []);
 
@@ -201,6 +201,13 @@ export function ClockView({ onBack }: Props) {
                 const interval = formatInterval(clock.intervalMs);
                 const errInfo = clock.consecutiveErrors > 0 ? ` ERR:${clock.consecutiveErrors}` : '';
 
+                // Progress bar (10 chars — compact alongside spinner)
+                const barWidth = 10;
+                const filled = Math.floor(progress * barWidth);
+                const empty = barWidth - filled;
+                const barFilled = '\u2501'.repeat(filled);
+                const barEmpty = '\u2501'.repeat(empty);
+
                 return (
                   <Box key={clock.id}>
                     <Text color={isSelected ? COLORS.primary : COLORS.muted}>
@@ -211,13 +218,15 @@ export function ClockView({ onBack }: Props) {
                       bold={isSelected}
                       color={clock.status === 'error' ? COLORS.danger : isSelected ? COLORS.text : COLORS.subtle}
                     >
-                      {clock.name.padEnd(22)}
+                      {clock.name.padEnd(20)}
                     </Text>
-                    <Text color={COLORS.muted}>{interval.padEnd(7)}</Text>
+                    <Text color={progressColor(progress)}>{barFilled}</Text>
+                    <Text color={COLORS.border}>{barEmpty}</Text>
+                    <Text color={COLORS.muted}> {interval.padEnd(5)}</Text>
                     <Text color={progressColor(progress)}>{remaining.padEnd(9)}</Text>
-                    <Text color={COLORS.subtle}>next </Text>
+                    <Text color={COLORS.subtle}>{'>'}</Text>
                     <Text color={COLORS.text}>{nextFireStr}</Text>
-                    <Text color={COLORS.muted}>  {'\u00d7'}{fires}</Text>
+                    <Text color={COLORS.muted}> {'\u00d7'}{fires}</Text>
                     {errInfo && <Text color={COLORS.danger}>{errInfo}</Text>}
                   </Box>
                 );
@@ -234,7 +243,7 @@ export function ClockView({ onBack }: Props) {
       {/* Footer */}
       <Box borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={1} justifyContent="space-between">
         <Text color={COLORS.muted}>P:pause/resume  Esc:back</Text>
-        <Text color={COLORS.muted}>10 FPS  {clocks.length} clocks</Text>
+        <Text color={COLORS.muted}>{clocks.length} clocks</Text>
       </Box>
     </Box>
   );
