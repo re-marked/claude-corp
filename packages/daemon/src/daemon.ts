@@ -41,6 +41,7 @@ export class Daemon {
   taskWatcher: TaskWatcher;
   hireWatcher: HireWatcher;
   pulse: Pulse;
+  private failsafeTimer: ReturnType<typeof setInterval> | null = null;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -153,6 +154,50 @@ export class Daemon {
     this.taskWatcher.start();
     this.hireWatcher.start();
     this.pulse.start();
+
+    // Failsafe heartbeat: dispatch monitoring protocol to Failsafe every 5 min
+    this.failsafeTimer = setInterval(() => this.dispatchFailsafeHeartbeat(), 5 * 60 * 1000);
+    log('[daemon] Failsafe heartbeat timer started (every 5m)');
+  }
+
+  /** Send "run your monitoring protocol" to Failsafe agent's DM via router. */
+  private dispatchFailsafeHeartbeat(): void {
+    try {
+      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+      const failsafe = members.find(m => m.displayName === 'Failsafe' && m.type === 'agent');
+      if (!failsafe) return;
+
+      // Check if Failsafe is already busy — don't pile up dispatches
+      if (this.getAgentWorkStatus(failsafe.id) === 'busy') return;
+
+      const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
+      const founder = members.find(m => m.rank === 'owner');
+      const dmChannel = channels.find(
+        c => c.kind === 'direct' &&
+        c.memberIds.includes(failsafe.id) &&
+        (founder ? c.memberIds.includes(founder.id) : true),
+      );
+      if (!dmChannel) return;
+
+      const msg: ChannelMessage = {
+        id: generateId(),
+        channelId: dmChannel.id,
+        senderId: 'system',
+        threadId: null,
+        content: 'Run your monitoring protocol. Check all agent statuses and report.',
+        kind: 'text',
+        mentions: [failsafe.id],
+        metadata: { source: 'failsafe-timer' },
+        depth: 0,
+        originId: '',
+        timestamp: new Date().toISOString(),
+      };
+      msg.originId = msg.id;
+      appendMessage(join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+      log('[daemon] Failsafe heartbeat dispatched');
+    } catch (err) {
+      logError(`[daemon] Failsafe heartbeat dispatch failed: ${err}`);
+    }
   }
 
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
@@ -310,6 +355,7 @@ export class Daemon {
     this.taskWatcher.stop();
     this.hireWatcher.stop();
     this.pulse.stop();
+    if (this.failsafeTimer) clearInterval(this.failsafeTimer);
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();
