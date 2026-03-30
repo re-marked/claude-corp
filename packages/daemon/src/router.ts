@@ -113,6 +113,9 @@ export class MessageRouter {
     // Ensure we're watching this channel
     if (!this.watchers.has(channel.id)) {
       this.watchChannel(channel);
+      // For newly watched channels, reset offset to 0 so we read ALL existing messages
+      // (watchChannel defaults to end-of-file, which would skip the message that triggered the poke)
+      this.offsets.set(msgPath, 0);
     }
     this.onFileChange(channel, msgPath);
   }
