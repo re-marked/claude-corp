@@ -216,6 +216,39 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  // --- Contracts ---
+
+  async createContract(opts: Record<string, unknown>): Promise<any> {
+    const resp = await fetch(`${this.baseUrl}/contracts/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    });
+    return resp.json() as Promise<any>;
+  }
+
+  async listContracts(project?: string, status?: string): Promise<any[]> {
+    const params = new URLSearchParams();
+    if (project) params.set('project', project);
+    if (status) params.set('status', status);
+    const resp = await fetch(`${this.baseUrl}/contracts?${params}`);
+    return resp.json() as Promise<any>;
+  }
+
+  async getContract(project: string, id: string): Promise<any> {
+    const resp = await fetch(`${this.baseUrl}/contracts/${encodeURIComponent(project)}/${encodeURIComponent(id)}`);
+    return resp.json() as Promise<any>;
+  }
+
+  async updateContract(project: string, id: string, updates: Record<string, unknown>): Promise<any> {
+    const resp = await fetch(`${this.baseUrl}/contracts/${encodeURIComponent(project)}/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    return resp.json() as Promise<any>;
+  }
+
   // --- Analytics ---
 
   async getAnalytics(): Promise<any> {

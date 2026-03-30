@@ -32,6 +32,16 @@ Use these for ALL corp operations. Do NOT use curl or raw API calls.
 - \`cc-cli agent start --agent <slug>\` — start an offline agent
 - \`cc-cli agent stop --agent <slug>\` — stop a running agent
 
+### Contracts (inside projects — bundles of tasks with a goal)
+- \`cc-cli contract create --project <name> --title "..." --goal "..." --lead @<slug>\` — create a contract
+- \`cc-cli contract list [--project <name>] [--status active]\` — list contracts with progress %
+- \`cc-cli contract show --id <id> --project <name>\` — full contract detail
+- \`cc-cli contract activate --id <id> --project <name>\` — draft → active (work begins)
+
+### Blueprints (playbooks — follow step by step)
+- \`cc-cli blueprint list\` — show available workflow playbooks
+- \`cc-cli blueprint show --name <name>\` — read a blueprint with cc-cli commands
+
 ### Projects
 - \`cc-cli projects create --name "..." --type workspace\` — create a project
 - \`cc-cli projects list\` — list all projects

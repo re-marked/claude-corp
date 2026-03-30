@@ -77,6 +77,7 @@ export function CorpHome({ onNavigate }: Props) {
     pending: 0, assigned: 0, in_progress: 0, completed: 0, failed: 0, blocked: 0,
   });
   const [cursor, setCursor] = useState(0);
+  const [narration, setNarration] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -156,6 +157,17 @@ export function CorpHome({ onNavigate }: Props) {
         }
         setTaskCounts(counts);
       } catch {}
+
+      // Read Herald narration
+      try {
+        const { readFileSync } = await import('node:fs');
+        const narrationPath = join(corpRoot, 'NARRATION.md');
+        if (existsSync(narrationPath)) {
+          const raw = readFileSync(narrationPath, 'utf-8');
+          const summaryLines = raw.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+          setNarration(summaryLines[0]?.trim() ?? '');
+        }
+      } catch {}
     } catch {}
   }, [corpRoot, daemonClient]);
 
@@ -228,6 +240,13 @@ export function CorpHome({ onNavigate }: Props) {
           </Text>
         </Box>
       </Box>
+
+      {/* Herald narration banner */}
+      {narration && (
+        <Box paddingX={2} paddingY={0}>
+          <Text color={COLORS.info} italic>{'\u25C8'} {narration}</Text>
+        </Box>
+      )}
 
       {/* Agent grid */}
       <Box

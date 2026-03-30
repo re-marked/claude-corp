@@ -35,6 +35,10 @@ const { values, positionals } = parseArgs({
     repo: { type: 'string' },
     soul: { type: 'string' },
     corp: { type: 'string' },
+    goal: { type: 'string' },
+    id: { type: 'string' },
+    blueprint: { type: 'string' },
+    deadline: { type: 'string' },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -325,6 +329,34 @@ async function run() {
         console.error('Usage: cc-cli task create --title "..." [--to <agent>] [--priority high]');
         process.exit(1);
       }
+      break;
+    }
+    case 'contract':
+    case 'contracts': {
+      const { cmdContract } = await import('./commands/contract.js');
+      await cmdContract({
+        action: positionals[1] as string | undefined,
+        project: values.project as string | undefined,
+        title: values.title as string | undefined,
+        goal: values.goal as string | undefined,
+        lead: values.lead as string | undefined,
+        priority: values.priority as string | undefined,
+        deadline: values.deadline as string | undefined,
+        blueprint: values.blueprint as string | undefined,
+        status: values.status as string | undefined,
+        id: values.id as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'blueprint':
+    case 'blueprints': {
+      const { cmdBlueprint } = await import('./commands/blueprint.js');
+      await cmdBlueprint({
+        action: positionals[1] as string | undefined,
+        name: values.name as string | undefined,
+        json: !!values.json,
+      });
       break;
     }
     case 'projects': {

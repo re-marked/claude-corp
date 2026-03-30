@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import {
   type Member,
   type Channel,
@@ -675,6 +675,32 @@ export class HeartbeatManager {
     try {
       const now = new Date();
       const lines: string[] = [`# Corp Vitals — updated ${now.toISOString()}`, ''];
+
+      // --- Herald Narration (if available) ---
+      try {
+        const narrationPath = join(this.daemon.corpRoot, 'NARRATION.md');
+        if (existsSync(narrationPath)) {
+          const narrationRaw = readFileSync(narrationPath, 'utf-8');
+          // Extract header timestamp and summary
+          const headerMatch = narrationRaw.match(/# Herald — (\d{2}:\d{2}:\d{2})/);
+          const narrationLines = narrationRaw.split('\n').filter((l: string) => l.trim() && !l.startsWith('#'));
+
+          if (narrationLines.length > 0) {
+            // Check staleness — NARRATION.md file mtime
+            const mtime = statSync(narrationPath).mtimeMs;
+            const ageMs = Date.now() - mtime;
+            const stale = ageMs > 10 * 60 * 1000; // > 10 min = stale
+
+            const timeStr = headerMatch?.[1] ?? '';
+            const staleNote = stale ? ' (stale — Herald may be offline)' : '';
+
+            lines.push('## Herald', '');
+            lines.push(`> ${narrationLines[0]!.trim()}`);
+            if (timeStr) lines.push(`> — ${timeStr}${staleNote}`);
+            lines.push('');
+          }
+        }
+      } catch {}
 
       // --- Agent Status Grid ---
       lines.push('## Agents', '');

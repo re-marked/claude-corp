@@ -28,6 +28,9 @@ import { InboxManager } from './inbox.js';
 import { Pulse } from './pulse.js';
 import { hireFailsafe } from './failsafe.js';
 import { hireJanitor } from './janitor.js';
+import { hireWarden } from './warden.js';
+import { hireHerald } from './herald.js';
+import { ContractWatcher } from './contract-watcher.js';
 import { ClockManager } from './clock-manager.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
@@ -44,6 +47,7 @@ export class Daemon {
   taskWatcher: TaskWatcher;
   hireWatcher: HireWatcher;
   pulse: Pulse;
+  contractWatcher: ContractWatcher;
   clocks: ClockManager;
   analytics: AnalyticsEngine;
   readonly startedAt: number = Date.now();
@@ -74,6 +78,7 @@ export class Daemon {
     this.taskWatcher = new TaskWatcher(this);
     this.hireWatcher = new HireWatcher(this);
     this.pulse = new Pulse(this);
+    this.contractWatcher = new ContractWatcher(this);
     this.clocks = new ClockManager(this.events);
     this.analytics = new AnalyticsEngine(this);
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
@@ -166,6 +171,7 @@ export class Daemon {
     this.taskWatcher.start();
     this.hireWatcher.start();
     this.pulse.start();
+    this.contractWatcher.start();
 
     this.analytics.start();
 
@@ -179,6 +185,54 @@ export class Daemon {
       description: 'Dispatches monitoring protocol to Failsafe agent every 5m',
       callback: () => this.dispatchFailsafeHeartbeat(),
     });
+
+    // Register Herald narration as a Clock
+    this.clocks.register({
+      id: 'herald-narration',
+      name: 'Herald Narration',
+      type: 'heartbeat',
+      intervalMs: 5 * 60 * 1000,
+      target: 'Herald',
+      description: 'Herald summarizes corp activity → writes NARRATION.md',
+      callback: () => this.dispatchHeraldNarration(),
+    });
+  }
+
+  /** Dispatch narration request to Herald via say(). Response = NARRATION.md content. */
+  private async dispatchHeraldNarration(): Promise<void> {
+    try {
+      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+      const herald = members.find(m => m.displayName === 'Herald' && m.type === 'agent');
+      if (!herald) return;
+      if (this.getAgentWorkStatus(herald.id) === 'busy') return;
+
+      const agentProc = this.processManager.getAgent(herald.id);
+      if (!agentProc || agentProc.status !== 'ready') return;
+
+      const resp = await fetch(`http://127.0.0.1:${this.port}/cc/say`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: 'herald',
+          message: 'Narrate the current state of the corp. Run cc-cli activity and cc-cli status, then give a 1-2 sentence summary.',
+          sessionKey: `herald-narration:${Date.now()}`,
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+
+      const data = await resp.json() as any;
+      if (data.ok && data.response?.trim()) {
+        // Write NARRATION.md at corp root
+        const { writeFileSync } = await import('node:fs');
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        const content = `# Herald — ${timeStr}\n\n${data.response.trim()}\n`;
+        writeFileSync(join(this.corpRoot, 'NARRATION.md'), content, 'utf-8');
+        log(`[daemon] Herald narration: ${data.response.trim().slice(0, 80)}`);
+      }
+    } catch (err) {
+      logError(`[daemon] Herald narration failed: ${err}`);
+    }
   }
 
   /**
@@ -326,7 +380,16 @@ export class Daemon {
     } catch (err) {
       logError(`[daemon] Failed to bootstrap Janitor agent: ${err}`);
     }
-
+    try {
+      await hireWarden(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Warden agent: ${err}`);
+    }
+    try {
+      await hireHerald(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Herald agent: ${err}`);
+    }
   }
 
   /**
@@ -415,6 +478,7 @@ export class Daemon {
     this.taskWatcher.stop();
     this.hireWatcher.stop();
     this.pulse.stop();
+    this.contractWatcher.stop();
     this.clocks.stopAll();
     this.inbox.flush(); // Persist inbox state before shutdown
     this.analytics.stop(); // Persist analytics before shutdown

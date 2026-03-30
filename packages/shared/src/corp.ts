@@ -4,6 +4,7 @@ import type { Corporation } from './types/corp.js';
 import type { Member } from './types/member.js';
 import type { Channel } from './types/channel.js';
 import { installDefaultSkills } from './skills.js';
+import { installDefaultBlueprints } from './blueprints.js';
 import { getTheme, type ThemeId } from './themes.js';
 import { generateId } from './id.js';
 import { writeConfig } from './parsers/config.js';
@@ -65,6 +66,7 @@ export async function scaffoldCorp(
 
   // Install default skills from bundled package
   try { installDefaultSkills(corpRoot); } catch {}
+  try { installDefaultBlueprints(corpRoot); } catch {}
 
   // IDs
   const userId = generateId();
