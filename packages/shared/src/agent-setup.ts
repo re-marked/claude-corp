@@ -363,13 +363,6 @@ The corp CLI. Use these for all corp operations — do NOT use curl or raw API c
 - \`cc-cli uptime\` — daemon uptime
 - \`cc-cli models\` — list available models
 
-## Git Worktree
-- Your worktree: ${corpRoot.replace(/\\/g, '/')}/wt/${agentDir.split('/').filter(Boolean).pop() ?? 'agent'}
-- Branch: wt/${agentDir.split('/').filter(Boolean).pop() ?? 'agent'}
-- All your code edits happen in your worktree, not in the corp root
-- When your task is done, the Janitor agent will merge your work back to main
-- Do NOT merge yourself — create a merge task for @janitor
-
 ## Build & Test
 - Build: \`cd ${corpRoot.replace(/\\/g, '/')} && pnpm build\` (if codebase project)
 - Always verify your work exists after writing it

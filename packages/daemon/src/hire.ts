@@ -18,10 +18,9 @@ import {
   MEMBERS_JSON,
   CHANNELS_JSON,
   CORP_JSON,
-  corpGit,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
-import { log, logError } from './logger.js';
+import { log } from './logger.js';
 
 export interface HireOpts {
   creatorId: string;
@@ -90,14 +89,9 @@ export async function hireAgent(
     remote: true,
   });
 
-  // 2b. Create git worktree for agent (best-effort — non-fatal if it fails)
-  try {
-    const git = corpGit(corpRoot);
-    const wtPath = await git.createWorktree(opts.agentName);
-    log(`[hire] Created worktree for ${opts.agentName} at ${wtPath}`);
-  } catch (err) {
-    logError(`[hire] Worktree creation failed for ${opts.agentName} (non-fatal): ${err}`);
-  }
+  // FIXME(v0.10.1): Per-agent worktrees disabled — needs project-scoped repos first.
+  // Worktree of the whole corp is wrong (stale members.json, channels, tasks).
+  // Will enable when projects land: worktree per project, not per agent.
 
   // 3. Add member to registry
   addMemberToRegistry(corpRoot, member);
