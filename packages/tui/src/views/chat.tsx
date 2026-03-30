@@ -1024,7 +1024,7 @@ Always consider what happens when things go wrong.`,
               <Text color={COLORS.muted}><Spinner type="dots" /></Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text wrap="wrap">{stream.content}</Text>
+              <Text wrap="wrap">{renderContent(stream.content, memberMap)}</Text>
             </Box>
           </Box>
         );
