@@ -18,6 +18,7 @@ import { historyFragment } from './history.js';
 import { debateProtocolFragment } from './debate-protocol.js';
 import { agentCommunicationFragment } from './agent-communication.js';
 import { inboxFragment } from './inbox.js';
+import { ccCliFragment } from './cc-cli.js';
 
 const FRAGMENTS: Fragment[] = [
   workspaceFragment,
@@ -37,6 +38,7 @@ const FRAGMENTS: Fragment[] = [
   debateProtocolFragment,
   agentCommunicationFragment,
   inboxFragment,
+  ccCliFragment,
   contextFragment,
   historyFragment,
 ].sort((a, b) => a.order - b.order);
