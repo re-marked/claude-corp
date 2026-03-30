@@ -196,6 +196,39 @@ export class Daemon {
       description: 'Herald summarizes corp activity → writes NARRATION.md',
       callback: () => this.dispatchHeraldNarration(),
     });
+
+    // Register Agent Recovery as a Clock — self-healing for crashed agents
+    this.clocks.register({
+      id: 'agent-recovery',
+      name: 'Agent Recovery',
+      type: 'system',
+      intervalMs: 30 * 1000, // Every 30 seconds
+      target: 'Daemon',
+      description: 'Detects crashed agents and attempts respawn — self-healing at daemon level',
+      callback: () => this.recoverCrashedAgents(),
+    });
+
+    // CEO Gateway Recovery — monitors the CEO's OpenClaw connection
+    this.clocks.register({
+      id: 'ceo-gateway-recovery',
+      name: 'CEO Gateway',
+      type: 'system',
+      intervalMs: 30 * 1000,
+      target: 'CEO',
+      description: 'Monitors CEO gateway health, reconnects WebSocket, respawns on failure',
+      callback: () => this.recoverCeoGateway(),
+    });
+
+    // Corp Gateway Recovery — picks up after autoRestart exhausts its 3 attempts
+    this.clocks.register({
+      id: 'corp-gateway-recovery',
+      name: 'Corp Gateway',
+      type: 'system',
+      intervalMs: 60 * 1000,
+      target: 'Workers',
+      description: 'Recovers corp gateway after auto-restart exhaustion, reconnects WebSocket',
+      callback: () => this.recoverCorpGateway(),
+    });
   }
 
   /** Dispatch narration request to Herald via say(). Response = NARRATION.md content. */
@@ -232,6 +265,256 @@ export class Daemon {
       }
     } catch (err) {
       logError(`[daemon] Herald narration failed: ${err}`);
+    }
+  }
+
+  /**
+   * Self-healing: detect crashed agents and attempt to respawn them.
+   * Runs every 30 seconds. Tracks consecutive failures per agent to avoid
+   * infinite retry loops — gives up after 5 consecutive failures and logs.
+   */
+  private recoveryAttempts = new Map<string, number>();
+  private static MAX_RECOVERY_ATTEMPTS = 5;
+
+  private async recoverCrashedAgents(): Promise<void> {
+    const agents = this.processManager.listAgents();
+    const crashed = agents.filter(a => a.status === 'crashed');
+
+    if (crashed.length === 0) {
+      // Reset all recovery counters when everything is healthy
+      this.recoveryAttempts.clear();
+      return;
+    }
+
+    for (const agent of crashed) {
+      const attempts = this.recoveryAttempts.get(agent.memberId) ?? 0;
+
+      if (attempts >= Daemon.MAX_RECOVERY_ATTEMPTS) {
+        // Already gave up on this one — log once at threshold, then stay quiet
+        if (attempts === Daemon.MAX_RECOVERY_ATTEMPTS) {
+          logError(`[recovery] ${agent.displayName} — gave up after ${attempts} attempts. Manual restart needed.`);
+          this.recoveryAttempts.set(agent.memberId, attempts + 1); // Prevent re-logging
+          this.analytics.trackError(agent.memberId);
+        }
+        continue;
+      }
+
+      this.recoveryAttempts.set(agent.memberId, attempts + 1);
+      log(`[recovery] ${agent.displayName} crashed — attempting respawn (attempt ${attempts + 1}/${Daemon.MAX_RECOVERY_ATTEMPTS})`);
+
+      try {
+        // Stop the old crashed process cleanly
+        await this.processManager.stopAgent(agent.memberId);
+
+        // Wait a beat for port release
+        await new Promise(r => setTimeout(r, 1000));
+
+        // Respawn
+        const respawned = await this.processManager.spawnAgent(agent.memberId);
+
+        if (respawned.status === 'ready' || respawned.status === 'starting') {
+          log(`[recovery] ${agent.displayName} respawned successfully (status: ${respawned.status})`);
+          this.recoveryAttempts.delete(agent.memberId);
+
+          // Reconnect WebSocket if this was the CEO (remote mode)
+          if (respawned.mode === 'remote' || respawned.mode === 'local') {
+            // Re-establish WebSocket for tool events
+            try {
+              this.openclawWS = new OpenClawWS(respawned.port, respawned.gatewayToken);
+              await this.openclawWS.connect();
+            } catch {
+              // Non-fatal — HTTP fallback still works
+            }
+          }
+
+          // Update work status
+          this.agentWorkStatus.set(agent.memberId, 'idle');
+
+          // Flush any queued tasks for this agent
+          const queued = this.inbox.peekNext(agent.memberId);
+          if (queued) {
+            log(`[recovery] ${agent.displayName} has queued work — inbox will dispatch on next idle`);
+          }
+
+          this.analytics.trackStatusChange(agent.memberId, agent.displayName, 'idle');
+        } else {
+          logError(`[recovery] ${agent.displayName} respawn returned status: ${respawned.status}`);
+        }
+      } catch (err) {
+        logError(`[recovery] ${agent.displayName} respawn failed: ${err}`);
+      }
+    }
+  }
+
+  /**
+   * CEO Gateway Recovery — verify the CEO's OpenClaw is reachable.
+   * If unreachable: mark crashed (agent-recovery handles respawn).
+   * If reachable but WebSocket disconnected: reconnect.
+   */
+  private ceoRecoveryFailures = 0;
+
+  private async recoverCeoGateway(): Promise<void> {
+    try {
+      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+      const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+      if (!ceo) return;
+
+      const agentProc = this.processManager.getAgent(ceo.id);
+      if (!agentProc) return;
+
+      // Skip if already crashed — agent-recovery handles that
+      if (agentProc.status === 'crashed' || agentProc.status === 'stopped') return;
+
+      // Health ping the CEO's gateway
+      try {
+        const resp = await fetch(`http://127.0.0.1:${agentProc.port}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${agentProc.gatewayToken}`,
+          },
+          body: JSON.stringify({ model: agentProc.model, messages: [] }),
+          signal: AbortSignal.timeout(3000),
+        });
+
+        if (resp.status >= 500) throw new Error(`HTTP ${resp.status}`);
+
+        // Gateway is reachable — reset failure counter
+        this.ceoRecoveryFailures = 0;
+
+        // Check WebSocket — reconnect if disconnected
+        const wsClient = agentProc.mode === 'remote' ? this.openclawWS : null;
+        if (agentProc.mode === 'remote' && (!wsClient || !wsClient.isConnected())) {
+          log('[ceo-recovery] WebSocket disconnected — reconnecting...');
+          try {
+            this.openclawWS = new OpenClawWS(agentProc.port, agentProc.gatewayToken);
+            await this.openclawWS.connect();
+            log('[ceo-recovery] WebSocket reconnected');
+          } catch {
+            logError('[ceo-recovery] WebSocket reconnect failed (HTTP fallback active)');
+          }
+        }
+
+        // Local mode CEO — check WebSocket too
+        if (agentProc.mode === 'local' && (!this.openclawWS || !this.openclawWS.isConnected())) {
+          try {
+            this.openclawWS = new OpenClawWS(agentProc.port, agentProc.gatewayToken);
+            await this.openclawWS.connect();
+            log('[ceo-recovery] Local CEO WebSocket reconnected');
+          } catch {
+            // Non-fatal
+          }
+        }
+      } catch {
+        // Gateway unreachable
+        this.ceoRecoveryFailures++;
+
+        if (this.ceoRecoveryFailures >= 3) {
+          // Confirmed dead — mark crashed so agent-recovery handles respawn
+          logError(`[ceo-recovery] CEO gateway unreachable (${this.ceoRecoveryFailures} consecutive failures) — marking crashed`);
+          agentProc.status = 'crashed';
+          this.ceoRecoveryFailures = 0; // Reset so agent-recovery gets a fresh start
+        } else {
+          log(`[ceo-recovery] CEO gateway ping failed (${this.ceoRecoveryFailures}/3)`);
+        }
+      }
+    } catch (err) {
+      logError(`[ceo-recovery] Unexpected error: ${err}`);
+    }
+  }
+
+  /**
+   * Corp Gateway Recovery — picks up after the built-in autoRestart exhausts.
+   * Also reconnects the daemon's WebSocket to the corp gateway and updates
+   * worker agent statuses after gateway recovery.
+   */
+  private corpGatewayRecoveryAttempts = 0;
+
+  private async recoverCorpGateway(): Promise<void> {
+    try {
+      const corpGw = this.processManager.corpGateway;
+      if (!corpGw) return; // No corp gateway configured
+
+      const gwStatus = corpGw.getStatus();
+
+      // Gateway is healthy — check WebSocket connection
+      if (gwStatus === 'ready') {
+        this.corpGatewayRecoveryAttempts = 0;
+
+        // Reconnect WebSocket if disconnected
+        if (!this.corpGatewayWS || !this.corpGatewayWS.isConnected()) {
+          try {
+            this.corpGatewayWS = new OpenClawWS(corpGw.getPort(), corpGw.getToken());
+            await this.corpGatewayWS.connect();
+            log('[corp-gw-recovery] WebSocket reconnected to corp gateway');
+          } catch {
+            // Non-fatal — HTTP fallback works
+          }
+        }
+
+        // Verify worker agents reflect gateway status
+        const agents = this.processManager.listAgents();
+        for (const agent of agents) {
+          if (agent.mode === 'gateway' && agent.status !== 'ready') {
+            agent.status = 'ready';
+            agent.port = corpGw.getPort();
+            agent.gatewayToken = corpGw.getToken();
+            log(`[corp-gw-recovery] Updated ${agent.displayName} → ready (gateway is healthy)`);
+          }
+        }
+        return;
+      }
+
+      // Gateway is stopped but has agents — this means autoRestart exhausted
+      if (gwStatus === 'stopped' && corpGw.hasAgents()) {
+        this.corpGatewayRecoveryAttempts++;
+
+        if (this.corpGatewayRecoveryAttempts > 10) {
+          // Give up after 10 attempts (10 minutes at 60s interval)
+          if (this.corpGatewayRecoveryAttempts === 11) {
+            logError('[corp-gw-recovery] Exhausted 10 recovery attempts — corp gateway is down. Restart TUI to recover.');
+          }
+          return;
+        }
+
+        log(`[corp-gw-recovery] Corp gateway stopped — attempting recovery (attempt ${this.corpGatewayRecoveryAttempts}/10)`);
+
+        try {
+          // Refresh auth in case API keys changed
+          corpGw.refreshAllAuth();
+
+          // Attempt restart
+          await corpGw.start();
+          log(`[corp-gw-recovery] Corp gateway recovered on port ${corpGw.getPort()}`);
+
+          // Reconnect WebSocket
+          try {
+            this.corpGatewayWS = new OpenClawWS(corpGw.getPort(), corpGw.getToken());
+            await this.corpGatewayWS.connect();
+            log('[corp-gw-recovery] WebSocket connected to recovered corp gateway');
+          } catch {
+            logError('[corp-gw-recovery] WebSocket connect failed after recovery');
+          }
+
+          // Mark all gateway workers as ready
+          const agents = this.processManager.listAgents();
+          for (const agent of agents) {
+            if (agent.mode === 'gateway') {
+              agent.status = 'ready';
+              agent.port = corpGw.getPort();
+              agent.gatewayToken = corpGw.getToken();
+              this.agentWorkStatus.set(agent.memberId, 'idle');
+              log(`[corp-gw-recovery] ${agent.displayName} → ready`);
+            }
+          }
+
+          this.corpGatewayRecoveryAttempts = 0;
+        } catch (err) {
+          logError(`[corp-gw-recovery] Recovery failed: ${err}`);
+        }
+      }
+    } catch (err) {
+      logError(`[corp-gw-recovery] Unexpected error: ${err}`);
     }
   }
 

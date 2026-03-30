@@ -169,6 +169,10 @@ export class MessageRouter {
   }
 
   private processMessage(msg: ChannelMessage, channel: Channel): void {
+    // Skip Jack-mode messages — already dispatched via say() with persistent session
+    const meta = msg.metadata as Record<string, unknown> | null;
+    if (meta?.source === 'jack') return;
+
     // Handle /uptime slash command
     if (msg.kind === 'text' && msg.content.trim() === '/uptime') {
       const uptime = this.daemon.getUptime();
