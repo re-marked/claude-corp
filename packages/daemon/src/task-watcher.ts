@@ -10,7 +10,7 @@ import {
   readConfig,
   MEMBERS_JSON,
 } from '@claudecorp/shared';
-import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm, dispatchBlockerToDm, dispatchCompletionToCeo } from './task-events.js';
+import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm, dispatchBlockerToDm, dispatchCompletionToCeo, dispatchToHander } from './task-events.js';
 import type { Daemon } from './daemon.js';
 import { log } from './logger.js';
 
@@ -116,13 +116,23 @@ export class TaskWatcher {
           `"${task.title}" → ${task.status}`,
         );
 
-        // When task is BLOCKED, notify the creator (supervisor) via DM
-        if (task.status === 'blocked' && task.createdBy) {
+        // When task is BLOCKED, notify the creator AND hander
+        if (task.status === 'blocked') {
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
             const assignee = members.find(m => m.id === task.assignedTo);
             const assigneeName = assignee?.displayName ?? 'an agent';
-            dispatchBlockerToDm(this.daemon, task.createdBy, assigneeName, task.title);
+
+            // Notify creator (supervisor)
+            if (task.createdBy) {
+              dispatchBlockerToDm(this.daemon, task.createdBy, assigneeName, task.title);
+            }
+
+            // Notify hander (sponsor) if different from creator
+            const handedBy = (task as any).handedBy;
+            if (handedBy && handedBy !== task.createdBy) {
+              dispatchToHander(this.daemon, handedBy, task.title, 'blocked', assigneeName);
+            }
           } catch {
             // Non-fatal
           }
@@ -138,12 +148,13 @@ export class TaskWatcher {
             // Notify CEO via DM
             dispatchCompletionToCeo(this.daemon, task.title, task.status, assigneeName);
 
-            // Notify the hander (if different from CEO) — they should know their handed task is done
-            if ((task as any).handedBy && (task as any).handedBy !== task.createdBy) {
-              const hander = members.find(m => m.id === (task as any).handedBy);
-              if (hander && hander.rank !== 'master') { // Don't double-notify CEO
-                dispatchCompletionToCeo(this.daemon, task.title, task.status, assigneeName);
-                // TODO: use a dedicated dispatchCompletionToHander when we split from CEO notification
+            // Notify the hander (sponsor) — they delegated this work and care about the outcome
+            const handedBy = (task as any).handedBy;
+            if (handedBy) {
+              // Don't double-notify if hander IS the CEO (already notified above)
+              const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+              if (handedBy !== ceo?.id) {
+                dispatchToHander(this.daemon, handedBy, task.title, task.status, assigneeName);
               }
             }
           } catch {

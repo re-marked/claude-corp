@@ -29,6 +29,7 @@ import { Pulse } from './pulse.js';
 import { hireFailsafe } from './failsafe.js';
 import { hireJanitor } from './janitor.js';
 import { ClockManager } from './clock-manager.js';
+import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
@@ -44,6 +45,7 @@ export class Daemon {
   hireWatcher: HireWatcher;
   pulse: Pulse;
   clocks: ClockManager;
+  analytics: AnalyticsEngine;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -73,6 +75,7 @@ export class Daemon {
     this.hireWatcher = new HireWatcher(this);
     this.pulse = new Pulse(this);
     this.clocks = new ClockManager(this.events);
+    this.analytics = new AnalyticsEngine(this);
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
   }
 

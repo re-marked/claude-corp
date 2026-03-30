@@ -267,3 +267,66 @@ export function dispatchCompletionToCeo(
     logError(`[task-events] CEO notification failed: ${err}`);
   }
 }
+
+/**
+ * Notify the task's hander (sponsor) that their handed task completed, failed, or got blocked.
+ * Different from CEO notification — this is for the person who delegated the work.
+ */
+export function dispatchToHander(
+  daemon: Daemon,
+  handerId: string,
+  taskTitle: string,
+  taskStatus: string,
+  assigneeName: string,
+): void {
+  try {
+    const corpRoot = daemon.corpRoot;
+    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
+    const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+
+    const hander = members.find((m) => m.id === handerId);
+    if (!hander) return;
+
+    const founder = members.find((m) => m.rank === 'owner');
+    const dmChannel = channels.find(
+      (c) =>
+        c.kind === 'direct' &&
+        c.memberIds.includes(handerId) &&
+        (founder ? c.memberIds.includes(founder.id) : true),
+    );
+    if (!dmChannel) return;
+
+    // Craft hander-specific message (different tone from CEO notification)
+    let content: string;
+    if (taskStatus === 'completed') {
+      content = `Your handed task "${taskTitle}" was completed by ${assigneeName}. Review the deliverables and verify acceptance criteria.`;
+    } else if (taskStatus === 'failed') {
+      content = `Your handed task "${taskTitle}" FAILED. ${assigneeName} could not complete it. Check the task file for details and decide next steps.`;
+    } else if (taskStatus === 'blocked') {
+      content = `Your handed task "${taskTitle}" is BLOCKED by ${assigneeName}. They need help — check the task file for Tried/Failed/Need details.`;
+    } else {
+      content = `Task "${taskTitle}" status changed to ${taskStatus} by ${assigneeName}.`;
+    }
+
+    const msg: ChannelMessage = {
+      id: generateId(),
+      channelId: dmChannel.id,
+      senderId: 'system',
+      threadId: null,
+      content,
+      kind: 'text',
+      mentions: [handerId],
+      metadata: { source: 'task-hander-notify' },
+      depth: 0,
+      originId: '',
+      timestamp: new Date().toISOString(),
+    };
+    msg.originId = msg.id;
+    appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+    setTimeout(() => daemon.router.pokeChannel(dmChannel.id), 100);
+
+    log(`[task-events] Hander notification for "${taskTitle}" (${taskStatus}) sent to ${hander.displayName}'s DM`);
+  } catch (err) {
+    logError(`[task-events] Hander notification failed: ${err}`);
+  }
+}

@@ -241,7 +241,7 @@ export class HeartbeatManager {
           } catch {}
         }
 
-        const content = this.buildTasksMd(corpRoot, myTasks, unassigned, now, allTasks);
+        const content = this.buildTasksMd(corpRoot, myTasks, unassigned, now, allTasks, members);
 
         try {
           const agentDir = join(this.daemon.corpRoot, agent.agentDir!);
@@ -290,6 +290,7 @@ export class HeartbeatManager {
     unassigned: { task: any; body: string }[],
     now: Date,
     allTasks?: { task: any; body: string }[],
+    members?: Member[],
   ): string {
     const lines: string[] = [`# Tasks — updated ${now.toISOString()}`, ''];
 
@@ -321,7 +322,19 @@ export class HeartbeatManager {
             const icon = blocker.task.status === 'completed' ? '\u2713' : blocker.task.status === 'in_progress' ? '\u25CF' : '\u25CB';
             return `${icon} "${blocker.task.title}" (${blocker.task.status})`;
           });
-          lines.push(`  Depends on: ${blockerInfo.join(', ')}`);
+          const resolved = (t.task.blockedBy as string[]).filter(id => {
+            const b = allTasks.find(bt => bt.task.id === id);
+            return b?.task.status === 'completed';
+          }).length;
+          lines.push(`  Depends on (${resolved}/${(t.task.blockedBy as string[]).length} resolved): ${blockerInfo.join(', ')}`);
+        }
+
+        // Handed-by info (who delegated this to you)
+        if (t.task.handedBy && members) {
+          const hander = members.find(m => m.id === t.task.handedBy);
+          const handerName = hander?.displayName ?? 'unknown';
+          const handedAt = t.task.handedAt ? new Date(t.task.handedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+          lines.push(`  Handed by: @${handerName.toLowerCase().replace(/\s+/g, '-')}${handedAt ? ` at ${handedAt}` : ''}`);
         }
         lines.push('');
       }

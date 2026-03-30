@@ -273,10 +273,19 @@ export function createApi(daemon: Daemon): Server {
             return;
           }
 
-          // Update task assignment + record who handed it
-          const handedBy = (body.handedBy as string) ?? null;
+          // Resolve who is handing (explicit handedBy, or detect from members)
+          const founder = members.find((m: any) => m.rank === 'owner');
+          const handedBy = (body.handedBy as string) ?? founder?.id ?? null;
+          const hander = members.find((m: any) => m.id === handedBy);
+          const handerName = hander?.displayName ?? 'system';
+
+          // Update task: assign + record hander + timestamp
           const filePath = taskPath(daemon.corpRoot, taskId);
-          const updated = updateTask(filePath, { assignedTo: target.id, handedBy } as any);
+          const updated = updateTask(filePath, {
+            assignedTo: target.id,
+            handedBy,
+            handedAt: new Date().toISOString(),
+          } as any);
 
           // Log to #tasks (read-only event) + dispatch to agent's DM
           logTaskAssignment(daemon.corpRoot, target.id, updated.title);
@@ -285,7 +294,7 @@ export function createApi(daemon: Daemon): Server {
           // Refresh all agents' TASKS.md + casket files
           daemon.heartbeat.refreshAll();
 
-          json(res, { ok: true, task: updated, handedTo: target.displayName });
+          json(res, { ok: true, task: updated, handedTo: target.displayName, handedBy: handerName });
         } catch {
           json(res, { error: 'Task not found' }, 404);
         }
