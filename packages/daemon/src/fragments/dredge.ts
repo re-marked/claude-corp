@@ -4,8 +4,9 @@ import type { Fragment } from './types.js';
 
 /**
  * Dredge — session recovery fragment.
- * Injects WORKLOG.md (recent DM activity) into every agent's system prompt
- * so they can pick up where they left off across sessions.
+ * Extracts the Session Summary from WORKLOG.md and injects it into
+ * the system prompt. This gives agents concise continuity without
+ * dumping the full worklog into every dispatch.
  */
 export const dredgeFragment: Fragment = {
   id: 'dredge',
@@ -16,14 +17,28 @@ export const dredgeFragment: Fragment = {
     if (!existsSync(worklogPath)) return '';
 
     try {
-      const content = readFileSync(worklogPath, 'utf-8').trim();
-      if (!content) return '';
+      const content = readFileSync(worklogPath, 'utf-8');
+      if (!content.trim()) return '';
 
-      return `## Dredge — Recent Work
+      // Extract just the "## Session Summary" section — that's the actionable part
+      const summaryMatch = content.match(/## Session Summary\n([\s\S]*?)(?=\n## |$)/);
+      if (summaryMatch?.[1]?.trim()) {
+        return `## Dredge — Session Recovery
 
-${content}
+${summaryMatch[1].trim()}
 
-Pick up where you left off. Don't repeat what you've already done.`;
+This is what you were doing before this session. Read WORKLOG.md for full session history if needed.`;
+      }
+
+      // Fallback: if no summary section, show the first 500 chars
+      const preview = content.slice(0, 500).trim();
+      if (!preview) return '';
+
+      return `## Dredge — Session Recovery
+
+${preview}
+
+Read your full WORKLOG.md for detailed session history.`;
     } catch {
       return '';
     }

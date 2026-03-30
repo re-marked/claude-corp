@@ -3,8 +3,11 @@ import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import {
   type Member,
   type Channel,
+  type ChannelMessage,
   readConfig,
   listTasks,
+  readTask,
+  taskPath,
   tailMessages,
   MEMBERS_JSON,
   CHANNELS_JSON,
@@ -294,6 +297,8 @@ export class HeartbeatManager {
 
   // --- Casket file generation ---
 
+  private readonly SESSION_GAP_MS = 10 * 60 * 1000; // 10 min gap = new session
+
   /** Generate INBOX.md + WORKLOG.md for a single agent. */
   private generateCasketFiles(memberId: string): void {
     try {
@@ -304,87 +309,287 @@ export class HeartbeatManager {
       const agentDir = join(this.daemon.corpRoot, agent.agentDir);
       if (!existsSync(agentDir)) return;
 
-      // INBOX.md
-      this.writeInboxMd(agent, agentDir);
+      const channels = readConfig<Channel[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
+      const allTasks = listTasks(this.daemon.corpRoot);
 
-      // WORKLOG.md
-      this.writeWorklogMd(agent, agentDir, members);
+      this.writeInboxMd(agent, agentDir, channels, members, allTasks);
+      this.writeWorklogMd(agent, agentDir, channels, members, allTasks);
     } catch {
       // Non-fatal
     }
   }
 
-  /** Generate INBOX.md from InboxManager state + task queue. */
-  private writeInboxMd(agent: Member, agentDir: string): void {
+  /**
+   * INBOX.md — everything waiting for the agent.
+   * Includes: next task with full description, task queue, actual mention content, unread activity.
+   */
+  private writeInboxMd(
+    agent: Member,
+    agentDir: string,
+    channels: Channel[],
+    members: Member[],
+    allTasks: { task: any; body: string }[],
+  ): void {
     const now = new Date().toISOString();
+    const corpRoot = this.daemon.corpRoot.replace(/\\/g, '/');
     const lines: string[] = [`# Inbox — updated ${now}`, ''];
+    let hasContent = false;
 
-    // Pending messages
-    const snapshot = this.daemon.inbox.getInboxSnapshot(agent.id);
-    if (snapshot) {
-      lines.push('## Pending Messages', '', snapshot, '');
-    }
-
-    // Queued tasks
-    const queueCount = this.daemon.inbox.getQueuedTaskCount(agent.id);
-    if (queueCount > 0) {
-      const next = this.daemon.inbox.peekNext(agent.id);
-      lines.push('## Queued Tasks', '');
-      lines.push(`${queueCount} task${queueCount === 1 ? '' : 's'} waiting.`);
-      if (next) {
-        lines.push(`Next up: **${next.taskTitle}** (${next.taskPriority.toUpperCase()})`);
+    // --- Section 1: Next Task (most important — what to work on) ---
+    const nextQueued = this.daemon.inbox.peekNext(agent.id);
+    if (nextQueued) {
+      hasContent = true;
+      lines.push('## Next Task', '');
+      try {
+        const tp = taskPath(this.daemon.corpRoot, nextQueued.taskId);
+        const { task, body } = readTask(tp);
+        const priorityBadge = task.priority === 'critical' ? '!! CRITICAL' : task.priority.toUpperCase();
+        lines.push(`**${task.title}** (${priorityBadge})`);
+        lines.push(`File: ${corpRoot}/tasks/${task.id}.md`);
+        if (body.trim()) {
+          lines.push('', body.trim().slice(0, 500));
+        }
+        if (task.acceptanceCriteria?.length) {
+          lines.push('', 'Acceptance criteria:');
+          for (const ac of task.acceptanceCriteria) {
+            lines.push(`- [ ] ${ac}`);
+          }
+        }
+        if (task.blockedBy?.length) {
+          const blockerNames = task.blockedBy.map((id: string) => {
+            const bt = allTasks.find(t => t.task.id === id);
+            return bt ? `"${bt.task.title}" (${bt.task.status})` : id;
+          });
+          lines.push('', `Blocked by: ${blockerNames.join(', ')}`);
+        }
+      } catch {
+        lines.push(`**${nextQueued.taskTitle}** (${nextQueued.taskPriority.toUpperCase()})`);
       }
       lines.push('');
     }
 
-    if (lines.length <= 2) {
+    // --- Section 2: Task Queue (what's after the next task) ---
+    const queueCount = this.daemon.inbox.getQueuedTaskCount(agent.id);
+    if (queueCount > 1) {
+      // We already showed the first one above — show the rest
+      hasContent = true;
+      lines.push(`## Task Queue (${queueCount - 1} more waiting)`, '');
+      // Peek at the queue without dequeuing — read from task files
+      const myQueuedTasks = allTasks.filter(t =>
+        t.task.assignedTo === agent.id &&
+        (t.task.status === 'assigned' || t.task.status === 'pending'),
+      );
+      for (const t of myQueuedTasks.slice(0, 5)) {
+        const blocked = t.task.blockedBy?.length ? ' (BLOCKED)' : '';
+        lines.push(`${myQueuedTasks.indexOf(t) + 1}. **${t.task.title}** (${t.task.priority.toUpperCase()})${blocked} — ${t.task.id}.md`);
+      }
+      if (myQueuedTasks.length > 5) {
+        lines.push(`   ...and ${myQueuedTasks.length - 5} more`);
+      }
+      lines.push('');
+    }
+
+    // --- Section 3: Mentions waiting (actual message content) ---
+    const agentChannels = channels.filter(c => c.memberIds.includes(agent.id));
+    const mentionLines: string[] = [];
+
+    for (const ch of agentChannels) {
+      try {
+        const msgPath = join(this.daemon.corpRoot, ch.path, MESSAGES_JSONL);
+        if (!existsSync(msgPath)) continue;
+
+        // Read recent messages and find ones that mention this agent
+        const recent = tailMessages(msgPath, 30);
+        const mentions = recent.filter(m =>
+          m.kind === 'text' &&
+          m.senderId !== agent.id &&
+          (m.mentions.includes(agent.id) || (ch.kind === 'direct' && m.senderId !== agent.id)),
+        );
+
+        // Only show unread-ish mentions (last 5 per channel)
+        const relevantMentions = mentions.slice(-5);
+        if (relevantMentions.length === 0) continue;
+
+        mentionLines.push(`### #${ch.name} (${relevantMentions.length} mention${relevantMentions.length === 1 ? '' : 's'})`);
+        for (const m of relevantMentions) {
+          const sender = members.find(mem => mem.id === m.senderId);
+          const senderName = sender?.displayName ?? (m.senderId === 'system' ? 'System' : '?');
+          const time = new Date(m.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+          const content = m.content.replace(/\n/g, ' ').slice(0, 150);
+          mentionLines.push(`[${time}] ${senderName}: ${content}`);
+        }
+        mentionLines.push('');
+      } catch {
+        // Skip unreadable channels
+      }
+    }
+
+    if (mentionLines.length > 0) {
+      hasContent = true;
+      lines.push('## Mentions Waiting', '', ...mentionLines);
+    }
+
+    // --- Section 4: Direct messages (cc-say) ---
+    const ccSayCount = this.daemon.inbox.getInboxSnapshot(agent.id);
+    if (ccSayCount && ccSayCount.includes('direct message')) {
+      hasContent = true;
+      lines.push('## Direct Messages', '', ccSayCount.split('\n').filter(l => l.includes('direct message')).join('\n'), '');
+    }
+
+    if (!hasContent) {
       lines.push('Nothing pending. You\'re clear.', '');
     }
 
     writeFileSync(join(agentDir, 'INBOX.md'), lines.join('\n'), 'utf-8');
   }
 
-  /** Generate WORKLOG.md from agent's DM message history. */
-  private writeWorklogMd(agent: Member, agentDir: string, members: Member[]): void {
+  /**
+   * WORKLOG.md — what the agent did recently.
+   * Scans ALL channels the agent participates in, groups by session,
+   * includes task status changes, and generates a summary at the top.
+   */
+  private writeWorklogMd(
+    agent: Member,
+    agentDir: string,
+    channels: Channel[],
+    members: Member[],
+    allTasks: { task: any; body: string }[],
+  ): void {
     try {
-      const channels = readConfig<Channel[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
-      const founder = members.find(m => m.rank === 'owner');
-      if (!founder) return;
+      const corpRoot = this.daemon.corpRoot;
+      const now = new Date();
 
-      // Find agent's DM channel
-      const dmChannel = channels.find(
-        c => c.kind === 'direct' &&
-        c.memberIds.includes(agent.id) &&
-        c.memberIds.includes(founder.id),
+      // Collect agent's messages from ALL channels they're in
+      const agentChannels = channels.filter(c => c.memberIds.includes(agent.id));
+      const allMessages: (ChannelMessage & { channelName: string })[] = [];
+
+      for (const ch of agentChannels) {
+        try {
+          const msgPath = join(corpRoot, ch.path, MESSAGES_JSONL);
+          if (!existsSync(msgPath)) continue;
+          const recent = tailMessages(msgPath, 50);
+          // Include: messages FROM this agent + system messages TO this agent (task dispatches, etc.)
+          const relevant = recent.filter(m =>
+            m.kind !== 'tool_event' && (
+              m.senderId === agent.id ||
+              (m.senderId === 'system' && m.mentions.includes(agent.id)) ||
+              (ch.kind === 'direct' && m.senderId !== agent.id)
+            ),
+          );
+          for (const m of relevant) {
+            allMessages.push({ ...m, channelName: ch.name });
+          }
+        } catch {}
+      }
+
+      if (allMessages.length === 0) {
+        writeFileSync(join(agentDir, 'WORKLOG.md'), `# Worklog — updated ${now.toISOString()}\n\nNo activity yet. This is your first session.\n`, 'utf-8');
+        return;
+      }
+
+      // Sort by timestamp
+      allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+      // Group into sessions (gap > 10 min = new session)
+      interface Session { start: Date; end: Date; messages: typeof allMessages }
+      const sessions: Session[] = [];
+      let currentSession: Session | null = null;
+
+      for (const msg of allMessages) {
+        const msgTime = new Date(msg.timestamp);
+        if (!currentSession || (msgTime.getTime() - currentSession.end.getTime()) > this.SESSION_GAP_MS) {
+          currentSession = { start: msgTime, end: msgTime, messages: [] };
+          sessions.push(currentSession);
+        }
+        currentSession.end = msgTime;
+        currentSession.messages.push(msg);
+      }
+
+      // Get agent's current tasks for status context
+      const myTasks = allTasks.filter(t => t.task.assignedTo === agent.id);
+      const inProgress = myTasks.filter(t => t.task.status === 'in_progress');
+      const recentlyCompleted = myTasks.filter(t =>
+        t.task.status === 'completed' &&
+        (now.getTime() - new Date(t.task.updatedAt).getTime()) < 2 * 60 * 60 * 1000, // Last 2 hours
       );
-      if (!dmChannel) return;
 
-      const dmPath = join(this.daemon.corpRoot, dmChannel.path, MESSAGES_JSONL);
-      if (!existsSync(dmPath)) return;
+      const lines: string[] = [`# Worklog — updated ${now.toISOString()}`, ''];
 
-      const messages = tailMessages(dmPath, 20);
-      if (messages.length === 0) return;
+      // --- Session Summary (most important section — Dredge reads this) ---
+      lines.push('## Session Summary', '');
+      const lastSession = sessions[sessions.length - 1];
+      if (lastSession) {
+        const ago = Math.round((now.getTime() - lastSession.end.getTime()) / 60000);
+        lines.push(`Last active: ${ago < 1 ? 'just now' : `${ago}m ago`}`);
+      }
+      if (inProgress.length > 0) {
+        const current = inProgress[0]!;
+        lines.push(`Working on: **${current.task.title}** (${current.task.status})`);
+        lines.push(`Task file: ${corpRoot.replace(/\\/g, '/')}/tasks/${current.task.id}.md`);
+      } else if (myTasks.some(t => t.task.status === 'assigned')) {
+        const next = myTasks.find(t => t.task.status === 'assigned')!;
+        lines.push(`Next task: **${next.task.title}** (assigned, not started)`);
+      } else {
+        lines.push('No active task.');
+      }
+      if (recentlyCompleted.length > 0) {
+        lines.push(`Recently completed: ${recentlyCompleted.map(t => `"${t.task.title}"`).join(', ')}`);
+      }
 
-      const now = new Date().toISOString();
-      const lines: string[] = [`# Worklog — updated ${now}`, '', 'Recent DM activity (last 20 messages):', ''];
+      // Extract last agent message as "last thing said"
+      const lastAgentMsg = [...allMessages].reverse().find(m => m.senderId === agent.id && m.kind === 'text');
+      if (lastAgentMsg) {
+        const preview = lastAgentMsg.content.replace(/\n/g, ' ').slice(0, 150);
+        lines.push(`Last message: "${preview}"`);
+      }
+      lines.push('');
 
-      for (const msg of messages) {
-        if (msg.kind === 'tool_event') continue; // Skip noisy tool events
+      // --- Recent Sessions (last 3, newest first) ---
+      lines.push('## Recent Sessions', '');
+      const recentSessions = sessions.slice(-3).reverse();
 
-        const time = new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-        const sender = members.find(m => m.id === msg.senderId);
-        const senderName = sender?.displayName ?? (msg.senderId === 'system' ? 'System' : '?');
-        const content = msg.content.replace(/\n/g, ' ').slice(0, 200);
+      for (let i = 0; i < recentSessions.length; i++) {
+        const session = recentSessions[i]!;
+        const startTime = session.start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const endTime = session.end.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const duration = Math.round((session.end.getTime() - session.start.getTime()) / 60000);
 
-        lines.push(`**[${time}]** ${senderName}: ${content}`);
+        lines.push(`### Session ${recentSessions.length - i} (${startTime} - ${endTime}, ${duration}m)`);
+
+        // Summarize session: agent's own messages (what they said/did)
+        const agentMsgs = session.messages.filter(m => m.senderId === agent.id && m.kind === 'text');
+        const systemMsgs = session.messages.filter(m => m.senderId === 'system');
+        const otherMsgs = session.messages.filter(m => m.senderId !== agent.id && m.senderId !== 'system' && m.kind === 'text');
+
+        // Show what the agent received
+        for (const m of systemMsgs.slice(0, 3)) {
+          const content = m.content.replace(/\n/g, ' ').slice(0, 120);
+          lines.push(`- Received: ${content}`);
+        }
+        for (const m of otherMsgs.slice(0, 3)) {
+          const sender = members.find(mem => mem.id === m.senderId);
+          const content = m.content.replace(/\n/g, ' ').slice(0, 120);
+          lines.push(`- From @${sender?.displayName ?? '?'}: ${content}`);
+        }
+
+        // Show what the agent said/did
+        for (const m of agentMsgs.slice(0, 5)) {
+          const content = m.content.replace(/\n/g, ' ').slice(0, 150);
+          const channel = m.channelName !== agentMsgs[0]?.channelName ? ` (in #${m.channelName})` : '';
+          lines.push(`- Said${channel}: ${content}`);
+        }
+
+        if (session.messages.length > 10) {
+          lines.push(`- ...${session.messages.length - 10} more messages`);
+        }
         lines.push('');
       }
 
-      lines.push('Use this to maintain continuity. Pick up where you left off.');
+      lines.push('Read your TASKS.md and INBOX.md for current state. This worklog is for continuity only.');
 
       writeFileSync(join(agentDir, 'WORKLOG.md'), lines.join('\n'), 'utf-8');
     } catch {
-      // Non-fatal — DM channel might not exist yet
+      // Non-fatal
     }
   }
 }
