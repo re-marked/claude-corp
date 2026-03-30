@@ -73,6 +73,7 @@ export class Daemon {
     this.hireWatcher = new HireWatcher(this);
     this.pulse = new Pulse(this);
     this.clocks = new ClockManager(this.events);
+    this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
   }
 
   // --- Agent Work Status Engine ---
@@ -404,6 +405,7 @@ export class Daemon {
     this.hireWatcher.stop();
     this.pulse.stop();
     this.clocks.stopAll();
+    this.inbox.flush(); // Persist inbox state before shutdown
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();

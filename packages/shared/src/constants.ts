@@ -34,6 +34,10 @@ auth-profiles.json
 # Agent git worktrees
 wt/
 
+# Runtime state (daemon, not version-controlled)
+inbox-state.json
+analytics.json
+
 # OS
 .DS_Store
 Thumbs.db
