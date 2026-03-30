@@ -27,6 +27,7 @@ import { EventBus, type DaemonEvent } from './events.js';
 import { InboxManager } from './inbox.js';
 import { Pulse } from './pulse.js';
 import { hireFailsafe } from './failsafe.js';
+import { hireJanitor } from './janitor.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
@@ -262,14 +263,18 @@ export class Daemon {
     await this.bootstrapSystemAgents();
   }
 
-  /** Ensure system agents (Failsafe) exist — auto-hire if missing. */
+  /** Ensure system agents (Failsafe, Janitor) exist — auto-hire if missing. */
   private async bootstrapSystemAgents(): Promise<void> {
     try {
       await hireFailsafe(this);
-      // Tell Pulse timer to re-scan for the Failsafe agent
       this.pulse.refreshFailsafe();
     } catch (err) {
       logError(`[daemon] Failed to bootstrap Failsafe agent: ${err}`);
+    }
+    try {
+      await hireJanitor(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Janitor agent: ${err}`);
     }
   }
 
