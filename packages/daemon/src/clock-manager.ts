@@ -84,7 +84,10 @@ export class ClockManager {
     entry.handle = setInterval(() => this.tick(opts.id), opts.intervalMs);
     this.entries.set(opts.id, entry);
 
-    log(`[clock] Registered: ${opts.name} (${opts.id}) — every ${this.formatInterval(opts.intervalMs)}`);
+    // Fire immediately on registration — don't wait for first interval
+    setTimeout(() => this.tick(opts.id), 0);
+
+    log(`[clock] Registered: ${opts.name} (${opts.id}) — every ${this.formatInterval(opts.intervalMs)}, firing now`);
     return entry.handle;
   }
 
