@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { ChannelMessage, Member } from '@claudecorp/shared';
-import { COLORS } from '../theme.js';
+import { COLORS, agentColor } from '../theme.js';
 
 interface Props {
   messages: ChannelMessage[];
@@ -115,7 +115,7 @@ export function renderContent(content: string | undefined | null, members: Map<s
 function senderColor(sender: Member | undefined, senderId: string): string | undefined {
   if (!sender || senderId === 'system') return COLORS.system;
   if (sender.rank === 'master') return undefined; // rainbow handled separately
-  if (sender.type === 'agent') return COLORS.agent;
+  if (sender.type === 'agent') return agentColor(COLORS, sender.rank);
   return COLORS.user;
 }
 

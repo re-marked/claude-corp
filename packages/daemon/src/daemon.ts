@@ -25,7 +25,8 @@ import { TaskWatcher } from './task-watcher.js';
 import { HireWatcher } from './hire-watcher.js';
 import { EventBus, type DaemonEvent } from './events.js';
 import { InboxManager } from './inbox.js';
-import { Failsafe } from './failsafe.js';
+import { Pulse } from './pulse.js';
+import { hireFailsafe } from './failsafe.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
@@ -39,7 +40,7 @@ export class Daemon {
   heartbeat: HeartbeatManager;
   taskWatcher: TaskWatcher;
   hireWatcher: HireWatcher;
-  failsafe: Failsafe;
+  pulse: Pulse;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -67,7 +68,7 @@ export class Daemon {
     this.heartbeat = new HeartbeatManager(this);
     this.taskWatcher = new TaskWatcher(this);
     this.hireWatcher = new HireWatcher(this);
-    this.failsafe = new Failsafe(this);
+    this.pulse = new Pulse(this);
   }
 
   // --- Agent Work Status Engine ---
@@ -151,7 +152,7 @@ export class Daemon {
     this.heartbeat.start();
     this.taskWatcher.start();
     this.hireWatcher.start();
-    this.failsafe.start();
+    this.pulse.start();
   }
 
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
@@ -211,6 +212,20 @@ export class Daemon {
 
     // Initialize work status for all agents
     this.initAgentWorkStatuses();
+
+    // Bootstrap system agents (Failsafe) if missing
+    await this.bootstrapSystemAgents();
+  }
+
+  /** Ensure system agents (Failsafe) exist — auto-hire if missing. */
+  private async bootstrapSystemAgents(): Promise<void> {
+    try {
+      await hireFailsafe(this);
+      // Tell Pulse timer to re-scan for the Failsafe agent
+      this.pulse.refreshFailsafe();
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Failsafe agent: ${err}`);
+    }
   }
 
   /**
@@ -294,7 +309,7 @@ export class Daemon {
     this.heartbeat.stop();
     this.taskWatcher.stop();
     this.hireWatcher.stop();
-    this.failsafe.stop();
+    this.pulse.stop();
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();
