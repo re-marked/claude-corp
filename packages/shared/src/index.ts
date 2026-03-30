@@ -24,6 +24,9 @@ export type {
   Clock,
   ClockType,
   ClockStatus,
+  Contract,
+  ContractStatus,
+  ContractProgress,
 } from './types/index.js';
 
 // Parsers
@@ -87,6 +90,10 @@ export type { HierarchyNode } from './hierarchy.js';
 
 // Projects
 export { createProject, listProjects, getProject, getProjectByName } from './projects.js';
+export { createContract, readContract, updateContract, listContracts, listAllContracts, contractPath, getContractProgress } from './contracts.js';
+export type { CreateContractOpts, ContractFilter, ContractWithBody } from './contracts.js';
+export { listBlueprints, getBlueprint, installDefaultBlueprints } from './blueprints.js';
+export type { BlueprintMeta, Blueprint } from './blueprints.js';
 export type { CreateProjectOpts } from './projects.js';
 
 // Teams
