@@ -937,13 +937,26 @@ Always consider what happens when things go wrong.`,
     if (msg.kind === 'tool_event') {
       const toolColor = sender ? agentColor(COLORS, sender.rank) : COLORS.subtle;
       const meta = msg.metadata as Record<string, unknown> | null;
-      const toolResult = meta?.toolResult as string | undefined;
+      const rawResult = meta?.toolResult as string | undefined;
 
-      // Truncate result to first line, max 80 chars
+      // Clean up tool result — strip JSON wrappers, extract meaningful text
       let resultPreview = '';
-      if (toolResult) {
-        const firstLine = toolResult.split('\n')[0]?.trim() ?? '';
-        resultPreview = firstLine.length > 80 ? firstLine.slice(0, 77) + '...' : firstLine;
+      if (rawResult) {
+        let cleaned = rawResult;
+        // Strip cc-cli JSON wrapper: {"content":[{"type":"text","text":"actual text...
+        try {
+          const parsed = JSON.parse(cleaned);
+          if (parsed?.content?.[0]?.text) {
+            cleaned = parsed.content[0].text;
+          } else if (typeof parsed === 'string') {
+            cleaned = parsed;
+          }
+        } catch {
+          // Not JSON — use as-is
+        }
+        // Take first meaningful line, truncate
+        const firstLine = cleaned.split('\n').find((l: string) => l.trim())?.trim() ?? '';
+        resultPreview = firstLine.length > 100 ? firstLine.slice(0, 97) + '...' : firstLine;
       }
 
       return (
@@ -951,12 +964,12 @@ Always consider what happens when things go wrong.`,
           <Box gap={1}>
             <Text color={COLORS.muted}> {'\u2502'}</Text>
             <Text color={toolColor}>{name}</Text>
-            <Text color={COLORS.subtle}>{msg.content}</Text>
+            <Text color={COLORS.subtle}> {msg.content}</Text>
           </Box>
           {resultPreview && (
-            <Box gap={1}>
-              <Text color={COLORS.border}> {'\u23BF'}</Text>
-              <Text color={COLORS.muted}>{resultPreview}</Text>
+            <Box gap={1} paddingLeft={1}>
+              <Text color={COLORS.border}>{'\u2514'}</Text>
+              <Text color={COLORS.muted} italic>{resultPreview}</Text>
             </Box>
           )}
         </Box>
