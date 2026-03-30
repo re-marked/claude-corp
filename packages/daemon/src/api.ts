@@ -512,7 +512,9 @@ export function createApi(daemon: Daemon): Server {
 
         try {
           const wsClient = agentProc.mode === 'remote' ? daemon.openclawWS : daemon.corpGatewayWS;
-          const sessionKey = `cc-say:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+          // Support persistent session keys for Jack mode (live interactive sessions)
+          const sessionKey = (body.sessionKey as string)
+            ?? `cc-say:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
           const result = await dispatchToAgent(agentProc, message, context, sessionKey, undefined, wsClient);
           daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
 
