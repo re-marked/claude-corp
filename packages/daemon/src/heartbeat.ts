@@ -43,14 +43,26 @@ export class HeartbeatManager {
   start(): void {
     this.refreshAll();
 
-    this.interval = setInterval(() => {
-      this.refreshAll();
-    }, REFRESH_INTERVAL_MS);
+    this.interval = this.daemon.clocks.register({
+      id: 'tasks-refresh',
+      name: 'Tasks Refresh',
+      type: 'heartbeat',
+      intervalMs: REFRESH_INTERVAL_MS,
+      target: 'all agents',
+      description: 'Refreshes TASKS.md + Casket files (INBOX.md, WORKLOG.md) for all agents',
+      callback: () => this.refreshAll(),
+    });
 
     // 60-second inbox heartbeat for idle agents
-    this.inboxInterval = setInterval(() => {
-      this.dispatchInboxSummaries();
-    }, INBOX_CHECK_INTERVAL_MS);
+    this.inboxInterval = this.daemon.clocks.register({
+      id: 'inbox-check',
+      name: 'Inbox Check',
+      type: 'heartbeat',
+      intervalMs: INBOX_CHECK_INTERVAL_MS,
+      target: 'idle agents',
+      description: 'Dispatches queued tasks (one at a time) + inbox summaries to idle agents',
+      callback: () => this.dispatchInboxSummaries(),
+    });
 
     // Wire busy→idle: update casket, then feed next task or inbox
     this.daemon.onAgentIdle((memberId, displayName) => {

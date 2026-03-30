@@ -1,4 +1,5 @@
 import { corpGit, type CorpGit } from '@claudecorp/shared';
+import type { ClockManager } from './clock-manager.js';
 import { log, logError } from './logger.js';
 
 const SNAPSHOT_INTERVAL_MS = 5_000; // Snapshot every 5 seconds
@@ -20,11 +21,21 @@ export class GitManager {
     this.pendingAuthor = agentName;
   }
 
-  /** Start the 5-second snapshot timer. */
-  start(): void {
-    this.snapshotInterval = setInterval(() => {
-      this.tryCommit();
-    }, SNAPSHOT_INTERVAL_MS);
+  /** Start the 5-second snapshot timer. Pass ClockManager for observability. */
+  start(clocks?: ClockManager): void {
+    if (clocks) {
+      this.snapshotInterval = clocks.register({
+        id: 'git-snapshots',
+        name: 'Git Snapshots',
+        type: 'timer',
+        intervalMs: SNAPSHOT_INTERVAL_MS,
+        target: 'git repo',
+        description: 'Auto-commits dirty corp state every 5 seconds',
+        callback: () => this.tryCommit(),
+      });
+    } else {
+      this.snapshotInterval = setInterval(() => this.tryCommit(), SNAPSHOT_INTERVAL_MS);
+    }
   }
 
   /** Stop the snapshot timer and flush any pending commit. */

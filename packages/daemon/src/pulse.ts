@@ -35,11 +35,15 @@ export class Pulse {
       }
     });
 
-    this.interval = setInterval(() => {
-      this.check();
-    }, CHECK_INTERVAL_MS);
-
-    log('[pulse] Started (checking every 2m)');
+    this.interval = this.daemon.clocks.register({
+      id: 'pulse-monitor',
+      name: 'Pulse Monitor',
+      type: 'timer',
+      intervalMs: CHECK_INTERVAL_MS,
+      target: 'all agents',
+      description: 'Scans all agents for broken/stuck state, restarts broken ones, monitors Failsafe',
+      callback: () => this.check(),
+    });
   }
 
   stop(): void {

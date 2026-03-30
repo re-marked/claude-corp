@@ -66,11 +66,16 @@ export class MessageRouter {
       });
     }
 
-    // Clear dedup set every 5 minutes
-    this.dedupClearInterval = setInterval(() => {
-      this.dispatched.clear();
-      this.processedMsgIds.clear();
-    }, 5 * 60 * 1000);
+    // Register dedup cleanup as a Clock
+    this.dedupClearInterval = this.daemon.clocks.register({
+      id: 'dedup-cleanup',
+      name: 'Dedup Cleanup',
+      type: 'system',
+      intervalMs: 5 * 60 * 1000,
+      target: 'router',
+      description: 'Clears dispatch dedup sets to prevent memory growth and allow re-dispatch',
+      callback: () => { this.dispatched.clear(); this.processedMsgIds.clear(); },
+    });
 
     log(`[router] Watching ${channels.length} channels`);
   }

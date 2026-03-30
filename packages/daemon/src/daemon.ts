@@ -28,6 +28,7 @@ import { InboxManager } from './inbox.js';
 import { Pulse } from './pulse.js';
 import { hireFailsafe } from './failsafe.js';
 import { hireJanitor } from './janitor.js';
+import { ClockManager } from './clock-manager.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
 import { log, logError } from './logger.js';
@@ -42,7 +43,7 @@ export class Daemon {
   taskWatcher: TaskWatcher;
   hireWatcher: HireWatcher;
   pulse: Pulse;
-  private failsafeTimer: ReturnType<typeof setInterval> | null = null;
+  clocks: ClockManager;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -71,6 +72,7 @@ export class Daemon {
     this.taskWatcher = new TaskWatcher(this);
     this.hireWatcher = new HireWatcher(this);
     this.pulse = new Pulse(this);
+    this.clocks = new ClockManager(this.events);
   }
 
   // --- Agent Work Status Engine ---
@@ -150,15 +152,22 @@ export class Daemon {
     // Connect WebSocket BEFORE router starts — so first dispatch uses WS not HTTP
     await this.connectOpenClawWS();
     this.router.start();
-    this.gitManager.start();
+    this.gitManager.start(this.clocks);
     this.heartbeat.start();
     this.taskWatcher.start();
     this.hireWatcher.start();
     this.pulse.start();
 
-    // Failsafe heartbeat: dispatch monitoring protocol to Failsafe every 5 min
-    this.failsafeTimer = setInterval(() => this.dispatchFailsafeHeartbeat(), 5 * 60 * 1000);
-    log('[daemon] Failsafe heartbeat timer started (every 5m)');
+    // Register Failsafe heartbeat as a Clock
+    this.clocks.register({
+      id: 'failsafe-heartbeat',
+      name: 'Failsafe Heartbeat',
+      type: 'heartbeat',
+      intervalMs: 5 * 60 * 1000,
+      target: 'Failsafe',
+      description: 'Dispatches monitoring protocol to Failsafe agent every 5m',
+      callback: () => this.dispatchFailsafeHeartbeat(),
+    });
   }
 
   /** Dispatch "run your monitoring protocol" directly to Failsafe agent. */
@@ -281,6 +290,10 @@ export class Daemon {
     // Initialize the shared corp gateway — if it fails, CEO may still work via remote
     try {
       await this.processManager.initCorpGateway();
+      // Wire ClockManager to corp gateway for health monitor observability
+      if (this.processManager.corpGateway) {
+        this.processManager.corpGateway.clocks = this.clocks;
+      }
     } catch (err) {
       logError(`[daemon] Corp gateway init failed (agents may start later): ${err}`);
     }
@@ -411,7 +424,7 @@ export class Daemon {
     this.taskWatcher.stop();
     this.hireWatcher.stop();
     this.pulse.stop();
-    if (this.failsafeTimer) clearInterval(this.failsafeTimer);
+    this.clocks.stopAll();
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();
