@@ -19,5 +19,6 @@ export { InboxManager } from './inbox.js';
 export { Pulse } from './pulse.js';
 export { hireFailsafe } from './failsafe.js';
 export { hireJanitor } from './janitor.js';
+export { ClockManager } from './clock-manager.js';
 export { OpenClawWS } from './openclaw-ws.js';
 export type { AgentEvent, ChatEvent, ToolEvent } from './openclaw-ws.js';

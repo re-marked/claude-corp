@@ -11,7 +11,9 @@ export type DaemonEvent =
   | { type: 'message_written'; channelId: string; messageId: string }
   | { type: 'tool_start'; agentName: string; channelId: string; toolName: string; args?: Record<string, unknown> }
   | { type: 'tool_end'; agentName: string; channelId: string; toolName: string; resultPreview?: string }
-  | { type: 'model_changed'; agentName: string | null; model: string };
+  | { type: 'model_changed'; agentName: string | null; model: string }
+  | { type: 'clock_tick'; clockId: string; clockName: string; firedAt: number; nextFireAt: number; fireCount: number }
+  | { type: 'clock_alarm'; clockId: string; clockName: string; consecutiveErrors: number; lastError: string | null };
 
 export class EventBus {
   private wss: WebSocketServer | null = null;
