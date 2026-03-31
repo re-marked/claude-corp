@@ -17,10 +17,13 @@ import {
   readConfig,
   appendMessage,
   generateId,
+  updateTask,
+  taskPath,
   CHANNELS_JSON,
   MEMBERS_JSON,
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Daemon } from './daemon.js';
 import { saveScheduledClock, removeScheduledClock, loadScheduledClocks, FireStatsWriter } from './scheduled-clock-store.js';
@@ -116,6 +119,22 @@ export class LoopManager {
     this.slugs.add(slug);
     saveScheduledClock(this.daemon.corpRoot, clock);
 
+    // Link to task — update the task's loopId so it knows this loop drives it
+    if (opts.taskId) {
+      try {
+        const tp = taskPath(this.daemon.corpRoot, opts.taskId);
+        if (existsSync(tp)) {
+          updateTask(tp, { loopId: slug });
+          log(`[loops] Linked loop ${slug} → task ${opts.taskId}`);
+        } else {
+          logError(`[loops] Task ${opts.taskId} not found — loop created without link`);
+          clock.taskId = null; // Clear the dead link
+        }
+      } catch (err) {
+        logError(`[loops] Failed to link task ${opts.taskId}: ${err}`);
+      }
+    }
+
     // Broadcast creation event
     this.daemon.events.broadcast({
       type: 'loop_created',
@@ -127,21 +146,36 @@ export class LoopManager {
     return clock;
   }
 
-  /** Delete a loop permanently — remove from clocks.json entirely. */
+  /** Delete a loop permanently — remove from clocks.json. Unlinks task but doesn't complete it. */
   stop(slug: string): void {
     slug = this.resolveSlug(slug);
     const clockEntry = this.daemon.clocks.get(slug);
     const name = clockEntry?.name ?? slug;
 
+    // Check for linked task BEFORE removing from store
+    const store = loadScheduledClocks(this.daemon.corpRoot);
+    const loop = store.loops.find(l => l.id === slug);
+
     this.daemon.clocks.remove(slug);
     this.slugs.delete(slug);
     removeScheduledClock(this.daemon.corpRoot, slug);
+
+    // Clear the task's loopId but DON'T complete it (delete ≠ done)
+    if (loop?.taskId) {
+      try {
+        const tp = taskPath(this.daemon.corpRoot, loop.taskId);
+        if (existsSync(tp)) {
+          updateTask(tp, { loopId: null });
+          log(`[loops] Unlinked task ${loop.taskId} from deleted loop ${slug}`);
+        }
+      } catch {}
+    }
 
     this.daemon.events.broadcast({ type: 'loop_stopped', name });
     log(`[loops] Deleted: ${name} (${slug})`);
   }
 
-  /** Complete a loop — it did its job. History preserved, shown as completed in /clock. */
+  /** Complete a loop — it did its job. History preserved, linked task auto-completes. */
   complete(slug: string): void {
     slug = this.resolveSlug(slug);
     const clockEntry = this.daemon.clocks.get(slug);
@@ -159,6 +193,19 @@ export class LoopManager {
       loop.enabled = false;
       loop.endedAt = Date.now();
       saveScheduledClock(this.daemon.corpRoot, loop);
+
+      // Bidirectional lifecycle: loop complete → task auto-complete
+      if (loop.taskId) {
+        try {
+          const tp = taskPath(this.daemon.corpRoot, loop.taskId);
+          if (existsSync(tp)) {
+            updateTask(tp, { status: 'completed', loopId: null });
+            log(`[loops] Task ${loop.taskId} auto-completed (loop ${slug} finished)`);
+          }
+        } catch (err) {
+          logError(`[loops] Failed to auto-complete task ${loop.taskId}: ${err}`);
+        }
+      }
     }
 
     this.daemon.events.broadcast({ type: 'loop_stopped', name });
