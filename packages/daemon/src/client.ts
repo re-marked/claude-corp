@@ -296,7 +296,7 @@ export class DaemonClient {
 
   // --- Loops & Crons ---
 
-  async createLoop(opts: { interval: string; command: string; targetAgent?: string; name?: string; maxRuns?: number }): Promise<{ ok: boolean; loop: any }> {
+  async createLoop(opts: { interval: string; command: string; targetAgent?: string; name?: string; maxRuns?: number; channelId?: string }): Promise<{ ok: boolean; loop: any }> {
     const resp = await fetch(`${this.baseUrl}/loops`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -305,12 +305,22 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
-  async createCron(opts: { schedule: string; command: string; targetAgent?: string; name?: string; maxRuns?: number }): Promise<{ ok: boolean; cron: any }> {
+  async createCron(opts: { schedule: string; command: string; targetAgent?: string; name?: string; maxRuns?: number; channelId?: string }): Promise<{ ok: boolean; cron: any }> {
     const resp = await fetch(`${this.baseUrl}/crons`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(opts),
     });
+    return resp.json() as Promise<any>;
+  }
+
+  async completeClock(slug: string): Promise<{ ok: boolean }> {
+    const resp = await fetch(`${this.baseUrl}/clocks/${encodeURIComponent(slug)}/complete`, { method: 'POST' });
+    return resp.json() as Promise<any>;
+  }
+
+  async dismissClock(slug: string): Promise<{ ok: boolean }> {
+    const resp = await fetch(`${this.baseUrl}/clocks/${encodeURIComponent(slug)}/dismiss`, { method: 'POST' });
     return resp.json() as Promise<any>;
   }
 

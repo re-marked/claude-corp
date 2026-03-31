@@ -65,7 +65,10 @@ export function ClockView({ onBack }: Props) {
     return () => clearInterval(timer);
   }, [clocks.length > 0]);
 
-  const selectableClocks = clocks.filter(c => c.status !== 'stopped');
+  // Show all running/paused/error clocks + stopped loops/crons (completed ones stay visible)
+  const selectableClocks = clocks.filter(c =>
+    c.status !== 'stopped' || c.type === 'loop' || c.type === 'cron',
+  );
 
   useInput((_input, key) => {
     if (key.escape) { onBack(); return; }
@@ -80,20 +83,30 @@ export function ClockView({ onBack }: Props) {
         daemonClient.pauseClock(clock.id).then(fetchClocks);
       }
     }
-    // D key — delete loops and crons only (system clocks protected)
+    // C key — complete a loop/cron (history preserved, grayed out)
+    if (_input === 'c' || _input === 'C') {
+      const clock = selectableClocks[selectedIndex];
+      if (!clock || (clock.type !== 'loop' && clock.type !== 'cron')) return;
+      daemonClient.completeClock(clock.id).then(fetchClocks).catch(() => {});
+    }
+    // X key — dismiss a loop/cron (hidden from view)
+    if (_input === 'x' || _input === 'X') {
+      const clock = selectableClocks[selectedIndex];
+      if (!clock || (clock.type !== 'loop' && clock.type !== 'cron')) return;
+      daemonClient.dismissClock(clock.id).then(fetchClocks).catch(() => {});
+    }
+    // D key — permanently delete a loop/cron
     if (_input === 'd' || _input === 'D') {
       const clock = selectableClocks[selectedIndex];
-      if (!clock) return;
-      if (clock.type === 'loop' || clock.type === 'cron') {
-        daemonClient.deleteClock(clock.id).then(fetchClocks).catch(() => {});
-      }
+      if (!clock || (clock.type !== 'loop' && clock.type !== 'cron')) return;
+      daemonClient.deleteClock(clock.id).then(fetchClocks).catch(() => {});
     }
   });
 
-  // Group clocks by type
+  // Group clocks by type — keep stopped loops/crons (completed) visible
   const groups = new Map<string, Clock[]>();
   for (const c of clocks) {
-    if (c.status === 'stopped') continue;
+    if (c.status === 'stopped' && c.type !== 'loop' && c.type !== 'cron') continue;
     const group = groups.get(c.type) ?? [];
     group.push(c);
     groups.set(c.type, group);
@@ -254,7 +267,7 @@ export function ClockView({ onBack }: Props) {
 
       {/* Footer */}
       <Box borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={1} justifyContent="space-between">
-        <Text color={COLORS.muted}>P:pause/resume  D:delete loop/cron  Esc:back</Text>
+        <Text color={COLORS.muted}>P:pause  C:complete  X:dismiss  D:delete  Esc:back</Text>
         <Text color={COLORS.muted}>{clocks.length} clocks</Text>
       </Box>
     </Box>

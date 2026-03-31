@@ -82,20 +82,34 @@ export async function cmdLoop(opts: {
       break;
     }
 
-    case 'stop': {
+    case 'complete': {
       const slug = opts.name;
-      if (!slug) {
-        console.error('Error: provide the loop name to stop (cc-cli loop stop --name <name>)');
-        process.exit(1);
-      }
+      if (!slug) { console.error('Error: --name required'); process.exit(1); }
+      try {
+        await client.completeClock(slug);
+        console.log(`\u2713 Loop "${slug}" completed — history preserved`);
+      } catch (err) { console.error(`Error: ${err instanceof Error ? err.message : String(err)}`); process.exit(1); }
+      break;
+    }
 
+    case 'dismiss': {
+      const slug = opts.name;
+      if (!slug) { console.error('Error: --name required'); process.exit(1); }
+      try {
+        await client.dismissClock(slug);
+        console.log(`\u2713 Loop "${slug}" dismissed`);
+      } catch (err) { console.error(`Error: ${err instanceof Error ? err.message : String(err)}`); process.exit(1); }
+      break;
+    }
+
+    case 'stop':
+    case 'delete': {
+      const slug = opts.name;
+      if (!slug) { console.error('Error: --name required'); process.exit(1); }
       try {
         await client.deleteClock(slug);
-        console.log(`\u2713 Loop "${slug}" stopped and removed`);
-      } catch (err) {
-        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-        process.exit(1);
-      }
+        console.log(`\u2713 Loop "${slug}" deleted`);
+      } catch (err) { console.error(`Error: ${err instanceof Error ? err.message : String(err)}`); process.exit(1); }
       break;
     }
 

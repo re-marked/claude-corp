@@ -87,20 +87,34 @@ export async function cmdCron(opts: {
       break;
     }
 
-    case 'stop': {
+    case 'complete': {
       const slug = opts.name;
-      if (!slug) {
-        console.error('Error: provide the cron name to stop (cc-cli cron stop --name <name>)');
-        process.exit(1);
-      }
+      if (!slug) { console.error('Error: --name required'); process.exit(1); }
+      try {
+        await client.completeClock(slug);
+        console.log(`\u2713 Cron "${slug}" completed — history preserved`);
+      } catch (err) { console.error(`Error: ${err instanceof Error ? err.message : String(err)}`); process.exit(1); }
+      break;
+    }
 
+    case 'dismiss': {
+      const slug = opts.name;
+      if (!slug) { console.error('Error: --name required'); process.exit(1); }
+      try {
+        await client.dismissClock(slug);
+        console.log(`\u2713 Cron "${slug}" dismissed`);
+      } catch (err) { console.error(`Error: ${err instanceof Error ? err.message : String(err)}`); process.exit(1); }
+      break;
+    }
+
+    case 'stop':
+    case 'delete': {
+      const slug = opts.name;
+      if (!slug) { console.error('Error: --name required'); process.exit(1); }
       try {
         await client.deleteClock(slug);
-        console.log(`\u2713 Cron "${slug}" stopped and removed`);
-      } catch (err) {
-        console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-        process.exit(1);
-      }
+        console.log(`\u2713 Cron "${slug}" deleted`);
+      } catch (err) { console.error(`Error: ${err instanceof Error ? err.message : String(err)}`); process.exit(1); }
       break;
     }
 

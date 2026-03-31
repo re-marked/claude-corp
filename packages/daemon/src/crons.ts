@@ -11,7 +11,19 @@
 
 import { Cron } from 'croner';
 import cronstrue from 'cronstrue';
-import { type ScheduledClock, isCronPreset, cronPresetToExpression, isRawCronExpression } from '@claudecorp/shared';
+import {
+  type ScheduledClock,
+  type ChannelMessage,
+  isCronPreset,
+  cronPresetToExpression,
+  isRawCronExpression,
+  readConfig,
+  appendMessage,
+  generateId,
+  CHANNELS_JSON,
+  MESSAGES_JSONL,
+} from '@claudecorp/shared';
+import { join } from 'node:path';
 import type { ExternalClockHandle } from './clock-manager.js';
 import type { Daemon } from './daemon.js';
 import { saveScheduledClock, removeScheduledClock, loadScheduledClocks, FireStatsWriter } from './scheduled-clock-store.js';
@@ -28,6 +40,8 @@ export interface CreateCronOpts {
   targetAgent?: string;
   /** Auto-stop after N fires */
   maxRuns?: number;
+  /** Channel where output should be written */
+  channelId?: string;
 }
 
 interface CronEntry {
@@ -97,6 +111,9 @@ export class CronManager {
       enabled: true,
       lastDurationMs: null,
       lastOutput: null,
+      channelId: opts.channelId ?? null,
+      scheduledStatus: 'running',
+      endedAt: null,
     };
 
     // Register external clock for observability
@@ -161,6 +178,65 @@ export class CronManager {
 
     this.daemon.events.broadcast({ type: 'cron_stopped', name: entry.clock.name });
     log(`[crons] Stopped: ${entry.clock.name} (${slug})`);
+  }
+
+  /** Complete a cron — it did its job. Croner job stops, history preserved. */
+  complete(slug: string): void {
+    const entry = this.resolveEntry(slug);
+    const realSlug = entry.clock.id;
+
+    entry.job.stop();
+    this.daemon.clocks.stop(realSlug);
+    this.entries.delete(realSlug);
+
+    const store = loadScheduledClocks(this.daemon.corpRoot);
+    const cron = store.crons.find(c => c.id === realSlug);
+    if (cron) {
+      cron.scheduledStatus = 'completed';
+      cron.enabled = false;
+      cron.endedAt = Date.now();
+      saveScheduledClock(this.daemon.corpRoot, cron);
+    }
+
+    this.daemon.events.broadcast({ type: 'cron_stopped', name: entry.clock.name });
+    log(`[crons] Completed: ${entry.clock.name} (${realSlug})`);
+  }
+
+  /** Dismiss a cron — not needed. Hidden from /clock, kept in clocks.json. */
+  dismiss(slug: string): void {
+    const entry = this.resolveEntry(slug);
+    const realSlug = entry.clock.id;
+
+    entry.job.stop();
+    this.daemon.clocks.remove(realSlug);
+    this.entries.delete(realSlug);
+
+    const store = loadScheduledClocks(this.daemon.corpRoot);
+    const cron = store.crons.find(c => c.id === realSlug);
+    if (cron) {
+      cron.scheduledStatus = 'dismissed';
+      cron.enabled = false;
+      cron.endedAt = Date.now();
+      saveScheduledClock(this.daemon.corpRoot, cron);
+    }
+
+    this.daemon.events.broadcast({ type: 'cron_stopped', name: entry.clock.name });
+    log(`[crons] Dismissed: ${entry.clock.name} (${realSlug})`);
+  }
+
+  /** Resolve a slug to its CronEntry. */
+  private resolveEntry(slug: string): CronEntry {
+    let entry = this.entries.get(slug);
+    if (!entry) {
+      for (const [key, e] of this.entries) {
+        if (e.clock.name.toLowerCase().replace(/\s+/g, '-') === slug.toLowerCase()) {
+          entry = e;
+          break;
+        }
+      }
+    }
+    if (!entry) throw new Error(`Cron "${slug}" not found`);
+    return entry;
   }
 
   /** List all active crons. */
@@ -290,6 +366,11 @@ export class CronManager {
       clock.lastOutput = output.trim() || null;
       clock.fireCount = handle.getFireCount();
 
+      // Write output to birth channel
+      if (clock.channelId && output.trim()) {
+        this.writeOutputToChannel(clock, output.trim());
+      }
+
       this.statsWriter.update(slug, {
         lastFiredAt: Date.now(),
         fireCount: clock.fireCount,
@@ -340,5 +421,46 @@ export class CronManager {
     }
     const short = opts.command.split(/\s+/).slice(0, 2).join(' ');
     return `${short} (${humanSchedule.toLowerCase()})`;
+  }
+
+  /** Write cron output to its birth channel as a visible message. */
+  private writeOutputToChannel(clock: ScheduledClock, output: string): void {
+    if (!clock.channelId) return;
+    try {
+      const channels = readConfig<any[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
+      const ch = channels.find((c: any) => c.id === clock.channelId);
+      if (!ch) return;
+      const msgPath = join(this.daemon.corpRoot, ch.path, MESSAGES_JSONL);
+
+      // Resolve agent member ID for agent dispatches
+      let senderId = 'system';
+      if (clock.targetAgent) {
+        try {
+          const members = readConfig<any[]>(join(this.daemon.corpRoot, 'members.json'));
+          const agent = members.find((m: any) =>
+            m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === clock.targetAgent!.toLowerCase(),
+          );
+          if (agent) senderId = agent.id;
+        } catch {}
+      }
+
+      const msg: ChannelMessage = {
+        id: generateId(),
+        channelId: clock.channelId,
+        senderId,
+        threadId: null,
+        content: senderId !== 'system' ? output : `[${clock.name}] ${output}`,
+        kind: senderId !== 'system' ? 'text' : 'system',
+        mentions: [],
+        metadata: { source: 'cron', cronId: clock.id },
+        depth: 0,
+        originId: '',
+        timestamp: new Date().toISOString(),
+      };
+      msg.originId = msg.id;
+      appendMessage(msgPath, msg);
+    } catch {
+      // Non-fatal
+    }
   }
 }
