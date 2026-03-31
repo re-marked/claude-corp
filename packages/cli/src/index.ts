@@ -39,6 +39,10 @@ const { values, positionals } = parseArgs({
     id: { type: 'string' },
     blueprint: { type: 'string' },
     deadline: { type: 'string' },
+    interval: { type: 'string' },
+    schedule: { type: 'string' },
+    command: { type: 'string' },
+    maxRuns: { type: 'string' },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -78,6 +82,14 @@ Commands:
   version    Show package versions
   logs       Show daemon logs
   dogfood    Set up dogfood project + dev team + task
+
+Automation commands:
+  loop create --interval "5m" --command "cc-cli status"
+  loop create --interval "5m" --agent ceo --command "Check status"
+  loop list | loop stop <name>
+  cron create --schedule "@daily" --agent herald --command "Summarize"
+  cron create --schedule "0 9 * * 1" --agent ceo --command "Sprint review"
+  cron list | cron stop <name>
 
 Model commands:
   models                                    List current model config
@@ -255,6 +267,34 @@ async function run() {
         channel: values.channel as string | undefined,
         last: parseInt(values.last as string) || undefined,
         verbose: false,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'loop':
+    case 'loops': {
+      const { cmdLoop } = await import('./commands/loop.js');
+      await cmdLoop({
+        action: positionals[1],
+        interval: values.interval as string | undefined,
+        command: values.command as string | undefined,
+        agent: values.agent as string | undefined,
+        name: values.name as string | undefined,
+        maxRuns: values.maxRuns ? parseInt(values.maxRuns as string) : undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'cron':
+    case 'crons': {
+      const { cmdCron } = await import('./commands/cron.js');
+      await cmdCron({
+        action: positionals[1],
+        schedule: values.schedule as string | undefined,
+        command: values.command as string | undefined,
+        agent: values.agent as string | undefined,
+        name: values.name as string | undefined,
+        maxRuns: values.maxRuns ? parseInt(values.maxRuns as string) : undefined,
         json: !!values.json,
       });
       break;
