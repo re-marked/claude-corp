@@ -9,6 +9,10 @@ export async function cmdCron(opts: {
   agent?: string;
   name?: string;
   maxRuns?: number;
+  spawnTask?: boolean;
+  taskTitle?: string;
+  assignTo?: string;
+  taskPriority?: string;
   json: boolean;
 }): Promise<void> {
   const client = getClient();
@@ -30,6 +34,10 @@ export async function cmdCron(opts: {
         targetAgent: opts.agent,
         name: opts.name,
         maxRuns: opts.maxRuns,
+        spawnTask: opts.spawnTask,
+        taskTitle: opts.taskTitle,
+        assignTo: opts.assignTo,
+        taskPriority: opts.taskPriority,
       });
 
       if (opts.json) {

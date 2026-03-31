@@ -66,6 +66,18 @@ Tasks can depend on other tasks via the \`blockedBy\` field:
 - When ALL blockers complete, you get auto-notified via inbox — then start immediately
 - Don't wait silently. Don't poll. The system handles it.
 
+## Loop-Driven Tasks
+
+If your task has a \`loopId\` field, it means a Loop is driving this task:
+- A recurring command fires every N seconds/minutes to help you
+- When you complete the task → the loop auto-stops
+- When the loop is completed → your task auto-completes
+- Don't worry about stopping the loop — the system handles it bidirectionally
+
+You can also CREATE a loop as part of your work strategy:
+\`cc-cli loop create --interval "2m" --command "check build status" --task <your-task-id>\`
+This sets up a 2-minute check tied to your task. When you complete the task, the loop dies.
+
 ## Status Flow
 \`pending\` → \`assigned\` (handed) → \`in_progress\` → \`completed\` | \`failed\` | \`blocked\` | \`cancelled\`
 

@@ -58,6 +58,7 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
     teamId: null,
     acceptanceCriteria: opts.acceptanceCriteria ?? null,
     dueAt: opts.dueAt ?? null,
+    loopId: null,
     createdAt: now,
     updatedAt: now,
   };

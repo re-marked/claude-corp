@@ -148,6 +148,16 @@ export class TaskWatcher {
             this.daemon.analytics.trackTaskFailed(task.assignedTo);
           }
 
+          // Bidirectional lifecycle: task complete → auto-stop linked loop
+          if (task.loopId) {
+            try {
+              this.daemon.loops.complete(task.loopId);
+              log(`[task-watcher] Loop ${task.loopId} auto-completed (task "${task.title}" finished)`);
+            } catch {
+              // Loop may already be stopped or deleted — non-fatal
+            }
+          }
+
           try {
             const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
             const assignee = members.find(m => m.id === task.assignedTo);

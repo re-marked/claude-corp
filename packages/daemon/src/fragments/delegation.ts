@@ -108,6 +108,37 @@ For features with multiple tasks, use a Contract instead of loose tasks:
 
 Follow a Blueprint for structured execution: \`cc-cli blueprint show ship-feature\`
 
+## Loops — Driving Tasks with Recurring Commands
+
+A Loop is a recurring command that DRIVES a task. Use this when a task needs periodic checking:
+
+1. Create the task: \`cc-cli task create --title "Monitor deploy until green"\`
+2. Create a loop linked to it: \`cc-cli loop create --interval "1m" --agent @<agent> --command "Check deploy status" --task <task-id>\`
+3. The loop fires every minute, the agent checks and reports
+4. When the agent completes the task → loop auto-stops
+5. When the loop is marked complete → task auto-completes
+
+**Key rules:**
+- Loop complete = task complete (bidirectional)
+- Loop deleted = task stays open (delete ≠ done)
+- Loop dismissed = task stays open (dismiss = "nevermind")
+- One task, one loop — the loop is the engine, the task is the goal
+
+## Crons — Spawning Recurring Tasks
+
+A Cron fires on a schedule and can CREATE a fresh task each time:
+
+\`cc-cli cron create --schedule "@weekly" --agent atlas --command "Run bug audit" --spawn-task --task-title "Bug audit — {date}"\`
+
+Every Monday: creates "Bug audit — Apr 7", assigns to Atlas.
+Next Monday: creates "Bug audit — Apr 14" — fresh independent task.
+The cron is the standing order. Each spawned task is independent.
+
+Use crons for:
+- Weekly reviews, daily audits, monthly reports
+- Any recurring work that produces discrete deliverables
+- Tasks that should be tracked individually in the task board
+
 ## Hiring
 
 \`cc-cli hire --name "agent-name" --rank worker\`

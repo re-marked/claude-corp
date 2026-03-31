@@ -20,6 +20,7 @@ import {
   readConfig,
   appendMessage,
   generateId,
+  createTask,
   CHANNELS_JSON,
   MEMBERS_JSON,
   MESSAGES_JSONL,
@@ -41,6 +42,16 @@ export interface CreateCronOpts {
   targetAgent?: string;
   /** Auto-stop after N fires */
   maxRuns?: number;
+  /** If true, each fire spawns a fresh task from the template below. */
+  spawnTask?: boolean;
+  /** Title pattern for spawned tasks — {date} replaced with fire date */
+  taskTitle?: string;
+  /** Agent slug to assign spawned tasks to */
+  assignTo?: string;
+  /** Priority for spawned tasks */
+  taskPriority?: string;
+  /** Description for spawned tasks */
+  taskDescription?: string;
   /** Channel where output should be written */
   channelId?: string;
 }
@@ -115,6 +126,13 @@ export class CronManager {
       channelId: opts.channelId ?? null,
       scheduledStatus: 'running',
       endedAt: null,
+      taskId: null, // Crons don't link to tasks — they spawn fresh ones
+      spawnTaskTemplate: opts.spawnTask ? {
+        title: opts.taskTitle ?? `${opts.command.slice(0, 40)} — {date}`,
+        assignTo: opts.assignTo ?? opts.targetAgent ?? null,
+        priority: (opts.taskPriority as any) ?? 'normal',
+        description: opts.taskDescription ?? null,
+      } : null,
     };
 
     // Register external clock for observability
@@ -269,13 +287,21 @@ export class CronManager {
           description: cron.description,
         });
 
-        // Create croner job
+        // Detect missed fires — if stored nextFireAt is in the past, a fire was missed
+        const now = Date.now();
+        if (cron.nextFireAt && cron.nextFireAt < now) {
+          const missedAgo = Math.round((now - cron.nextFireAt) / 60_000);
+          log(`[crons] "${cron.name}" missed a fire (${missedAgo}m ago) — skipping to next scheduled time`);
+        }
+
+        // Create croner job — croner computes next fire from NOW, naturally skipping missed
         const job = this.createCronerJob(slug, cron, handle, expression);
 
-        // Compute next fire
+        // Compute next fire from croner (not from stored value)
         const nextRun = job.nextRun();
         if (nextRun) {
           handle.updateNextFire(nextRun.getTime());
+          log(`[crons] "${cron.name}" next fire: ${nextRun.toLocaleString()}`);
         }
 
         this.entries.set(slug, { job, handle, clock: cron });
@@ -328,6 +354,39 @@ export class CronManager {
     }, async () => {
       const start = Date.now();
       let output = '';
+
+      // Spawn a fresh task if spawnTaskTemplate is configured
+      if (clock.spawnTaskTemplate) {
+        try {
+          const tpl = clock.spawnTaskTemplate;
+          const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const title = tpl.title.replace(/\{date\}/g, dateStr);
+
+          // Resolve assignee member ID from slug
+          let assignedTo: string | null = null;
+          if (tpl.assignTo) {
+            try {
+              const members = readConfig<any[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+              const agent = members.find((m: any) =>
+                m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === tpl.assignTo!.toLowerCase(),
+              );
+              assignedTo = agent?.id ?? null;
+            } catch {}
+          }
+
+          const task = createTask(this.daemon.corpRoot, {
+            title,
+            description: tpl.description ?? `Spawned by cron "${clock.name}" on ${dateStr}.`,
+            priority: tpl.priority,
+            assignedTo,
+            createdBy: 'system',
+          });
+
+          log(`[crons] Spawned task "${title}" (${task.id}) from cron ${slug}`);
+        } catch (err) {
+          logError(`[crons] Failed to spawn task from cron ${slug}: ${err}`);
+        }
+      }
 
       try {
         if (clock.targetAgent) {

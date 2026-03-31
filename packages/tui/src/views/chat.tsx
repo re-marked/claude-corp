@@ -646,10 +646,19 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         } catch (err) { writeSystemMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`); }
         return;
       }
-      // Create: /loop 5m cc-cli status  OR  /loop 5m @ceo Check statuses
+      // Create: /loop 5m cc-cli status  OR  /loop 5m @ceo Check deploy --task bold-fox
       // DM auto-assign: if in a DM and no @agent, auto-target the DM agent
       const interval = parts[0]!;
       let targetAgent: string | undefined;
+      let taskId: string | undefined;
+
+      // Extract --task flag from anywhere in the parts
+      const taskFlagIdx = parts.indexOf('--task');
+      if (taskFlagIdx >= 0 && parts[taskFlagIdx + 1]) {
+        taskId = parts[taskFlagIdx + 1];
+        parts.splice(taskFlagIdx, 2); // Remove --task and its value
+      }
+
       let command: string;
       if (parts[1]?.startsWith('@')) {
         targetAgent = parts[1].slice(1);
@@ -667,12 +676,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         }
       }
       if (!command) {
-        writeSystemMessage('Usage: /loop <interval> <command>  or  /loop <interval> @agent <prompt>');
+        writeSystemMessage('Usage: /loop <interval> <command>  or  /loop <interval> @agent <prompt> [--task <id>]');
         return;
       }
       try {
         const result = await daemonClient.createLoop({
-          interval, command, targetAgent, channelId: channel.id,
+          interval, command, targetAgent, channelId: channel.id, taskId,
         });
         if (result.ok) {
           writeSystemMessage(`Loop created: every ${interval} → ${targetAgent ? `@${targetAgent}: ` : ''}${command}`);
@@ -760,9 +769,16 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         writeSystemMessage('Usage: /cron <schedule> [@agent] <command>');
         return;
       }
+      // Extract --spawn-task flag
+      const spawnTask = command.includes('--spawn-task');
+      if (spawnTask) command = command.replace('--spawn-task', '').trim();
+
       try {
         const result = await daemonClient.createCron({
           schedule, command, targetAgent, channelId: channel.id,
+          spawnTask: spawnTask || undefined,
+          taskTitle: spawnTask ? `${command.slice(0, 40)} — {date}` : undefined,
+          assignTo: targetAgent,
         });
         if (result.ok) {
           const cron = result.cron;

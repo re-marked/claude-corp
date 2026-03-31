@@ -26,6 +26,7 @@ export type {
   ClockStatus,
   ScheduledClock,
   ScheduledClockStatus,
+  CronTaskTemplate,
   Contract,
   ContractStatus,
   ContractProgress,
