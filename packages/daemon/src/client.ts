@@ -314,6 +314,16 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  async completeClock(slug: string): Promise<{ ok: boolean }> {
+    const resp = await fetch(`${this.baseUrl}/clocks/${encodeURIComponent(slug)}/complete`, { method: 'POST' });
+    return resp.json() as Promise<any>;
+  }
+
+  async dismissClock(slug: string): Promise<{ ok: boolean }> {
+    const resp = await fetch(`${this.baseUrl}/clocks/${encodeURIComponent(slug)}/dismiss`, { method: 'POST' });
+    return resp.json() as Promise<any>;
+  }
+
   async deleteClock(slug: string): Promise<{ ok: boolean }> {
     const resp = await fetch(`${this.baseUrl}/clocks/${encodeURIComponent(slug)}`, { method: 'DELETE' });
     return resp.json() as Promise<any>;

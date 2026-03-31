@@ -53,6 +53,14 @@ export interface Clock {
  * Extends Clock with scheduling metadata, execution target, and output tracking.
  * Stored in clocks.json at corp root. Rehydrated on daemon restart.
  */
+/** Lifecycle state for user-created loops and crons. */
+export type ScheduledClockStatus =
+  | 'running'     // Actively firing
+  | 'paused'      // Temporarily paused, can resume
+  | 'completed'   // Finished its job — history preserved (e.g., maxRuns reached, user marked done)
+  | 'dismissed'   // No longer needed — hidden from /clock but kept in clocks.json
+  | 'deleted';    // Marked for removal — cleaned up on next persist
+
 export interface ScheduledClock extends Clock {
   /** Original schedule expression: "@every 5m", "0 9 * * 1", "@daily" */
   expression: string;
@@ -70,4 +78,10 @@ export interface ScheduledClock extends Clock {
   lastDurationMs: number | null;
   /** Last callback output, truncated to 500 chars */
   lastOutput: string | null;
+  /** Channel where this loop/cron was created — output goes here */
+  channelId: string | null;
+  /** Lifecycle status for user-facing state management */
+  scheduledStatus: ScheduledClockStatus;
+  /** When this loop/cron was completed or dismissed */
+  endedAt: number | null;
 }

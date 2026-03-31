@@ -28,6 +28,8 @@ export interface CreateCronOpts {
   targetAgent?: string;
   /** Auto-stop after N fires */
   maxRuns?: number;
+  /** Channel where output should be written */
+  channelId?: string;
 }
 
 interface CronEntry {
@@ -97,6 +99,9 @@ export class CronManager {
       enabled: true,
       lastDurationMs: null,
       lastOutput: null,
+      channelId: opts.channelId ?? null,
+      scheduledStatus: 'running',
+      endedAt: null,
     };
 
     // Register external clock for observability
@@ -161,6 +166,65 @@ export class CronManager {
 
     this.daemon.events.broadcast({ type: 'cron_stopped', name: entry.clock.name });
     log(`[crons] Stopped: ${entry.clock.name} (${slug})`);
+  }
+
+  /** Complete a cron — it did its job. Croner job stops, history preserved. */
+  complete(slug: string): void {
+    const entry = this.resolveEntry(slug);
+    const realSlug = entry.clock.id;
+
+    entry.job.stop();
+    this.daemon.clocks.stop(realSlug);
+    this.entries.delete(realSlug);
+
+    const store = loadScheduledClocks(this.daemon.corpRoot);
+    const cron = store.crons.find(c => c.id === realSlug);
+    if (cron) {
+      cron.scheduledStatus = 'completed';
+      cron.enabled = false;
+      cron.endedAt = Date.now();
+      saveScheduledClock(this.daemon.corpRoot, cron);
+    }
+
+    this.daemon.events.broadcast({ type: 'cron_stopped', name: entry.clock.name });
+    log(`[crons] Completed: ${entry.clock.name} (${realSlug})`);
+  }
+
+  /** Dismiss a cron — not needed. Hidden from /clock, kept in clocks.json. */
+  dismiss(slug: string): void {
+    const entry = this.resolveEntry(slug);
+    const realSlug = entry.clock.id;
+
+    entry.job.stop();
+    this.daemon.clocks.remove(realSlug);
+    this.entries.delete(realSlug);
+
+    const store = loadScheduledClocks(this.daemon.corpRoot);
+    const cron = store.crons.find(c => c.id === realSlug);
+    if (cron) {
+      cron.scheduledStatus = 'dismissed';
+      cron.enabled = false;
+      cron.endedAt = Date.now();
+      saveScheduledClock(this.daemon.corpRoot, cron);
+    }
+
+    this.daemon.events.broadcast({ type: 'cron_stopped', name: entry.clock.name });
+    log(`[crons] Dismissed: ${entry.clock.name} (${realSlug})`);
+  }
+
+  /** Resolve a slug to its CronEntry. */
+  private resolveEntry(slug: string): CronEntry {
+    let entry = this.entries.get(slug);
+    if (!entry) {
+      for (const [key, e] of this.entries) {
+        if (e.clock.name.toLowerCase().replace(/\s+/g, '-') === slug.toLowerCase()) {
+          entry = e;
+          break;
+        }
+      }
+    }
+    if (!entry) throw new Error(`Cron "${slug}" not found`);
+    return entry;
   }
 
   /** List all active crons. */

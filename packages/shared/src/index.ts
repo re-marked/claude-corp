@@ -25,6 +25,7 @@ export type {
   ClockType,
   ClockStatus,
   ScheduledClock,
+  ScheduledClockStatus,
   Contract,
   ContractStatus,
   ContractProgress,

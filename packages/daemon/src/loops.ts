@@ -9,7 +9,18 @@
  * Registered as ClockManager entries with type='loop' for full observability.
  */
 
-import { type ScheduledClock, parseIntervalExpression, formatIntervalMs } from '@claudecorp/shared';
+import {
+  type ScheduledClock,
+  type ChannelMessage,
+  parseIntervalExpression,
+  formatIntervalMs,
+  readConfig,
+  appendMessage,
+  generateId,
+  CHANNELS_JSON,
+  MESSAGES_JSONL,
+} from '@claudecorp/shared';
+import { join } from 'node:path';
 import type { Daemon } from './daemon.js';
 import { saveScheduledClock, removeScheduledClock, loadScheduledClocks, FireStatsWriter } from './scheduled-clock-store.js';
 import { log, logError } from './logger.js';
@@ -25,6 +36,8 @@ export interface CreateLoopOpts {
   targetAgent?: string;
   /** Auto-stop after N fires (null = unlimited) */
   maxRuns?: number;
+  /** Channel where output should be written. Null = output captured but not posted. */
+  channelId?: string;
 }
 
 export class LoopManager {
@@ -77,6 +90,9 @@ export class LoopManager {
       enabled: true,
       lastDurationMs: null,
       lastOutput: null,
+      channelId: opts.channelId ?? null,
+      scheduledStatus: 'running',
+      endedAt: null,
     };
 
     // Register with ClockManager for observability
@@ -106,22 +122,9 @@ export class LoopManager {
     return clock;
   }
 
-  /** Stop and remove a loop by slug. */
+  /** Delete a loop permanently — remove from clocks.json entirely. */
   stop(slug: string): void {
-    if (!this.slugs.has(slug)) {
-      // Try matching by name
-      const store = loadScheduledClocks(this.daemon.corpRoot);
-      const match = store.loops.find(l =>
-        l.name.toLowerCase().replace(/\s+/g, '-') === slug.toLowerCase() ||
-        l.id === slug
-      );
-      if (match) {
-        slug = match.id;
-      } else {
-        throw new Error(`Loop "${slug}" not found`);
-      }
-    }
-
+    slug = this.resolveSlug(slug);
     const clockEntry = this.daemon.clocks.get(slug);
     const name = clockEntry?.name ?? slug;
 
@@ -130,7 +133,54 @@ export class LoopManager {
     removeScheduledClock(this.daemon.corpRoot, slug);
 
     this.daemon.events.broadcast({ type: 'loop_stopped', name });
-    log(`[loops] Stopped: ${name} (${slug})`);
+    log(`[loops] Deleted: ${name} (${slug})`);
+  }
+
+  /** Complete a loop — it did its job. History preserved, shown as completed in /clock. */
+  complete(slug: string): void {
+    slug = this.resolveSlug(slug);
+    const clockEntry = this.daemon.clocks.get(slug);
+    const name = clockEntry?.name ?? slug;
+
+    // Stop the interval but keep the entry in ClockManager (for /clock view)
+    this.daemon.clocks.stop(slug);
+    this.slugs.delete(slug);
+
+    // Update persistence — mark as completed, not removed
+    const store = loadScheduledClocks(this.daemon.corpRoot);
+    const loop = store.loops.find(l => l.id === slug);
+    if (loop) {
+      loop.scheduledStatus = 'completed';
+      loop.enabled = false;
+      loop.endedAt = Date.now();
+      saveScheduledClock(this.daemon.corpRoot, loop);
+    }
+
+    this.daemon.events.broadcast({ type: 'loop_stopped', name });
+    log(`[loops] Completed: ${name} (${slug}) — ${loop?.fireCount ?? 0} fires`);
+  }
+
+  /** Dismiss a loop — not needed anymore. Hidden from /clock, kept in clocks.json. */
+  dismiss(slug: string): void {
+    slug = this.resolveSlug(slug);
+    const clockEntry = this.daemon.clocks.get(slug);
+    const name = clockEntry?.name ?? slug;
+
+    this.daemon.clocks.remove(slug); // Fully remove from ClockManager (hidden)
+    this.slugs.delete(slug);
+
+    // Update persistence — mark as dismissed, not removed
+    const store = loadScheduledClocks(this.daemon.corpRoot);
+    const loop = store.loops.find(l => l.id === slug);
+    if (loop) {
+      loop.scheduledStatus = 'dismissed';
+      loop.enabled = false;
+      loop.endedAt = Date.now();
+      saveScheduledClock(this.daemon.corpRoot, loop);
+    }
+
+    this.daemon.events.broadcast({ type: 'loop_stopped', name });
+    log(`[loops] Dismissed: ${name} (${slug})`);
   }
 
   /** List all active loops. */
@@ -182,6 +232,47 @@ export class LoopManager {
 
   // ── Private ──────────────────────────────────────────────────────
 
+  /** Resolve a slug — try direct match, then name match. */
+  private resolveSlug(slug: string): string {
+    if (this.slugs.has(slug)) return slug;
+    const store = loadScheduledClocks(this.daemon.corpRoot);
+    const match = store.loops.find(l =>
+      l.name.toLowerCase().replace(/\s+/g, '-') === slug.toLowerCase() || l.id === slug,
+    );
+    if (match) return match.id;
+    throw new Error(`Loop "${slug}" not found`);
+  }
+
+  /** Write loop output to its birth channel as a visible message. */
+  private writeOutputToChannel(clock: ScheduledClock, output: string, agentMemberId: string | null): void {
+    if (!clock.channelId) return;
+    try {
+      const channels = readConfig<any[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
+      const ch = channels.find((c: any) => c.id === clock.channelId);
+      if (!ch) return;
+      const msgPath = join(this.daemon.corpRoot, ch.path, MESSAGES_JSONL);
+
+      // Agent dispatch → message from the agent. Shell → system message.
+      const msg: ChannelMessage = {
+        id: generateId(),
+        channelId: clock.channelId,
+        senderId: agentMemberId ?? 'system',
+        threadId: null,
+        content: agentMemberId ? output : `[${clock.name}] ${output}`,
+        kind: agentMemberId ? 'text' : 'system',
+        mentions: [],
+        metadata: { source: 'loop', loopId: clock.id },
+        depth: 0,
+        originId: '',
+        timestamp: new Date().toISOString(),
+      };
+      msg.originId = msg.id;
+      appendMessage(msgPath, msg);
+    } catch {
+      // Non-fatal — loop still works, just can't post to channel
+    }
+  }
+
   /** Build the callback function for a loop. */
   private buildCallback(slug: string, clock: ScheduledClock): () => Promise<void> {
     // Watchdog timeout: 80% of interval, min 5s, max 5min
@@ -190,22 +281,39 @@ export class LoopManager {
     return async () => {
       const start = Date.now();
       let output = '';
+      let agentMemberId: string | null = null;
 
       try {
         if (clock.targetAgent) {
-          // Dispatch to agent via say()
+          // Dispatch to agent via say() — pass channelId for streaming events
+          const sayPayload: Record<string, string> = {
+            target: clock.targetAgent,
+            message: clock.command,
+            sessionKey: `loop:${slug}`,
+          };
+          if (clock.channelId) sayPayload.channelId = clock.channelId;
+
           const resp = await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              target: clock.targetAgent,
-              message: clock.command,
-              sessionKey: `loop:${slug}`,
-            }),
+            body: JSON.stringify(sayPayload),
             signal: AbortSignal.timeout(watchdogMs),
           });
           const data = await resp.json() as Record<string, unknown>;
           output = (data.response as string ?? data.error as string ?? '').slice(0, 500);
+
+          // Resolve agent member ID for writing response to channel
+          if (data.ok && clock.channelId) {
+            try {
+              const members = readConfig<any[]>(join(this.daemon.corpRoot, CHANNELS_JSON))
+                ? readConfig<any[]>(join(this.daemon.corpRoot, 'members.json'))
+                : [];
+              const agent = members.find((m: any) =>
+                m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === clock.targetAgent!.toLowerCase(),
+              );
+              agentMemberId = agent?.id ?? null;
+            } catch {}
+          }
         } else {
           // Shell command via execa
           const { execa } = await import('execa');
@@ -226,6 +334,11 @@ export class LoopManager {
         clock.lastOutput = output.trim() || null;
         clock.fireCount++;
 
+        // Write output to the channel where the loop was created
+        if (clock.channelId && output.trim()) {
+          this.writeOutputToChannel(clock, output.trim(), agentMemberId);
+        }
+
         // Debounced stats persistence
         this.statsWriter.update(slug, {
           lastFiredAt: Date.now(),
@@ -234,12 +347,11 @@ export class LoopManager {
           lastOutput: clock.lastOutput,
         });
 
-        // maxRuns check — auto-stop after N fires
+        // maxRuns check — auto-complete after N fires
         if (clock.maxRuns && clock.fireCount >= clock.maxRuns) {
-          log(`[loops] ${clock.name} reached maxRuns (${clock.maxRuns}) — auto-stopping`);
-          // Use setTimeout to avoid stopping inside the callback
+          log(`[loops] ${clock.name} reached maxRuns (${clock.maxRuns}) — auto-completing`);
           setTimeout(() => {
-            try { this.stop(slug); } catch {}
+            try { this.complete(slug); } catch {}
           }, 100);
         }
       }

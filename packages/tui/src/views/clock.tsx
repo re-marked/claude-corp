@@ -80,13 +80,23 @@ export function ClockView({ onBack }: Props) {
         daemonClient.pauseClock(clock.id).then(fetchClocks);
       }
     }
-    // D key — delete loops and crons only (system clocks protected)
+    // C key — complete a loop/cron (history preserved, grayed out)
+    if (_input === 'c' || _input === 'C') {
+      const clock = selectableClocks[selectedIndex];
+      if (!clock || (clock.type !== 'loop' && clock.type !== 'cron')) return;
+      daemonClient.completeClock(clock.id).then(fetchClocks).catch(() => {});
+    }
+    // X key — dismiss a loop/cron (hidden from view)
+    if (_input === 'x' || _input === 'X') {
+      const clock = selectableClocks[selectedIndex];
+      if (!clock || (clock.type !== 'loop' && clock.type !== 'cron')) return;
+      daemonClient.dismissClock(clock.id).then(fetchClocks).catch(() => {});
+    }
+    // D key — permanently delete a loop/cron
     if (_input === 'd' || _input === 'D') {
       const clock = selectableClocks[selectedIndex];
-      if (!clock) return;
-      if (clock.type === 'loop' || clock.type === 'cron') {
-        daemonClient.deleteClock(clock.id).then(fetchClocks).catch(() => {});
-      }
+      if (!clock || (clock.type !== 'loop' && clock.type !== 'cron')) return;
+      daemonClient.deleteClock(clock.id).then(fetchClocks).catch(() => {});
     }
   });
 
@@ -254,7 +264,7 @@ export function ClockView({ onBack }: Props) {
 
       {/* Footer */}
       <Box borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={1} justifyContent="space-between">
-        <Text color={COLORS.muted}>P:pause/resume  D:delete loop/cron  Esc:back</Text>
+        <Text color={COLORS.muted}>P:pause  C:complete  X:dismiss  D:delete  Esc:back</Text>
         <Text color={COLORS.muted}>{clocks.length} clocks</Text>
       </Box>
     </Box>

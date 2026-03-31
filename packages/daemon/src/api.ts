@@ -779,6 +779,7 @@ export function createApi(daemon: Daemon): Server {
             command,
             targetAgent: body.targetAgent as string | undefined,
             maxRuns: body.maxRuns as number | undefined,
+            channelId: body.channelId as string | undefined,
           });
           json(res, { ok: true, loop });
         } catch (err) {
@@ -803,6 +804,7 @@ export function createApi(daemon: Daemon): Server {
             command,
             targetAgent: body.targetAgent as string | undefined,
             maxRuns: body.maxRuns as number | undefined,
+            channelId: body.channelId as string | undefined,
           });
           json(res, { ok: true, cron });
         } catch (err) {
@@ -827,6 +829,44 @@ export function createApi(daemon: Daemon): Server {
           } else {
             daemon.crons.stop(slug);
           }
+          json(res, { ok: true });
+        } catch (err) {
+          json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+        }
+        return;
+      }
+
+      // POST /clocks/:slug/complete — mark a loop/cron as completed
+      const clockCompleteMatch = path.match(/^\/clocks\/([^/]+)\/complete$/);
+      if (method === 'POST' && clockCompleteMatch) {
+        const slug = decodeURIComponent(clockCompleteMatch[1]!);
+        const clock = daemon.clocks.get(slug);
+        if (!clock) { json(res, { error: 'Clock not found' }, 404); return; }
+        if (clock.type !== 'loop' && clock.type !== 'cron') {
+          json(res, { error: 'Cannot complete system clocks' }, 403); return;
+        }
+        try {
+          if (clock.type === 'loop') daemon.loops.complete(slug);
+          else daemon.crons.complete(slug);
+          json(res, { ok: true });
+        } catch (err) {
+          json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+        }
+        return;
+      }
+
+      // POST /clocks/:slug/dismiss — dismiss a loop/cron (hidden but preserved)
+      const clockDismissMatch = path.match(/^\/clocks\/([^/]+)\/dismiss$/);
+      if (method === 'POST' && clockDismissMatch) {
+        const slug = decodeURIComponent(clockDismissMatch[1]!);
+        const clock = daemon.clocks.get(slug);
+        if (!clock) { json(res, { error: 'Clock not found' }, 404); return; }
+        if (clock.type !== 'loop' && clock.type !== 'cron') {
+          json(res, { error: 'Cannot dismiss system clocks' }, 403); return;
+        }
+        try {
+          if (clock.type === 'loop') daemon.loops.dismiss(slug);
+          else daemon.crons.dismiss(slug);
           json(res, { ok: true });
         } catch (err) {
           json(res, { error: err instanceof Error ? err.message : String(err) }, 400);

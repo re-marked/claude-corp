@@ -622,16 +622,32 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         } catch { writeSystemMessage('Failed to list loops'); }
         return;
       }
-      if (parts[0] === 'stop' && parts[1]) {
+      if (parts[0] === 'stop' || parts[0] === 'delete') {
+        if (!parts[1]) { writeSystemMessage('Usage: /loop stop <name>'); return; }
         try {
           await daemonClient.deleteClock(parts.slice(1).join('-'));
-          writeSystemMessage(`Loop stopped: ${parts.slice(1).join(' ')}`);
-        } catch (err) {
-          writeSystemMessage(`Failed to stop loop: ${err instanceof Error ? err.message : String(err)}`);
-        }
+          writeSystemMessage(`Loop deleted: ${parts.slice(1).join(' ')}`);
+        } catch (err) { writeSystemMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`); }
+        return;
+      }
+      if (parts[0] === 'complete') {
+        if (!parts[1]) { writeSystemMessage('Usage: /loop complete <name>'); return; }
+        try {
+          await daemonClient.completeClock(parts.slice(1).join('-'));
+          writeSystemMessage(`Loop completed: ${parts.slice(1).join(' ')}`);
+        } catch (err) { writeSystemMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`); }
+        return;
+      }
+      if (parts[0] === 'dismiss') {
+        if (!parts[1]) { writeSystemMessage('Usage: /loop dismiss <name>'); return; }
+        try {
+          await daemonClient.dismissClock(parts.slice(1).join('-'));
+          writeSystemMessage(`Loop dismissed: ${parts.slice(1).join(' ')}`);
+        } catch (err) { writeSystemMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`); }
         return;
       }
       // Create: /loop 5m cc-cli status  OR  /loop 5m @ceo Check statuses
+      // DM auto-assign: if in a DM and no @agent, auto-target the DM agent
       const interval = parts[0]!;
       let targetAgent: string | undefined;
       let command: string;
@@ -640,13 +656,24 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         command = parts.slice(2).join(' ');
       } else {
         command = parts.slice(1).join(' ');
+        // DM auto-assign — if in a DM, the agent in this channel is the target
+        if (channel.kind === 'direct' && !targetAgent) {
+          const agent = members.find(m =>
+            m.type === 'agent' && channel.memberIds.includes(m.id),
+          );
+          if (agent) {
+            targetAgent = agent.displayName.toLowerCase().replace(/\s+/g, '-');
+          }
+        }
       }
       if (!command) {
         writeSystemMessage('Usage: /loop <interval> <command>  or  /loop <interval> @agent <prompt>');
         return;
       }
       try {
-        const result = await daemonClient.createLoop({ interval, command, targetAgent });
+        const result = await daemonClient.createLoop({
+          interval, command, targetAgent, channelId: channel.id,
+        } as any);
         if (result.ok) {
           writeSystemMessage(`Loop created: every ${interval} → ${targetAgent ? `@${targetAgent}: ` : ''}${command}`);
         } else {
@@ -674,13 +701,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         } catch { writeSystemMessage('Failed to list crons'); }
         return;
       }
-      if (parts[0] === 'stop' && parts[1]) {
+      if (parts[0] === 'stop' || parts[0] === 'delete') {
+        if (!parts[1]) { writeSystemMessage('Usage: /cron stop <name>'); return; }
         try {
           await daemonClient.deleteClock(parts.slice(1).join('-'));
-          writeSystemMessage(`Cron stopped: ${parts.slice(1).join(' ')}`);
-        } catch (err) {
-          writeSystemMessage(`Failed to stop cron: ${err instanceof Error ? err.message : String(err)}`);
-        }
+          writeSystemMessage(`Cron deleted: ${parts.slice(1).join(' ')}`);
+        } catch (err) { writeSystemMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`); }
+        return;
+      }
+      if (parts[0] === 'complete') {
+        if (!parts[1]) { writeSystemMessage('Usage: /cron complete <name>'); return; }
+        try {
+          await daemonClient.completeClock(parts.slice(1).join('-'));
+          writeSystemMessage(`Cron completed: ${parts.slice(1).join(' ')}`);
+        } catch (err) { writeSystemMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`); }
+        return;
+      }
+      if (parts[0] === 'dismiss') {
+        if (!parts[1]) { writeSystemMessage('Usage: /cron dismiss <name>'); return; }
+        try {
+          await daemonClient.dismissClock(parts.slice(1).join('-'));
+          writeSystemMessage(`Cron dismissed: ${parts.slice(1).join(' ')}`);
+        } catch (err) { writeSystemMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`); }
         return;
       }
       // Create: /cron @daily @herald Write summary  OR  /cron "0 9 * * 1" @ceo Sprint review
@@ -706,13 +748,22 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         command = restParts.slice(1).join(' ');
       } else {
         command = restParts.join(' ');
+        // DM auto-assign
+        if (channel.kind === 'direct' && !targetAgent) {
+          const agent = members.find(m =>
+            m.type === 'agent' && channel.memberIds.includes(m.id),
+          );
+          if (agent) targetAgent = agent.displayName.toLowerCase().replace(/\s+/g, '-');
+        }
       }
       if (!command) {
         writeSystemMessage('Usage: /cron <schedule> [@agent] <command>');
         return;
       }
       try {
-        const result = await daemonClient.createCron({ schedule, command, targetAgent });
+        const result = await daemonClient.createCron({
+          schedule, command, targetAgent, channelId: channel.id,
+        } as any);
         if (result.ok) {
           const cron = result.cron;
           writeSystemMessage(`Cron created: ${cron.humanSchedule ?? schedule} → ${targetAgent ? `@${targetAgent}: ` : ''}${command}`);
