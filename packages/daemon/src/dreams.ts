@@ -348,7 +348,7 @@ export class DreamManager {
         body: JSON.stringify({
           target: slug,
           message: prompt,
-          sessionKey: `dream:${slug}:${Date.now()}`,
+          sessionKey: `jack:${slug}`,
           // Pass DM channelId so tool events + streaming show in the agent's DM
           channelId: dmChannel?.id ?? undefined,
         }),
