@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Box, Text, useInput, Static } from 'ink';
 import Spinner from 'ink-spinner';
+import TextInput from 'ink-text-input';
 import {
   type Channel,
   type Member,
@@ -193,23 +194,9 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           return;
         }
       } else {
-        // Editing mode — capture text input
+        // Editing mode — TextInput handles text, we just handle escape
         if (key.escape) { setPlanReview(p => p ? { ...p, editing: false } : p); return; }
-        if (key.return && planReview.editText.trim()) {
-          // Send feedback to CEO
-          handleSend(`Feedback on the plan at ${planReview.planPath}: ${planReview.editText}. Revise the plan accordingly.`);
-          writeSystemMessage('Feedback sent. CEO will revise the plan.');
-          setPlanReview(null);
-          return;
-        }
-        if (key.backspace) {
-          setPlanReview(p => p ? { ...p, editText: p.editText.slice(0, -1) } : p);
-          return;
-        }
-        if (input && !key.ctrl && !key.meta) {
-          setPlanReview(p => p ? { ...p, editText: p.editText + input } : p);
-          return;
-        }
+        // Let TextInput handle all other input (return handled by onSubmit)
       }
       return; // Consume all input in plan review mode
     }
@@ -1478,10 +1465,22 @@ Always consider what happens when things go wrong.`,
               </Box>
             ) : (
               <Box flexDirection="column" marginTop={1}>
-                <Text color={COLORS.subtle}>Feedback for the CEO (Enter to send):</Text>
+                <Text color={COLORS.subtle}>Feedback for the CEO (Enter to send, Esc to cancel):</Text>
                 <Box>
                   <Text bold color={COLORS.primary}>&gt; </Text>
-                  <Text>{planReview.editText}<Text inverse> </Text></Text>
+                  <TextInput
+                    value={planReview.editText}
+                    onChange={(v) => setPlanReview(p => p ? { ...p, editText: v } : p)}
+                    onSubmit={(v) => {
+                      if (!v.trim()) return;
+                      handleSend(`Feedback on the plan at ${planReview.planPath}: ${v}. Revise the plan and save the updated version to the same file.`);
+                      writeSystemMessage('Feedback sent. CEO will revise — plan review will resume when done.');
+                      // Stay in plan review mode but reset to choice view
+                      // The revised plan will stream in the DM, user can re-review
+                      setPlanReview(p => p ? { ...p, editing: false, editText: '', choice: 0 } : p);
+                    }}
+                    placeholder="The auth section needs OAuth support too..."
+                  />
                 </Box>
               </Box>
             )}
