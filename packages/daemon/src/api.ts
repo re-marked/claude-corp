@@ -12,17 +12,51 @@ import {
   listTeams,
   readConfig,
   writeConfig,
+  appendMessage,
+  generateId,
   KNOWN_MODELS,
   resolveModelAlias,
   writeGlobalConfig,
   readGlobalConfig,
   MEMBERS_JSON,
+  CHANNELS_JSON,
+  MESSAGES_JSONL,
+  type ChannelMessage,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { dispatchToAgent } from './dispatch.js';
 import { hireAgent } from './hire.js';
 import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm } from './task-events.js';
-import { logError } from './logger.js';
+import { log, logError } from './logger.js';
+
+/** Format tool call into a human-readable description for chat history. */
+function formatToolMsg(toolName: string, args?: Record<string, unknown>): string {
+  const name = toolName.toLowerCase();
+  if (name === 'write' || name === 'create' || name === 'write_file') {
+    return `wrote ${args?.path ?? args?.file_path ?? args?.filePath ?? 'a file'}`;
+  }
+  if (name === 'edit' || name === 'edit_file' || name === 'patch') {
+    return `edited ${args?.path ?? args?.file_path ?? args?.filePath ?? 'a file'}`;
+  }
+  if (name === 'read' || name === 'read_file') {
+    return `read ${args?.path ?? args?.file_path ?? args?.filePath ?? 'a file'}`;
+  }
+  if (name === 'bash' || name === 'execute' || name === 'exec' || name === 'shell' || name === 'run') {
+    const cmd = String(args?.command ?? args?.cmd ?? args?.input ?? '').trim();
+    return cmd ? `ran \`${cmd.split('\n')[0]!.substring(0, 80)}\`` : 'ran a command';
+  }
+  if (name === 'glob' || name === 'search' || name === 'find') {
+    return `searched ${args?.pattern ?? args?.query ?? 'files'}`;
+  }
+  if (name === 'grep') return `searched for "${args?.pattern ?? args?.query ?? '...'}"`;
+  if (name === 'web_search' || name === 'websearch') return `searched web: "${args?.query ?? '...'}"`;
+  if (name === 'web_fetch' || name === 'fetch' || name === 'curl') return `fetched ${args?.url ?? 'a URL'}`;
+  const path = args?.path ?? args?.file_path ?? args?.filePath;
+  if (path) return `${name} ${path}`;
+  const cmd = args?.command ?? args?.cmd;
+  if (cmd) return `${name}: ${String(cmd).substring(0, 60)}`;
+  return `used ${toolName}`;
+}
 
 export function createApi(daemon: Daemon): Server {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -524,6 +558,16 @@ export function createApi(daemon: Daemon): Server {
         // Channel ID for WebSocket events (Jack passes this so TUI gets streaming)
         const channelId = (body.channelId as string) ?? '';
 
+        // Resolve channel path for writing tool events to JSONL
+        let channelMsgPath = '';
+        if (channelId) {
+          const channels = readConfig<any[]>(join(daemon.corpRoot, CHANNELS_JSON));
+          const ch = channels.find((c: any) => c.id === channelId);
+          if (ch) channelMsgPath = join(daemon.corpRoot, ch.path, MESSAGES_JSONL);
+        }
+        // Cache tool args from start events — end events often lack them
+        const toolArgsCache = new Map<string, Record<string, unknown>>();
+
         try {
           const wsClient = agentProc.mode === 'remote' ? daemon.openclawWS : daemon.corpGatewayWS;
           // Persistent sessions by default — ALL communication has memory.
@@ -569,9 +613,12 @@ export function createApi(daemon: Daemon): Server {
               });
             } : undefined,
             wsClient,
-            // Tool callbacks — emit tool_start/tool_end events
+            // Tool callbacks — emit events + write tool_event messages to JSONL
             channelId ? {
               onToolStart: (tool) => {
+                if (tool.toolCallId && tool.args) {
+                  toolArgsCache.set(tool.toolCallId, tool.args);
+                }
                 daemon.events.broadcast({
                   type: 'tool_start',
                   agentName: target.displayName,
@@ -581,12 +628,43 @@ export function createApi(daemon: Daemon): Server {
                 });
               },
               onToolEnd: (tool) => {
+                const args = tool.args ?? toolArgsCache.get(tool.toolCallId);
+                toolArgsCache.delete(tool.toolCallId);
+
                 daemon.events.broadcast({
                   type: 'tool_end',
                   agentName: target.displayName,
                   channelId,
                   toolName: tool.name,
                 });
+
+                // Write tool_event message to channel JSONL (visible in chat history)
+                if (channelMsgPath) {
+                  const toolContent = formatToolMsg(tool.name, args);
+                  const toolMsg: ChannelMessage = {
+                    id: generateId(),
+                    channelId,
+                    senderId: target.id,
+                    threadId: null,
+                    content: toolContent,
+                    kind: 'tool_event',
+                    mentions: [],
+                    metadata: {
+                      source: 'jack',
+                      toolName: tool.name,
+                      toolCallId: tool.toolCallId,
+                      toolArgs: args,
+                      toolResult: tool.result
+                        ? (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result)).slice(0, 300)
+                        : undefined,
+                    },
+                    depth: 0,
+                    originId: '',
+                    timestamp: new Date().toISOString(),
+                  };
+                  toolMsg.originId = toolMsg.id;
+                  appendMessage(channelMsgPath, toolMsg);
+                }
               },
             } : undefined,
           );
