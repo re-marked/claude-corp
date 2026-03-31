@@ -17,6 +17,7 @@ import {
   readConfig,
   appendMessage,
   generateId,
+  readTask,
   updateTask,
   taskPath,
   CHANNELS_JSON,
@@ -195,12 +196,19 @@ export class LoopManager {
       saveScheduledClock(this.daemon.corpRoot, loop);
 
       // Bidirectional lifecycle: loop complete → task auto-complete
+      // Guard against infinite cycle: only complete if task isn't already done
       if (loop.taskId) {
         try {
           const tp = taskPath(this.daemon.corpRoot, loop.taskId);
           if (existsSync(tp)) {
-            updateTask(tp, { status: 'completed', loopId: null });
-            log(`[loops] Task ${loop.taskId} auto-completed (loop ${slug} finished)`);
+            const existing = readTask(tp);
+            if (existing.task.status !== 'completed' && existing.task.status !== 'failed') {
+              updateTask(tp, { status: 'completed', loopId: null });
+              log(`[loops] Task ${loop.taskId} auto-completed (loop ${slug} finished)`);
+            } else {
+              // Task already done — just clear the loopId
+              updateTask(tp, { loopId: null });
+            }
           }
         } catch (err) {
           logError(`[loops] Failed to auto-complete task ${loop.taskId}: ${err}`);
