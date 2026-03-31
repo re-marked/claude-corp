@@ -101,9 +101,20 @@ export class CorpGateway {
     mkdirSync(agentDir, { recursive: true });
 
     // Copy auth from user's OpenClaw (source of truth for API keys)
+    // Strip cooldown/usage state to prevent stale cooldowns from blocking agents
     const userAuthPath = join(homedir(), '.openclaw', 'agents', 'main', 'agent', 'auth-profiles.json');
     if (existsSync(userAuthPath)) {
       const userAuth = readConfig<Record<string, unknown>>(userAuthPath);
+      // Remove usageStats (contains cooldownUntil, errorCount, etc.)
+      if (userAuth.usageStats) delete userAuth.usageStats;
+      if (userAuth.profiles && typeof userAuth.profiles === 'object') {
+        for (const profile of Object.values(userAuth.profiles as Record<string, any>)) {
+          if (profile?.usageStats) delete profile.usageStats;
+          if (profile?.cooldownUntil) delete profile.cooldownUntil;
+          if (profile?.errorCount) delete profile.errorCount;
+          if (profile?.failureCounts) delete profile.failureCounts;
+        }
+      }
       writeConfig(join(agentDir, 'auth-profiles.json'), userAuth);
     } else {
       // Fallback: try globalConfig.apiKeys
@@ -418,25 +429,29 @@ export class CorpGateway {
   }
 
   private buildConfig(agentsList: CorpGatewayAgent[]): Record<string, unknown> {
-    const defaultModel = `${this.globalConfig.defaults.provider}/${this.globalConfig.defaults.model}`;
+    const provider = this.globalConfig.defaults.provider;
+    const defaultModel = `${provider}/${this.globalConfig.defaults.model}`;
     const fallbacks = this.globalConfig.defaults.fallbackChain;
+
+    // Always have a fallback chain — even if user didn't configure one.
+    // Without it, one overloaded error = hard failure for ALL agents.
+    const fallbackModels = fallbacks && fallbacks.length > 0
+      ? fallbacks.map(m => `${provider}/${m}`)
+      : [`${provider}/claude-haiku-4-5`]; // safe default fallback
+
     return {
       agents: {
         defaults: {
           model: {
             primary: defaultModel,
-            // Native OpenClaw fallback chain — exponential backoff, profile rotation
-            ...(fallbacks && fallbacks.length > 0 ? {
-              fallbacks: fallbacks.map(m => `${this.globalConfig.defaults.provider}/${m}`),
-            } : {}),
+            fallbacks: fallbackModels,
           },
+          maxConcurrent: 2, // Prevent agent stampede — 2 concurrent per gateway
           compaction: { mode: 'safeguard' },
           verboseDefault: 'full',
           blockStreamingDefault: 'off',
-          heartbeat: {
-            every: '10m',
-            prompt: 'Read your HEARTBEAT.md file. It contains your current tasks and instructions. Follow them. If nothing needs attention, reply HEARTBEAT_OK.',
-          },
+          // NOTE: No OpenClaw heartbeat — Pulse handles all agent heartbeats
+          // directly. Having both would double API usage.
         },
         list: agentsList,
       },
