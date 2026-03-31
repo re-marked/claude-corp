@@ -283,6 +283,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /hand <task-id> @agent — hand a task to an agent (start work)
+    if (text.trim().toLowerCase().startsWith('/hand')) {
+      const parts = text.trim().split(/\s+/).slice(1);
+      if (parts.length < 2) {
+        writeSystemMessage('Usage: /hand <task-id> @agent\nCreating a task is planning. Handing it starts the work.');
+        return;
+      }
+      const handTaskId = parts[0]!;
+      const agentSlug = parts[1]!.startsWith('@') ? parts[1].slice(1) : parts[1]!;
+      try {
+        const result = await daemonClient.handTask(handTaskId, agentSlug);
+        if ((result as any).ok) {
+          writeSystemMessage(`Handed task ${handTaskId} → @${(result as any).handedTo ?? agentSlug}. Work begins.`);
+        } else {
+          writeSystemMessage(`Failed to hand: ${(result as any).error ?? 'unknown error'}`);
+        }
+      } catch (err) {
+        writeSystemMessage(`Failed to hand task: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     // /status shows agent work status inline
     if (text.trim().toLowerCase() === '/status') {
       try {
@@ -363,7 +385,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         '⚙️ Management:',
         '  /hire              Open agent hiring wizard',
         '  /model             View and change AI models',
-        '  /task              Open task creation wizard',
+        '  /task              Create a task (planning)',
+        '  /hand <id> @agent  Hand a task to an agent (action)',
         '  /project           Open project creation wizard',
         '  /team              Open team creation wizard',
         '  /dogfood           Set up development project',
