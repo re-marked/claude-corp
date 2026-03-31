@@ -283,6 +283,36 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /dream @agent — force-trigger a memory consolidation dream
+    if (text.trim().toLowerCase().startsWith('/dream')) {
+      const parts = text.trim().split(/\s+/).slice(1);
+      let agentSlug: string;
+      if (parts[0]?.startsWith('@')) {
+        agentSlug = parts[0].slice(1);
+      } else if (parts[0]) {
+        agentSlug = parts[0];
+      } else if (channel.kind === 'direct') {
+        const agent = members.find(m => m.type === 'agent' && channel.memberIds.includes(m.id));
+        agentSlug = agent?.displayName.toLowerCase().replace(/\s+/g, '-') ?? '';
+      } else {
+        writeSystemMessage('Usage: /dream @agent — force-trigger memory consolidation');
+        return;
+      }
+      if (!agentSlug) { writeSystemMessage('Usage: /dream @agent'); return; }
+      writeSystemMessage(`Triggering dream for @${agentSlug}...`);
+      try {
+        const result = await daemonClient.triggerDream(agentSlug);
+        if (result.ok) {
+          writeSystemMessage(`Dream complete: ${result.summary ?? 'consolidated'}`);
+        } else {
+          writeSystemMessage(`Dream failed: ${result.error ?? 'unknown'}`);
+        }
+      } catch (err) {
+        writeSystemMessage(`Dream error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     // /hand <task-id> @agent — hand a task to an agent (start work)
     if (text.trim().toLowerCase().startsWith('/hand')) {
       const parts = text.trim().split(/\s+/).slice(1);

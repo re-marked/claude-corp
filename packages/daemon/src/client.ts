@@ -296,6 +296,15 @@ export class DaemonClient {
 
   // --- Loops & Crons ---
 
+  async triggerDream(agentSlug: string): Promise<{ ok: boolean; summary?: string; error?: string }> {
+    const resp = await fetch(`${this.baseUrl}/dream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent: agentSlug }),
+    });
+    return resp.json() as Promise<any>;
+  }
+
   async createLoop(opts: { interval: string; command: string; targetAgent?: string; name?: string; maxRuns?: number; channelId?: string; taskId?: string }): Promise<{ ok: boolean; loop: any }> {
     const resp = await fetch(`${this.baseUrl}/loops`, {
       method: 'POST',

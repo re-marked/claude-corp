@@ -797,6 +797,16 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /dream — force-trigger a dream for an agent
+      if (method === 'POST' && path === '/dream') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const target = body.agent as string;
+        if (!target) { json(res, { error: 'agent slug required' }, 400); return; }
+        const result = await daemon.dreams.forceDream(target);
+        json(res, result, result.ok ? 200 : 400);
+        return;
+      }
+
       // POST /loops — create a new loop
       if (method === 'POST' && path === '/loops') {
         const body = await readBody(req) as Record<string, unknown>;

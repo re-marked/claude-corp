@@ -29,12 +29,11 @@ import { log, logError } from './logger.js';
 
 // ── Configuration ───────────────────────────────────────────────────
 
-const DREAM_CHECK_INTERVAL_MS = 30 * 60 * 1000; // Check gates every 30 min
-const DEFAULT_MIN_HOURS = 24;                     // 24h between dreams
-const DEFAULT_MIN_SESSIONS = 5;                   // 5 work sessions minimum
-const LOCK_STALE_MS = 60 * 60 * 1000;            // Lock stale after 1 hour (from source)
-const DREAM_TIMEOUT_MS = 5 * 60 * 1000;          // 5 min timeout per dream
-const SESSION_HEADER_RE = /^## Session/m;         // WORKLOG.md session boundary marker
+const DREAM_CHECK_INTERVAL_MS = 2 * 60 * 1000;  // Check every 2 min (lightweight — just stat checks)
+const IDLE_THRESHOLD_MS = 5 * 60 * 1000;          // 5 min idle before dreaming
+const MIN_HOURS_BETWEEN_DREAMS = 1;                // At least 1h between dreams (prevent thrashing)
+const LOCK_STALE_MS = 60 * 60 * 1000;             // Lock stale after 1 hour
+const DREAM_TIMEOUT_MS = 5 * 60 * 1000;           // 5 min timeout per dream
 
 // ── State Files ─────────────────────────────────────────────────────
 
@@ -59,9 +58,37 @@ export class DreamManager {
   private daemon: Daemon;
   /** Agents currently dreaming — prevents double-dispatch */
   private dreaming = new Set<string>();
+  /** Track when each agent became idle (memberId → timestamp) */
+  private idleSince = new Map<string, number>();
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
+  }
+
+  /** Force-trigger a dream for a specific agent (skips all gates). For testing/CLI. */
+  async forceDream(agentSlug: string): Promise<{ ok: boolean; summary?: string; error?: string }> {
+    let members: Member[];
+    try {
+      members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+    } catch { return { ok: false, error: 'Cannot read members' }; }
+
+    const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+    const agent = members.find(m =>
+      m.type === 'agent' && (normalize(m.displayName) === normalize(agentSlug) || m.id === agentSlug),
+    );
+    if (!agent || !agent.agentDir) return { ok: false, error: `Agent "${agentSlug}" not found` };
+
+    const agentDir = join(this.daemon.corpRoot, agent.agentDir);
+    if (this.dreaming.has(agent.id)) return { ok: false, error: `${agent.displayName} is already dreaming` };
+
+    const state = this.readDreamState(agentDir);
+    const hoursSince = (Date.now() - state.lastDreamAt) / 3_600_000;
+    const sessionsSince = this.countSessionsSince(agentDir, state.lastDreamAt);
+
+    await this.dispatchDream(agent, agentDir, hoursSince, sessionsSince);
+
+    const updated = this.readDreamState(agentDir);
+    return { ok: true, summary: updated.lastSummary ?? 'Dream completed' };
   }
 
   /** Register the dream check clock. Called from daemon.startRouter(). */
@@ -80,8 +107,14 @@ export class DreamManager {
   // ── Dream Cycle ─────────────────────────────────────────────────
 
   /**
-   * Check all agents' gates and dispatch dreams for those that qualify.
-   * Dispatches are concurrent — OpenClaw's maxConcurrent handles throttling.
+   * Natural dream cycle — check all agents for idle + no pending work.
+   * Runs every 2 min (lightweight stat checks, no API calls).
+   *
+   * An agent dreams when:
+   *   1. Idle for 5+ minutes (nobody's talking to it)
+   *   2. No pending inbox items or queued tasks
+   *   3. At least 1 hour since last dream
+   *   4. Lock free (no concurrent dream)
    */
   private async dreamCycle(): Promise<void> {
     let members: Member[];
@@ -92,94 +125,91 @@ export class DreamManager {
     const agents = members.filter(m => m.type === 'agent' && m.status === 'active' && m.agentDir);
     if (agents.length === 0) return;
 
-    let dreamCount = 0;
+    const now = Date.now();
+
     for (const agent of agents) {
       if (this.dreaming.has(agent.id)) continue;
 
       const agentDir = join(this.daemon.corpRoot, agent.agentDir!);
       if (!existsSync(agentDir)) continue;
 
-      // Check if this agent's process is online
+      // Must be online
       const agentProc = this.daemon.processManager.getAgent(agent.id);
-      if (!agentProc || agentProc.status !== 'ready') continue;
+      if (!agentProc || agentProc.status !== 'ready') {
+        this.idleSince.delete(agent.id);
+        continue;
+      }
 
-      // Check gates
-      const gateResult = this.checkGates(agentDir, agent.displayName);
+      // Track idle state
+      const workStatus = this.daemon.getAgentWorkStatus(agent.id);
+      if (workStatus === 'busy') {
+        this.idleSince.delete(agent.id);
+        continue;
+      }
+
+      // Record when agent became idle
+      if (!this.idleSince.has(agent.id)) {
+        this.idleSince.set(agent.id, now);
+        continue; // Just became idle — check again next cycle
+      }
+
+      // Check natural gates
+      const gateResult = this.checkGates(agent, agentDir, now);
       if (!gateResult.open) continue;
 
-      // Dispatch dream (non-blocking — don't await, let them run in parallel)
-      dreamCount++;
+      // Dispatch (non-blocking)
       this.dispatchDream(agent, agentDir, gateResult.hoursSince, gateResult.sessionsSince);
-    }
-
-    if (dreamCount > 0) {
-      log(`[dreams] Dispatched ${dreamCount} dream(s) this cycle`);
     }
   }
 
-  // ── Gate Checks ─────────────────────────────────────────────────
+  // ── Natural Gate Checks ─────────────────────────────────────────
 
-  private checkGates(agentDir: string, displayName: string): {
+  private checkGates(agent: Member, agentDir: string, now: number): {
     open: boolean;
     hoursSince: number;
     sessionsSince: number;
   } {
     const closed = { open: false, hoursSince: 0, sessionsSince: 0 };
 
-    // Gate 1: Time — hours since last dream
+    // Gate 1: Idle for 5+ minutes
+    const idleStart = this.idleSince.get(agent.id);
+    if (!idleStart || (now - idleStart) < IDLE_THRESHOLD_MS) return closed;
+
+    // Gate 2: No pending work — check inbox queue
+    const pendingTask = this.daemon.inbox.peekNext(agent.id);
+    if (pendingTask) return closed;
+
+    // Gate 3: At least 1 hour since last dream (prevent thrashing)
     const state = this.readDreamState(agentDir);
     const hoursSince = (Date.now() - state.lastDreamAt) / 3_600_000;
-    if (hoursSince < DEFAULT_MIN_HOURS) return closed;
+    if (hoursSince < MIN_HOURS_BETWEEN_DREAMS) return closed;
 
-    // Gate 2: Sessions — count WORKLOG.md session boundaries since last dream
+    // Gate 4: Lock free
+    if (!this.tryAcquireLock(agentDir)) return closed;
+
+    // Count sessions for the prompt context (not a gate — just informational)
     const sessionsSince = this.countSessionsSince(agentDir, state.lastDreamAt);
-    if (sessionsSince < DEFAULT_MIN_SESSIONS) return closed;
 
-    // Gate 3: Lock — no other dream in progress
-    if (!this.tryAcquireLock(agentDir)) {
-      log(`[dreams] ${displayName} — lock held, skipping`);
-      return closed;
-    }
-
-    log(`[dreams] ${displayName} gates open — ${hoursSince.toFixed(1)}h since last, ${sessionsSince} sessions`);
+    log(`[dreams] ${agent.displayName} — idle ${Math.round((now - idleStart) / 60_000)}m, ${hoursSince.toFixed(1)}h since last dream, ${sessionsSince} sessions → dreaming`);
     return { open: true, hoursSince, sessionsSince };
   }
 
-  /**
-   * Count session boundaries in WORKLOG.md since a given timestamp.
-   * Session boundaries are "## Session" headers written by the Casket system.
-   * We scan for timestamps in the headers that are after lastDreamAt.
-   */
+  /** Count WORKLOG.md session boundaries since a timestamp (informational, not a gate). */
   private countSessionsSince(agentDir: string, sinceMs: number): number {
     const worklogPath = join(agentDir, 'WORKLOG.md');
     if (!existsSync(worklogPath)) return 0;
-
     try {
       const content = readFileSync(worklogPath, 'utf-8');
-      const lines = content.split('\n');
       let count = 0;
-
-      for (const line of lines) {
-        if (!SESSION_HEADER_RE.test(line)) continue;
-        // Try to extract timestamp from the session header
-        // Format: "## Session — 2026-03-31T14:00:00.000Z" or similar
+      for (const line of content.split('\n')) {
+        if (!/^## Session/.test(line)) continue;
         const isoMatch = line.match(/\d{4}-\d{2}-\d{2}T[\d:.]+Z?/);
         if (isoMatch) {
-          const ts = new Date(isoMatch[0]).getTime();
-          if (ts > sinceMs) count++;
-        } else {
-          // No parseable timestamp — count it if WORKLOG.md mtime > sinceMs
-          // (conservative: if we can't parse, assume it's recent)
-          const stat = statSync(worklogPath);
-          if (stat.mtimeMs > sinceMs) count++;
-          break; // Only count once for unparseable headers
+          if (new Date(isoMatch[0]).getTime() > sinceMs) count++;
         }
       }
-
       return count;
-    } catch {
-      return 0;
-    }
+    } catch { return 0; }
   }
 
   // ── Lock (adapted from consolidationLock.ts) ─────────────────────
