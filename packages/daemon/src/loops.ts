@@ -51,6 +51,8 @@ export class LoopManager {
   private daemon: Daemon;
   private slugs = new Set<string>(); // Track active loop slugs
   private statsWriter: FireStatsWriter;
+  /** Track consecutive errors per loop — suppress channel messages after first error */
+  private errorStreaks = new Map<string, number>();
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -343,6 +345,7 @@ export class LoopManager {
       const start = Date.now();
       let output = '';
       let agentMemberId: string | null = null;
+      let failed = false;
 
       try {
         if (clock.targetAgent) {
@@ -386,6 +389,10 @@ export class LoopManager {
         }
       } catch (err) {
         output = err instanceof Error ? err.message : String(err);
+        failed = true;
+        // Track error streak — suppress channel messages after first error
+        const streak = (this.errorStreaks.get(slug) ?? 0) + 1;
+        this.errorStreaks.set(slug, streak);
         throw err; // Re-throw so ClockManager tracks the error
       } finally {
         const duration = Date.now() - start;
@@ -394,9 +401,20 @@ export class LoopManager {
         // Sync fireCount from ClockManager (it tracks fires in tick())
         clock.fireCount = this.daemon.clocks.get(slug)?.fireCount ?? clock.fireCount;
 
-        // Write output to the channel where the loop was created
+        // Write output to channel — suppress repeated errors to prevent flooding
+        const errorStreak = this.errorStreaks.get(slug) ?? 0;
         if (clock.channelId && output.trim()) {
-          this.writeOutputToChannel(clock, output.trim(), agentMemberId);
+          if (!failed) {
+            // Success → always write, reset error streak
+            this.writeOutputToChannel(clock, output.trim(), agentMemberId);
+            this.errorStreaks.delete(slug);
+          } else if (errorStreak <= 1) {
+            // First error → show it with suppression notice
+            this.writeOutputToChannel(clock, `[${clock.name}] ${output.trim()} (further errors suppressed until recovery)`, null);
+          }
+          // errorStreak > 1 → silently suppressed, only in daemon.log
+        } else if (!failed) {
+          this.errorStreaks.delete(slug);
         }
 
         // Debounced stats persistence

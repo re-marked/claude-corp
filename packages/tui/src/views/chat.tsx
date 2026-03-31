@@ -1049,7 +1049,7 @@ Always consider what happens when things go wrong.`,
 
   if (showProjectWizard) {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+      <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={10}>
         <ProjectWizard
           daemonClient={daemonClient}
           founderId={founder?.id ?? ''}
@@ -1062,7 +1062,7 @@ Always consider what happens when things go wrong.`,
 
   if (showTeamWizard) {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+      <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={10}>
         <TeamWizard
           daemonClient={daemonClient}
           founderId={founder?.id ?? ''}
@@ -1076,7 +1076,7 @@ Always consider what happens when things go wrong.`,
 
   if (showTaskWizard) {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+      <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={10}>
         <TaskWizard
           daemonClient={daemonClient}
           founderId={founder?.id ?? ''}
@@ -1090,7 +1090,7 @@ Always consider what happens when things go wrong.`,
 
   if (showHireWizard) {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+      <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={10}>
         <HireWizard
           daemonClient={daemonClient}
           founderId={founder?.id ?? ''}
@@ -1103,7 +1103,7 @@ Always consider what happens when things go wrong.`,
 
   if (showModelWizard) {
     return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+      <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={10}>
         <ModelWizard
           daemonClient={daemonClient}
           onClose={() => setShowModelWizard(false)}
