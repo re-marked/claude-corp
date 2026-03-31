@@ -287,13 +287,21 @@ export class CronManager {
           description: cron.description,
         });
 
-        // Create croner job
+        // Detect missed fires — if stored nextFireAt is in the past, a fire was missed
+        const now = Date.now();
+        if (cron.nextFireAt && cron.nextFireAt < now) {
+          const missedAgo = Math.round((now - cron.nextFireAt) / 60_000);
+          log(`[crons] "${cron.name}" missed a fire (${missedAgo}m ago) — skipping to next scheduled time`);
+        }
+
+        // Create croner job — croner computes next fire from NOW, naturally skipping missed
         const job = this.createCronerJob(slug, cron, handle, expression);
 
-        // Compute next fire
+        // Compute next fire from croner (not from stored value)
         const nextRun = job.nextRun();
         if (nextRun) {
           handle.updateNextFire(nextRun.getTime());
+          log(`[crons] "${cron.name}" next fire: ${nextRun.toLocaleString()}`);
         }
 
         this.entries.set(slug, { job, handle, clock: cron });
