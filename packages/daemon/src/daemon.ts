@@ -32,6 +32,8 @@ import { hireWarden } from './warden.js';
 import { hireHerald } from './herald.js';
 import { ContractWatcher } from './contract-watcher.js';
 import { ClockManager } from './clock-manager.js';
+import { LoopManager } from './loops.js';
+import { CronManager } from './crons.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
@@ -49,6 +51,8 @@ export class Daemon {
   pulse: Pulse;
   contractWatcher: ContractWatcher;
   clocks: ClockManager;
+  loops: LoopManager;
+  crons: CronManager;
   analytics: AnalyticsEngine;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
@@ -80,6 +84,8 @@ export class Daemon {
     this.pulse = new Pulse(this);
     this.contractWatcher = new ContractWatcher(this);
     this.clocks = new ClockManager(this.events);
+    this.loops = new LoopManager(this);
+    this.crons = new CronManager(this);
     this.analytics = new AnalyticsEngine(this);
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
   }
@@ -229,6 +235,10 @@ export class Daemon {
       description: 'Recovers corp gateway after auto-restart exhaustion, reconnects WebSocket',
       callback: () => this.recoverCorpGateway(),
     });
+
+    // Rehydrate user-created loops and crons from clocks.json
+    this.loops.rehydrate();
+    this.crons.rehydrate();
   }
 
   /** Dispatch narration request to Herald via say(). Response = NARRATION.md content. */
@@ -762,6 +772,8 @@ export class Daemon {
     this.hireWatcher.stop();
     this.pulse.stop();
     this.contractWatcher.stop();
+    this.crons.stopAll(); // Stop croner jobs before ClockManager
+    this.loops.shutdown(); // Flush loop stats
     this.clocks.stopAll();
     this.inbox.flush(); // Persist inbox state before shutdown
     this.analytics.stop(); // Persist analytics before shutdown
