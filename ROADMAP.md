@@ -1,257 +1,360 @@
 # Claude Corp — Roadmap
 
 > Built independently. Validated by the Claude Code source leak (March 31, 2026).
-> Every feature below is mapped to real TypeScript from both codebases.
+> Every feature below traced to actual TypeScript from the leaked 512K-line codebase.
+> Source: [Kuberwastaken/claude-code](https://github.com/Kuberwastaken/claude-code) (1,905 files)
 
 ---
 
 ## v0.12.0 — Agent Dreams (autoDream)
 
-**Source:** `claude-code-leaked/services/autoDream/` — 4 files, ~325 lines
-**Claude Corp equivalent:** New `packages/daemon/src/dreams.ts`
+**Source:** `services/autoDream/autoDream.ts` (325 lines), `consolidationPrompt.ts`, `consolidationLock.ts`, `config.ts`
+**Also:** `tasks/DreamTask/DreamTask.ts` — state tracking with phase/filesTouched/turns
 
-Memory consolidation engine. Agents periodically "dream" — reviewing their recent sessions, consolidating learnings into durable memory files, and pruning stale knowledge.
+Memory consolidation engine. Agents periodically "dream" — reviewing recent sessions, consolidating learnings into BRAIN/ memory files, pruning stale knowledge.
 
-### Three-Gate Trigger
-1. **Time gate:** 24 hours since last consolidation (configurable)
-2. **Session gate:** 5+ sessions with activity since last consolidation
-3. **Lock gate:** No other dream is in progress (prevents pile-up)
+### Three-Gate Trigger (cheapest first, from source)
+```
+Gate 1: Time     — hours since lastConsolidatedAt >= 24h (configurable)
+Gate 2: Sessions — transcripts with mtime > lastConsolidatedAt >= 5 (configurable)
+Gate 3: Lock     — no other dream in progress (file lock with PID, stale after 1h)
+```
+Additionally: scan throttle of 10 minutes between session scans (prevents repeated gate checks).
 
-### Four-Phase Consolidation
-1. **Orient** — read MEMORY.md index, skim existing BRAIN/ topics
-2. **Gather Signal** — scan recent WORKLOG.md sessions, grep transcripts for key events
-3. **Consolidate** — write/update BRAIN/ topic files, merge new signal into existing topics, convert relative dates to absolute, delete contradicted facts
-4. **Prune & Index** — update MEMORY.md, keep it under 200 lines, remove stale pointers
+### Four-Phase Consolidation (exact prompt from `consolidationPrompt.ts`)
+1. **Orient** — `ls` memory directory, read MEMORY.md index, skim existing BRAIN/ topics to avoid duplicates
+2. **Gather Signal** — check recent WORKLOG.md sessions, grep transcripts narrowly ("don't exhaustively read"), look for drifted facts that contradict current state
+3. **Consolidate** — write/update BRAIN/ topic files, merge new signal into existing, convert relative dates to absolute, delete contradicted facts at source
+4. **Prune & Index** — update MEMORY.md, keep under 200 lines / 25KB, each entry one line under 150 chars: `- [Title](file.md) — one-line hook`
 
-### Implementation
-- New `DreamManager` class in daemon
-- Registers as a Clock (`type: 'system'`, fires every 30 min but gate-checked)
-- Dispatches via `say()` to the agent with the consolidation prompt
-- Agent has read-only access to its own workspace + transcripts
-- Progress tracked as a background task in /clock view
+### Tool Constraints (from source)
+Bash restricted to **read-only**: `ls, find, grep, cat, stat, wc, head, tail`. No writes, no redirects, no state modification. Only FileEdit and FileWrite allowed on memory directory.
+
+### State Tracking (from `DreamTask.ts`)
+```typescript
+type DreamTaskState = {
+  type: 'dream'
+  phase: 'starting' | 'updating'  // Flips on first Edit/Write
+  sessionsReviewing: number
+  filesTouched: string[]           // Observed Edit/Write tool_uses
+  turns: DreamTurn[]               // Recent text + tool count (max 30)
+  priorMtime: number               // For lock rollback on failure
+}
+```
+
+### Claude Corp Implementation
+- New `DreamManager` class, registers as Clock (`type: 'system'`, every 30m, gate-checked)
+- Dispatches via `say()` with consolidation prompt adapted from their `buildConsolidationPrompt()`
+- Agent has read-only access to workspace + WORKLOG.md transcripts
+- Progress tracked in /clock view as "Dreaming..." phase
 - Persists `lastDreamAt` per agent in `agents/<name>/dream-state.json`
+- Lock file: `agents/<name>/.dream-lock` with PID + stale detection (1h threshold)
 
 ### Files
 - `packages/daemon/src/dreams.ts` — DreamManager
-- `packages/daemon/src/dream-prompt.ts` — consolidation prompt (adapted from Claude Code's `consolidationPrompt.ts`)
+- `packages/daemon/src/dream-prompt.ts` — adapted consolidation prompt
 - `packages/shared/src/types/agent-config.ts` — add `lastDreamAt`, `dreamCount`
-- Fragment update: `workspace.ts` — teach agents about dreaming
+- Fragment: `workspace.ts` — teach agents about dreaming
 
 ---
 
 ## v0.13.0 — Coordinator Mode (Swarm)
 
-**Source:** `claude-code-leaked/coordinator/coordinatorMode.ts` — full system prompt (370 lines)
-**Claude Corp equivalent:** CEO becomes a coordinator when working on Contracts
+**Source:** `coordinator/coordinatorMode.ts` (370 lines — full system prompt + logic)
+**Also:** `tasks/LocalAgentTask/LocalAgentTask.tsx` — worker spawning + task notifications
 
-### Architecture
-The CEO (or any leader agent) can enter **Coordinator Mode** when working on a Contract:
-1. **Research phase** — spawn parallel workers to investigate the codebase
-2. **Synthesis phase** — coordinator reads findings, writes specific implementation specs
-3. **Implementation phase** — workers make targeted changes per spec
-4. **Verification phase** — separate workers verify (fresh eyes, not the implementer)
+### Architecture (exact from source)
+CEO or leader enters Coordinator Mode when working on a Contract. Four phases:
 
-### Key Design Principles (from Claude Code)
-- "Parallelism is your superpower" — launch independent workers concurrently
-- Workers can't see the coordinator's conversation — every prompt must be self-contained
-- Coordinator SYNTHESIZES findings, never lazy-delegates ("based on your findings" is banned)
-- Continue workers for related follow-up, spawn fresh for unrelated work
-- Read-only tasks run in parallel, write-heavy tasks serialize per file set
+| Phase | Who | Purpose |
+|-------|-----|---------|
+| Research | Workers (parallel) | Investigate codebase, find files, understand problem |
+| Synthesis | **Coordinator** | Read findings, craft specific implementation specs |
+| Implementation | Workers | Make targeted changes per spec, commit |
+| Verification | Fresh workers | Test changes with fresh eyes |
 
-### Implementation
-- New fragment: `coordinator.ts` — injected when agent has rank 'master' or 'leader' AND is working on a Contract
-- **Shared scratchpad** — `projects/<name>/contracts/<id>/scratchpad/` — workers read/write without permission prompts
-- Coordinator prompt adapted from Claude Code's 370-line system prompt
-- Workers spawned via existing `cc-cli hire --rank worker` (temporary, scoped to contract)
-- Results arrive via task completion notifications (we already have `dispatchCompletionToCeo`)
+### Key Rules (verbatim from Claude Code's prompt)
+- **"Parallelism is your superpower"** — launch independent workers concurrently, don't serialize
+- **Workers can't see the coordinator's conversation** — every prompt must be self-contained
+- **Coordinator SYNTHESIZES** — never lazy-delegate ("based on your findings" is explicitly banned)
+- **Read-only tasks** run in parallel freely. **Write-heavy** serialize per file set.
+- **Verification workers are FRESH** — spawn new, don't continue implementer (prevents rubber-stamping)
 
-### Files
-- `packages/daemon/src/fragments/coordinator.ts` — coordinator mode system prompt
-- `packages/shared/src/contracts.ts` — add `scratchpadPath` to contracts
-- Fragment update: `delegation.ts` — teach about coordinator mode phases
+### Continue vs Spawn Decision Matrix (from source)
+| Situation | Do | Why |
+|-----------|-----|-----|
+| Research explored exactly the files to edit | Continue | Context overlap is high |
+| Research broad, implementation narrow | Spawn fresh | Avoid exploration noise |
+| Correcting a failure | Continue | Worker has error context |
+| Verifying another worker's code | Spawn fresh | Fresh eyes, no implementation assumptions |
+| Wrong approach entirely | Spawn fresh | Polluted context anchors on failed path |
+
+### Shared Scratchpad (from source: `tengu_scratch` gate)
+```
+Scratchpad directory: projects/<name>/contracts/<id>/scratchpad/
+Workers can read and write here without permission prompts.
+Use this for durable cross-worker knowledge — structure files however fits the work.
+```
+
+### Worker Communication (from `LocalAgentTask.tsx`)
+Workers report via `<task-notification>` XML injected as messages:
+```xml
+<task-notification>
+  <task-id>{agentId}</task-id>
+  <status>completed|failed|killed</status>
+  <summary>{human-readable outcome}</summary>
+  <result>{agent's final response}</result>
+  <usage><total_tokens>N</total_tokens><tool_uses>N</tool_uses><duration_ms>N</duration_ms></usage>
+</task-notification>
+```
+
+### Anti-Patterns (explicitly banned in prompt)
+```
+BAD:  "Based on your findings, fix the auth bug"
+BAD:  "The worker found an issue. Please fix it."
+GOOD: "Fix the null pointer in src/auth/validate.ts:42. The user field on Session
+       (src/auth/types.ts:15) is undefined when sessions expire but the token remains
+       cached. Add a null check before user.id access — if null, return 401."
+```
+
+### Claude Corp Implementation
+- New fragment: `coordinator.ts` — adapted 370-line system prompt for Claude Corp
+- Injected when rank=master/leader AND working on a Contract
+- Workers spawned via existing `cc-cli hire --rank worker` (temporary, contract-scoped)
+- Shared scratchpad: `projects/<name>/contracts/<id>/scratchpad/`
+- Results flow through existing task completion notifications
+- CEO synthesizes findings into Hand dispatch specs — never lazy-delegates
 
 ---
 
 ## v0.14.0 — Haiku Gate (YOLO Classifier)
 
-**Source:** `claude-code-leaked/tools/permissions/` — risk classification + ML auto-approval
-**Claude Corp equivalent:** Haiku-based action classifier for agent risk management
+**Source:** `utils/permissions/yoloClassifier.ts` (1,495 lines), `permissionExplainer.ts`, `dangerousPatterns.ts`, `filesystem.ts`
 
-### Risk Classification
+### Risk Classification (from `permissionExplainer.ts`)
+```typescript
+type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
+```
+
+### Safe Allowlist (skip classifier entirely, from source)
+Read-only tools: FileRead, Grep, Glob, LSP, ToolSearch, ListMCPResources
+Task management: TodoWrite, Task tools, Workflow
+Plan mode: AskUserQuestion, EnterPlanMode, ExitPlanMode
+Swarm: TeamCreate, TeamDelete, SendMessage
+
+### Two-Stage Classifier (from source)
+Claude Code uses a two-stage approach:
+1. **Fast stage** — XML response with `max_tokens=64` + stop sequences for instant yes/no
+2. **Thinking stage** — chain-of-thought with `max_tokens=256` to reduce false positives (only if stage 1 blocks)
+
+Output format: `<block>yes</block><reason>one sentence</reason>` or `<block>no</block>`
+
+### Dangerous Patterns (from `dangerousPatterns.ts`)
+Cross-platform code-exec: `python, node, deno, tsx, ruby, perl, php, lua, npx, bunx, bash, sh, ssh`
+Cloud mutations: `kubectl, aws, gcloud, gsutil`
+HTTP/exfil: `curl, wget, gh api`
+
+### Claude Corp Implementation — Haiku Gate
 | Level | Examples | Gate |
 |-------|----------|------|
-| **LOW** | Read files, run cc-cli status, check tasks | Auto-approve |
-| **MEDIUM** | Write files, run bash, hire agents, hand tasks | **Haiku Gate** — <1s decision |
-| **HIGH** | Delete files, modify corp config, create contracts, spend tokens | Supervisor or founder approval |
+| **LOW** | Read files, cc-cli status, check tasks | Auto-approve |
+| **MEDIUM** | Write files, run bash, hire agents, hand tasks | **Haiku call** — <1s decision |
+| **HIGH** | Delete files, modify corp.json, create contracts, escalate | Supervisor or founder approval |
 
-### Implementation
-- New `ActionGate` class in daemon
-- Before any agent tool execution, classify the action's risk level
-- MEDIUM actions → dispatch to a Haiku agent with action description + context
-- Haiku responds APPROVE or DENY with reason
-- <1 second round-trip (Haiku is fast + cheap)
-- HIGH actions → write to founder's DM for approval, agent blocks until approved
-
-### Files
-- `packages/daemon/src/action-gate.ts` — ActionGate with risk classification
-- `packages/daemon/src/haiku-classifier.ts` — Haiku dispatch for MEDIUM actions
-- `packages/shared/src/types/action.ts` — ActionRisk type
-- Fragment update: all fragments mention action risk levels
+- New `ActionGate` class: classifies action risk, dispatches to Haiku for MEDIUM
+- Haiku agent responds with APPROVE/DENY + reason in <1 second
+- HIGH actions write to founder DM for manual approval, agent blocks
+- Protected paths: `corp.json`, `members.json`, `channels.json`, `.gateway/`
 
 ---
 
-## v0.15.0 — ULTRAPLAN (Deep Plan)
+## v0.15.0 — Deep Plan (ULTRAPLAN)
 
-**Source:** `claude-code-leaked/commands/ultraplan.tsx` — 46K tokens
-**Claude Corp equivalent:** Long-running planning sessions for complex projects
+**Source:** `commands/ultraplan.tsx` (46K tokens), `utils/ultraplan/ccrSession.ts` (350 lines), `utils/ultraplan/keyword.ts` (128 lines)
 
-### How It Works
-1. Founder says: "Plan the authentication system for our app"
-2. CEO enters Deep Plan mode — creates a CCR-like planning session
-3. CEO uses Opus to think for up to 30 minutes (our version: configurable timeout)
-4. Results polled every 3 seconds (we use existing Clock + WebSocket events)
-5. Plan written to `projects/<name>/plans/<id>.md`
-6. Founder reviews in TUI, approves → CEO decomposes into Contract + Tasks
+### How It Works (from source)
+1. CEO enters Deep Plan mode with complex planning task
+2. Session uses Opus 4.6 model with 30-minute timeout (`ULTRAPLAN_TIMEOUT_MS = 30 * 60 * 1000`)
+3. Terminal polls every 3 seconds for results (`POLL_INTERVAL_MS = 3000`)
+4. Plan approval flow: running → needs_input → plan_ready → approved/rejected
+5. Approved plan scraped from `"## Approved Plan:"` marker
+6. Plan written to project, CEO decomposes into Contract + Tasks
 
-### Implementation
-- New `/deepplan` TUI command
+### ExitPlanModeScanner (from `ccrSession.ts`)
+Stateful event classifier tracking plan lifecycle:
+- `exitPlanCalls: string[]` — pending ExitPlanMode tool calls
+- `rejectedIds: Set<string>` — plans the user rejected
+- `rescanAfterRejection` — re-evaluate after rejection
+- Returns: `approved | teleport | rejected | pending | terminated | unchanged`
+
+### Claude Corp Implementation
+- `/deepplan` TUI command + `cc-cli deepplan` CLI
 - New `DeepPlanManager` in daemon
-- Uses existing `say()` with a long timeout (up to 30 min)
-- Plan saved as markdown with YAML frontmatter (like contracts)
-- TUI shows progress indicator while planning
-- Blueprint for "deep-plan" workflow added to defaults
-
-### Files
-- `packages/daemon/src/deep-plan.ts` — DeepPlanManager
-- `packages/cli/src/commands/deepplan.ts` — CLI interface
-- `packages/tui/src/views/chat.tsx` — /deepplan command
-- `packages/shared/src/blueprints/deep-plan.md` — blueprint
+- Uses `say()` with configurable long timeout (up to 30 min)
+- Plan saved as markdown in `projects/<name>/plans/<id>.md`
+- TUI shows progress indicator + phase transitions via WebSocket events
+- On approval: CEO auto-creates Contract + decomposes into Tasks
+- Blueprint: `deep-plan.md` added to defaults
 
 ---
 
 ## v0.16.0 — Proactive Mode (KAIROS-lite)
 
-**Source:** `claude-code-leaked/assistant/` — KAIROS always-on assistant
-**Claude Corp equivalent:** Agents proactively act when idle, with a blocking budget
+**Source:** Feature-gated out of external builds (`feature('PROACTIVE')`, `feature('KAIROS')`)
+**Architecture inferred from:** `utils/systemPrompt.ts`, `constants/xml.ts` (TICK_TAG), tool registrations
 
-### Behavior
-- Idle agents don't just wait — they **scan for work and act**
-- 15-second blocking budget: any proactive action that would block for >15s gets deferred
-- Agents maintain append-only daily observation logs
-- Proactive actions: check for unassigned tasks, clean up workspace, update status, help blocked peers
+### What We Know (from codebase references)
+- Receives `<tick>` XML prompts for decision-making
+- 15-second blocking budget: proactive actions that would block user >15s get deferred
+- Maintains append-only daily observation logs
+- Brief mode for ultra-concise responses (persistent assistant shouldn't flood terminal)
+- Exclusive tools: SendUserFile, PushNotification, SubscribePR
 
-### Implementation
-- Extend Pulse heartbeat: when an idle agent responds to heartbeat with "found pending work," the agent acts on it instead of just reporting HEARTBEAT_OK
-- New fragment: `proactive.ts` — teach agents to look for work during idle heartbeats
+### Claude Corp Implementation
+- Extend Pulse: idle heartbeat response triggers proactive action instead of just HEARTBEAT_OK
+- New fragment: `proactive.ts` — teach agents to scan for: unassigned tasks, blocked peers, workspace anomalies, stale contracts
 - Daily observation log: `agents/<name>/observations/YYYY-MM-DD.md`
-- 15-second budget enforced by the daemon: if say() takes >15s on a proactive action, don't block other operations
-
-### Files
-- `packages/daemon/src/proactive.ts` — ProactiveManager
-- `packages/daemon/src/fragments/proactive.ts` — proactive behavior fragment
-- Agent workspace: `observations/` directory
+- 15-second budget: if `say()` takes >15s on proactive action, defer to next cycle
+- Proactive actions: check-and-hand unassigned tasks, unblock peers, update STATUS.md, notify CEO of anomalies
 
 ---
 
 ## v0.17.0 — Corp Buddy (Mascot)
 
-**Source:** `claude-code-leaked/buddy/` — Tamagotchi system
-**Claude Corp equivalent:** Per-corp mascot that reacts to corp activity
+**Source:** `buddy/companion.ts` (PRNG + rolling), `buddy/types.ts` (species/rarity), `buddy/sprites.ts` (ASCII art), `buddy/prompt.ts` (integration)
 
-### Design
-- Deterministic per corp using Mulberry32 PRNG seeded on corp name
-- 12 species across 4 rarity tiers (Common, Uncommon, Rare, Legendary)
-- Procedural stats: MORALE, EFFICIENCY, CREATIVITY, RESILIENCE, CHAOS (0-100)
-- ASCII art sprite shown in Corp Home header
-- Reacts to events: tasks completed → morale up, agents crash → resilience tested, contracts closed → efficiency up
-- Stats evolve based on corp activity, not randomly
+### Species & Rarity (from `types.ts`)
+18 species: duck, goose, blob, cat, dragon, octopus, owl, penguin, turtle, snail, ghost, axolotl, capybara, cactus, robot, rabbit, mushroom, chonk
 
-### Implementation
-- `packages/shared/src/buddy.ts` — species definitions, PRNG, stat generation
-- `packages/tui/src/components/buddy-sprite.tsx` — ASCII art renderer
-- `packages/tui/src/views/corp-home.tsx` — buddy in header
-- `packages/daemon/src/buddy-engine.ts` — event reactions, stat evolution
-- Stored in `corp.json` as `buddy: { species, stats, hatched }`
+```
+RARITY_WEIGHTS = { common: 60, uncommon: 25, rare: 10, epic: 4, legendary: 1 }
+RARITY_STARS  = { common: '★', uncommon: '★★', rare: '★★★', epic: '★★★★', legendary: '★★★★★' }
+```
+
+### Deterministic PRNG (from `companion.ts`)
+Mulberry32 seeded with FNV-1a hash of `userId + SALT`:
+```typescript
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+```
+
+### Procedural Stats (from `companion.ts`)
+5 stats: DEBUGGING, PATIENCE, CHAOS, WISDOM, SNARK (0-100)
+- One peak stat (floor + 50 + random 30)
+- One dump stat (floor - 10 + random 15)
+- Three scattered (floor + random 40)
+- Rarity floors: common=5, uncommon=15, rare=25, epic=35, legendary=50
+
+### Anti-Cheat Design (from source)
+- Only `soul` (name + personality) persisted to config
+- `bones` (species, rarity, stats, eye, hat, shiny) **regenerated from hash every time**
+- Can't fake rarity by editing config — deterministic from userId
+- Allows species list updates without breaking existing companions
+
+### ASCII Art (from `sprites.ts`)
+3 animation frames per species, 5 lines tall, 12 chars wide
+- `{E}` token substituted with eye type
+- Hats applied to line 0 if blank and uncommon+
+- 6 eye types: `·, ✦, ×, ◉, @, °`
+- 8 hat types: none, crown, tophat, propeller, halo, wizard, beanie, tinyduck
+
+### Claude Corp Adaptation
+- 12 corp-themed species (architect, sentinel, scribe, forgemaster, etc.)
+- Stats adapted: MORALE, EFFICIENCY, CREATIVITY, RESILIENCE, CHAOS
+- Seeded on corp name (deterministic per corp, not per user)
+- Stats EVOLVE based on corp activity (tasks completed → morale up, crashes → resilience tested)
+- ASCII art sprite in Corp Home header
+- Reacts to events: contracts closed, agents hired, escalations
+- Stored in `corp.json` as `buddy: { species, stats, hatchedAt }`
 
 ---
 
 ## v0.18.0 — Founder Away (AFK Mode)
 
-**Source:** Claude Code's `afk-mode` beta header
-**Claude Corp equivalent:** Full CEO autonomy while founder sleeps/works
+**Source:** `afk-mode` beta header in `constants/betas.ts`
 
 ### Behavior
-1. Founder types `/away` or just closes the TUI
+1. Founder types `/away` or closes TUI
 2. CEO takes full autonomy — creates contracts, hires agents, hands tasks
-3. When founder returns: CEO presents a **digest** of everything that happened
-4. Digest includes: tasks created/completed, agents hired, contracts opened/closed, blockers hit, decisions made
-5. Founder can `/rewind` any decision they disagree with (Time Machine)
+3. Daemon detects founder inactive >10 min → AFK mode activates
+4. CEO gets expanded prompt: "The Founder is away. You have full authority."
+5. On return: CEO presents a **digest** of everything that happened
+6. Digest: tasks created/completed, agents hired, contracts opened/closed, blockers, decisions
+7. Founder can `/rewind` any decision via Time Machine
 
 ### Implementation
-- `packages/daemon/src/afk.ts` — AFKManager
-- Tracks founder's last interaction timestamp
-- After 10 min of no interaction → AFK mode activates
-- CEO gets an expanded system prompt with full autonomy
-- Digest written to `away-digest.md` at corp root
-- TUI shows digest on reconnect
+- `packages/daemon/src/afk.ts` — AFKManager, tracks founder last interaction
+- Away digest: `away-digest.md` at corp root (overwritten each AFK cycle)
+- TUI shows digest on reconnect before entering normal mode
+- CEO fragment extension when AFK: full delegation authority, must log all decisions
 
 ---
 
 ## v0.19.0 — Corp Boundaries (Undercover Mode)
 
-**Source:** `claude-code-leaked/utils/undercover.ts`
-**Claude Corp equivalent:** Prevent agents from leaking internal corp info to public repos
+**Source:** `utils/undercover.ts` (90 lines)
 
-### Behavior
-- When agents work on public codebases, strip internal corp info from commits
-- Block: agent names, internal task IDs, corp strategies, internal channel messages
-- Allow: technical code, public-facing documentation
+### How Claude Code Does It (from source)
+```typescript
+export function isUndercover(): boolean {
+  if (process.env.USER_TYPE === 'ant') {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_UNDERCOVER)) return true
+    return getRepoClassCached() !== 'internal'  // Auto-ON for public repos
+  }
+  return false
+}
+```
 
-### Implementation
-- `packages/daemon/src/boundaries.ts` — BoundaryFilter
-- Hooks into git commits: scans commit messages and diffs for internal references
-- Configurable allowlist/blocklist per project
-- Janitor agent enforces boundaries on merge
+Forbidden in commits: model codenames, unreleased versions, internal repo names, Slack channels, short links, AI attribution, Co-Authored-By lines.
+
+### Claude Corp Adaptation
+- When agents work on public repos (project.type === 'codebase' + external URL)
+- Strip: agent names, task IDs, corp strategies, internal channel names
+- Allow: technical code, public documentation
+- Janitor agent enforces on merge (scan diff for internal references)
+- Configurable allowlist/blocklist per project in `project.json`
 
 ---
 
 ## v0.20.0 — Token Budgets
 
-**Source:** Claude Code's `task-budgets` beta header
-**Claude Corp equivalent:** Per-agent and per-contract token/cost limits
-
-### Behavior
-- Each agent has a daily token budget
-- Each contract has a total budget
-- When budget is 80% consumed → warning to CEO
-- When budget is exhausted → agent pauses, CEO notified, founder can top up
-- Analytics track cost per agent, per task, per contract
+**Source:** `task-budgets` beta header, `cost-tracker.ts`
 
 ### Implementation
-- `packages/shared/src/types/budget.ts` — Budget type
-- `packages/daemon/src/budget-tracker.ts` — BudgetTracker
-- Hooks into every say() dispatch: counts tokens from OpenClaw response
-- Daily reset for agent budgets, contract budgets persist
+- Each agent has a daily token budget (configurable in corp.json)
+- Each contract has a total budget
+- 80% consumed → warning to CEO
+- 100% consumed → agent pauses, CEO notified, founder can top up
+- Analytics: cost per agent, per task, per contract
+- `packages/daemon/src/budget-tracker.ts` — hooks into every say() dispatch
 
 ---
 
 ## Ship Priority
 
-| # | Version | Feature | Impact | Effort |
-|---|---------|---------|--------|--------|
-| 1 | v0.12.0 | Agent Dreams | High — agents learn and improve | Medium |
-| 2 | v0.13.0 | Coordinator Mode | Very High — structured multi-agent work | High |
-| 3 | v0.14.0 | Haiku Gate | High — safety + governance | Medium |
-| 4 | v0.15.0 | ULTRAPLAN/Deep Plan | High — complex planning | Medium |
-| 5 | v0.16.0 | Proactive Mode | Medium — agents work without prompting | Medium |
-| 6 | v0.17.0 | Corp Buddy | Medium — viral appeal + alive feeling | Low |
-| 7 | v0.18.0 | Founder Away | High — autonomous overnight operation | Medium |
-| 8 | v0.19.0 | Corp Boundaries | Low — niche use case | Low |
-| 9 | v0.20.0 | Token Budgets | Medium — cost control | Medium |
+| # | Version | Feature | Why First | Effort |
+|---|---------|---------|-----------|--------|
+| 1 | v0.12.0 | **Agent Dreams** | Self-contained, we have BRAIN/MEMORY, direct translation from source | Medium |
+| 2 | v0.13.0 | **Coordinator Mode** | Highest impact — structured multi-agent is the killer feature | High |
+| 3 | v0.14.0 | **Haiku Gate** | Safety + governance, builds trust | Medium |
+| 4 | v0.17.0 | **Corp Buddy** | Most viral — alive feeling, shareable | Low |
+| 5 | v0.15.0 | **Deep Plan** | Complex planning capability | Medium |
+| 6 | v0.16.0 | **Proactive Mode** | Agents work without prompting | Medium |
+| 7 | v0.18.0 | **Founder Away** | Autonomous overnight operation | Medium |
+| 8 | v0.19.0 | **Corp Boundaries** | Niche but important for public work | Low |
+| 9 | v0.20.0 | **Token Budgets** | Cost control for production use | Medium |
 
 ---
 
 ## Reference
 
+- Key source files analyzed: `autoDream.ts`, `consolidationPrompt.ts`, `consolidationLock.ts`, `coordinatorMode.ts`, `ultraplan.tsx`, `ccrSession.ts`, `companion.ts`, `types.ts`, `sprites.ts`, `yoloClassifier.ts`, `dangerousPatterns.ts`, `filesystem.ts`, `undercover.ts`
 - GitHub mirror: https://github.com/Kuberwastaken/claude-code
 - Claude Corp: https://github.com/re-marked/claude-corp
