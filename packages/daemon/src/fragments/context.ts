@@ -44,6 +44,12 @@ ${memberList}
 - **offline** — not running (needs manual start)
 ${hierarchyHint}
 
+## Heartbeat Protocol
+The Pulse system pings you every 3 minutes:
+- **If you are idle:** You'll get "Check your Casket and Inbox." Do useful work — read TASKS.md, check for pending tasks, process inbox items.
+- **If you are busy:** You'll get a quick "HEARTBEAT" ping. Reply **HEARTBEAT_OK** immediately and continue your work. Don't stop what you're doing.
+- If you don't respond to 2 consecutive heartbeats, the CEO gets notified.
+
 ## Current Time
 ${new Date().toISOString()}`;
   },
