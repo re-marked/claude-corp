@@ -24,6 +24,7 @@ export type {
   Clock,
   ClockType,
   ClockStatus,
+  ScheduledClock,
   Contract,
   ContractStatus,
   ContractProgress,
@@ -58,6 +59,20 @@ export {
   tempSuffix,
 } from './id.js';
 export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
+
+// Schedule parsing
+export {
+  parseIntervalExpression,
+  isIntervalExpression,
+  isCronPreset,
+  cronPresetToExpression,
+  isRawCronExpression,
+  normalizeScheduleInput,
+  formatIntervalMs,
+  formatCountdown,
+  formatRelativeTime,
+  type NormalizedSchedule,
+} from './schedule-parser.js';
 export * from './paths.js';
 export * from './constants.js';
 

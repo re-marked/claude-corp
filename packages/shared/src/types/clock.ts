@@ -2,8 +2,8 @@
 export type ClockType =
   | 'heartbeat'   // Agent wake cycles (Pulse, Failsafe, Tasks refresh, Inbox check)
   | 'timer'       // Recurring system timers (Git snapshots, Gateway health)
-  | 'loop'        // User-created recurring commands (future: /loop)
-  | 'cron'        // Scheduled jobs (future)
+  | 'loop'        // User-created recurring commands (@every 5m)
+  | 'cron'        // Scheduled jobs (0 9 * * 1, @daily, @weekly)
   | 'system';     // Internal daemon housekeeping (dedup cleanup, reconnects)
 
 /** Clock status — current lifecycle state. */
@@ -46,4 +46,28 @@ export interface Clock {
   description: string;
   /** When this clock was registered (ms timestamp) */
   createdAt: number;
+}
+
+/**
+ * ScheduledClock — a user-created loop or cron with persistence.
+ * Extends Clock with scheduling metadata, execution target, and output tracking.
+ * Stored in clocks.json at corp root. Rehydrated on daemon restart.
+ */
+export interface ScheduledClock extends Clock {
+  /** Original schedule expression: "@every 5m", "0 9 * * 1", "@daily" */
+  expression: string;
+  /** Human-readable schedule label: "Every 5 minutes", "At 9:00 AM, only on Monday" */
+  humanSchedule: string;
+  /** Shell command to run, OR prompt text to send to agent */
+  command: string;
+  /** If set, dispatch to this agent via say() instead of running as shell command */
+  targetAgent: string | null;
+  /** Auto-stop after this many fires (null = unlimited) */
+  maxRuns: number | null;
+  /** Whether this clock should be rehydrated on daemon restart */
+  enabled: boolean;
+  /** How long the last callback execution took (ms) */
+  lastDurationMs: number | null;
+  /** Last callback output, truncated to 500 chars */
+  lastOutput: string | null;
 }
