@@ -420,7 +420,45 @@ export class Daemon {
         this.ceoRecoveryFailures++;
 
         if (this.ceoRecoveryFailures >= 3) {
-          // Confirmed dead — mark crashed so agent-recovery handles respawn
+          // Confirmed dead — try to auto-start OpenClaw if remote mode
+          if (agentProc.mode === 'remote') {
+            log('[ceo-recovery] CEO remote gateway dead — attempting to start OpenClaw...');
+            try {
+              const { execa: run } = await import('execa');
+              // Check if openclaw is already running on the expected port
+              const gw = this.globalConfig.userGateway;
+              if (gw) {
+                const proc = run('openclaw', ['gateway', 'run'], {
+                  stdio: 'pipe',
+                  reject: false,
+                  detached: true,
+                });
+                // Don't await — let it run in background. Give it 5s to start.
+                proc.unref?.();
+                await new Promise(r => setTimeout(r, 5000));
+
+                // Check if it came up
+                try {
+                  const check = await fetch(`http://127.0.0.1:${gw.port}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gw.token}` },
+                    body: JSON.stringify({ model: 'openclaw:main', messages: [] }),
+                    signal: AbortSignal.timeout(3000),
+                  });
+                  if (check.status < 500) {
+                    log('[ceo-recovery] OpenClaw started successfully — CEO will recover on next agent-recovery tick');
+                    this.ceoRecoveryFailures = 0;
+                  }
+                } catch {
+                  logError('[ceo-recovery] OpenClaw start attempted but gateway still unreachable');
+                }
+              }
+            } catch (err) {
+              logError(`[ceo-recovery] Failed to start OpenClaw: ${err}`);
+            }
+          }
+
+          // Mark crashed so agent-recovery handles respawn
           logError(`[ceo-recovery] CEO gateway unreachable (${this.ceoRecoveryFailures} consecutive failures) — marking crashed`);
           agentProc.status = 'crashed';
           this.ceoRecoveryFailures = 0; // Reset so agent-recovery gets a fresh start
