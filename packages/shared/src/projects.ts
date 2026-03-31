@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Project, ProjectType } from './types/project.js';
 import type { Channel } from './types/channel.js';
 import { readConfig, readConfigOr, writeConfig } from './parsers/config.js';
-import { generateId } from './id.js';
+import { projectId, channelId } from './id.js';
 import { addChannelToRegistry } from './agent-setup.js';
 import { CHANNELS_JSON, MESSAGES_JSONL } from './constants.js';
 
@@ -20,7 +20,7 @@ export interface CreateProjectOpts {
 }
 
 export function createProject(corpRoot: string, opts: CreateProjectOpts): Project {
-  const id = generateId();
+  const id = projectId();
   const now = new Date().toISOString();
 
   const project: Project = {
@@ -48,7 +48,7 @@ export function createProject(corpRoot: string, opts: CreateProjectOpts): Projec
 
   // Create project channels
   const generalChannel: Channel = {
-    id: generateId(),
+    id: channelId(`${project.name}-general`),
     name: `${project.name}-general`,
     kind: 'broadcast',
     scope: 'project',
@@ -61,7 +61,7 @@ export function createProject(corpRoot: string, opts: CreateProjectOpts): Projec
   };
 
   const tasksChannel: Channel = {
-    id: generateId(),
+    id: channelId(`${project.name}-tasks`),
     name: `${project.name}-tasks`,
     kind: 'system',
     scope: 'project',

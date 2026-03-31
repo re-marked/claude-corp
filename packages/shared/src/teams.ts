@@ -4,7 +4,7 @@ import type { Team } from './types/team.js';
 import type { Channel } from './types/channel.js';
 import type { Project } from './types/project.js';
 import { readConfig, readConfigOr, writeConfig } from './parsers/config.js';
-import { generateId } from './id.js';
+import { teamId, channelId } from './id.js';
 import { addChannelToRegistry } from './agent-setup.js';
 import { CHANNELS_JSON, MESSAGES_JSONL } from './constants.js';
 
@@ -19,7 +19,7 @@ export interface CreateTeamOpts {
 }
 
 export function createTeam(corpRoot: string, opts: CreateTeamOpts): Team {
-  const id = generateId();
+  const id = teamId();
   const now = new Date().toISOString();
 
   const team: Team = {
@@ -48,7 +48,7 @@ export function createTeam(corpRoot: string, opts: CreateTeamOpts): Team {
 
   // Create team channel
   const channel: Channel = {
-    id: generateId(),
+    id: channelId(`${projectName}-${team.name}`),
     name: `${projectName}-${team.name}`,
     kind: 'team',
     scope: 'team',
