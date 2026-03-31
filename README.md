@@ -3,9 +3,12 @@
 </p>
 
 <h1 align="center">🏭 Claude Corp — Personal AI Corporation</h1>
-
 <p align="center">
-  <strong>A self-growing team of AI agents that works for you.</strong>
+A self-growing team of AI agents that works for you.
+</p align="center">
+<p align="center">
+
+  <strong>Built 2 weeks before the Claude Code source leak revealed Anthropic was building the same things internally LOL.<?strong>
 </p>
 
 <p align="center">
