@@ -34,6 +34,7 @@ import { ContractWatcher } from './contract-watcher.js';
 import { ClockManager } from './clock-manager.js';
 import { LoopManager } from './loops.js';
 import { CronManager } from './crons.js';
+import { DreamManager } from './dreams.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
@@ -53,6 +54,7 @@ export class Daemon {
   clocks: ClockManager;
   loops: LoopManager;
   crons: CronManager;
+  dreams: DreamManager;
   analytics: AnalyticsEngine;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
@@ -88,6 +90,7 @@ export class Daemon {
     this.clocks = new ClockManager(this.events);
     this.loops = new LoopManager(this);
     this.crons = new CronManager(this);
+    this.dreams = new DreamManager(this);
     this.analytics = new AnalyticsEngine(this);
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
   }
@@ -233,6 +236,9 @@ export class Daemon {
     // Rehydrate user-created loops and crons from clocks.json
     this.loops.rehydrate();
     this.crons.rehydrate();
+
+    // Start Agent Dreams — background memory consolidation
+    this.dreams.start();
   }
 
   /** Dispatch narration request to Herald via say(). Response = NARRATION.md content. */
