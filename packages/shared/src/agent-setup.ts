@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { generateId } from './id.js';
+import { memberId as makeMemberId, channelId as makeChannelId, gatewayToken as makeGatewayToken } from './id.js';
 import { writeConfig } from './parsers/config.js';
 import type { Member } from './types/member.js';
 import type { Channel } from './types/channel.js';
@@ -64,7 +64,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     ? `projects/${opts.projectName}/agents/${agentName}/`
     : `agents/${agentName}/`;
   const agentAbsDir = join(corpRoot, agentRelDir);
-  const memberId = generateId();
+  const memberId = makeMemberId(displayName);
   const now = new Date().toISOString();
 
   // Create workspace directories
@@ -104,7 +104,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     mkdirSync(join(openclawStateDir, 'agents', 'main', 'agent'), { recursive: true });
 
     // Generate a unique gateway token for this agent
-    const gatewayToken = generateId() + generateId();
+    const gatewayToken = makeGatewayToken();
 
     // openclaw.json
     const openclawConfig = {
@@ -191,7 +191,7 @@ export function createDmChannel(
   writeFileSync(join(corpRoot, channelPath, MESSAGES_JSONL), '', 'utf-8');
 
   const channel: Channel = {
-    id: generateId(),
+    id: makeChannelId(channelName),
     name: channelName,
     kind: 'direct',
     scope: 'corp',

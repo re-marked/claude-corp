@@ -1,4 +1,4 @@
-import type { Clock, ClockType, ClockStatus } from '@claudecorp/shared';
+import { type Clock, type ClockType, type ClockStatus, clockId } from '@claudecorp/shared';
 import type { EventBus } from './events.js';
 import { log, logError } from './logger.js';
 
@@ -48,16 +48,17 @@ export class ClockManager {
    * stores handles for clearInterval — double-clear is a safe no-op).
    */
   register(opts: RegisterClockOpts): ReturnType<typeof setInterval> {
-    // Don't duplicate
+    // Don't duplicate — keyed by caller slug
     if (this.entries.has(opts.id)) {
       const existing = this.entries.get(opts.id)!;
       log(`[clock] ${opts.id} already registered — skipping`);
       return existing.handle!;
     }
 
+    // Auto-assign ck-NNNN ID, keep caller's id as internal slug
     const now = Date.now();
     const clock: Clock = {
-      id: opts.id,
+      id: clockId(),
       name: opts.name,
       type: opts.type,
       intervalMs: opts.intervalMs,

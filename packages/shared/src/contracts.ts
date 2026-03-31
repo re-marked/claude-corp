@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Contract, ContractStatus, ContractProgress } from './types/contract.js';
 import type { TaskPriority } from './types/task.js';
 import { parse as parseFrontmatter, stringify as stringifyFrontmatter } from './parsers/frontmatter.js';
-import { generateId } from './id.js';
+import { contractId } from './id.js';
 import { listTasks, readTask } from './tasks.js';
 
 export interface CreateContractOpts {
@@ -40,7 +40,11 @@ export function createContract(corpRoot: string, opts: CreateContractOpts): Cont
   const contractsDir = join(corpRoot, 'projects', opts.projectName, 'contracts');
   mkdirSync(contractsDir, { recursive: true });
 
-  const id = generateId();
+  // Generate unique word-pair ID — retry on collision
+  let id = contractId();
+  for (let i = 0; i < 10 && existsSync(join(contractsDir, `${id}.md`)); i++) {
+    id = contractId();
+  }
   const now = new Date().toISOString();
 
   const contract: Contract = {

@@ -6,7 +6,7 @@ import type { Channel } from './types/channel.js';
 import { installDefaultSkills } from './skills.js';
 import { installDefaultBlueprints } from './blueprints.js';
 import { getTheme, type ThemeId } from './themes.js';
-import { generateId } from './id.js';
+import { memberId, channelId } from './id.js';
 import { writeConfig } from './parsers/config.js';
 import { corpGit } from './git.js';
 import {
@@ -68,8 +68,8 @@ export async function scaffoldCorp(
   try { installDefaultSkills(corpRoot); } catch {}
   try { installDefaultBlueprints(corpRoot); } catch {}
 
-  // IDs
-  const userId = generateId();
+  // IDs — member slug IS the ID
+  const userId = memberId(userName);
   const now = new Date().toISOString();
 
   // corp.json
@@ -143,7 +143,7 @@ function makeChannel(
   createdAt: string,
 ): Channel {
   return {
-    id: generateId(),
+    id: channelId(name),
     name,
     kind,
     scope,

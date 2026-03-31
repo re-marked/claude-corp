@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "gray-matter": "^4.0.3",
-    "simple-git": "^3.33.0",
-    "ulid": "^3.0.2"
+    "simple-git": "^3.33.0"
   }
 }

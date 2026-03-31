@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 
 import { join } from 'node:path';
 import type { Task, TaskStatus, TaskPriority } from './types/task.js';
 import { parse as parseFrontmatter, stringify as stringifyFrontmatter } from './parsers/frontmatter.js';
-import { generateId } from './id.js';
+import { taskId } from './id.js';
 
 export interface CreateTaskOpts {
   title: string;
@@ -36,7 +36,11 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
   const tasksDir = join(corpRoot, 'tasks');
   mkdirSync(tasksDir, { recursive: true });
 
-  const id = generateId();
+  // Generate unique word-pair ID — retry on collision
+  let id = taskId();
+  for (let i = 0; i < 10 && existsSync(join(tasksDir, `${id}.md`)); i++) {
+    id = taskId();
+  }
   const now = new Date().toISOString();
 
   const task: Task = {

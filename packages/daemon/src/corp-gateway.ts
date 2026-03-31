@@ -6,7 +6,7 @@ import {
   type GlobalConfig,
   readConfig,
   writeConfig,
-  generateId,
+  gatewayToken as makeGatewayToken,
   formatProviderModel,
   parseProviderModel,
 } from '@claudecorp/shared';
@@ -41,7 +41,7 @@ export class CorpGateway {
     // Random port from range — avoids conflicts between multiple corps
     const [lo, hi] = globalConfig.daemon.portRange;
     this._port = lo + Math.floor(Math.random() * (hi - lo));
-    this._token = generateId() + generateId();
+    this._token = makeGatewayToken();
   }
 
   getPort(): number { return this._port; }

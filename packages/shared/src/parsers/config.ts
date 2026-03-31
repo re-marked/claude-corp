@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { generateId } from '../id.js';
+import { tempSuffix } from '../id.js';
 
 export function readConfig<T>(
   filePath: string,
@@ -22,7 +22,7 @@ export function readConfigOr<T>(
 
 export function writeConfig<T>(filePath: string, data: T): void {
   const json = JSON.stringify(data, null, 2) + '\n';
-  const tmpPath = join(dirname(filePath), `.tmp-${generateId()}.json`);
+  const tmpPath = join(dirname(filePath), `.tmp-${tempSuffix()}.json`);
   writeFileSync(tmpPath, json, 'utf-8');
   renameSync(tmpPath, filePath);
 }
