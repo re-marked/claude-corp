@@ -55,14 +55,15 @@ export function ClockView({ onBack }: Props) {
     return () => clearInterval(refresh);
   }, []);
 
-  // Animation loop — 4 FPS (250ms) — balance between alive feel and Yoga stability
+  // Animation loop — 4 FPS (250ms) — only when clocks exist (prevents Yoga crash with empty layout)
   useEffect(() => {
+    if (clocks.length === 0) return;
     const timer = setInterval(() => {
       setFrame(f => f + 1);
       setNow(Date.now());
     }, 250);
     return () => clearInterval(timer);
-  }, []);
+  }, [clocks.length > 0]);
 
   const selectableClocks = clocks.filter(c => c.status !== 'stopped');
 
@@ -244,7 +245,10 @@ export function ClockView({ onBack }: Props) {
         })}
 
         {clocks.length === 0 && (
-          <Text color={COLORS.muted}>No clocks registered. Start the daemon first.</Text>
+          <Box flexDirection="column" gap={0}>
+            <Text color={COLORS.muted}>No clocks registered. Daemon may not be running.</Text>
+            <Text color={COLORS.subtle}>Restart the TUI: npx tsx packages/tui/src/index.tsx</Text>
+          </Box>
         )}
       </Box>
 
