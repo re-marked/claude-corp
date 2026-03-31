@@ -69,6 +69,8 @@ export class Daemon {
   openclawWS: OpenClawWS | null = null;
   /** WebSocket to corp gateway (for worker dispatch with tool events). */
   corpGatewayWS: OpenClawWS | null = null;
+  /** Track consecutive overloaded errors per agent for gateway restart logic */
+  overloadCounts = new Map<string, number>();
   private server: Server | null = null;
   private port = 0;
 

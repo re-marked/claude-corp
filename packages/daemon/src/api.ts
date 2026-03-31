@@ -701,7 +701,41 @@ export function createApi(daemon: Daemon): Server {
             daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId });
           }
           daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
-          json(res, { error: `Dispatch failed: ${err instanceof Error ? err.message : String(err)}` }, 500);
+
+          // Detect overloaded errors on remote CEO gateway → restart to clear cooldown
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (errMsg.includes('overloaded') && agentProc.mode === 'remote') {
+            const count = (daemon.overloadCounts.get(target.id) ?? 0) + 1;
+            daemon.overloadCounts.set(target.id, count);
+
+            if (count >= 3) {
+              log(`[cc-say] Remote gateway overloaded ${count}x — restarting user OpenClaw to clear cooldown`);
+              daemon.overloadCounts.delete(target.id);
+              try {
+                const { execa: run } = await import('execa');
+                const gw = daemon.globalConfig.userGateway;
+                if (gw) {
+                  if (process.platform === 'win32') {
+                    await run('taskkill', ['/F', '/IM', 'openclaw.exe'], { reject: false, timeout: 5000 });
+                  } else {
+                    await run('pkill', ['-f', 'openclaw.*gateway'], { reject: false, timeout: 5000 });
+                  }
+                  await new Promise(r => setTimeout(r, 2000));
+                  const proc = run('openclaw', ['gateway', 'run'], { stdio: 'pipe', reject: false, detached: true });
+                  proc.unref?.();
+                  await new Promise(r => setTimeout(r, 5000));
+                  log(`[cc-say] User OpenClaw restarted — cooldown state cleared`);
+                }
+              } catch (restartErr) {
+                logError(`[cc-say] Failed to restart user OpenClaw: ${restartErr}`);
+              }
+            }
+          } else {
+            // Non-overload error or non-remote → reset counter
+            daemon.overloadCounts.delete(target.id);
+          }
+
+          json(res, { error: `Dispatch failed: ${errMsg}` }, 500);
         }
         return;
       }

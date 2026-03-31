@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Daemon } from './daemon.js';
 import { log, logError } from './logger.js';
 
-const CHECK_INTERVAL_MS = 3 * 60 * 1000; // Every 3 minutes
+const CHECK_INTERVAL_MS = 5 * 60 * 1000; // Every 5 minutes
 const PING_TIMEOUT_MS = 30_000; // 30s timeout per agent ping
 const STUCK_THRESHOLD_MS = 8 * 60 * 1000; // 8 minutes busy = stuck
 const MAX_MISSED_BEFORE_ESCALATE = 2; // 2 missed heartbeats → escalate
