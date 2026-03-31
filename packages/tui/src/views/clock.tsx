@@ -79,6 +79,14 @@ export function ClockView({ onBack }: Props) {
         daemonClient.pauseClock(clock.id).then(fetchClocks);
       }
     }
+    // D key — delete loops and crons only (system clocks protected)
+    if (_input === 'd' || _input === 'D') {
+      const clock = selectableClocks[selectedIndex];
+      if (!clock) return;
+      if (clock.type === 'loop' || clock.type === 'cron') {
+        daemonClient.deleteClock(clock.id).then(fetchClocks).catch(() => {});
+      }
+    }
   });
 
   // Group clocks by type
@@ -124,13 +132,13 @@ export function ClockView({ onBack }: Props) {
           const group = groups.get(type);
           const label = TYPE_LABELS[type] ?? type.toUpperCase();
 
-          // Placeholder sections for loops and crons
+          // Empty sections — show helpful placeholder for user-created types
           if (!group || group.length === 0) {
             if (type === 'loop') {
               return (
                 <Box key={type} flexDirection="column" marginBottom={1}>
                   <Text bold color={COLORS.muted}>{label}</Text>
-                  <Text color={COLORS.border}>  {STOPPED_ICON} No loops yet. Use /loop to create recurring commands.</Text>
+                  <Text color={COLORS.border}>  {STOPPED_ICON} No loops. /loop 5m cc-cli status</Text>
                 </Box>
               );
             }
@@ -138,7 +146,7 @@ export function ClockView({ onBack }: Props) {
               return (
                 <Box key={type} flexDirection="column" marginBottom={1}>
                   <Text bold color={COLORS.muted}>{label}</Text>
-                  <Text color={COLORS.border}>  {STOPPED_ICON} No cron jobs yet. Scheduled tasks coming soon.</Text>
+                  <Text color={COLORS.border}>  {STOPPED_ICON} No crons. /cron @daily @herald Write summary</Text>
                 </Box>
               );
             }
@@ -242,7 +250,7 @@ export function ClockView({ onBack }: Props) {
 
       {/* Footer */}
       <Box borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={1} justifyContent="space-between">
-        <Text color={COLORS.muted}>P:pause/resume  Esc:back</Text>
+        <Text color={COLORS.muted}>P:pause/resume  D:delete loop/cron  Esc:back</Text>
         <Text color={COLORS.muted}>{clocks.length} clocks</Text>
       </Box>
     </Box>
