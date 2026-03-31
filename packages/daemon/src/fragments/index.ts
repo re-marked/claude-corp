@@ -20,6 +20,7 @@ import { agentCommunicationFragment } from './agent-communication.js';
 import { inboxFragment } from './inbox.js';
 import { ccCliFragment } from './cc-cli.js';
 import { dredgeFragment } from './dredge.js';
+import { coordinatorFragment } from './coordinator.js';
 
 const FRAGMENTS: Fragment[] = [
   workspaceFragment,
@@ -40,6 +41,7 @@ const FRAGMENTS: Fragment[] = [
   agentCommunicationFragment,
   inboxFragment,
   dredgeFragment,
+  coordinatorFragment,
   ccCliFragment,
   contextFragment,
   historyFragment,
