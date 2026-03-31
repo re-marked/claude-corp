@@ -159,6 +159,7 @@ export class ClockManager {
   registerExternal(opts: Omit<RegisterClockOpts, 'callback'>): ExternalClockHandle {
     if (this.entries.has(opts.id)) {
       log(`[clock] ${opts.id} already registered (external) — returning existing handle`);
+      return this.buildExternalHandle(opts.id);
     }
 
     const now = Date.now();
@@ -190,12 +191,17 @@ export class ClockManager {
     this.entries.set(opts.id, entry);
     log(`[clock] Registered external: ${opts.name} (${opts.id})`);
 
-    // Return handle for the caller to update metadata
+    return this.buildExternalHandle(opts.id);
+  }
+
+  /** Build an ExternalClockHandle for a given slug. */
+  private buildExternalHandle(slug: string): ExternalClockHandle {
     const self = this;
     return {
       recordFire(durationMs?: number) {
-        const e = self.entries.get(opts.id);
-        if (!e) return;
+        const found = self.findEntry(slug);
+        if (!found) return;
+        const [, e] = found;
         const firedAt = Date.now();
         e.clock.lastFiredAt = firedAt;
         e.clock.fireCount++;
@@ -204,19 +210,20 @@ export class ClockManager {
         self.broadcastTick(e.clock);
       },
       recordError(message: string) {
-        self.recordError(opts.id, message);
+        self.recordError(slug, message);
       },
       updateNextFire(timestamp: number) {
-        const e = self.entries.get(opts.id);
-        if (!e) return;
+        const found = self.findEntry(slug);
+        if (!found) return;
+        const [, e] = found;
         e.clock.nextFireAt = timestamp;
-        // Update intervalMs to reflect actual gap for progress bar accuracy
         if (e.clock.lastFiredAt) {
           e.clock.intervalMs = timestamp - e.clock.lastFiredAt;
         }
       },
       getFireCount() {
-        return self.entries.get(opts.id)?.clock.fireCount ?? 0;
+        const found = self.findEntry(slug);
+        return found ? found[1].clock.fireCount : 0;
       },
     };
   }

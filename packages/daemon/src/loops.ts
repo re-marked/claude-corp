@@ -332,7 +332,8 @@ export class LoopManager {
         const duration = Date.now() - start;
         clock.lastDurationMs = duration;
         clock.lastOutput = output.trim() || null;
-        clock.fireCount++;
+        // Sync fireCount from ClockManager (it tracks fires in tick())
+        clock.fireCount = this.daemon.clocks.get(slug)?.fireCount ?? clock.fireCount;
 
         // Write output to the channel where the loop was created
         if (clock.channelId && output.trim()) {

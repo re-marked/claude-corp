@@ -357,9 +357,9 @@ export class CronManager {
         // Record successful fire
         handle.recordFire(Date.now() - start);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        handle.recordError(msg);
-        output = msg;
+        // Don't call handle.recordError here — croner's catch handler already does it.
+        // Just capture the output for display.
+        output = err instanceof Error ? err.message : String(err);
       }
 
       // Update stats
