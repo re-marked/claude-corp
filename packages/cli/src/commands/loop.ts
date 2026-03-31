@@ -9,6 +9,7 @@ export async function cmdLoop(opts: {
   agent?: string;
   name?: string;
   maxRuns?: number;
+  task?: string;
   json: boolean;
 }): Promise<void> {
   const client = getClient();
@@ -30,6 +31,7 @@ export async function cmdLoop(opts: {
         targetAgent: opts.agent,
         name: opts.name,
         maxRuns: opts.maxRuns,
+        taskId: opts.task,
       });
 
       if (opts.json) {

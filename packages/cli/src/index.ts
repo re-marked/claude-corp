@@ -43,6 +43,8 @@ const { values, positionals } = parseArgs({
     schedule: { type: 'string' },
     command: { type: 'string' },
     maxRuns: { type: 'string' },
+    'spawn-task': { type: 'boolean', default: false },
+    'task-title': { type: 'string' },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -281,6 +283,7 @@ async function run() {
         agent: values.agent as string | undefined,
         name: values.name as string | undefined,
         maxRuns: values.maxRuns ? parseInt(values.maxRuns as string) : undefined,
+        task: values.task as string | undefined,
         json: !!values.json,
       });
       break;
@@ -295,6 +298,10 @@ async function run() {
         agent: values.agent as string | undefined,
         name: values.name as string | undefined,
         maxRuns: values.maxRuns ? parseInt(values.maxRuns as string) : undefined,
+        spawnTask: !!(values as any)['spawn-task'],
+        taskTitle: (values as any)['task-title'] as string | undefined,
+        assignTo: values.to as string | undefined,
+        taskPriority: values.priority as string | undefined,
         json: !!values.json,
       });
       break;
