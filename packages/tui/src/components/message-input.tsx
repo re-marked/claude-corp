@@ -238,25 +238,43 @@ function renderInput(
 // --- Component ---
 
 const COMMANDS = [
-  { name: '/hire', desc: 'hire an agent' },
-  { name: '/model', desc: 'change AI model' },
-  { name: '/theme', desc: 'switch color palette' },
-  { name: '/task', desc: 'create a task' },
-  { name: '/project', desc: 'create a project' },
-  { name: '/team', desc: 'create a team' },
-  { name: '/dogfood', desc: 'setup dev team' },
-  { name: '/who', desc: 'member roster' },
-  { name: '/stats', desc: 'corp statistics' },
-  { name: '/uptime', desc: 'daemon uptime' },
-  { name: '/channels', desc: 'list channels' },
-  { name: '/tm', desc: 'time machine' },
-  { name: '/logs', desc: 'daemon logs' },
-  { name: '/version', desc: 'package versions' },
-  { name: '/help', desc: 'all commands' },
-  { name: '/h', desc: 'hierarchy' },
-  { name: '/t', desc: 'task board' },
-  { name: '/home', desc: 'corp home' },
-  { name: '/ping', desc: 'pong!' },
+  // Management
+  { name: '/hire', syntax: '/hire', desc: 'Open agent hiring wizard' },
+  { name: '/task', syntax: '/task', desc: 'Create a new task (planning)' },
+  { name: '/hand', syntax: '/hand <task-id> @agent', desc: 'Hand a task to an agent (start work)' },
+  { name: '/project', syntax: '/project', desc: 'Create a new project' },
+  { name: '/team', syntax: '/team', desc: 'Create a new team' },
+  { name: '/model', syntax: '/model', desc: 'View and change AI models' },
+
+  // Automation
+  { name: '/loop', syntax: '/loop <interval> [command or @agent prompt]', desc: 'Create a recurring loop' },
+  { name: '/cron', syntax: '/cron <schedule> [command or @agent prompt]', desc: 'Create a scheduled cron job' },
+  { name: '/clock', syntax: '/clock', desc: 'View all clocks, loops, and crons' },
+
+  // Communication
+  { name: '/jack', syntax: '/jack', desc: 'Enter live persistent session (DM only)' },
+  { name: '/unjack', syntax: '/unjack', desc: 'Switch to async mode (deprecated)' },
+
+  // Navigation
+  { name: '/home', syntax: '/home', desc: 'Corp home — agent grid + activity' },
+  { name: '/h', syntax: '/h', desc: 'Hierarchy — org chart' },
+  { name: '/t', syntax: '/t', desc: 'Task board — all tasks by status' },
+  { name: '/tm', syntax: '/tm', desc: 'Time Machine — rewind any snapshot' },
+
+  // Info
+  { name: '/who', syntax: '/who', desc: 'Member roster with online/offline' },
+  { name: '/status', syntax: '/status', desc: 'Agent work statuses inline' },
+  { name: '/stats', syntax: '/stats', desc: 'Comprehensive corp statistics' },
+  { name: '/channels', syntax: '/channels', desc: 'List all channels' },
+  { name: '/uptime', syntax: '/uptime', desc: 'Daemon uptime + message count' },
+  { name: '/logs', syntax: '/logs', desc: 'Recent daemon logs' },
+  { name: '/version', syntax: '/version', desc: 'Package versions + runtime' },
+
+  // Utility
+  { name: '/theme', syntax: '/theme [name]', desc: 'Switch color palette' },
+  { name: '/dogfood', syntax: '/dogfood', desc: 'Setup dev team + task' },
+  { name: '/ping', syntax: '/ping', desc: 'Pong!' },
+  { name: '/help', syntax: '/help', desc: 'Show all available commands' },
 ];
 
 export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Props) {
@@ -483,8 +501,8 @@ export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Pro
       const partial = beforeCursor.toLowerCase();
       const matches = COMMANDS
         .filter(c => c.name.startsWith(partial))
-        .slice(0, 8)
-        .map(c => ({ label: c.name, desc: c.desc }));
+        .slice(0, 10)
+        .map(c => ({ label: c.name, desc: c.desc, syntax: (c as any).syntax }));
       if (matches.length > 0) return { type: 'command', items: matches, prefix: beforeCursor };
     }
 
@@ -499,12 +517,15 @@ export function MessageInput({ onSend, disabled, placeholder, agents = [] }: Pro
         <Box paddingX={2} flexDirection="column">
           {autocomplete.items.map((item, i) => {
             const selected = i === Math.min(acIndex, autocomplete.items.length - 1);
+            const syntax = (item as any).syntax;
             return (
               <Box key={item.label} gap={1}>
                 <Text color={selected ? COLORS.primary : COLORS.muted}>{selected ? '\u25B8' : ' '}</Text>
-                <Text color={selected ? COLORS.primary : COLORS.subtle} bold={selected}>{item.label}</Text>
-                <Text color={COLORS.muted}>{item.desc}</Text>
-                {selected && <Text color={COLORS.muted} dimColor>Tab</Text>}
+                <Text color={selected ? COLORS.primary : COLORS.subtle} bold={selected}>
+                  {selected && syntax ? syntax : item.label}
+                </Text>
+                <Text color={COLORS.muted}>{'\u2014'} {item.desc}</Text>
+                {selected && <Text color={COLORS.border} dimColor> Tab</Text>}
               </Box>
             );
           })}
