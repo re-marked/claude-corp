@@ -94,6 +94,36 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - ❌ Ctrl+H not working in some contexts (terminal intercepts)
 - ❌ Herald cc-cli commands fail from inside agent shell (PATH issue)
 
+## v0.11.2 — Loop-Task Link + Cron Task Spawning (MERGED)
+
+- ✅ Loop-task bidirectional lifecycle: loop complete → task complete, task complete → loop stop
+- ✅ Cron task spawning: each fire creates fresh dated task + hands it to agent via DM
+- ✅ Missed cron detection on restart (log, skip to next)
+- ✅ Fragments teach agents loop-task links, cron spawning, when to use each
+
+## v0.11.3 — Smart Heartbeat + Gateway Fixes (MERGED)
+
+- ✅ Pulse rewritten: per-agent two-state heartbeat (idle → check casket, busy → HEARTBEAT_OK)
+- ✅ Staggered pings (1.5s delay) — no thundering herd
+- ✅ Escalation to CEO after 2 missed heartbeats with specific reason
+- ✅ Recovery notification — CEO told when escalated agent comes back
+- ✅ Corp gateway: always fallback model, maxConcurrent: 2, stripped cooldown state
+- ✅ Auto-restart user OpenClaw on 3 consecutive overloaded errors
+- ✅ Comprehensive stale process cleanup on TUI restart (scans all ports)
+
+## v0.11.3.1 — Polish (MERGED)
+
+- ✅ /hand command: DM auto-assign, agent validation, busy warning, task title + priority
+- ✅ Task wizard: removed assignee step, added acceptance criteria, shows /hand hint
+- ✅ Command autocomplete: 26 commands with syntax hints + descriptions + Tab complete
+- ✅ Wizard Ink crash fix (flexGrow → minHeight)
+- ✅ Loop error suppression (first error shown, rest silent until recovery)
+
+### Still needs building
+- Task wizard: blockedBy field
+- /loop info <name> — detail view for specific loop
+- Loop-task link testing with real agents
+
 ---
 
 ## Planned but NOT yet built
