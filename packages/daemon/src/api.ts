@@ -780,6 +780,7 @@ export function createApi(daemon: Daemon): Server {
             targetAgent: body.targetAgent as string | undefined,
             maxRuns: body.maxRuns as number | undefined,
             channelId: body.channelId as string | undefined,
+            taskId: body.taskId as string | undefined,
           });
           json(res, { ok: true, loop });
         } catch (err) {
@@ -805,6 +806,11 @@ export function createApi(daemon: Daemon): Server {
             targetAgent: body.targetAgent as string | undefined,
             maxRuns: body.maxRuns as number | undefined,
             channelId: body.channelId as string | undefined,
+            spawnTask: !!body.spawnTask,
+            taskTitle: body.taskTitle as string | undefined,
+            assignTo: body.assignTo as string | undefined,
+            taskPriority: body.taskPriority as string | undefined,
+            taskDescription: body.taskDescription as string | undefined,
           });
           json(res, { ok: true, cron });
         } catch (err) {
