@@ -21,6 +21,7 @@ import {
   appendMessage,
   generateId,
   CHANNELS_JSON,
+  MEMBERS_JSON,
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
@@ -252,6 +253,7 @@ export class CronManager {
 
     for (const cron of store.crons) {
       if (!cron.enabled) continue;
+      if (cron.scheduledStatus === 'completed' || cron.scheduledStatus === 'dismissed' || cron.scheduledStatus === 'deleted') continue;
 
       try {
         const expression = this.normalizeExpression(cron.expression);
@@ -436,7 +438,7 @@ export class CronManager {
       let senderId = 'system';
       if (clock.targetAgent) {
         try {
-          const members = readConfig<any[]>(join(this.daemon.corpRoot, 'members.json'));
+          const members = readConfig<any[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
           const agent = members.find((m: any) =>
             m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === clock.targetAgent!.toLowerCase(),
           );

@@ -18,6 +18,7 @@ import {
   appendMessage,
   generateId,
   CHANNELS_JSON,
+  MEMBERS_JSON,
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
@@ -196,6 +197,7 @@ export class LoopManager {
 
     for (const loop of store.loops) {
       if (!loop.enabled) continue;
+      if (loop.scheduledStatus === 'completed' || loop.scheduledStatus === 'dismissed' || loop.scheduledStatus === 'deleted') continue;
 
       try {
         // Re-register without re-persisting (it's already in clocks.json)
@@ -305,9 +307,7 @@ export class LoopManager {
           // Resolve agent member ID for writing response to channel
           if (data.ok && clock.channelId) {
             try {
-              const members = readConfig<any[]>(join(this.daemon.corpRoot, CHANNELS_JSON))
-                ? readConfig<any[]>(join(this.daemon.corpRoot, 'members.json'))
-                : [];
+              const members = readConfig<any[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
               const agent = members.find((m: any) =>
                 m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === clock.targetAgent!.toLowerCase(),
               );
