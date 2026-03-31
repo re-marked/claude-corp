@@ -40,6 +40,8 @@ export function createContract(corpRoot: string, opts: CreateContractOpts): Cont
   const contractsDir = join(corpRoot, 'projects', opts.projectName, 'contracts');
   mkdirSync(contractsDir, { recursive: true });
 
+  // Scratchpad created after contract ID is generated (per-contract, for Coordinator Mode)
+
   // Generate unique word-pair ID — retry on collision
   let id = contractId();
   for (let i = 0; i < 10 && existsSync(join(contractsDir, `${id}.md`)); i++) {
@@ -81,6 +83,9 @@ export function createContract(corpRoot: string, opts: CreateContractOpts): Cont
 
   const content = stringifyFrontmatter(contract as unknown as Record<string, unknown>, body);
   writeFileSync(join(contractsDir, `${id}.md`), content, 'utf-8');
+
+  // Create per-contract scratchpad for Coordinator Mode (cross-worker knowledge sharing)
+  mkdirSync(join(contractsDir, id, 'scratchpad'), { recursive: true });
 
   return contract;
 }
