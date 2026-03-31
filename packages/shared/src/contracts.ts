@@ -40,7 +40,11 @@ export function createContract(corpRoot: string, opts: CreateContractOpts): Cont
   const contractsDir = join(corpRoot, 'projects', opts.projectName, 'contracts');
   mkdirSync(contractsDir, { recursive: true });
 
-  const id = contractId();
+  // Generate unique word-pair ID — retry on collision
+  let id = contractId();
+  for (let i = 0; i < 10 && existsSync(join(contractsDir, `${id}.md`)); i++) {
+    id = contractId();
+  }
   const now = new Date().toISOString();
 
   const contract: Contract = {

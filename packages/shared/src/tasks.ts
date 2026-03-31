@@ -36,7 +36,11 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
   const tasksDir = join(corpRoot, 'tasks');
   mkdirSync(tasksDir, { recursive: true });
 
-  const id = taskId();
+  // Generate unique word-pair ID — retry on collision
+  let id = taskId();
+  for (let i = 0; i < 10 && existsSync(join(tasksDir, `${id}.md`)); i++) {
+    id = taskId();
+  }
   const now = new Date().toISOString();
 
   const task: Task = {
