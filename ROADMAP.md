@@ -253,6 +253,5 @@ The CEO (or any leader agent) can enter **Coordinator Mode** when working on a C
 
 ## Reference
 
-- Claude Code leaked source: `C:/Users/psyhik1769/claude-code-leaked/`
 - GitHub mirror: https://github.com/Kuberwastaken/claude-code
 - Claude Corp: https://github.com/re-marked/claude-corp
