@@ -226,15 +226,19 @@ export class ClockManager {
    * Used for user-deleted loops/crons (vs stop which keeps the entry).
    */
   remove(id: string): void {
+    const found = this.findEntry(id);
+    if (!found) return;
+    const [slug] = found;
     this.stop(id);
-    this.entries.delete(id);
-    log(`[clock] Removed: ${id}`);
+    this.entries.delete(slug);
+    log(`[clock] Removed: ${slug}`);
   }
 
   /** Pause a clock — stops the interval, preserves metadata. */
   pause(id: string): void {
-    const entry = this.entries.get(id);
-    if (!entry) throw new Error(`Clock "${id}" not found`);
+    const found = this.findEntry(id);
+    if (!found) throw new Error(`Clock "${id}" not found`);
+    const [, entry] = found;
     if (entry.clock.status === 'paused') return;
 
     if (entry.handle) {
@@ -248,11 +252,12 @@ export class ClockManager {
 
   /** Resume a paused clock — recreates the interval. */
   resume(id: string): void {
-    const entry = this.entries.get(id);
-    if (!entry) throw new Error(`Clock "${id}" not found`);
+    const found = this.findEntry(id);
+    if (!found) throw new Error(`Clock "${id}" not found`);
+    const [slug, entry] = found;
     if (entry.clock.status === 'running') return;
 
-    entry.handle = setInterval(() => this.tick(id), entry.clock.intervalMs);
+    entry.handle = setInterval(() => this.tick(slug), entry.clock.intervalMs);
     entry.clock.status = 'running';
     entry.clock.nextFireAt = Date.now() + entry.clock.intervalMs;
     log(`[clock] Resumed: ${entry.clock.name}`);
@@ -260,8 +265,9 @@ export class ClockManager {
 
   /** Stop a clock permanently. */
   stop(id: string): void {
-    const entry = this.entries.get(id);
-    if (!entry) return;
+    const found = this.findEntry(id);
+    if (!found) return;
+    const [, entry] = found;
 
     if (entry.handle) {
       clearInterval(entry.handle);
@@ -281,8 +287,9 @@ export class ClockManager {
 
   /** Record an error manually (for callbacks that handle their own try/catch). */
   recordError(id: string, message: string): void {
-    const entry = this.entries.get(id);
-    if (!entry) return;
+    const found = this.findEntry(id);
+    if (!found) return;
+    const [, entry] = found;
 
     entry.clock.errorCount++;
     entry.clock.consecutiveErrors++;
@@ -295,15 +302,31 @@ export class ClockManager {
     }
   }
 
+  /**
+   * Find an entry by slug key OR by ck-NNNN clock.id.
+   * The entries map is keyed by caller slug, but the Clock.id is auto-generated ck-NNNN.
+   * The TUI/API uses clock.id for lookups, so we need to search both.
+   */
+  private findEntry(id: string): [string, ClockEntry] | undefined {
+    // Direct slug match (fast path)
+    const direct = this.entries.get(id);
+    if (direct) return [id, direct];
+    // Search by ck-NNNN clock.id (fallback)
+    for (const [slug, entry] of this.entries) {
+      if (entry.clock.id === id) return [slug, entry];
+    }
+    return undefined;
+  }
+
   /** Get all clocks as metadata (no handles, no callbacks). */
   list(): Clock[] {
     return [...this.entries.values()].map(e => ({ ...e.clock }));
   }
 
-  /** Get a single clock by ID. */
+  /** Get a single clock by slug or ck-NNNN ID. */
   get(id: string): Clock | undefined {
-    const entry = this.entries.get(id);
-    return entry ? { ...entry.clock } : undefined;
+    const found = this.findEntry(id);
+    return found ? { ...found[1].clock } : undefined;
   }
 
   /** Number of registered clocks. */
