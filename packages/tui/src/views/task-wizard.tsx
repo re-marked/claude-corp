@@ -4,7 +4,7 @@ import TextInput from 'ink-text-input';
 import type { DaemonClient } from '../lib/daemon-client.js';
 import type { Member } from '@claudecorp/shared';
 
-type Step = 'title' | 'priority' | 'description' | 'creating' | 'done' | 'error';
+type Step = 'title' | 'priority' | 'description' | 'criteria' | 'creating' | 'done' | 'error';
 
 const PRIORITIES = ['normal', 'high', 'critical', 'low'] as const;
 
@@ -21,6 +21,8 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
   const [title, setTitle] = useState('');
   const [priorityIndex, setPriorityIndex] = useState(0);
   const [description, setDescription] = useState('');
+  const [criteriaInput, setCriteriaInput] = useState('');
+  const [criteria, setCriteria] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [createdId, setCreatedId] = useState('');
 
@@ -31,13 +33,9 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
     }
 
     if (step === 'priority') {
-      if (key.upArrow) {
-        setPriorityIndex((i) => Math.max(0, i - 1));
-      } else if (key.downArrow) {
-        setPriorityIndex((i) => Math.min(PRIORITIES.length - 1, i + 1));
-      } else if (key.return) {
-        setStep('description');
-      }
+      if (key.upArrow) setPriorityIndex((i) => Math.max(0, i - 1));
+      if (key.downArrow) setPriorityIndex((i) => Math.min(PRIORITIES.length - 1, i + 1));
+      if (key.return) setStep('description');
     }
   });
 
@@ -48,15 +46,31 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
     setStep('priority');
   };
 
-  const handleDescriptionSubmit = async (val: string) => {
+  const handleDescriptionSubmit = (val: string) => {
     setDescription(val.trim());
+    setStep('criteria');
+  };
+
+  const handleCriteriaSubmit = async (val: string) => {
+    const trimmed = val.trim();
+
+    // Non-empty = add another criterion and stay on this step
+    if (trimmed) {
+      setCriteria(prev => [...prev, trimmed]);
+      setCriteriaInput('');
+      return;
+    }
+
+    // Empty enter = done adding criteria, create the task
     setStep('creating');
+    const allCriteria = criteria.length > 0 ? criteria : undefined;
 
     try {
       const result = await daemonClient.createTask({
         title,
-        description: val.trim() || undefined,
+        description: description || undefined,
         priority: PRIORITIES[priorityIndex]!,
+        acceptanceCriteria: allCriteria,
         createdBy: founderId,
       });
       const taskId = (result as any)?.id ?? (result as any)?.task?.id ?? '?';
@@ -78,15 +92,11 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
 
       {step === 'title' && (
         <Box flexDirection="column">
-          <Text>Task title:</Text>
+          <Text dimColor>Creating a task is planning. Use /hand to start work.</Text>
+          <Box marginTop={1}><Text>Task title:</Text></Box>
           <Box>
             <Text bold color="green">&gt; </Text>
-            <TextInput
-              value={title}
-              onChange={setTitle}
-              onSubmit={handleTitleSubmit}
-              placeholder="Research competitor pricing"
-            />
+            <TextInput value={title} onChange={setTitle} onSubmit={handleTitleSubmit} placeholder="Research competitor pricing" />
           </Box>
         </Box>
       )}
@@ -94,7 +104,7 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
       {step === 'priority' && (
         <Box flexDirection="column">
           <Text>Title: <Text bold>{title}</Text></Text>
-          <Box marginTop={1}><Text>Select priority:</Text></Box>
+          <Box marginTop={1}><Text>Priority:</Text></Box>
           {PRIORITIES.map((p, i) => (
             <Box key={p} gap={1}>
               <Text color={i === priorityIndex ? 'cyan' : undefined} bold={i === priorityIndex}>
@@ -102,7 +112,7 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
               </Text>
             </Box>
           ))}
-          <Box marginTop={1}><Text dimColor>up/down to select, Enter to confirm</Text></Box>
+          <Box marginTop={1}><Text dimColor>up/down, Enter to confirm</Text></Box>
         </Box>
       )}
 
@@ -112,12 +122,22 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
           <Box marginTop={1}><Text>Description (optional, Enter to skip):</Text></Box>
           <Box>
             <Text bold color="green">&gt; </Text>
-            <TextInput
-              value={description}
-              onChange={setDescription}
-              onSubmit={handleDescriptionSubmit}
-              placeholder="Analyze top 5 competitors..."
-            />
+            <TextInput value={description} onChange={setDescription} onSubmit={handleDescriptionSubmit} placeholder="Analyze top 5 competitors..." />
+          </Box>
+        </Box>
+      )}
+
+      {step === 'criteria' && (
+        <Box flexDirection="column">
+          <Text>Title: <Text bold>{title}</Text>  Priority: <Text bold>{PRIORITIES[priorityIndex]}</Text></Text>
+          <Box marginTop={1}><Text>Acceptance criteria (the Warden checks these):</Text></Box>
+          <Text dimColor>Type each criterion + Enter. Empty Enter when done.</Text>
+          {criteria.map((c, i) => (
+            <Text key={i} color="green">  {'\u2713'} {c}</Text>
+          ))}
+          <Box>
+            <Text bold color="green">&gt; </Text>
+            <TextInput value={criteriaInput} onChange={setCriteriaInput} onSubmit={handleCriteriaSubmit} placeholder={criteria.length === 0 ? 'Login form renders correctly' : 'Add another or Enter to finish'} />
           </Box>
         </Box>
       )}
@@ -129,7 +149,8 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
       {step === 'done' && (
         <Box flexDirection="column">
           <Text color="green">Task created: <Text bold>{createdId}</Text></Text>
-          <Text dimColor>Creating a task is planning. To start work:</Text>
+          {criteria.length > 0 && <Text dimColor>{criteria.length} acceptance criteria set</Text>}
+          <Text dimColor>To start work:</Text>
           <Text color="cyan">  /hand {createdId} @agent-name</Text>
         </Box>
       )}
