@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@claudecorp/daemon": "workspace:*",
-    "@claudecorp/shared": "workspace:*"
+    "@claudecorp/shared": "workspace:*",
+    "cronstrue": "^3.14.0"
   }
 }

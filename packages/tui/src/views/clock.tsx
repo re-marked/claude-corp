@@ -55,14 +55,15 @@ export function ClockView({ onBack }: Props) {
     return () => clearInterval(refresh);
   }, []);
 
-  // Animation loop — 4 FPS (250ms) — balance between alive feel and Yoga stability
+  // Animation loop — 4 FPS (250ms) — only when clocks exist (prevents Yoga crash with empty layout)
   useEffect(() => {
+    if (clocks.length === 0) return;
     const timer = setInterval(() => {
       setFrame(f => f + 1);
       setNow(Date.now());
     }, 250);
     return () => clearInterval(timer);
-  }, []);
+  }, [clocks.length > 0]);
 
   const selectableClocks = clocks.filter(c => c.status !== 'stopped');
 
@@ -77,6 +78,14 @@ export function ClockView({ onBack }: Props) {
         daemonClient.resumeClock(clock.id).then(fetchClocks);
       } else if (clock.status === 'running' || clock.status === 'error') {
         daemonClient.pauseClock(clock.id).then(fetchClocks);
+      }
+    }
+    // D key — delete loops and crons only (system clocks protected)
+    if (_input === 'd' || _input === 'D') {
+      const clock = selectableClocks[selectedIndex];
+      if (!clock) return;
+      if (clock.type === 'loop' || clock.type === 'cron') {
+        daemonClient.deleteClock(clock.id).then(fetchClocks).catch(() => {});
       }
     }
   });
@@ -124,13 +133,13 @@ export function ClockView({ onBack }: Props) {
           const group = groups.get(type);
           const label = TYPE_LABELS[type] ?? type.toUpperCase();
 
-          // Placeholder sections for loops and crons
+          // Empty sections — show helpful placeholder for user-created types
           if (!group || group.length === 0) {
             if (type === 'loop') {
               return (
                 <Box key={type} flexDirection="column" marginBottom={1}>
                   <Text bold color={COLORS.muted}>{label}</Text>
-                  <Text color={COLORS.border}>  {STOPPED_ICON} No loops yet. Use /loop to create recurring commands.</Text>
+                  <Text color={COLORS.border}>  {STOPPED_ICON} No loops. /loop 5m cc-cli status</Text>
                 </Box>
               );
             }
@@ -138,7 +147,7 @@ export function ClockView({ onBack }: Props) {
               return (
                 <Box key={type} flexDirection="column" marginBottom={1}>
                   <Text bold color={COLORS.muted}>{label}</Text>
-                  <Text color={COLORS.border}>  {STOPPED_ICON} No cron jobs yet. Scheduled tasks coming soon.</Text>
+                  <Text color={COLORS.border}>  {STOPPED_ICON} No crons. /cron @daily @herald Write summary</Text>
                 </Box>
               );
             }
@@ -236,13 +245,16 @@ export function ClockView({ onBack }: Props) {
         })}
 
         {clocks.length === 0 && (
-          <Text color={COLORS.muted}>No clocks registered. Start the daemon first.</Text>
+          <Box flexDirection="column" gap={0}>
+            <Text color={COLORS.muted}>No clocks registered. Daemon may not be running.</Text>
+            <Text color={COLORS.subtle}>Restart the TUI: npx tsx packages/tui/src/index.tsx</Text>
+          </Box>
         )}
       </Box>
 
       {/* Footer */}
       <Box borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={1} justifyContent="space-between">
-        <Text color={COLORS.muted}>P:pause/resume  Esc:back</Text>
+        <Text color={COLORS.muted}>P:pause/resume  D:delete loop/cron  Esc:back</Text>
         <Text color={COLORS.muted}>{clocks.length} clocks</Text>
       </Box>
     </Box>

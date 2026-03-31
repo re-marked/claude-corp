@@ -15,7 +15,8 @@ import { isDaemonRunning, DaemonClient } from '@claudecorp/daemon';
 export function getClient(silent = false): DaemonClient {
   const { running, port } = isDaemonRunning();
   if (!running || !port) {
-    console.error('Daemon is not running. Start it with: cc-cli start');
+    console.error('Daemon is not running. Restart the TUI or run:');
+    console.error('  npx tsx packages/tui/src/index.tsx');
     process.exit(1);
   }
   return new DaemonClient(port);

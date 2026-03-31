@@ -763,6 +763,77 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /loops — create a new loop
+      if (method === 'POST' && path === '/loops') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const interval = body.interval as string;
+        const command = body.command as string;
+        if (!interval || !command) {
+          json(res, { error: 'interval and command are required' }, 400);
+          return;
+        }
+        try {
+          const loop = daemon.loops.create({
+            name: body.name as string | undefined,
+            interval,
+            command,
+            targetAgent: body.targetAgent as string | undefined,
+            maxRuns: body.maxRuns as number | undefined,
+          });
+          json(res, { ok: true, loop });
+        } catch (err) {
+          json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+        }
+        return;
+      }
+
+      // POST /crons — create a new cron job
+      if (method === 'POST' && path === '/crons') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const schedule = body.schedule as string;
+        const command = body.command as string;
+        if (!schedule || !command) {
+          json(res, { error: 'schedule and command are required' }, 400);
+          return;
+        }
+        try {
+          const cron = daemon.crons.create({
+            name: body.name as string | undefined,
+            schedule,
+            command,
+            targetAgent: body.targetAgent as string | undefined,
+            maxRuns: body.maxRuns as number | undefined,
+          });
+          json(res, { ok: true, cron });
+        } catch (err) {
+          json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+        }
+        return;
+      }
+
+      // DELETE /clocks/:slug — remove a loop or cron (not system clocks)
+      const clockDeleteMatch = path.match(/^\/clocks\/([^/]+)$/);
+      if (method === 'DELETE' && clockDeleteMatch) {
+        const slug = decodeURIComponent(clockDeleteMatch[1]!);
+        const clock = daemon.clocks.get(slug);
+        if (!clock) { json(res, { error: 'Clock not found' }, 404); return; }
+        if (clock.type !== 'loop' && clock.type !== 'cron') {
+          json(res, { error: 'Cannot delete system clocks — only loops and crons' }, 403);
+          return;
+        }
+        try {
+          if (clock.type === 'loop') {
+            daemon.loops.stop(slug);
+          } else {
+            daemon.crons.stop(slug);
+          }
+          json(res, { ok: true });
+        } catch (err) {
+          json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+        }
+        return;
+      }
+
       // --- Contract endpoints ---
 
       // POST /contracts/create

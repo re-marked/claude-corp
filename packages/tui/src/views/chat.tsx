@@ -367,6 +367,16 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         '  /project           Open project creation wizard',
         '  /team              Open team creation wizard',
         '  /dogfood           Set up development project',
+        '',
+        'Automation:',
+        '  /loop 5m <cmd>     Create a recurring loop (every 5m)',
+        '  /loop 5m @ceo <prompt>  Loop that dispatches to agent',
+        '  /loop list         Show active loops',
+        '  /loop stop <name>  Stop a loop',
+        '  /cron @daily @herald <prompt>  Create a cron job',
+        '  /cron list         Show active crons',
+        '  /cron stop <name>  Stop a cron',
+        '',
         '  /help              Show this help message',
       ];
       writeSystemMessage(helpText.join('\n'));
@@ -592,6 +602,126 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     }
     if (cmd === '/clock' || cmd === '/clocks') {
       setTimeout(() => onNavigate?.({ type: 'clock' }), 10);
+      return;
+    }
+
+    // /loop — create, list, or stop loops
+    if (text.trim().toLowerCase().startsWith('/loop')) {
+      const parts = text.trim().split(/\s+/).slice(1);
+      if (parts.length === 0 || parts[0] === 'list') {
+        // List active loops
+        try {
+          const clocks = await daemonClient.listClocks();
+          const loops = (clocks as any[]).filter((c: any) => c.type === 'loop');
+          if (loops.length === 0) {
+            writeSystemMessage('No active loops. Usage: /loop 5m cc-cli status');
+          } else {
+            const lines = loops.map((l: any) => `  ${l.status === 'running' ? '\u25CF' : '\u25CB'} ${l.name} — ${l.fireCount}x fired`);
+            writeSystemMessage(`Loops (${loops.length}):\n${lines.join('\n')}`);
+          }
+        } catch { writeSystemMessage('Failed to list loops'); }
+        return;
+      }
+      if (parts[0] === 'stop' && parts[1]) {
+        try {
+          await daemonClient.deleteClock(parts.slice(1).join('-'));
+          writeSystemMessage(`Loop stopped: ${parts.slice(1).join(' ')}`);
+        } catch (err) {
+          writeSystemMessage(`Failed to stop loop: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+      // Create: /loop 5m cc-cli status  OR  /loop 5m @ceo Check statuses
+      const interval = parts[0]!;
+      let targetAgent: string | undefined;
+      let command: string;
+      if (parts[1]?.startsWith('@')) {
+        targetAgent = parts[1].slice(1);
+        command = parts.slice(2).join(' ');
+      } else {
+        command = parts.slice(1).join(' ');
+      }
+      if (!command) {
+        writeSystemMessage('Usage: /loop <interval> <command>  or  /loop <interval> @agent <prompt>');
+        return;
+      }
+      try {
+        const result = await daemonClient.createLoop({ interval, command, targetAgent });
+        if (result.ok) {
+          writeSystemMessage(`Loop created: every ${interval} → ${targetAgent ? `@${targetAgent}: ` : ''}${command}`);
+        } else {
+          writeSystemMessage(`Failed: ${(result as any).error}`);
+        }
+      } catch (err) {
+        writeSystemMessage(`Failed to create loop: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    // /cron — create, list, or stop crons
+    if (text.trim().toLowerCase().startsWith('/cron')) {
+      const parts = text.trim().split(/\s+/).slice(1);
+      if (parts.length === 0 || parts[0] === 'list') {
+        try {
+          const clocks = await daemonClient.listClocks();
+          const crons = (clocks as any[]).filter((c: any) => c.type === 'cron');
+          if (crons.length === 0) {
+            writeSystemMessage('No active crons. Usage: /cron @daily @herald Write summary');
+          } else {
+            const lines = crons.map((c: any) => `  ${c.status === 'running' ? '\u25CF' : '\u25CB'} ${c.name} — ${c.fireCount}x fired`);
+            writeSystemMessage(`Crons (${crons.length}):\n${lines.join('\n')}`);
+          }
+        } catch { writeSystemMessage('Failed to list crons'); }
+        return;
+      }
+      if (parts[0] === 'stop' && parts[1]) {
+        try {
+          await daemonClient.deleteClock(parts.slice(1).join('-'));
+          writeSystemMessage(`Cron stopped: ${parts.slice(1).join(' ')}`);
+        } catch (err) {
+          writeSystemMessage(`Failed to stop cron: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        return;
+      }
+      // Create: /cron @daily @herald Write summary  OR  /cron "0 9 * * 1" @ceo Sprint review
+      let schedule: string;
+      let restParts: string[];
+      // Check if first arg is a quoted cron expression or a preset
+      if (parts[0]!.startsWith('@') && !parts[0]!.startsWith('@e')) {
+        // Preset like @daily, @hourly, @weekly
+        schedule = parts[0]!;
+        restParts = parts.slice(1);
+      } else if (parts[0]!.match(/^\d/)) {
+        // Raw cron: take first 5 fields
+        schedule = parts.slice(0, 5).join(' ');
+        restParts = parts.slice(5);
+      } else {
+        writeSystemMessage('Usage: /cron <schedule> [@agent] <command>\nSchedule: @daily, @hourly, @weekly, or "0 9 * * 1"');
+        return;
+      }
+      let targetAgent: string | undefined;
+      let command: string;
+      if (restParts[0]?.startsWith('@')) {
+        targetAgent = restParts[0].slice(1);
+        command = restParts.slice(1).join(' ');
+      } else {
+        command = restParts.join(' ');
+      }
+      if (!command) {
+        writeSystemMessage('Usage: /cron <schedule> [@agent] <command>');
+        return;
+      }
+      try {
+        const result = await daemonClient.createCron({ schedule, command, targetAgent });
+        if (result.ok) {
+          const cron = result.cron;
+          writeSystemMessage(`Cron created: ${cron.humanSchedule ?? schedule} → ${targetAgent ? `@${targetAgent}: ` : ''}${command}`);
+        } else {
+          writeSystemMessage(`Failed: ${(result as any).error}`);
+        }
+      } catch (err) {
+        writeSystemMessage(`Failed to create cron: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return;
     }
 
