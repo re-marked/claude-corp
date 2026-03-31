@@ -98,10 +98,24 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ## Planned but NOT yet built
 
-### v0.11.0 — Loops & Crons (Clock placeholders exist)
-- /loop command: `cc-cli loop 5m cc-cli status` — recurring commands
-- Cron jobs: scheduled tasks
-- Both register as Clock entries, visible in /clock view
+## v0.11.0 + v0.11.1 — Loops & Crons (MERGED)
+
+- ✅ Loops — interval-based recurring commands (@every 5m, 30s, 2h)
+- ✅ Crons — schedule-based jobs via croner (100% correctness): @daily, @hourly, 0 9 * * 1
+- ✅ Both persist to clocks.json — survive daemon restarts via rehydration
+- ✅ Both visible in /clock view with animated spinners + progress bars
+- ✅ Channel-bound output — loop/cron output appears in the channel where created
+- ✅ DM auto-assign — /loop in a DM auto-targets the agent
+- ✅ Complete/Dismiss/Delete lifecycle (C/X/D keys in /clock, CLI + TUI commands)
+- ✅ ScheduledClock type extends Clock with expression, command, targetAgent, maxRuns, channelId
+- ✅ Schedule parser — @every 5m, @daily, raw cron, formatIntervalMs, formatCountdown
+- ✅ cronstrue converts cron expressions to English ("At 9:00 AM, only on Monday")
+- ✅ LoopManager + CronManager with watchdog timeouts, maxRuns auto-complete
+- ✅ ClockManager.registerExternal() for cron observability bridge
+- ✅ API: POST /loops, POST /crons, DELETE /clocks/:slug, POST complete/dismiss
+- ✅ CLI: cc-cli loop create/list/complete/dismiss/delete, cc-cli cron create/list/complete/dismiss/delete
+- ✅ TUI: /loop, /cron chat commands with DM auto-assign
+- ✅ CEO auto-starts OpenClaw if remote gateway is dead
 
 ### Future — Escalation
 - Severity-routed blockers: P0 → Founder, P1 → CEO, P2 → team leader
