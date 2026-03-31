@@ -20,6 +20,7 @@ import {
   readConfig,
   appendMessage,
   generateId,
+  createTask,
   CHANNELS_JSON,
   MEMBERS_JSON,
   MESSAGES_JSONL,
@@ -345,6 +346,39 @@ export class CronManager {
     }, async () => {
       const start = Date.now();
       let output = '';
+
+      // Spawn a fresh task if spawnTaskTemplate is configured
+      if (clock.spawnTaskTemplate) {
+        try {
+          const tpl = clock.spawnTaskTemplate;
+          const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const title = tpl.title.replace(/\{date\}/g, dateStr);
+
+          // Resolve assignee member ID from slug
+          let assignedTo: string | null = null;
+          if (tpl.assignTo) {
+            try {
+              const members = readConfig<any[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+              const agent = members.find((m: any) =>
+                m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === tpl.assignTo!.toLowerCase(),
+              );
+              assignedTo = agent?.id ?? null;
+            } catch {}
+          }
+
+          const task = createTask(this.daemon.corpRoot, {
+            title,
+            description: tpl.description ?? `Spawned by cron "${clock.name}" on ${dateStr}.`,
+            priority: tpl.priority,
+            assignedTo,
+            createdBy: 'system',
+          });
+
+          log(`[crons] Spawned task "${title}" (${task.id}) from cron ${slug}`);
+        } catch (err) {
+          logError(`[crons] Failed to spawn task from cron ${slug}: ${err}`);
+        }
+      }
 
       try {
         if (clock.targetAgent) {
