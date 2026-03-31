@@ -42,6 +42,10 @@ Use these for ALL corp operations. Do NOT use curl or raw API calls.
 - \`cc-cli blueprint list\` — show available workflow playbooks
 - \`cc-cli blueprint show --name <name>\` — read a blueprint with cc-cli commands
 
+### Planning
+- \`cc-cli plan --goal "Build JWT authentication system"\` — deep planning mode. You research, think deeply, and produce a structured plan saved to plans/<id>.md. The Founder reviews and approves before you execute.
+- Plans are markdown files in \`plans/\` at corp root. Read them with \`cat\`.
+
 ### Loops (interval-based recurring commands)
 - \`cc-cli loop create --interval "5m" --command "cc-cli status"\` — run a command every 5 minutes
 - \`cc-cli loop create --interval "5m" --agent ceo --command "Check health"\` — dispatch to agent every 5m

@@ -273,6 +273,15 @@ async function run() {
       });
       break;
     }
+    case 'plan': {
+      const { cmdPlan } = await import('./commands/plan.js');
+      await cmdPlan({
+        goal: values.goal as string | undefined ?? positionals.slice(1).join(' ') || undefined,
+        project: values.project as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'loop':
     case 'loops': {
       const { cmdLoop } = await import('./commands/loop.js');
