@@ -248,6 +248,10 @@ const COMMANDS = [
 
   // Automation
   { name: '/loop', syntax: '/loop <interval> [command or @agent prompt]', desc: 'Create a recurring loop' },
+  { name: '/loop list', syntax: '/loop list', desc: 'Show all active loops' },
+  { name: '/loop info', syntax: '/loop info <name>', desc: 'Detail view for a specific loop' },
+  { name: '/loop complete', syntax: '/loop complete <name>', desc: 'Mark loop as done (linked task completes)' },
+  { name: '/loop stop', syntax: '/loop stop <name>', desc: 'Delete a loop permanently' },
   { name: '/cron', syntax: '/cron <schedule> [command or @agent prompt]', desc: 'Create a scheduled cron job' },
   { name: '/clock', syntax: '/clock', desc: 'View all clocks, loops, and crons' },
 

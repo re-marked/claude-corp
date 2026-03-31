@@ -679,6 +679,29 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         } catch { writeSystemMessage('Failed to list loops'); }
         return;
       }
+      if (parts[0] === 'info' && parts[1]) {
+        try {
+          const slug = parts.slice(1).join('-');
+          const clocks = await daemonClient.listClocks();
+          const loop = (clocks as any[]).find((c: any) =>
+            c.type === 'loop' && (c.id === slug || c.name?.toLowerCase().includes(slug.toLowerCase())),
+          );
+          if (!loop) { writeSystemMessage(`Loop "${slug}" not found`); return; }
+          const lines = [
+            `\u2500\u2500\u2500 Loop: ${loop.name} \u2500\u2500\u2500`,
+            `  ID:         ${loop.id}`,
+            `  Status:     ${loop.status}`,
+            `  Interval:   ${loop.description ?? 'N/A'}`,
+            `  Fires:      ${loop.fireCount}x`,
+            `  Errors:     ${loop.errorCount}`,
+            `  Last fired: ${loop.lastFiredAt ? new Date(loop.lastFiredAt).toLocaleTimeString() : 'never'}`,
+            `  Next fire:  ${loop.nextFireAt ? new Date(loop.nextFireAt).toLocaleTimeString() : 'N/A'}`,
+          ];
+          if (loop.lastError) lines.push(`  Last error: ${loop.lastError}`);
+          writeSystemMessage(lines.join('\n'));
+        } catch (err) { writeSystemMessage(`Failed: ${err instanceof Error ? err.message : String(err)}`); }
+        return;
+      }
       if (parts[0] === 'stop' || parts[0] === 'delete') {
         if (!parts[1]) { writeSystemMessage('Usage: /loop stop <name>'); return; }
         try {
