@@ -1032,8 +1032,8 @@ Always consider what happens when things go wrong.`,
 
   const founder = members.find((m) => m.rank === 'owner');
 
-  const handleTaskCreated = (title: string) => {
-    writeSystemMessage(`Task "${title}" created. Check #tasks for details.`);
+  const handleTaskCreated = (title: string, taskId: string) => {
+    writeSystemMessage(`Task "${title}" created — ID: ${taskId}`);
     setTimeout(() => setShowTaskWizard(false), 1500);
   };
 

@@ -13,7 +13,7 @@ interface Props {
   founderId: string;
   members: Member[];
   onClose: () => void;
-  onCreated: (title: string) => void;
+  onCreated: (title: string, taskId: string) => void;
 }
 
 export function TaskWizard({ daemonClient, founderId, members, onClose, onCreated }: Props) {
@@ -69,7 +69,7 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
     }
 
     try {
-      await daemonClient.createTask({
+      const result = await daemonClient.createTask({
         title,
         description: val.trim() || undefined,
         priority: PRIORITIES[priorityIndex]!,
@@ -77,7 +77,8 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
         createdBy: founderId,
       });
       setStep('done');
-      onCreated(title);
+      const taskId = (result as any)?.id ?? (result as any)?.task?.id ?? '?';
+      onCreated(title, taskId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStep('error');
