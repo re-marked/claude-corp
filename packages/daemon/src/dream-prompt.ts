@@ -89,13 +89,16 @@ Corp root: \`${opts.corpRoot}\`
 
 It has been ${opts.hoursSinceLast.toFixed(0)} hours since your last consolidation. ${opts.sessionsSince} work sessions have accumulated.${agentContext}
 
+**CRITICAL: You MUST use tools.** Read actual files. Write actual BRAIN/ topic files. Run actual commands. Do NOT just describe what you would do or reply with a summary. Execute every phase below using tools. If there is nothing to consolidate, say DREAM_CLEAN.
+
 ---
 
 ## Phase 1 — Orient
 
-- Read \`MEMORY.md\` to understand your current memory index
-- \`ls BRAIN/\` to see what topic files already exist
-- Skim 2-3 existing topic files to avoid creating duplicates
+Execute these commands NOW:
+1. \`cat "${opts.agentDir}/MEMORY.md"\` — read your current memory index
+2. \`ls "${opts.agentDir}/BRAIN/" 2>/dev/null\` — list existing topic files
+3. If any BRAIN/ files exist, read the 1-2 most relevant ones
 
 ## Phase 2 — Gather recent signal
 

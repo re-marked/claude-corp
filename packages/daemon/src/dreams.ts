@@ -349,6 +349,8 @@ export class DreamManager {
           target: slug,
           message: prompt,
           sessionKey: `dream:${slug}:${Date.now()}`,
+          // Pass DM channelId so tool events + streaming show in the agent's DM
+          channelId: dmChannel?.id ?? undefined,
         }),
         signal: AbortSignal.timeout(DREAM_TIMEOUT_MS),
       });
