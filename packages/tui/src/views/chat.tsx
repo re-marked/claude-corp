@@ -673,7 +673,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       try {
         const result = await daemonClient.createLoop({
           interval, command, targetAgent, channelId: channel.id,
-        } as any);
+        });
         if (result.ok) {
           writeSystemMessage(`Loop created: every ${interval} → ${targetAgent ? `@${targetAgent}: ` : ''}${command}`);
         } else {
@@ -763,7 +763,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       try {
         const result = await daemonClient.createCron({
           schedule, command, targetAgent, channelId: channel.id,
-        } as any);
+        });
         if (result.ok) {
           const cron = result.cron;
           writeSystemMessage(`Cron created: ${cron.humanSchedule ?? schedule} → ${targetAgent ? `@${targetAgent}: ` : ''}${command}`);

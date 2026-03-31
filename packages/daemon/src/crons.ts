@@ -11,7 +11,19 @@
 
 import { Cron } from 'croner';
 import cronstrue from 'cronstrue';
-import { type ScheduledClock, isCronPreset, cronPresetToExpression, isRawCronExpression } from '@claudecorp/shared';
+import {
+  type ScheduledClock,
+  type ChannelMessage,
+  isCronPreset,
+  cronPresetToExpression,
+  isRawCronExpression,
+  readConfig,
+  appendMessage,
+  generateId,
+  CHANNELS_JSON,
+  MESSAGES_JSONL,
+} from '@claudecorp/shared';
+import { join } from 'node:path';
 import type { ExternalClockHandle } from './clock-manager.js';
 import type { Daemon } from './daemon.js';
 import { saveScheduledClock, removeScheduledClock, loadScheduledClocks, FireStatsWriter } from './scheduled-clock-store.js';
@@ -354,6 +366,11 @@ export class CronManager {
       clock.lastOutput = output.trim() || null;
       clock.fireCount = handle.getFireCount();
 
+      // Write output to birth channel
+      if (clock.channelId && output.trim()) {
+        this.writeOutputToChannel(clock, output.trim());
+      }
+
       this.statsWriter.update(slug, {
         lastFiredAt: Date.now(),
         fireCount: clock.fireCount,
@@ -404,5 +421,46 @@ export class CronManager {
     }
     const short = opts.command.split(/\s+/).slice(0, 2).join(' ');
     return `${short} (${humanSchedule.toLowerCase()})`;
+  }
+
+  /** Write cron output to its birth channel as a visible message. */
+  private writeOutputToChannel(clock: ScheduledClock, output: string): void {
+    if (!clock.channelId) return;
+    try {
+      const channels = readConfig<any[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
+      const ch = channels.find((c: any) => c.id === clock.channelId);
+      if (!ch) return;
+      const msgPath = join(this.daemon.corpRoot, ch.path, MESSAGES_JSONL);
+
+      // Resolve agent member ID for agent dispatches
+      let senderId = 'system';
+      if (clock.targetAgent) {
+        try {
+          const members = readConfig<any[]>(join(this.daemon.corpRoot, 'members.json'));
+          const agent = members.find((m: any) =>
+            m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === clock.targetAgent!.toLowerCase(),
+          );
+          if (agent) senderId = agent.id;
+        } catch {}
+      }
+
+      const msg: ChannelMessage = {
+        id: generateId(),
+        channelId: clock.channelId,
+        senderId,
+        threadId: null,
+        content: senderId !== 'system' ? output : `[${clock.name}] ${output}`,
+        kind: senderId !== 'system' ? 'text' : 'system',
+        mentions: [],
+        metadata: { source: 'cron', cronId: clock.id },
+        depth: 0,
+        originId: '',
+        timestamp: new Date().toISOString(),
+      };
+      msg.originId = msg.id;
+      appendMessage(msgPath, msg);
+    } catch {
+      // Non-fatal
+    }
   }
 }

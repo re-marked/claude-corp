@@ -65,7 +65,10 @@ export function ClockView({ onBack }: Props) {
     return () => clearInterval(timer);
   }, [clocks.length > 0]);
 
-  const selectableClocks = clocks.filter(c => c.status !== 'stopped');
+  // Show all running/paused/error clocks + stopped loops/crons (completed ones stay visible)
+  const selectableClocks = clocks.filter(c =>
+    c.status !== 'stopped' || c.type === 'loop' || c.type === 'cron',
+  );
 
   useInput((_input, key) => {
     if (key.escape) { onBack(); return; }
@@ -100,10 +103,10 @@ export function ClockView({ onBack }: Props) {
     }
   });
 
-  // Group clocks by type
+  // Group clocks by type — keep stopped loops/crons (completed) visible
   const groups = new Map<string, Clock[]>();
   for (const c of clocks) {
-    if (c.status === 'stopped') continue;
+    if (c.status === 'stopped' && c.type !== 'loop' && c.type !== 'cron') continue;
     const group = groups.get(c.type) ?? [];
     group.push(c);
     groups.set(c.type, group);
