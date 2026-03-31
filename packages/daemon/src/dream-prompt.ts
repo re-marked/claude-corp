@@ -5,27 +5,89 @@
  * Original: services/autoDream/consolidationPrompt.ts
  * Key differences:
  *   - Uses BRAIN/ directory instead of flat memory root
- *   - Uses MEMORY.md as index (their ENTRYPOINT_NAME equivalent)
- *   - Sources from WORKLOG.md session boundaries (not JSONL transcripts)
- *   - Bash is unrestricted (agents have full workspace access)
- *   - Adds corp context (STATUS.md, recent task completions)
+ *   - Uses MEMORY.md as index
+ *   - Sources from REAL conversations: DMs, #general, #tasks, activity
+ *   - Agents have full workspace access
+ *   - Corp-specific context: STATUS.md, task completions, Herald narration
  */
 
-export function buildDreamPrompt(opts: {
+export interface DreamPromptOpts {
   agentName: string;
   agentDir: string;
   corpRoot: string;
   sessionsSince: number;
   hoursSinceLast: number;
-}): string {
+  /** Path to the agent's DM channel with the founder (highest signal) */
+  dmChannelPath: string | null;
+  /** Path to #general channel (corp-wide context) */
+  generalChannelPath: string | null;
+  /** Path to #tasks channel (task events, completions) */
+  tasksChannelPath: string | null;
+  /** Recent agent names + what they're working on */
+  agentSummaries: string[];
+}
+
+export function buildDreamPrompt(opts: DreamPromptOpts): string {
+  // Build the signal sources section based on what channels exist
+  const sources: string[] = [];
+  let sourceNum = 1;
+
+  // DM with founder is the highest-signal source
+  if (opts.dmChannelPath) {
+    sources.push(`${sourceNum}. **Your DM with the Founder** — \`${opts.dmChannelPath}/messages.jsonl\`
+   This is your most important signal source. Grep the last ~50 lines for recent conversations:
+   \`tail -100 "${opts.dmChannelPath}/messages.jsonl" | grep -o '"content":"[^"]*"' | tail -30\`
+   Look for: direct instructions, feedback on your work, preferences, decisions, corrections`);
+    sourceNum++;
+  }
+
+  // WORKLOG.md for session summaries
+  sources.push(`${sourceNum}. **WORKLOG.md** — your recent session log
+   Read the last few session summaries. What did you work on? What shipped? What failed?`);
+  sourceNum++;
+
+  // #general for corp-wide context
+  if (opts.generalChannelPath) {
+    sources.push(`${sourceNum}. **#general channel** — \`${opts.generalChannelPath}/messages.jsonl\`
+   Scan the last ~30 messages for corp-wide context:
+   \`tail -60 "${opts.generalChannelPath}/messages.jsonl" | grep -o '"content":"[^"]*"' | tail -20\`
+   Look for: announcements, decisions, strategy changes, new hires`);
+    sourceNum++;
+  }
+
+  // #tasks for task events
+  if (opts.tasksChannelPath) {
+    sources.push(`${sourceNum}. **#tasks channel** — \`${opts.tasksChannelPath}/messages.jsonl\`
+   Scan for recent task completions and events:
+   \`tail -40 "${opts.tasksChannelPath}/messages.jsonl" | grep -o '"content":"[^"]*"' | tail -15\`
+   Look for: completed tasks, blocked tasks, contract updates, Warden reviews`);
+    sourceNum++;
+  }
+
+  // TASKS.md + STATUS.md + INBOX.md for workspace state
+  sources.push(`${sourceNum}. **Your workspace state files** — TASKS.md, STATUS.md, INBOX.md
+   Skim for: completed tasks with outcomes, current corp vitals, pending signals`);
+  sourceNum++;
+
+  // Existing memories that may have drifted
+  sources.push(`${sourceNum}. **Existing BRAIN/ memories** — check if any facts are now outdated
+   Compare what you knew with what the recent conversations reveal`);
+
+  const sourcesText = sources.join('\n\n');
+
+  // Agent context
+  const agentContext = opts.agentSummaries.length > 0
+    ? `\n\n**Current corp agents:**\n${opts.agentSummaries.map(s => `- ${s}`).join('\n')}`
+    : '';
+
   return `# Dream: Memory Consolidation
 
-You are ${opts.agentName}, performing a dream — a reflective pass over your memory and experience. Synthesize what you've learned recently into durable, well-organized memories so that future sessions can orient quickly.
+You are ${opts.agentName}, performing a dream — a reflective pass over your recent experience. Synthesize what you've learned into durable, well-organized memories so that future sessions can orient quickly.
 
 Your workspace: \`${opts.agentDir}\`
 Corp root: \`${opts.corpRoot}\`
 
-It has been ${opts.hoursSinceLast.toFixed(0)} hours since your last consolidation. ${opts.sessionsSince} work sessions have accumulated.
+It has been ${opts.hoursSinceLast.toFixed(0)} hours since your last consolidation. ${opts.sessionsSince} work sessions have accumulated.${agentContext}
 
 ---
 
@@ -33,60 +95,60 @@ It has been ${opts.hoursSinceLast.toFixed(0)} hours since your last consolidatio
 
 - Read \`MEMORY.md\` to understand your current memory index
 - \`ls BRAIN/\` to see what topic files already exist
-- Skim existing topic files so you improve them rather than creating duplicates
-- Read \`WORKLOG.md\` to see your recent session boundaries and what you worked on
+- Skim 2-3 existing topic files to avoid creating duplicates
 
 ## Phase 2 — Gather recent signal
 
-Look for new information worth persisting. Sources in priority order:
+Scan these sources for new information worth persisting. **Be selective** — don't read entire files. Grep narrowly, tail recent lines, and look for what matters.
 
-1. **WORKLOG.md session summaries** — what you worked on, what decisions were made, what shipped
-2. **TASKS.md** — completed tasks with acceptance criteria and outcomes
-3. **Existing BRAIN/ memories that drifted** — facts that may be outdated given recent work
-4. **STATUS.md** — current corp state, recent completions, any patterns worth noting
-5. **INBOX.md** — unprocessed signals that contain learnable patterns
+${sourcesText}
 
-Don't exhaustively read everything. Look only for things that matter for future you.
+**Important:** Don't exhaustively read every channel. Grep for recent messages, scan the tail, look for things that surprised you or changed your understanding. If a source has nothing new, move on.
 
 ## Phase 3 — Consolidate
 
 For each thing worth remembering, write or update a topic file in \`BRAIN/\`:
 
 **What to save:**
+- Founder preferences, communication style, and working patterns
 - Project decisions and their reasoning (WHY, not just WHAT)
-- Patterns you discovered in the codebase or in agent collaboration
-- Mistakes and what you learned from them
-- User preferences and working style observations
-- Technical knowledge gained (file paths, architecture patterns, build commands)
-- Relationships: who does what well, who to escalate to, communication patterns
+- Patterns in agent collaboration — who does what well, who to escalate to
+- Mistakes made and lessons learned (yours and others')
+- Technical knowledge: file paths, build commands, architecture decisions
+- Corp dynamics: recent hires, team changes, strategy shifts
+- Recurring tasks and how to handle them efficiently
 
 **How to save:**
-- Use markdown files with clear titles: \`BRAIN/auth-system.md\`, \`BRAIN/team-dynamics.md\`
-- Each file should be self-contained and useful to a future session with zero context
-- Merge new signal into existing topic files rather than creating near-duplicates
-- Convert relative dates ("yesterday", "last session") to absolute dates
-- Delete contradicted facts — if new work disproves an old memory, fix it at the source
-- Keep each topic file under 200 lines — split if growing too large
+- Use descriptive filenames: \`BRAIN/founder-preferences.md\`, \`BRAIN/auth-architecture.md\`
+- Each file is self-contained — useful to future you with zero prior context
+- Merge new signal into existing topics. Never create near-duplicates.
+- Convert relative dates to absolute: "yesterday" → "2026-03-31"
+- Delete contradicted facts at the source — don't leave wrong memories
+- Keep each topic file under 200 lines. Split if growing.
 
 **What NOT to save:**
 - Raw task descriptions (already in task files)
-- Code snippets (already in the codebase — just reference file paths)
-- Temporary debugging state
-- Anything derivable from git history
+- Full conversation transcripts (stay in JSONL)
+- Code snippets (reference file paths instead)
+- Anything derivable from git log
 
 ## Phase 4 — Prune and index
 
 Update \`MEMORY.md\` so it stays under 200 lines:
 
-- It is an **index**, not a dump — each entry should be one line under 150 characters:
-  \`- [Title](BRAIN/file.md) — one-line hook\`
-- Never write memory content directly into MEMORY.md
-- Remove pointers to memories that are stale, wrong, or superseded
+- It is an **index**, not a dump — each entry: \`- [Title](BRAIN/file.md) — one-line hook\`
+- Never write content directly into MEMORY.md
+- Remove stale, wrong, or superseded pointers
 - Add pointers to newly important memories
-- Resolve contradictions — if two files disagree, fix the wrong one
-- Group entries semantically by topic, not chronologically
+- Resolve contradictions between files
+- Group semantically by topic, not chronologically
 
 ---
 
-Return a brief summary of what you consolidated, updated, or pruned. If nothing meaningful changed (memories are already tight), say "DREAM_CLEAN" and nothing else.`;
+Return a brief summary of what you consolidated, updated, or pruned. Format:
+- X new topics created
+- Y topics updated
+- Z stale entries pruned
+
+If nothing meaningful changed, say "DREAM_CLEAN" and nothing else.`;
 }

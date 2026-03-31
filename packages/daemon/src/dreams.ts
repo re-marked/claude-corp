@@ -19,7 +19,9 @@ import { join } from 'node:path';
 import {
   readConfig,
   type Member,
+  type Channel,
   MEMBERS_JSON,
+  CHANNELS_JSON,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { buildDreamPrompt } from './dream-prompt.js';
@@ -265,12 +267,49 @@ export class DreamManager {
     }
 
     try {
+      // Resolve channel paths for rich signal gathering
+      let channels: Channel[] = [];
+      let members: Member[] = [];
+      try {
+        channels = readConfig<Channel[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
+        members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+      } catch {}
+
+      const founder = members.find(m => m.rank === 'owner');
+      const corpRootNorm = this.daemon.corpRoot.replace(/\\/g, '/');
+
+      // Find the agent's DM with the founder
+      const dmChannel = channels.find(c =>
+        c.kind === 'direct' &&
+        c.memberIds.includes(agent.id) &&
+        (founder ? c.memberIds.includes(founder.id) : false),
+      );
+
+      // Find corp-level #general and #tasks channels
+      const generalChannel = channels.find(c =>
+        c.scope === 'corp' && c.kind === 'broadcast',
+      );
+      const tasksChannel = channels.find(c =>
+        c.scope === 'corp' && c.kind === 'system' && c.name.includes('task'),
+      );
+
+      // Build agent summaries for context
+      const agentSummaries: string[] = [];
+      for (const m of members.filter(m2 => m2.type === 'agent' && m2.id !== agent.id)) {
+        const status = this.daemon.getAgentWorkStatus(m.id);
+        agentSummaries.push(`${m.displayName} (${m.rank}) — ${status ?? 'unknown'}`);
+      }
+
       const prompt = buildDreamPrompt({
         agentName: agent.displayName,
         agentDir: agentDir.replace(/\\/g, '/'),
-        corpRoot: this.daemon.corpRoot.replace(/\\/g, '/'),
+        corpRoot: corpRootNorm,
         sessionsSince,
         hoursSinceLast: hoursSince,
+        dmChannelPath: dmChannel ? join(corpRootNorm, dmChannel.path) : null,
+        generalChannelPath: generalChannel ? join(corpRootNorm, generalChannel.path) : null,
+        tasksChannelPath: tasksChannel ? join(corpRootNorm, tasksChannel.path) : null,
+        agentSummaries,
       });
 
       const resp = await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
