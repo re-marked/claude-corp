@@ -13,7 +13,11 @@ export type DaemonEvent =
   | { type: 'tool_end'; agentName: string; channelId: string; toolName: string; resultPreview?: string }
   | { type: 'model_changed'; agentName: string | null; model: string }
   | { type: 'clock_tick'; clockId: string; clockName: string; firedAt: number; nextFireAt: number; fireCount: number }
-  | { type: 'clock_alarm'; clockId: string; clockName: string; consecutiveErrors: number; lastError: string | null };
+  | { type: 'clock_alarm'; clockId: string; clockName: string; consecutiveErrors: number; lastError: string | null }
+  | { type: 'loop_created'; name: string; interval: string }
+  | { type: 'loop_stopped'; name: string }
+  | { type: 'cron_created'; name: string; schedule: string }
+  | { type: 'cron_stopped'; name: string };
 
 export class EventBus {
   private wss: WebSocketServer | null = null;

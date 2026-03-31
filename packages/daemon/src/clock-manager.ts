@@ -11,6 +11,14 @@ interface ClockEntry {
   firing: boolean; // Guard against overlapping async fires
 }
 
+/** Handle for externally-driven clocks (crons). Lets the caller update metadata. */
+export interface ExternalClockHandle {
+  recordFire(durationMs?: number): void;
+  recordError(message: string): void;
+  updateNextFire(timestamp: number): void;
+  getFireCount(): number;
+}
+
 export interface RegisterClockOpts {
   id: string;
   name: string;
@@ -141,6 +149,86 @@ export class ClockManager {
     } finally {
       entry.firing = false;
     }
+  }
+
+  /**
+   * Register an externally-driven clock (for crons via croner).
+   * Creates a Clock entry for observability WITHOUT creating a setInterval.
+   * The caller is responsible for driving the schedule and calling handle methods.
+   */
+  registerExternal(opts: Omit<RegisterClockOpts, 'callback'>): ExternalClockHandle {
+    if (this.entries.has(opts.id)) {
+      log(`[clock] ${opts.id} already registered (external) — returning existing handle`);
+    }
+
+    const now = Date.now();
+    const clock: Clock = {
+      id: clockId(),
+      name: opts.name,
+      type: opts.type,
+      intervalMs: opts.intervalMs,
+      target: opts.target,
+      status: 'running',
+      lastFiredAt: null,
+      nextFireAt: opts.intervalMs > 0 ? now + opts.intervalMs : null,
+      fireCount: 0,
+      errorCount: 0,
+      consecutiveErrors: 0,
+      lastError: null,
+      description: opts.description,
+      createdAt: now,
+    };
+
+    // External clocks have no interval and a no-op callback
+    const entry: ClockEntry = {
+      clock,
+      callback: () => {},
+      handle: null,
+      firing: false,
+    };
+
+    this.entries.set(opts.id, entry);
+    log(`[clock] Registered external: ${opts.name} (${opts.id})`);
+
+    // Return handle for the caller to update metadata
+    const self = this;
+    return {
+      recordFire(durationMs?: number) {
+        const e = self.entries.get(opts.id);
+        if (!e) return;
+        const firedAt = Date.now();
+        e.clock.lastFiredAt = firedAt;
+        e.clock.fireCount++;
+        e.clock.consecutiveErrors = 0;
+        if (e.clock.status === 'error') e.clock.status = 'running';
+        self.broadcastTick(e.clock);
+      },
+      recordError(message: string) {
+        self.recordError(opts.id, message);
+      },
+      updateNextFire(timestamp: number) {
+        const e = self.entries.get(opts.id);
+        if (!e) return;
+        e.clock.nextFireAt = timestamp;
+        // Update intervalMs to reflect actual gap for progress bar accuracy
+        if (e.clock.lastFiredAt) {
+          e.clock.intervalMs = timestamp - e.clock.lastFiredAt;
+        }
+      },
+      getFireCount() {
+        return self.entries.get(opts.id)?.clock.fireCount ?? 0;
+      },
+    };
+  }
+
+  /**
+   * Remove a clock completely — stop + delete from entries.
+   * Used for user-deleted loops/crons (vs stop which keeps the entry).
+   */
+  remove(id: string): void {
+    this.stop(id);
+    this.entries.delete(id);
+    log(`[clock] Removed: ${id}`);
   }
 
   /** Pause a clock — stops the interval, preserves metadata. */
