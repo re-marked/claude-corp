@@ -383,6 +383,20 @@ export class CronManager {
           });
 
           log(`[crons] Spawned task "${title}" (${task.id}) from cron ${slug}`);
+
+          // Hand the task so the agent gets a DM notification
+          if (assignedTo && tpl.assignTo) {
+            try {
+              await fetch(`http://127.0.0.1:${this.daemon.getPort()}/tasks/${encodeURIComponent(task.id)}/hand`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to: tpl.assignTo }),
+              });
+              log(`[crons] Handed spawned task ${task.id} → @${tpl.assignTo}`);
+            } catch {
+              // Non-fatal — task exists even if hand fails
+            }
+          }
         } catch (err) {
           logError(`[crons] Failed to spawn task from cron ${slug}: ${err}`);
         }

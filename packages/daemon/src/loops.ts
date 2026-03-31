@@ -367,13 +367,15 @@ export class LoopManager {
           output = (data.response as string ?? data.error as string ?? '').slice(0, 500);
 
           // Resolve agent member ID for writing response to channel
-          if (data.ok && clock.channelId) {
+          if (data.ok) {
+            // Track dispatch in analytics
             try {
               const members = readConfig<any[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
               const agent = members.find((m: any) =>
                 m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === clock.targetAgent!.toLowerCase(),
               );
               agentMemberId = agent?.id ?? null;
+              if (agent) this.daemon.analytics.trackDispatch(agent.id);
             } catch {}
           }
         } else {

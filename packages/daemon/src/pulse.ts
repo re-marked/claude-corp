@@ -82,17 +82,19 @@ export class Pulse {
 
     log(`[pulse] Heartbeat cycle — ${online.length} agents online`);
 
-    // Ping all agents concurrently (with individual timeouts)
-    const results = await Promise.allSettled(
-      online.map(agent => this.pingAgent(agent.memberId, agent.displayName, now)),
-    );
-
-    // Count results
+    // Stagger pings with 1.5s delay between each — prevents thundering herd
+    // on a single API key. Sequential, not concurrent.
     let responded = 0;
     let missed = 0;
-    for (const r of results) {
-      if (r.status === 'fulfilled' && r.value) responded++;
-      else missed++;
+    for (let i = 0; i < online.length; i++) {
+      const agent = online[i]!;
+      if (i > 0) await new Promise(r => setTimeout(r, 1500));
+      try {
+        const ok = await this.pingAgent(agent.memberId, agent.displayName, now);
+        if (ok) responded++; else missed++;
+      } catch {
+        missed++;
+      }
     }
 
     log(`[pulse] Heartbeat results: ${responded} responded, ${missed} missed`);
@@ -155,17 +157,31 @@ export class Pulse {
       const data = await resp.json() as Record<string, unknown>;
 
       if (data.ok) {
-        // Agent responded — reset missed count
+        // Agent responded — check if recovering from escalation
+        const wasEscalated = state.escalated;
         state.missedCount = 0;
         state.lastResponseAt = now;
         state.escalated = false;
 
-        const response = (data.response as string ?? '').trim();
-        const isOk = response.includes('HEARTBEAT_OK') || response.length > 0;
+        log(`[pulse] ${displayName} ${isBusy ? '(busy)' : '(idle)'} — responded OK`);
 
-        if (isOk) {
-          log(`[pulse] ${displayName} ${isBusy ? '(busy)' : '(idle)'} — responded OK`);
+        // Recovery notification — tell CEO the agent is back
+        if (wasEscalated) {
+          log(`[pulse] ${displayName} RECOVERED after escalation`);
+          try {
+            await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                target: 'ceo',
+                message: `RECOVERY: Agent "${displayName}" is back online and responding to heartbeats. Previous escalation resolved.`,
+                sessionKey: `pulse-recovery:${Date.now()}`,
+              }),
+              signal: AbortSignal.timeout(30_000),
+            });
+          } catch {} // Non-fatal
         }
+
         return true;
       } else {
         // Dispatch failed (agent error, not network)

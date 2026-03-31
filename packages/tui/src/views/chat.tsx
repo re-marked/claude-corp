@@ -286,16 +286,50 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // /hand <task-id> @agent — hand a task to an agent (start work)
     if (text.trim().toLowerCase().startsWith('/hand')) {
       const parts = text.trim().split(/\s+/).slice(1);
-      if (parts.length < 2) {
+      if (parts.length < 1) {
         writeSystemMessage('Usage: /hand <task-id> @agent\nCreating a task is planning. Handing it starts the work.');
         return;
       }
       const handTaskId = parts[0]!;
-      const agentSlug = parts[1]!.startsWith('@') ? parts[1].slice(1) : parts[1]!;
+      let agentSlug: string;
+
+      if (parts.length >= 2) {
+        agentSlug = parts[1]!.startsWith('@') ? parts[1].slice(1) : parts[1]!;
+      } else if (channel.kind === 'direct') {
+        // DM auto-assign — if in a DM, hand to the agent in this channel
+        const agent = members.find(m => m.type === 'agent' && channel.memberIds.includes(m.id));
+        if (agent) {
+          agentSlug = agent.displayName.toLowerCase().replace(/\s+/g, '-');
+        } else {
+          writeSystemMessage('Usage: /hand <task-id> @agent');
+          return;
+        }
+      } else {
+        writeSystemMessage('Usage: /hand <task-id> @agent\nOr use /hand in a DM to auto-assign to that agent.');
+        return;
+      }
+
+      // Validate the agent exists
+      const targetAgent = members.find(m =>
+        m.type === 'agent' && m.displayName.toLowerCase().replace(/\s+/g, '-') === agentSlug.toLowerCase(),
+      );
+      if (!targetAgent) {
+        writeSystemMessage(`Agent @${agentSlug} not found. Available: ${members.filter(m => m.type === 'agent').map(m => m.displayName).join(', ')}`);
+        return;
+      }
+
+      // Check if agent is busy — warn but don't block
+      const agentStatus = await daemonClient.status().catch(() => null);
+      const agentInfo = (agentStatus as any)?.agents?.find((a: any) => a.memberId === targetAgent.id);
+      const busyWarning = agentInfo?.workStatus === 'busy' ? ' (agent is busy — task will queue in their inbox)' : '';
+
       try {
         const result = await daemonClient.handTask(handTaskId, agentSlug);
         if ((result as any).ok) {
-          writeSystemMessage(`Handed task ${handTaskId} → @${(result as any).handedTo ?? agentSlug}. Work begins.`);
+          const task = (result as any).task;
+          const title = task?.title ?? handTaskId;
+          const priority = task?.priority ?? 'normal';
+          writeSystemMessage(`Handed "${title}" [${priority}] → @${targetAgent.displayName}${busyWarning}. Work begins.`);
         } else {
           writeSystemMessage(`Failed to hand: ${(result as any).error ?? 'unknown error'}`);
         }
