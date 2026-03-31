@@ -318,6 +318,12 @@ export class ClockManager {
     return undefined;
   }
 
+  /** Resolve any ID (ck-NNNN or slug) to the internal map key (slug). */
+  resolveKey(id: string): string | undefined {
+    const found = this.findEntry(id);
+    return found ? found[0] : undefined;
+  }
+
   /** Get all clocks as metadata (no handles, no callbacks). */
   list(): Clock[] {
     return [...this.entries.values()].map(e => ({ ...e.clock }));
