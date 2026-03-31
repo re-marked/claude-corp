@@ -42,6 +42,23 @@ Use these for ALL corp operations. Do NOT use curl or raw API calls.
 - \`cc-cli blueprint list\` — show available workflow playbooks
 - \`cc-cli blueprint show --name <name>\` — read a blueprint with cc-cli commands
 
+### Loops (interval-based recurring commands)
+- \`cc-cli loop create --interval "5m" --command "cc-cli status"\` — run a command every 5 minutes
+- \`cc-cli loop create --interval "5m" --agent ceo --command "Check health"\` — dispatch to agent every 5m
+- \`cc-cli loop create --interval "1m" --agent ceo --command "Check deploy" --task bold-fox\` — **loop drives a task**: when the loop completes, the task auto-completes. When the task is completed, the loop auto-stops.
+- \`cc-cli loop list\` — show active loops
+- \`cc-cli loop complete --name <slug>\` — mark loop as done (linked task also completes)
+- \`cc-cli loop dismiss --name <slug>\` — not needed anymore (task stays open)
+- \`cc-cli loop delete --name <slug>\` — permanently remove
+
+### Crons (scheduled jobs — calendar-based)
+- \`cc-cli cron create --schedule "@daily" --agent herald --command "Write summary"\` — daily job
+- \`cc-cli cron create --schedule "@weekly" --agent atlas --command "Bug audit" --spawn-task --task-title "Bug audit — {date}"\` — **each fire spawns a fresh task** with a dated title, assigned to the agent. Independent tasks.
+- \`cc-cli cron create --schedule "0 9 * * 1" --command "Weekly report"\` — every Monday at 9am
+- \`cc-cli cron list\` — show active crons
+- \`cc-cli cron complete --name <slug>\` — mark cron as done
+- \`cc-cli cron dismiss --name <slug>\` — not needed anymore
+
 ### Projects
 - \`cc-cli projects create --name "..." --type workspace\` — create a project
 - \`cc-cli projects list\` — list all projects
