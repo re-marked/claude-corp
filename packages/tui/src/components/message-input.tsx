@@ -242,6 +242,7 @@ const COMMANDS = [
   { name: '/hire', syntax: '/hire', desc: 'Open agent hiring wizard' },
   { name: '/task', syntax: '/task', desc: 'Create a new task (planning)' },
   { name: '/hand', syntax: '/hand <task-id> @agent', desc: 'Hand a task to an agent (start work)' },
+  { name: '/plan', syntax: '/plan <goal>', desc: 'CEO goes deep: researches, thinks, returns a structured plan' },
   { name: '/dream', syntax: '/dream @agent', desc: 'Force-trigger memory consolidation dream' },
   { name: '/project', syntax: '/project', desc: 'Create a new project' },
   { name: '/team', syntax: '/team', desc: 'Create a new team' },
