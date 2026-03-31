@@ -64,6 +64,15 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showTeamWizard, setShowTeamWizard] = useState(false);
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
 
+  // Plan review mode — replaces input when a plan arrives
+  const [planReview, setPlanReview] = useState<{
+    planId: string;
+    planPath: string;
+    choice: number; // 0=approve, 1=edit, 2=dismiss
+    editing: boolean;
+    editText: string;
+  } | null>(null);
+
   // Jack mode — persistent conversation session with an agent
   // Default: jack is ON for DMs (corp.json defaultDmMode, defaults to 'jack')
   const [jackMode, setJackMode] = useState<{
@@ -159,6 +168,51 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   useInput((input, key) => {
     if (showHireWizard || showModelWizard) return;
+    // Plan review mode keyboard handling
+    if (planReview) {
+      if (key.escape) { setPlanReview(null); return; }
+      if (!planReview.editing) {
+        if (key.upArrow) { setPlanReview(p => p ? { ...p, choice: Math.max(0, p.choice - 1) } : p); return; }
+        if (key.downArrow) { setPlanReview(p => p ? { ...p, choice: Math.min(2, p.choice + 1) } : p); return; }
+        if (key.return) {
+          if (planReview.choice === 0) {
+            // Approve — tell CEO to execute
+            writeSystemMessage('Plan approved. CEO will decompose into tasks.');
+            if (jackMode?.active) {
+              handleSend(`The plan at ${planReview.planPath} is approved. Decompose it into a Contract with tasks and start execution. Follow the Coordinator workflow.`);
+            }
+            setPlanReview(null);
+          } else if (planReview.choice === 1) {
+            // Edit — enter text input mode
+            setPlanReview(p => p ? { ...p, editing: true, editText: '' } : p);
+          } else {
+            // Dismiss
+            writeSystemMessage('Plan dismissed.');
+            setPlanReview(null);
+          }
+          return;
+        }
+      } else {
+        // Editing mode — capture text input
+        if (key.escape) { setPlanReview(p => p ? { ...p, editing: false } : p); return; }
+        if (key.return && planReview.editText.trim()) {
+          // Send feedback to CEO
+          handleSend(`Feedback on the plan at ${planReview.planPath}: ${planReview.editText}. Revise the plan accordingly.`);
+          writeSystemMessage('Feedback sent. CEO will revise the plan.');
+          setPlanReview(null);
+          return;
+        }
+        if (key.backspace) {
+          setPlanReview(p => p ? { ...p, editText: p.editText.slice(0, -1) } : p);
+          return;
+        }
+        if (input && !key.ctrl && !key.meta) {
+          setPlanReview(p => p ? { ...p, editText: p.editText + input } : p);
+          return;
+        }
+      }
+      return; // Consume all input in plan review mode
+    }
     if (key.ctrl && input === 'm') {
       setShowMemberSidebar(prev => !prev);
     }
@@ -300,8 +354,16 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           goal,
           channelId: channel.id,
         });
-        if (result.ok) {
-          writeSystemMessage(`Plan ready: ${result.planPath}\n\n${result.response ?? 'Plan saved.'}`);
+        if (result.ok && result.planId) {
+          writeSystemMessage(`Plan saved: ${result.planPath}`);
+          // Enter plan review mode — replace input with approve/edit/dismiss choice
+          setPlanReview({
+            planId: result.planId,
+            planPath: result.planPath!,
+            choice: 0,
+            editing: false,
+            editText: '',
+          });
         } else {
           writeSystemMessage(`Plan failed: ${result.error ?? 'unknown'}`);
         }
@@ -1382,19 +1444,61 @@ Always consider what happens when things go wrong.`,
         <Box gap={1} paddingLeft={1}>
           <Text color={COLORS.muted}><Spinner type="dots" /></Text>
           <Text color={COLORS.subtle}>
-            {thinkingAgents.length > 0
-              ? `${thinkingAgents.join(', ')} ${thinkingAgents.length === 1 ? 'is' : 'are'} typing...`
-              : `${[...dispatchingAgents].join(', ')} ${dispatchingAgents.length === 1 ? 'is' : 'are'} working...`}
+            {(() => {
+              const THINKING_VERBS = ['thinking', 'reasoning', 'contemplating', 'ideating', 'pondering', 'mulling'];
+              const WORKING_VERBS = ['working', 'processing', 'executing', 'crunching', 'operating', 'computing'];
+              const verb = thinkingAgents.length > 0
+                ? THINKING_VERBS[Math.floor(Date.now() / 8000) % THINKING_VERBS.length]
+                : WORKING_VERBS[Math.floor(Date.now() / 8000) % WORKING_VERBS.length];
+              const names = thinkingAgents.length > 0 ? thinkingAgents.join(', ') : [...dispatchingAgents].join(', ');
+              const count = thinkingAgents.length > 0 ? thinkingAgents.length : dispatchingAgents.length;
+              return `${names} ${count === 1 ? 'is' : 'are'} ${verb}...`;
+            })()}
           </Text>
         </Box>
       )}
-      <MessageInput
-        onSend={handleSend}
-        disabled={sending}
-        placeholder={jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
-        agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
-      />
-      <Text color={jackMode?.active ? COLORS.warning : COLORS.muted}> {jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  Esc:back</Text>
+      {/* Plan review mode — replaces input with approve/edit/dismiss choice */}
+      {planReview ? (
+        <Box flexDirection="column">
+          <Box borderStyle="round" borderColor={COLORS.info} paddingX={1} marginTop={1} flexDirection="column">
+            <Text bold color={COLORS.info}>Plan Review — {planReview.planPath}</Text>
+            {!planReview.editing ? (
+              <Box flexDirection="column" marginTop={1}>
+                {['Approve — start building', 'Edit — give feedback first', 'Dismiss — discard plan'].map((label, i) => (
+                  <Box key={i} gap={1}>
+                    <Text color={planReview.choice === i ? COLORS.primary : COLORS.muted}>
+                      {planReview.choice === i ? '\u25B8' : ' '}
+                    </Text>
+                    <Text color={planReview.choice === i ? COLORS.text : COLORS.subtle} bold={planReview.choice === i}>
+                      {label}
+                    </Text>
+                  </Box>
+                ))}
+                <Text color={COLORS.muted} dimColor> up/down, Enter to confirm</Text>
+              </Box>
+            ) : (
+              <Box flexDirection="column" marginTop={1}>
+                <Text color={COLORS.subtle}>Feedback for the CEO (Enter to send):</Text>
+                <Box>
+                  <Text bold color={COLORS.primary}>&gt; </Text>
+                  <Text>{planReview.editText}<Text inverse> </Text></Text>
+                </Box>
+              </Box>
+            )}
+          </Box>
+          <Text color={COLORS.info}> PLAN REVIEW  up/down:select  Enter:confirm  Esc:cancel</Text>
+        </Box>
+      ) : (
+        <>
+          <MessageInput
+            onSend={handleSend}
+            disabled={sending}
+            placeholder={jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
+            agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
+          />
+          <Text color={jackMode?.active ? COLORS.warning : COLORS.muted}> {jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  Esc:back</Text>
+        </>
+      )}
     </Box>
   );
 }
