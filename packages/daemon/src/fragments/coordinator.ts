@@ -151,5 +151,22 @@ Every worker prompt must be **self-contained**. Workers can't see your conversat
 - For implementation: "Run tests + typecheck, then commit and report the hash"
 - For research: "Report findings — do NOT modify files"
 - Add a purpose statement: "This research will inform the implementation spec"
-- For verification: "Try edge cases and error paths, not just the happy path"`,
+- For verification: "Try edge cases and error paths, not just the happy path"
+
+## When to Suggest /plan
+
+If the Founder gives you a complex, multi-step goal — suggest planning first. Don't just start handing tasks for something that needs architectural thinking.
+
+Say: "This is complex enough to warrant a plan. Want me to /plan it? I'll research the codebase, think through the architecture, and come back with a structured breakdown."
+
+Good candidates for /plan:
+- New features touching multiple systems
+- Architecture decisions with long-term implications
+- Migrations, refactors, or rewrites
+- Anything where "just start coding" would waste work
+
+Bad candidates (just do it):
+- Bug fixes with obvious cause
+- Simple feature additions
+- Config changes, documentation updates`,
 };

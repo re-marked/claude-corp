@@ -283,6 +283,34 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /plan <goal> — deep planning session with the CEO
+    if (text.trim().toLowerCase().startsWith('/plan')) {
+      const goal = text.trim().slice(5).trim();
+      if (!goal) {
+        writeSystemMessage('Usage: /plan <goal>\nCEO goes deep: researches, thinks, returns a structured plan.');
+        return;
+      }
+      // Random planning verb for alive feeling
+      const verbs = ['brewing', 'devising', 'architecting', 'contemplating', 'deliberating', 'mapping out', 'crafting', 'distilling'];
+      const verb = verbs[Math.floor(Math.random() * verbs.length)]!;
+      writeSystemMessage(`CEO is ${verb} a plan for: ${goal}\nThis may take a few minutes...`);
+
+      try {
+        const result = await daemonClient.createPlan({
+          goal,
+          channelId: channel.id,
+        });
+        if (result.ok) {
+          writeSystemMessage(`Plan ready: ${result.planPath}\n\n${result.response ?? 'Plan saved.'}`);
+        } else {
+          writeSystemMessage(`Plan failed: ${result.error ?? 'unknown'}`);
+        }
+      } catch (err) {
+        writeSystemMessage(`Plan error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     // /dream @agent — force-trigger a memory consolidation dream
     if (text.trim().toLowerCase().startsWith('/dream')) {
       const parts = text.trim().split(/\s+/).slice(1);

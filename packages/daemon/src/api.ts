@@ -797,6 +797,73 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /plan — deep planning session
+      if (method === 'POST' && path === '/plan') {
+        const { buildPlanPrompt, randomPlanVerb } = await import('./plan-prompt.js');
+        const { taskId: makeTaskId } = await import('@claudecorp/shared');
+        const { writeFileSync, mkdirSync } = await import('node:fs');
+        const body = await readBody(req) as Record<string, unknown>;
+        const goal = body.goal as string;
+        if (!goal) { json(res, { error: 'goal is required' }, 400); return; }
+
+        const channelId = (body.channelId as string) ?? '';
+        const projectName = body.projectName as string | undefined;
+        const verb = randomPlanVerb();
+
+        // Find CEO
+        const members = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
+        const ceo = members.find((m: any) => m.rank === 'master' && m.type === 'agent');
+        if (!ceo) { json(res, { error: 'No CEO agent found' }, 404); return; }
+
+        const agentDir = ceo.agentDir ? join(daemon.corpRoot, ceo.agentDir).replace(/\\/g, '/') : daemon.corpRoot;
+        const prompt = buildPlanPrompt({
+          goal,
+          corpRoot: daemon.corpRoot.replace(/\\/g, '/'),
+          agentDir,
+          projectName,
+        });
+
+        const slug = ceo.displayName.toLowerCase().replace(/\s+/g, '-');
+
+        try {
+          const resp = await fetch(`http://127.0.0.1:${daemon.getPort()}/cc/say`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              target: slug,
+              message: prompt,
+              sessionKey: `jack:${slug}`,
+              channelId: channelId || undefined,
+            }),
+            signal: AbortSignal.timeout(10 * 60 * 1000), // 10 min timeout for planning
+          });
+
+          const data = await resp.json() as Record<string, unknown>;
+
+          if (data.ok && data.response) {
+            // Save plan to file
+            const planId = makeTaskId(); // word-pair ID
+            const plansDir = join(daemon.corpRoot, 'plans');
+            mkdirSync(plansDir, { recursive: true });
+            const planPath = join(plansDir, `${planId}.md`);
+            writeFileSync(planPath, data.response as string, 'utf-8');
+
+            json(res, {
+              ok: true,
+              planId,
+              planPath: `plans/${planId}.md`,
+              verb,
+              response: (data.response as string).slice(0, 1000),
+            });
+          } else {
+            json(res, { ok: false, error: (data as any).error ?? 'Plan failed', verb }, 500);
+          }
+        } catch (err) {
+          json(res, { ok: false, error: err instanceof Error ? err.message : String(err), verb }, 500);
+        }
+        return;
+      }
+
       // POST /dream — force-trigger a dream for an agent
       if (method === 'POST' && path === '/dream') {
         const body = await readBody(req) as Record<string, unknown>;
