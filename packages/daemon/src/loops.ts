@@ -39,6 +39,8 @@ export interface CreateLoopOpts {
   maxRuns?: number;
   /** Channel where output should be written. Null = output captured but not posted. */
   channelId?: string;
+  /** Link this loop to a task — loop drives the task, bidirectional lifecycle. */
+  taskId?: string;
 }
 
 export class LoopManager {
@@ -94,6 +96,8 @@ export class LoopManager {
       channelId: opts.channelId ?? null,
       scheduledStatus: 'running',
       endedAt: null,
+      taskId: opts.taskId ?? null,
+      spawnTaskTemplate: null, // Loops don't spawn tasks — they drive one
     };
 
     // Register with ClockManager for observability

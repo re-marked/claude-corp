@@ -27,6 +27,8 @@ export interface Task {
   teamId: string | null;
   acceptanceCriteria: string[] | null;
   dueAt: string | null;
+  /** Loop that drives this task. When the loop completes, this task auto-completes. */
+  loopId: string | null;
   createdAt: string;
   updatedAt: string;
 }

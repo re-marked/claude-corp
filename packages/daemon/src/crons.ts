@@ -41,6 +41,16 @@ export interface CreateCronOpts {
   targetAgent?: string;
   /** Auto-stop after N fires */
   maxRuns?: number;
+  /** If true, each fire spawns a fresh task from the template below. */
+  spawnTask?: boolean;
+  /** Title pattern for spawned tasks — {date} replaced with fire date */
+  taskTitle?: string;
+  /** Agent slug to assign spawned tasks to */
+  assignTo?: string;
+  /** Priority for spawned tasks */
+  taskPriority?: string;
+  /** Description for spawned tasks */
+  taskDescription?: string;
   /** Channel where output should be written */
   channelId?: string;
 }
@@ -115,6 +125,13 @@ export class CronManager {
       channelId: opts.channelId ?? null,
       scheduledStatus: 'running',
       endedAt: null,
+      taskId: null, // Crons don't link to tasks — they spawn fresh ones
+      spawnTaskTemplate: opts.spawnTask ? {
+        title: opts.taskTitle ?? `${opts.command.slice(0, 40)} — {date}`,
+        assignTo: opts.assignTo ?? opts.targetAgent ?? null,
+        priority: (opts.taskPriority as any) ?? 'normal',
+        description: opts.taskDescription ?? null,
+      } : null,
     };
 
     // Register external clock for observability

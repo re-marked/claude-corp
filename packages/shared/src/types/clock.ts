@@ -61,6 +61,18 @@ export type ScheduledClockStatus =
   | 'dismissed'   // No longer needed — hidden from /clock but kept in clocks.json
   | 'deleted';    // Marked for removal — cleaned up on next persist
 
+/** Template for tasks spawned by a cron on each fire. */
+export interface CronTaskTemplate {
+  /** Title pattern — {date} replaced with fire date (e.g., "Bug audit — {date}") */
+  title: string;
+  /** Agent slug to assign each spawned task to */
+  assignTo: string | null;
+  /** Task priority */
+  priority: 'critical' | 'high' | 'normal' | 'low';
+  /** Optional description for each spawned task */
+  description: string | null;
+}
+
 export interface ScheduledClock extends Clock {
   /** Original schedule expression: "@every 5m", "0 9 * * 1", "@daily" */
   expression: string;
@@ -84,4 +96,8 @@ export interface ScheduledClock extends Clock {
   scheduledStatus: ScheduledClockStatus;
   /** When this loop/cron was completed or dismissed */
   endedAt: number | null;
+  /** For loops: the task this loop drives. Loop complete → task complete. */
+  taskId: string | null;
+  /** For crons: if set, each fire spawns a fresh task from this template. */
+  spawnTaskTemplate: CronTaskTemplate | null;
 }
