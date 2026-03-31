@@ -181,16 +181,8 @@ export class Daemon {
 
     this.analytics.start();
 
-    // Register Failsafe heartbeat as a Clock
-    this.clocks.register({
-      id: 'failsafe-heartbeat',
-      name: 'Failsafe Heartbeat',
-      type: 'heartbeat',
-      intervalMs: 5 * 60 * 1000,
-      target: 'Failsafe',
-      description: 'Dispatches monitoring protocol to Failsafe agent every 5m',
-      callback: () => this.dispatchFailsafeHeartbeat(),
-    });
+    // NOTE: Failsafe heartbeat removed — Pulse now handles ALL agent heartbeats
+    // directly (two-state: idle → check casket, busy → quick ping).
 
     // Register Herald narration as a Clock
     this.clocks.register({
