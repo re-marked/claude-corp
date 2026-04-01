@@ -82,9 +82,9 @@ Rules:
 }
 
 function buildDeepPlanPrompt(opts: PlanPromptOpts, projectCtx: string): string {
-  return `# Plan Mode — Deep Planning
+  return `# Plan Mode — Deep Planning (5-Phase Workflow)
 
-Take your time. Research thoroughly. Think about tradeoffs.
+You have up to 20 minutes. Do NOT rush. A plan that takes 2 minutes is not a deep plan.
 
 **Goal:** ${opts.goal}${projectCtx}
 **Corp root:** \`${opts.corpRoot}\`
@@ -92,13 +92,30 @@ Take your time. Research thoroughly. Think about tradeoffs.
 
 ---
 
-## Instructions
+## The 5 Phases — Execute ALL of them in order
 
-This is a PLANNING session. Your job:
+### Phase 1: Explore & Understand
+Read the codebase. Understand what exists. Do NOT skip this.
+- Read relevant source files, configs, existing patterns
+- Check what functions/modules already exist that you can reuse
+- Identify constraints, dependencies, potential conflicts
+- If there's no codebase yet, research the ecosystem (frameworks, libraries, best practices)
 
-1. **Research first** — read relevant files, understand the codebase, check existing patterns. Use tools. Do NOT guess.
-2. **Think deeply** — consider multiple approaches. Weigh tradeoffs. Think about what could go wrong.
-3. **Produce a structured plan** in this format:
+### Phase 2: Design
+Think about HOW to build it. Consider multiple approaches.
+- What are 2-3 different approaches? List them.
+- What are the tradeoffs of each? (complexity, performance, maintainability)
+- Which approach is best and WHY?
+- What existing code can be reused? (reference file:line)
+
+### Phase 3: Review & Verify
+Check your assumptions against reality.
+- Re-read the critical files you'll be modifying
+- Verify that the functions you plan to reuse actually work as expected
+- Identify anything you're unsure about — note it in Risks
+
+### Phase 4: Write the Structured Plan
+Now — and ONLY now — write the plan. Use this format:
 
 \`\`\`markdown
 # Plan: [title]
@@ -135,11 +152,23 @@ This is a PLANNING session. Your job:
 [Small / Medium / Large — and why]
 \`\`\`
 
+### Phase 5: Self-Review
+Before finalizing, check your own plan:
+- Is every task specific enough that an agent with zero context could execute it?
+- Are file paths real (you verified they exist) or assumed?
+- Did you consider what could go wrong?
+- Is the scope realistic for the timeline?
+- Would YOU approve this plan if someone else wrote it?
+
+If any answer is "no" — go back and fix it before responding.
+
+---
+
 Rules:
-- **Use tools.** Read files. Run commands. Don't plan in the dark.
-- **Be specific.** File paths, not "the auth module."
-- **Think about phases.** What parallelizes? What must be sequential?
-- **Include risks.** Every plan has them.
-- **Don't implement.** Plan only. No code changes.
-- **Don't rush.** You have up to 20 minutes.`;
+- **Use tools in every phase.** Read files. Run commands. Don't plan in the dark.
+- **Be specific.** File paths with line numbers, not "the auth module."
+- **Think about parallelism.** What can workers do simultaneously?
+- **Include risks.** Every plan has them. Name the mitigation.
+- **Don't implement.** Plan only. No code changes. No commits.
+- **Don't rush.** If your plan took less than 5 minutes, it's not deep enough. Go back to Phase 1.`;
 }
