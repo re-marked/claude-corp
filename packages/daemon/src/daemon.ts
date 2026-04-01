@@ -30,6 +30,7 @@ import { hireFailsafe } from './failsafe.js';
 import { hireJanitor } from './janitor.js';
 import { hireWarden } from './warden.js';
 import { hireHerald } from './herald.js';
+import { hirePlanner } from './planner.js';
 import { ContractWatcher } from './contract-watcher.js';
 import { ClockManager } from './clock-manager.js';
 import { LoopManager } from './loops.js';
@@ -720,6 +721,11 @@ export class Daemon {
       await hireHerald(this);
     } catch (err) {
       logError(`[daemon] Failed to bootstrap Herald agent: ${err}`);
+    }
+    try {
+      await hirePlanner(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Planner agent: ${err}`);
     }
   }
 

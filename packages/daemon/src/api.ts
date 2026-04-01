@@ -804,12 +804,21 @@ export function createApi(daemon: Daemon): Server {
         const verb = randomPlanVerb();
         const agentSlug = body.agent as string | undefined;
 
-        // Find target agent — specified, or CEO as default
+        // Find target agent:
+        // - Deep plan (type=plan) → Planner agent (Opus) by default
+        // - Sketch (type=sketch) → specified agent, or CEO
         const members = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
         const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
-        const target = agentSlug
-          ? members.find((m: any) => m.type === 'agent' && (normalize(m.displayName) === normalize(agentSlug) || m.id === agentSlug))
-          : members.find((m: any) => m.rank === 'master' && m.type === 'agent');
+        let target: any;
+        if (agentSlug) {
+          target = members.find((m: any) => m.type === 'agent' && (normalize(m.displayName) === normalize(agentSlug) || m.id === agentSlug));
+        } else if (planType === 'plan') {
+          // Deep plan → use Planner agent (Opus) if available, fall back to CEO
+          target = members.find((m: any) => m.displayName === 'Planner' && m.type === 'agent')
+            ?? members.find((m: any) => m.rank === 'master' && m.type === 'agent');
+        } else {
+          target = members.find((m: any) => m.rank === 'master' && m.type === 'agent');
+        }
         if (!target) { json(res, { error: `Agent "${agentSlug ?? 'CEO'}" not found` }, 404); return; }
 
         const agentDir = target.agentDir ? join(daemon.corpRoot, target.agentDir).replace(/\\/g, '/') : daemon.corpRoot;
