@@ -124,6 +124,100 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - /loop info <name> — detail view for specific loop
 - Loop-task link testing with real agents
 
+## v0.12.0 — Agent Dreams (MERGED)
+
+- ✅ 4-phase memory consolidation: Orient → Gather → Consolidate → Prune (adapted from Claude Code's autoDream)
+- ✅ Natural idle trigger: 5min idle + no pending inbox + 1h since last dream
+- ✅ Dream state persisted to `agents/<name>/dream-state.json`
+- ✅ Force dream via API: `POST /dream` + `cc-cli dream`
+- ✅ Lock mechanism with PID + race detection + 1h stale threshold
+- ✅ Uses Jack session key for DM context continuity
+- ✅ Dream consolidation clock registered in ClockManager (every 2m scan)
+
+## v0.13.0 — Coordinator Mode (MERGED)
+
+- ✅ 172-line coordinator prompt fragment (adapted from Claude Code's coordinatorMode.ts, 370 lines)
+- ✅ Injected for all master/leader rank agents
+- ✅ 4-phase workflow: Research → Synthesis → Implementation → Verification
+- ✅ Anti-lazy-delegation rules ("Never say 'based on your findings, fix it'")
+- ✅ Continue-vs-spawn decision matrix
+- ✅ Parallelism as superpower — concurrent workers for research
+- ✅ Verification with fresh eyes only (not the implementer)
+
+## v0.14.0 — Plan Primitive (MERGED)
+
+- ✅ Two-tier planning: Sketch (5m, ~60 lines) + Ultraplan (20m, 5-phase deep audit)
+- ✅ Sketch: reads 2-5 files, considers 2 approaches, 80-line cap, actionable
+- ✅ Ultraplan: 5 phases — Audit Codebase → Design & Compare → Stress-Test → Write Plan → Self-Review
+- ✅ Plans saved to `plans/<id>.md` with frontmatter (id, title, type, author, status)
+- ✅ Plan approval UI in TUI (approve/edit/dismiss with TextInput)
+- ✅ Rotating status verbs (brewing/devising/architecting/contemplating...)
+- ✅ cc-cli plan create/list/show commands
+
+## v0.14.3 — Planner Agent + Opus Routing (MERGED)
+
+- ✅ Planner agent auto-hired on bootstrap (like Failsafe/Warden/Herald)
+- ✅ Rank: leader, Model: claude-opus-4-6
+- ✅ Opus agents route to remote gateway (user's OpenClaw), NOT corp gateway (Haiku)
+- ✅ hireAgent() detects Opus model → skips corp gateway, calls spawnAgent()
+- ✅ initCorpGateway() skips Opus agents on rehydration
+- ✅ Deep plans auto-route to Planner (Opus), sketches use any agent
+
+### Bugs fixed during v0.14.3 testing
+- ✅ acceptanceCriteria missing from DaemonClient.createTask type
+- ✅ cc-cli send misattributed messages to busy agent (now passes founder ID)
+
+---
+
+## v0.14.3 Full Test Report (April 1, 2026)
+
+**Corp:** full-test | **Agents:** 7 | **Duration:** 16 min | **Build:** clean (0 type errors)
+
+| # | Feature | Status | Metric |
+|---|---------|--------|--------|
+| 1 | **Ultraplan (Opus)** | PASS | 251 lines, 17KB, ~10min, 8 phases, parallelism strategy, file change summary |
+| 2 | **Sketch (Haiku)** | PASS | 57 lines, 4.4KB, 50s, grounded in code, within 80-line cap |
+| 3 | **Readable IDs** | PASS | Task `cool-bay` (word-pair), member slugs (ceo, planner, herald) |
+| 4 | **Loops** | PASS | 30s interval, fired 25x in 12.5min, persisted to clocks.json, deleted cleanly |
+| 5 | **Crons** | PASS | @hourly → "Every hour", nextFireAt correct, persisted |
+| 6 | **Pulse Heartbeat** | PASS | 7 agents pinged sequentially (~6s stagger), 6/7 responded, idle/busy detection |
+| 7 | **Agent Dreams** | PASS | Warden + Herald auto-dreamed, Janitor force dream worked, 4-phase protocol |
+| 8 | **Coordinator Mode** | PASS | 172-line fragment injected for master/leader rank |
+| 9 | **Agent Hiring** | PASS | Researcher hired, 7-agent hierarchy, DM channel created, joined #general |
+| 10 | **Message Routing** | PASS* | @CEO dispatched, CEO responded with onboarding. *senderId bug found + fixed |
+| 11 | **Clock System** | PASS | 10+ system clocks, fire counts tracked, gateway health, git snapshots |
+| 12 | **Corp Stats** | PASS | 7/7 online, 47 dispatches, per-agent utilization %, 10 channels |
+
+**Ultraplan quality (Opus vs Haiku):**
+| Metric | Haiku (v0.14.2) | Opus (v0.14.3) |
+|--------|-----------------|----------------|
+| Time | 200s (3.3 min) | ~600s (10 min) |
+| Lines | 469 | 251 (denser) |
+| Size | — | 17KB |
+| Phases | 5 | 8 + parallelism graph |
+| Real file paths | Yes | Yes (verified by reading) |
+| Risk matrix | 3 risks | 7 risks with mitigations |
+| Acceptance criteria | 12 items | 9 items |
+| Worker assignment | Generic | Named roles (worker-types, worker-core, worker-cli, worker-verifier) |
+
+**Dream auto-trigger confirmed:**
+- Warden: dream #1 completed at 12:25:14 (idle trigger, clean)
+- Herald: dream #1 completed at 12:25:22 (idle trigger, clean)
+- CEO: dream triggered at 12:26:22 (hit API rate limit from ultraplan)
+- Janitor: force dream worked, detected new signal (Herald's plan)
+
+**Pulse heartbeat cycle captured (12:33):**
+```
+CEO       — miss (rate limit, miss #4)
+Failsafe  — (idle) responded OK     +6s
+Janitor   — (idle) responded OK     +6s
+Warden    — (idle) responded OK     +6s
+Herald    — (idle) responded OK     +7s
+Planner   — (idle) responded OK     +10s
+Researcher— (idle) responded OK     +6s
+Results: 6 responded, 1 missed
+```
+
 ---
 
 ## Planned but NOT yet built
@@ -163,13 +257,29 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 - Janitor merges worktrees back to project main branch
 - Git worktree methods already in shared/git.ts (createWorktree, mergeWorktree, etc.)
 
-### Future — Agent Dreams
-- Warm-start idle behavior via heartbeat context pre-loading
-- Agents pre-load workspace context during idle, ready to respond faster
+### ~~Future — Agent Dreams~~ SHIPPED v0.12.0
+- ~~Warm-start idle behavior via heartbeat context pre-loading~~
+- Shipped as 4-phase memory consolidation (Orient → Gather → Consolidate → Prune)
 
-### Future — Herald on Haiku 4.5
-- Currently uses default model. Should use Haiku for speed + cost savings
-- Needs per-agent model override to work in corp gateway config
+### ~~Future — Herald on Haiku 4.5~~ SHIPPED
+- Herald runs on corp gateway (Haiku) by default. Per-agent model routing works.
+- Opus agents (CEO, Planner) route to remote gateway. Haiku agents use corp gateway.
+
+### Future — Proactive Mode (KAIROS-lite)
+- Agents act without being prompted — monitor channels, detect patterns, take initiative
+- Adapted from Claude Code's KAIROS system
+- Next major feature after v0.14.3
+
+### Future — Corp Buddy (Tamagotchi)
+- Per-corp mascot that reflects corp health/mood
+- Adapted from Claude Code's buddy system
+
+### Future — Founder Away (AFK Mode)
+- CEO autonomy while user sleeps — autonomous task execution, morning briefing
+- Queue management, escalation deferral
+
+### Future — Token Budgets
+- Per-agent cost limits, usage tracking, budget alerts
 
 ---
 
