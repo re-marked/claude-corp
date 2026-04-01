@@ -85,7 +85,7 @@ export class TaskWatcher {
     if (!existsSync(filePath)) return;
     if (this.processing.has(filePath)) return;
     this.processing.add(filePath);
-    setTimeout(() => this.processing.delete(filePath), 2000); // Debounce 2s (Windows fs.watch fires many times)
+    setTimeout(() => this.processing.delete(filePath), 4000); // Debounce 4s (Windows fs.watch fires 3-5 times per change)
 
     try {
       const { task } = readTask(filePath);
