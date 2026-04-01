@@ -172,34 +172,43 @@ export async function hireAgent(
     log(`[hire] Added ${opts.displayName} to ${projectChannels.length} project channel(s)`);
   }
 
-  // 6. Add to corp gateway — start if first agent, hot-reload if running
-  const gw = daemon.processManager.corpGateway;
-  if (gw) {
-    const workspace = join(corpRoot, agentDir).replace(/\\/g, '/');
-    const gwAgentDir = join(corpRoot, '.gateway', 'agents', opts.agentName, 'agent').replace(/\\/g, '/');
+  // 6. Route agent: Opus → remote gateway (user's OpenClaw), everything else → corp gateway
+  const needsRemoteGateway = model.includes('opus') && globalConfig.userGateway;
 
-    gw.addAgent({
-      id: opts.agentName,
-      name: opts.displayName,
-      workspace,
-      agentDir: gwAgentDir,
-      model: model !== globalConfig.defaults.model
-        ? { primary: `${provider}/${model}` }
-        : undefined,
-    });
+  if (needsRemoteGateway) {
+    // Opus agents route to user's remote OpenClaw gateway — skip corp gateway entirely
+    log(`[hire] ${opts.displayName} needs Opus — routing to remote gateway`);
+    await daemon.processManager.spawnAgent(member.id);
+  } else {
+    // Standard agents → corp gateway (Haiku)
+    const gw = daemon.processManager.corpGateway;
+    if (gw) {
+      const workspace = join(corpRoot, agentDir).replace(/\\/g, '/');
+      const gwAgentDir = join(corpRoot, '.gateway', 'agents', opts.agentName, 'agent').replace(/\\/g, '/');
 
-    // Start gateway if this is the first agent, otherwise let OpenClaw hot-reload
-    const gwStatus = gw.getStatus();
-    if (gwStatus === 'stopped') {
-      await gw.start();
-    } else {
-      // Gateway already running — OpenClaw watches agents.list for changes
-      await new Promise((r) => setTimeout(r, 1500));
+      gw.addAgent({
+        id: opts.agentName,
+        name: opts.displayName,
+        workspace,
+        agentDir: gwAgentDir,
+        model: model !== globalConfig.defaults.model
+          ? { primary: `${provider}/${model}` }
+          : undefined,
+      });
+
+      // Start gateway if this is the first agent, otherwise let OpenClaw hot-reload
+      const gwStatus = gw.getStatus();
+      if (gwStatus === 'stopped') {
+        await gw.start();
+      } else {
+        // Gateway already running — OpenClaw watches agents.list for changes
+        await new Promise((r) => setTimeout(r, 1500));
+      }
     }
-  }
 
-  // 7. Register in process manager
-  daemon.processManager.registerGatewayAgent(member.id, member);
+    // Register in process manager
+    daemon.processManager.registerGatewayAgent(member.id, member);
+  }
 
   log(`[daemon] Hired ${opts.displayName} (${opts.rank}) as ${opts.agentName}`);
 

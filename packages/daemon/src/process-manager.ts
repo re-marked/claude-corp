@@ -81,6 +81,17 @@ export class ProcessManager {
     );
 
     for (const worker of workers) {
+      // Skip Opus agents — they route to remote gateway, not corp gateway
+      try {
+        const agentConfig = readConfig<{ model?: string }>(
+          join(this.corpRoot, worker.agentDir!, 'config.json'),
+        );
+        if (agentConfig.model?.includes('opus') && this.globalConfig.userGateway) {
+          log(`[gateway] Skipping ${worker.displayName} (Opus) — uses remote gateway`);
+          continue;
+        }
+      } catch {} // Config read failed — default to corp gateway
+
       const agentName = extractAgentSlug(worker.agentDir!);
       const workspace = join(this.corpRoot, worker.agentDir!).replace(/\\/g, '/');
       const agentDir = join(this.corpRoot, '.gateway', 'agents', agentName, 'agent').replace(/\\/g, '/');

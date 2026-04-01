@@ -57,6 +57,7 @@ export class DaemonClient {
     title: string;
     description?: string;
     priority?: string;
+    acceptanceCriteria?: string[];
     assignedTo?: string;
     createdBy: string;
   }): Promise<{ ok: boolean; task: unknown }> {
@@ -119,11 +120,11 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
-  async sendMessage(channelId: string, content: string): Promise<{ dispatching: boolean; dispatchTargets: string[] }> {
+  async sendMessage(channelId: string, content: string, senderId?: string): Promise<{ dispatching: boolean; dispatchTargets: string[] }> {
     const resp = await fetch(`${this.baseUrl}/messages/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channelId, content }),
+      body: JSON.stringify({ channelId, content, senderId }),
     });
     const data = await resp.json() as { dispatching?: boolean; dispatchTargets?: string[] };
     return { dispatching: data.dispatching ?? false, dispatchTargets: data.dispatchTargets ?? [] };
