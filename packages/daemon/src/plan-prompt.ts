@@ -46,39 +46,58 @@ export function buildPlanPrompt(opts: PlanPromptOpts): string {
 function buildSketchPrompt(opts: PlanPromptOpts, projectCtx: string): string {
   return `# Sketch Mode
 
-Quick planning pass. Outline the approach, don't over-research.
+Planning pass. Read relevant code first, then outline the approach.
 
 **Goal:** ${opts.goal}${projectCtx}
+**Corp root:** \`${opts.corpRoot}\`
 **Your workspace:** \`${opts.agentDir}\`
 
-Produce a concise plan. Structure:
+---
+
+## Process
+
+1. **Quick exploration** — read 2-5 relevant files to understand what exists. Use tools. Don't guess about the codebase.
+2. **Consider alternatives** — briefly think about 2 approaches. Pick the better one and say why.
+3. **Write the sketch** — structured, specific, actionable.
+
+## Output Format
 
 \`\`\`markdown
 # Sketch: [title]
 
 ## Goal
-[1-2 sentences]
+[What and why — 2-3 sentences]
+
+## Context
+[What you found when reading the code — existing patterns, reusable functions, constraints]
 
 ## Approach
-[High-level strategy — why this over alternatives]
+[Strategy and why this over the alternative you considered]
 
 ## Steps
-1. [First thing to do — specific, actionable]
-2. [Second thing]
+1. [Specific step with file paths — e.g., "Create src/middleware/auth.ts with JWT verify"]
+2. [...]
 3. [...]
 
+## Files to modify/create
+- \`path/to/file.ts\` — [what changes]
+- \`path/to/new-file.ts\` — [what it does]
+
 ## Risks
-- [Main risk and mitigation]
+- [Main risk + mitigation]
+- [Second risk if applicable]
 
 ## Done when
-- [ ] [Key acceptance criterion]
+- [ ] [Specific, verifiable criterion]
+- [ ] [Second criterion]
 \`\`\`
 
 Rules:
-- Keep it under 50 lines
-- Be specific — file paths, not "the module"
-- Don't implement — sketch only
-- If you need to read a file to answer, read it. But don't over-research.`;
+- **Read code first.** Even a sketch should be grounded in reality.
+- Keep it under 80 lines — concise but complete.
+- Be specific — file paths, function names, not "the auth module."
+- List files you'll modify — agents need to know the blast radius.
+- Don't implement — sketch only. No code changes.`;
 }
 
 function buildDeepPlanPrompt(opts: PlanPromptOpts, projectCtx: string): string {
