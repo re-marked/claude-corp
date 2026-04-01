@@ -178,6 +178,209 @@ This is what makes Claude Corp different from every other AI agent framework. No
 
 ---
 
+### When Things Go Wrong
+
+The cascading consensus protocol isn't just a happy path. Every level has failure handling built in.
+
+**Workers disagree on scope:**
+```
+Worker 1: "I need to modify auth.ts for the session fix."
+Worker 2: "CONFLICT — I also need auth.ts for the token refresh."
+Worker 1: "Can we split it? I take validateSession(), you take refreshToken()?"
+Worker 2: "That works. Functions are independent. SCOPE AGREED."
+```
+If workers can't resolve → team leader mediates. Team leader rewrites the scope split.
+
+**Warden rejects the contract:**
+The contract goes back to `active` status (not `draft` — work was done). Warden creates **remediation tasks** — specific things to fix. These get handed back to the relevant team leader, who assigns them to workers. The cycle repeats for just the failed parts, not the whole contract.
+
+**Merge conflicts (Janitor):**
+Janitor tries auto-merge. If conflicts are trivial (formatting, imports) → resolve automatically. If conflicts are semantic (two workers changed the same logic differently) → Janitor escalates to the team leader whose workers created the conflict. The team leader decides which version wins, or writes a merged version.
+
+**Worker fails a task:**
+Worker marks task as `blocked` with a reason. Team leader gets notified. Options:
+1. Reassign to another worker (fresh context)
+2. Pair the worker with a peer (discussion channel)
+3. Escalate to CEO if it's a design flaw in the plan
+
+**Team leader plan rejected by CEO:**
+CEO gives specific feedback: "Your plan misses the migration step" or "This overlaps with Team B." Team leaders go back to discussion. They don't start from scratch — they revise.
+
+---
+
+### The Data Model (Contract v2)
+
+**Parent Contract** (the full plan, lives at `projects/<name>/contracts/<id>/`):
+```yaml
+---
+id: swift-oak
+title: "Implement authentication system"
+type: contract
+status: draft | approved | active | review | completed | rejected | failed
+planId: plugin-system          # Reference to the ultraplan in plans/
+blueprintId: ship-feature      # Optional — auto-inject blueprint steps
+parentContract: null            # null for top-level, parent ID for sub-contracts
+subContracts:                   # Team-level sub-contracts
+  - id: swift-oak-auth
+    team: auth-team
+    leaderId: team-lead-auth
+    status: active
+  - id: swift-oak-api
+    team: api-team
+    leaderId: team-lead-api
+    status: active
+approvedBy: mark               # Founder approval
+approvedAt: 2026-04-01T12:00:00Z
+createdBy: ceo
+createdAt: 2026-04-01T11:30:00Z
+---
+
+# Contract: Implement authentication system
+
+## Plan
+(Full ultraplan text embedded here — the contract IS the plan)
+
+## Tasks
+- [ ] task: swift-oak-01 — Design session schema (unassigned)
+- [ ] task: swift-oak-02 — Implement validateSession() (unassigned)
+- [ ] task: swift-oak-03 — Write auth middleware (unassigned)
+...
+```
+
+**Sub-Contract** (team-level, lives at `projects/<name>/contracts/<id>-<team>/`):
+```yaml
+---
+id: swift-oak-auth
+title: "Auth team — session management"
+type: sub-contract
+status: active
+parentContract: swift-oak
+team: auth-team
+leaderId: team-lead-auth
+workers: [worker-1, worker-2, worker-3]
+discussionChannel: discuss-swift-oak-auth   # Temp channel for this team
+worktrees:
+  worker-1: projects/auth-system/wt/worker-1
+  worker-2: projects/auth-system/wt/worker-2
+  worker-3: projects/auth-system/wt/worker-3
+---
+```
+
+**Discussion Channel** (temporary, scoped to a sub-contract):
+```json
+{
+  "id": "discuss-swift-oak-auth",
+  "name": "discuss-swift-oak-auth",
+  "type": "discussion",
+  "scope": "contract",
+  "scopeId": "swift-oak-auth",
+  "members": ["team-lead-auth", "worker-1", "worker-2", "worker-3"],
+  "temporary": true,
+  "archiveOnComplete": true
+}
+```
+
+---
+
+### The Discussion Protocol (Fragment)
+
+This is the most important new fragment. It teaches agents HOW to deliberate — not just talk at each other.
+
+```markdown
+# Discussion Protocol
+
+You are in a **scoping discussion** with other agents. This is not a status update.
+This is a collaborative planning session where you must reach consensus.
+
+## Rules
+
+1. **Read ALL messages** in the channel before writing yours.
+   Don't respond to just the last message — read the full thread.
+
+2. **Reference specific points** from other agents by name:
+   "I agree with Worker 2's approach to the middleware, but I need to
+   modify the same file for session handling."
+
+3. **Flag conflicts explicitly** with the CONFLICT tag:
+   "CONFLICT: Worker 1 plans to modify auth.ts:validateSession().
+   I also need auth.ts for token refresh. We need to split file ownership."
+
+4. **Propose resolutions** — don't just flag problems:
+   "CONFLICT: ... PROPOSAL: I take validateSession() (lines 10-50),
+   Worker 1 takes refreshToken() (lines 55-90). No overlap."
+
+5. **State your scope clearly** when you've figured out your work:
+   "MY SCOPE: I will modify middleware.ts (new file), add tests in
+   middleware.test.ts, and update the route config in routes.ts:15-30."
+
+6. **Confirm consensus** with SCOPE AGREED:
+   "SCOPE AGREED — my work: [list of files and functions].
+   No conflicts with Worker 1 or Worker 3."
+
+7. **Do NOT start working** until ALL participants say SCOPE AGREED.
+
+8. **After completion**, use the same channel to confirm:
+   "WORK COMPLETE — [task ID]. Tests passing. Ready for review."
+   Wait for all team members to confirm before escalating.
+
+## Example Discussion
+
+Worker 1: "Reading the plan. I see three tasks: session schema, validation,
+           and middleware. I'll take the session schema — it's self-contained
+           in types.ts and session.ts. No overlap with the other two."
+
+Worker 2: "I'll take validation. But heads up — validateSession() in auth.ts
+           imports from types.ts (the session schema). @Worker 1, can you
+           have the schema done before I start validation? Or should I use
+           the existing types and you update them?"
+
+Worker 1: "Good catch. PROPOSAL: I'll define the new SessionData type first
+           and export it. You can import it from day 1. I won't change the
+           existing Session type — I'll add a new one alongside it."
+
+Worker 2: "That works. SCOPE AGREED — my work: auth.ts (validateSession,
+           isExpired), auth.test.ts. Depends on Worker 1's SessionData type
+           but no file conflicts."
+
+Worker 3: "I'll take middleware. New file middleware.ts + middleware.test.ts.
+           I import from auth.ts but don't modify it. SCOPE AGREED."
+
+Worker 1: "SCOPE AGREED — my work: types.ts (SessionData), session.ts,
+           session.test.ts. No conflicts."
+
+→ All three agreed. Team leader reviews and gives green light.
+```
+
+---
+
+### Parallel Execution with Claude Code (the 12-session scenario)
+
+Each worker owns a **git worktree** — an isolated copy of the codebase at a specific branch. Workers don't share files. They can't step on each other.
+
+```
+projects/auth-system/
+  wt/
+    worker-1/    ← git worktree, branch: contract/swift-oak/worker-1
+    worker-2/    ← git worktree, branch: contract/swift-oak/worker-2
+    worker-3/    ← git worktree, branch: contract/swift-oak/worker-3
+    worker-4/    ← another team's worktree
+    worker-5/
+    worker-6/
+```
+
+Each worker can spawn **Claude Code sessions** via the `exec` tool:
+```bash
+# Worker 1 spawns Claude Code pointing at their worktree
+claude --worktree projects/auth-system/wt/worker-1 \
+  --message "Implement SessionData type in types.ts per the spec..."
+```
+
+With 6 workers × 2 Claude Code sessions each = **12 parallel coding sessions**. Each session works on a different part of the codebase in an isolated worktree. No merge conflicts during work — conflicts only happen at merge time, when the Janitor combines everything.
+
+This is more throughput than most human dev teams. And it's all local, on your machine.
+
+---
+
 ### What Exists vs What's Missing
 
 **Exists (the primitives):**
@@ -217,7 +420,7 @@ Steps 1-4 can be built incrementally. Steps 5-7 can run in parallel. Step 8 is i
 
 ---
 
-## Shipped Features (from Claude Code source analysis)
+## Feature Specs (shipped + planned, traced from Claude Code source leak)
 
 ## v0.12.0 — Agent Dreams (autoDream)
 
