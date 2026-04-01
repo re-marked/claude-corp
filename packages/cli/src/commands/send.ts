@@ -38,7 +38,7 @@ export async function cmdSend(opts: {
     } catch {}
   }
 
-  const result = await client.sendMessage(channel.id, opts.message);
+  const result = await client.sendMessage(channel.id, opts.message, founder.id);
 
   if (opts.json && !opts.wait) {
     console.log(JSON.stringify(result));

@@ -1,10 +1,426 @@
 # Claude Corp — Roadmap
 
-> Built independently. Validated by the Claude Code source leak (March 31, 2026).
-> Every feature below traced to actual TypeScript from the leaked 512K-line codebase.
-> Source: [Kuberwastaken/claude-code](https://github.com/Kuberwastaken/claude-code) (1,905 files)
+> Your Personal Corporation — a self-growing organization of AI agents that work FOR you, running locally.
+> Not a chatbot. Not a single agent with tools. A company you own on your machine.
 
 ---
+
+## The Vision — Cascading Consensus Protocol
+
+This is how Claude Corp is meant to work. Not someday — this is the north star every feature serves.
+
+### The Flow
+
+A task doesn't get done by one agent guessing alone. It flows through a **social hierarchy** where every level discusses, plans, reviews, and agrees before work begins or results are accepted. The same pattern repeats at every scale — fractal organization.
+
+```
+Founder
+  └── CEO
+       └── Team Leader A ──┐
+       └── Team Leader B ──┼── Discussion Channel (async, real-time)
+       └── Team Leader C ──┘
+            └── Worker 1 ──┐
+            └── Worker 2 ──┼── Discussion Channel (async, real-time)
+            └── Worker 3 ──┘
+```
+
+### Phase 1 — Vision (Founder → CEO)
+
+The Founder gives the CEO an **abstract idea**. Not a spec. Not a task list. Just the vision.
+
+The CEO and Founder **discuss** it. Back and forth in their DM. The CEO asks clarifying questions, proposes angles, pushes back on scope. This is a conversation, not a command.
+
+When the vision is clear, the CEO writes an **ULTRAPLAN** — a deep, multi-phase plan using the Planner agent (Opus 4.6). The ultraplan audits the entire codebase, compares to real-world approaches, designs phases with tasks, identifies risks, and estimates scope.
+
+### Phase 2 — Contract Creation (CEO)
+
+The CEO creates a **Contract** from the ultraplan. The contract is not separate from the plan — **the contract IS the plan**. It contains:
+
+- The goal (from the ultraplan)
+- The full plan text
+- **Task files** — born inside the contract, unassigned. Each task has acceptance criteria, file paths, dependencies.
+- Status: `draft`
+
+The CEO presents the contract to the Founder: "Here's the plan. Here are the tasks. Here's the scope estimate. Here are the risks."
+
+### Phase 3 — Founder Approval
+
+The Founder reviews the contract. They can:
+- **Approve** — "Go." The CEO gets the green light.
+- **Edit** — "Change this part." Back to discussion.
+- **Reject** — "Wrong approach." CEO starts over.
+
+Nothing moves until the Founder says go. This is the only human gate in the entire flow.
+
+### Phase 4 — Team Leader Scoping (CEO → Team Leaders)
+
+The CEO takes the approved contract and splits it across **team leaders**. Each team leader gets:
+- The full contract (for context)
+- Their **fraction** of the plan — the scope their team owns
+
+If there are multiple team leaders, a **temporary discussion channel** is created (or a thread in #general). The team leaders **discuss** before writing anything:
+
+1. **Read** the full contract and their assigned scope
+2. **Discuss** with other team leaders: "I'm taking the auth module. You're taking the API layer. Are there any overlaps?"
+3. **Write** their team-level plans — what their team will build, which files they'll touch, what their workers will do
+4. **Discuss again** — compare plans, flag conflicts: "Wait, your worker needs to modify `router.ts` too. Let's coordinate."
+5. **Agree** — all team leaders confirm: "No conflicts. Scopes are clean."
+
+This happens **async in real-time**. Agents write to the channel, read each other's messages, respond. Not blind parallel planning — **collaborative scoping**.
+
+### Phase 5 — CEO Reviews Team Plans
+
+The CEO reads what the team leaders agreed on. Compares to the original contract. If the team-level plans cover the full scope without gaps or overlaps:
+
+**Green light.** Team leaders can proceed to their workers.
+
+If something's wrong — "You missed the migration step" or "This overlaps with Team B's scope" — back to discussion.
+
+### Phase 6 — Worker Scoping (Team Leaders → Workers)
+
+Each team leader takes their plan fraction and assigns it to their **workers**. Same pattern repeats:
+
+1. Workers are placed in a **temporary discussion channel** (per team)
+2. Workers **discuss** what each one will do
+3. Workers write **sketches** (mini-plans) — exactly what the sketch primitive is for
+4. Workers break sketches into **sub-tasks** with specific file paths, line numbers, acceptance criteria
+5. Workers **discuss again** — "I'm editing `auth.ts`, are you touching that file?" / "No, I'm only in `middleware.ts`, we're clean."
+6. Workers **agree** — all workers in the team confirm their scopes are conflict-free
+
+The team leader reviews the worker plans against their own team plan and the big contract. If it checks out:
+
+**Green light.** Workers can start executing.
+
+### Phase 7 — Execution (Workers)
+
+Workers do the actual work. Each worker:
+- Owns a **git worktree** (isolated copy of the codebase)
+- Can spawn **Claude Code sessions** for coding tasks (up to 2 per worker)
+- Follows their sketch/sub-task exactly
+- Reports progress to their team leader
+
+With 6 workers running 2 Claude Code sessions each, that's **12 parallel coding sessions** working on different parts of the same project in isolated worktrees. That's more throughput than most dev teams.
+
+### Phase 8 — Worker Completion & Discussion
+
+When a worker finishes their tasks, they don't just mark "done" and go idle. They **discuss** with their teammates:
+
+```
+Worker 1: "I finished the auth module. Tests passing. What about you guys?"
+Worker 2: "Done with the middleware. All green."
+Worker 3: "Same here. API routes are complete."
+Worker 1: "I think we're ready. Let's pass this up to the team leader."
+```
+
+This isn't just status reporting — it's **peer validation**. Workers confirm to each other that the work is complete before escalating.
+
+### Phase 9 — Team Leader Review
+
+The team leader receives the workers' completion signal. They review:
+- Each worker's changes against the sub-tasks
+- The combined work against their team plan fraction
+- The combined work against the big contract
+
+If satisfied, the team leader waits for **all other team leaders** to finish. Then the same discussion pattern:
+
+```
+Team Leader A: "My team's done. Auth module complete, all tests passing."
+Team Leader B: "API layer done. Integration tests green."
+Team Leader C: "Frontend done. E2E tests passing."
+Team Leader A: "No conflicts detected. I think we're ready for review."
+```
+
+### Phase 10 — Contract Review (Warden)
+
+When all team leaders agree, they **mark the contract as "in review"**. Not complete — in review.
+
+The **Warden agent** takes over:
+- Reads the original ultraplan
+- Reads the contract and all sub-contracts
+- **Audits every file** that was modified (git diff against the contract start point)
+- Checks every acceptance criterion against the actual code
+- Runs builds and type-checks
+
+### Phase 11 — QA Testing (Tester Agent)
+
+A dedicated **QA/Tester agent** (new role, auto-hired like Warden) runs:
+- Full build verification
+- Test suites
+- Edge case testing
+- Integration testing across the worktrees
+
+This also happens at the **team level** — each team's mini-contract gets QA'd before the full contract review. The Tester agent reviews the team's work in their worktree before it gets merged.
+
+### Phase 12 — Merge (Janitor)
+
+Once the Warden and Tester are satisfied, the **Janitor agent** takes over:
+- Merges all worker worktrees into a single branch
+- Resolves merge conflicts (this is the Janitor's core job)
+- Runs a final build on the merged branch
+- Verifies no regressions from the merge
+
+The Janitor can test individual worktrees in parallel before merging — build each one independently, then merge sequentially.
+
+### Phase 13 — Completion (CEO → Founder)
+
+The CEO sees that:
+- All tasks complete
+- Warden approved the review
+- Tester passed all checks
+- Janitor merged everything cleanly
+- Final build is green
+
+The CEO reports to the Founder:
+
+> "The task is complete. It wasn't done by a single agent — it was designed by 3 team leaders who discussed and agreed on scope, implemented by 9 workers who coordinated their changes, reviewed by the Warden, tested by QA, and merged by the Janitor. Here's the branch. Here's the diff. Here's what we built."
+
+This is what makes Claude Corp different from every other AI agent framework. Not one agent guessing. Not a swarm of agents doing random things. A **social hierarchy with a clear chain, rules, discussion, and consensus at every level.**
+
+---
+
+### When Things Go Wrong
+
+The cascading consensus protocol isn't just a happy path. Every level has failure handling built in.
+
+**Workers disagree on scope:**
+```
+Worker 1: "I need to modify auth.ts for the session fix."
+Worker 2: "CONFLICT — I also need auth.ts for the token refresh."
+Worker 1: "Can we split it? I take validateSession(), you take refreshToken()?"
+Worker 2: "That works. Functions are independent. SCOPE AGREED."
+```
+If workers can't resolve → team leader mediates. Team leader rewrites the scope split.
+
+**Warden rejects the contract:**
+The contract goes back to `active` status (not `draft` — work was done). Warden creates **remediation tasks** — specific things to fix. These get handed back to the relevant team leader, who assigns them to workers. The cycle repeats for just the failed parts, not the whole contract.
+
+**Merge conflicts (Janitor):**
+Janitor tries auto-merge. If conflicts are trivial (formatting, imports) → resolve automatically. If conflicts are semantic (two workers changed the same logic differently) → Janitor escalates to the team leader whose workers created the conflict. The team leader decides which version wins, or writes a merged version.
+
+**Worker fails a task:**
+Worker marks task as `blocked` with a reason. Team leader gets notified. Options:
+1. Reassign to another worker (fresh context)
+2. Pair the worker with a peer (discussion channel)
+3. Escalate to CEO if it's a design flaw in the plan
+
+**Team leader plan rejected by CEO:**
+CEO gives specific feedback: "Your plan misses the migration step" or "This overlaps with Team B." Team leaders go back to discussion. They don't start from scratch — they revise.
+
+---
+
+### The Data Model (Contract v2)
+
+**Parent Contract** (the full plan, lives at `projects/<name>/contracts/<id>/`):
+```yaml
+---
+id: swift-oak
+title: "Implement authentication system"
+type: contract
+status: draft | approved | active | review | completed | rejected | failed
+planId: plugin-system          # Reference to the ultraplan in plans/
+blueprintId: ship-feature      # Optional — auto-inject blueprint steps
+parentContract: null            # null for top-level, parent ID for sub-contracts
+subContracts:                   # Team-level sub-contracts
+  - id: swift-oak-auth
+    team: auth-team
+    leaderId: team-lead-auth
+    status: active
+  - id: swift-oak-api
+    team: api-team
+    leaderId: team-lead-api
+    status: active
+approvedBy: mark               # Founder approval
+approvedAt: 2026-04-01T12:00:00Z
+createdBy: ceo
+createdAt: 2026-04-01T11:30:00Z
+---
+
+# Contract: Implement authentication system
+
+## Plan
+(Full ultraplan text embedded here — the contract IS the plan)
+
+## Tasks
+- [ ] task: swift-oak-01 — Design session schema (unassigned)
+- [ ] task: swift-oak-02 — Implement validateSession() (unassigned)
+- [ ] task: swift-oak-03 — Write auth middleware (unassigned)
+...
+```
+
+**Sub-Contract** (team-level, lives at `projects/<name>/contracts/<id>-<team>/`):
+```yaml
+---
+id: swift-oak-auth
+title: "Auth team — session management"
+type: sub-contract
+status: active
+parentContract: swift-oak
+team: auth-team
+leaderId: team-lead-auth
+workers: [worker-1, worker-2, worker-3]
+discussionChannel: discuss-swift-oak-auth   # Temp channel for this team
+worktrees:
+  worker-1: projects/auth-system/wt/worker-1
+  worker-2: projects/auth-system/wt/worker-2
+  worker-3: projects/auth-system/wt/worker-3
+---
+```
+
+**Discussion Channel** (temporary, scoped to a sub-contract):
+```json
+{
+  "id": "discuss-swift-oak-auth",
+  "name": "discuss-swift-oak-auth",
+  "type": "discussion",
+  "scope": "contract",
+  "scopeId": "swift-oak-auth",
+  "members": ["team-lead-auth", "worker-1", "worker-2", "worker-3"],
+  "temporary": true,
+  "archiveOnComplete": true
+}
+```
+
+---
+
+### The Discussion Protocol (Fragment)
+
+This is the most important new fragment. It teaches agents HOW to deliberate — not just talk at each other.
+
+```markdown
+# Discussion Protocol
+
+You are in a **scoping discussion** with other agents. This is not a status update.
+This is a collaborative planning session where you must reach consensus.
+
+## Rules
+
+1. **Read ALL messages** in the channel before writing yours.
+   Don't respond to just the last message — read the full thread.
+
+2. **Reference specific points** from other agents by name:
+   "I agree with Worker 2's approach to the middleware, but I need to
+   modify the same file for session handling."
+
+3. **Flag conflicts explicitly** with the CONFLICT tag:
+   "CONFLICT: Worker 1 plans to modify auth.ts:validateSession().
+   I also need auth.ts for token refresh. We need to split file ownership."
+
+4. **Propose resolutions** — don't just flag problems:
+   "CONFLICT: ... PROPOSAL: I take validateSession() (lines 10-50),
+   Worker 1 takes refreshToken() (lines 55-90). No overlap."
+
+5. **State your scope clearly** when you've figured out your work:
+   "MY SCOPE: I will modify middleware.ts (new file), add tests in
+   middleware.test.ts, and update the route config in routes.ts:15-30."
+
+6. **Confirm consensus** with SCOPE AGREED:
+   "SCOPE AGREED — my work: [list of files and functions].
+   No conflicts with Worker 1 or Worker 3."
+
+7. **Do NOT start working** until ALL participants say SCOPE AGREED.
+
+8. **After completion**, use the same channel to confirm:
+   "WORK COMPLETE — [task ID]. Tests passing. Ready for review."
+   Wait for all team members to confirm before escalating.
+
+## Example Discussion
+
+Worker 1: "Reading the plan. I see three tasks: session schema, validation,
+           and middleware. I'll take the session schema — it's self-contained
+           in types.ts and session.ts. No overlap with the other two."
+
+Worker 2: "I'll take validation. But heads up — validateSession() in auth.ts
+           imports from types.ts (the session schema). @Worker 1, can you
+           have the schema done before I start validation? Or should I use
+           the existing types and you update them?"
+
+Worker 1: "Good catch. PROPOSAL: I'll define the new SessionData type first
+           and export it. You can import it from day 1. I won't change the
+           existing Session type — I'll add a new one alongside it."
+
+Worker 2: "That works. SCOPE AGREED — my work: auth.ts (validateSession,
+           isExpired), auth.test.ts. Depends on Worker 1's SessionData type
+           but no file conflicts."
+
+Worker 3: "I'll take middleware. New file middleware.ts + middleware.test.ts.
+           I import from auth.ts but don't modify it. SCOPE AGREED."
+
+Worker 1: "SCOPE AGREED — my work: types.ts (SessionData), session.ts,
+           session.test.ts. No conflicts."
+
+→ All three agreed. Team leader reviews and gives green light.
+```
+
+---
+
+### Parallel Execution with Claude Code (the 12-session scenario)
+
+Each worker owns a **git worktree** — an isolated copy of the codebase at a specific branch. Workers don't share files. They can't step on each other.
+
+```
+projects/auth-system/
+  wt/
+    worker-1/    ← git worktree, branch: contract/swift-oak/worker-1
+    worker-2/    ← git worktree, branch: contract/swift-oak/worker-2
+    worker-3/    ← git worktree, branch: contract/swift-oak/worker-3
+    worker-4/    ← another team's worktree
+    worker-5/
+    worker-6/
+```
+
+Each worker can spawn **Claude Code sessions** via the `exec` tool:
+```bash
+# Worker 1 spawns Claude Code pointing at their worktree
+claude --worktree projects/auth-system/wt/worker-1 \
+  --message "Implement SessionData type in types.ts per the spec..."
+```
+
+With 6 workers × 2 Claude Code sessions each = **12 parallel coding sessions**. Each session works on a different part of the codebase in an isolated worktree. No merge conflicts during work — conflicts only happen at merge time, when the Janitor combines everything.
+
+This is more throughput than most human dev teams. And it's all local, on your machine.
+
+---
+
+### What Exists vs What's Missing
+
+**Exists (the primitives):**
+- Contracts, Tasks, Hand, Plans/Sketches, Hierarchy (CEO → leaders → workers)
+- Warden (quality review), Herald (narration), Janitor (placeholder)
+- Channels, @mention routing, Jack sessions, Inbox queue
+- Worktree code in shared/git.ts (disabled), ClockManager, Analytics
+
+**Missing (the orchestration):**
+
+| # | Missing Piece | What It Does | Blocks |
+|---|--------------|--------------|--------|
+| 1 | **Contract-Plan Binding** | Contract contains the plan + tasks born inside it | Everything |
+| 2 | **Sub-Contracts** | Team-level mini-contracts that roll up to parent | Phase 4-9 |
+| 3 | **Discussion Protocol** | Fragment teaching agents to deliberate, flag conflicts, reach consensus | Phase 4, 6, 8, 9 |
+| 4 | **Discussion Channels** | Temporary scoped channels for multi-agent deliberation | Phase 4, 6 |
+| 5 | **Approval Gates** | Explicit "green light" at every level before work begins | Phase 3, 5, 6 |
+| 6 | **QA/Tester Agent** | Dedicated testing role, auto-hired | Phase 11 |
+| 7 | **Worktrees v2** | Per-worker git isolation, Janitor merges | Phase 7, 12 |
+| 8 | **Cascading Completion** | Workers agree → team leader reviews → contract in review → Warden → Janitor → CEO | Phase 8-13 |
+| 9 | **Blueprint Integration** | Blueprints injected when contract references them | Phase 2 |
+
+### Build Order
+
+```
+1. Contract v2 (plan binding + sub-contracts)        ──────────────────►
+2. Discussion Protocol (fragment + temp channels)      ──────────────────►
+3. Approval Gates (explicit green light at each level)   ─────────────────►
+4. Blueprint Integration (wire into contract lifecycle)    ──────────────►
+5. QA/Tester Agent (auto-hired, runs builds/tests)          ─────────────►
+6. Worktrees v2 (per-worker isolation)                        ────────────►
+7. Janitor v2 (merge all worktrees, resolve conflicts)          ──────────►
+8. Cascading Completion (the full flow wired together)            ────────►
+```
+
+Steps 1-4 can be built incrementally. Steps 5-7 can run in parallel. Step 8 is integration — wiring it all together.
+
+---
+
+## Feature Specs (shipped + planned, traced from Claude Code source leak)
 
 ## v0.12.0 — Agent Dreams (autoDream)
 
@@ -339,14 +755,29 @@ Forbidden in commits: model codenames, unreleased versions, internal repo names,
 
 ## Ship Priority
 
-| # | Version | Feature | Why First | Effort |
-|---|---------|---------|-----------|--------|
-| 1 | v0.12.0 | **Agent Dreams** | Self-contained, we have BRAIN/MEMORY, direct translation from source | Medium |
-| 2 | v0.13.0 | **Coordinator Mode** | Highest impact — structured multi-agent is the killer feature | High |
-| 3 | v0.14.0 | **Haiku Gate** | Safety + governance, builds trust | Medium |
-| 4 | v0.17.0 | **Corp Buddy** | Most viral — alive feeling, shareable | Low |
-| 5 | v0.15.0 | **Deep Plan** | Complex planning capability | Medium |
-| 6 | v0.16.0 | **Proactive Mode** | Agents work without prompting | Medium |
+### Vision Features (the cascading consensus protocol)
+
+| # | Feature | What It Unlocks | Effort |
+|---|---------|----------------|--------|
+| 1 | **Contract v2** | Plans + tasks born inside contracts, sub-contracts per team | High |
+| 2 | **Discussion Protocol** | Agents deliberate, flag conflicts, reach consensus | High |
+| 3 | **Approval Gates** | Explicit green light at every hierarchy level | Medium |
+| 4 | **Blueprint Integration** | Blueprints auto-injected when contracts reference them | Low |
+| 5 | **QA/Tester Agent** | Dedicated testing role at team + contract level | Medium |
+| 6 | **Worktrees v2** | Per-worker git isolation, parallel coding | High |
+| 7 | **Janitor v2** | Merge all worktrees, resolve conflicts, final build | High |
+| 8 | **Cascading Completion** | Full flow wired: workers → leaders → Warden → Janitor → CEO | High |
+
+### Standalone Features (enhance the corp regardless of vision)
+
+| # | Version | Feature | Status | Effort |
+|---|---------|---------|--------|--------|
+| 1 | v0.12.0 | **Agent Dreams** | SHIPPED | — |
+| 2 | v0.13.0 | **Coordinator Mode** | SHIPPED | — |
+| 3 | v0.14.0 | **Plan Primitive** | SHIPPED (was Haiku Gate, pivoted to ultraplan) | — |
+| 4 | v0.14.3 | **Planner Agent** | SHIPPED (Opus routing) | — |
+| 5 | v0.16.0 | **Proactive Mode** | Next — agents act without prompting | Medium |
+| 6 | v0.17.0 | **Corp Buddy** | Most viral — alive feeling, shareable | Low |
 | 7 | v0.18.0 | **Founder Away** | Autonomous overnight operation | Medium |
 | 8 | v0.19.0 | **Corp Boundaries** | Niche but important for public work | Low |
 | 9 | v0.20.0 | **Token Budgets** | Cost control for production use | Medium |
@@ -355,6 +786,6 @@ Forbidden in commits: model codenames, unreleased versions, internal repo names,
 
 ## Reference
 
-- Key source files analyzed: `autoDream.ts`, `consolidationPrompt.ts`, `consolidationLock.ts`, `coordinatorMode.ts`, `ultraplan.tsx`, `ccrSession.ts`, `companion.ts`, `types.ts`, `sprites.ts`, `yoloClassifier.ts`, `dangerousPatterns.ts`, `filesystem.ts`, `undercover.ts`
+- Claude Code source analysis: `autoDream.ts`, `consolidationPrompt.ts`, `coordinatorMode.ts`, `ultraplan.tsx`, `companion.ts`, `yoloClassifier.ts`, `undercover.ts`
 - GitHub mirror: https://github.com/Kuberwastaken/claude-code
 - Claude Corp: https://github.com/re-marked/claude-corp
