@@ -114,24 +114,38 @@ export class ProcessManager {
     if (member.type !== 'agent') throw new Error(`Member ${memberId} is not an agent`);
     if (!member.agentDir) throw new Error(`Member ${memberId} has no agentDir`);
 
-    // CEO (rank master) with user's OpenClaw → try remote, fallback to local
-    if (member.rank === 'master' && this.globalConfig.userGateway) {
+    // Check if agent needs a powerful model (Opus) → route to remote gateway
+    // The corp gateway runs Haiku. Agents needing Opus must use the user's OpenClaw.
+    let needsRemoteGateway = member.rank === 'master'; // CEO always remote
+    if (!needsRemoteGateway && this.globalConfig.userGateway) {
+      try {
+        const agentConfig = readConfig<{ model?: string }>(
+          join(this.corpRoot, member.agentDir, 'config.json'),
+        );
+        if (agentConfig.model && agentConfig.model.includes('opus')) {
+          needsRemoteGateway = true;
+          log(`[daemon] ${member.displayName} needs Opus — routing to remote gateway`);
+        }
+      } catch {} // Config read failed — default to corp gateway
+    }
+
+    // Remote gateway agents (CEO + Opus models)
+    if (needsRemoteGateway && this.globalConfig.userGateway) {
       try {
         return await this.connectRemoteAgent(memberId, member);
       } catch {
-        log(`[daemon] CEO remote connection failed — falling back to local gateway`);
-        // Fall through to local spawn below
+        log(`[daemon] ${member.displayName} remote connection failed — falling back to local gateway`);
       }
     }
 
-    // CEO without user's OpenClaw (or remote failed) → local fallback
-    if (member.rank === 'master') {
+    // Local fallback for remote agents
+    if (needsRemoteGateway) {
       const agentAbsDir = join(this.corpRoot, member.agentDir);
       const openclawStateDir = join(agentAbsDir, '.openclaw');
       return this.spawnLocalAgent(memberId, member, agentAbsDir, openclawStateDir, gatewayToken);
     }
 
-    // All other agents → shared corp gateway
+    // All other agents → shared corp gateway (Haiku)
     return this.registerGatewayAgent(memberId, member);
   }
 
