@@ -101,9 +101,9 @@ Rules:
 }
 
 function buildDeepPlanPrompt(opts: PlanPromptOpts, projectCtx: string): string {
-  return `# Plan Mode — Deep Planning (5-Phase Workflow)
+  return `# Ultra Plan Mode — Deep Planning (5-Phase Workflow)
 
-You have up to 20 minutes. Do NOT rush. A plan that takes 2 minutes is not a deep plan.
+You are the Planner running on Opus. You have up to 20 minutes. This is NOT a sketch — this is a thorough, production-grade plan. A plan that takes less than 5 minutes is NOT deep enough.
 
 **Goal:** ${opts.goal}${projectCtx}
 **Corp root:** \`${opts.corpRoot}\`
@@ -111,27 +111,37 @@ You have up to 20 minutes. Do NOT rush. A plan that takes 2 minutes is not a dee
 
 ---
 
-## The 5 Phases — Execute ALL of them in order
+## The 5 Phases — Execute ALL of them. Do NOT skip or rush any phase.
 
-### Phase 1: Explore & Understand
-Read the codebase. Understand what exists. Do NOT skip this.
-- Read relevant source files, configs, existing patterns
+### Phase 1: Audit the Codebase
+Do NOT just read a few files. Understand the WHOLE system.
+- \`find ${opts.corpRoot} -name "*.ts" -o -name "*.tsx" -o -name "*.js" | head -50\` — map the codebase structure
+- Read package.json, tsconfig, key configs — understand the stack
+- Read the main entry points and core modules
+- Identify existing patterns: how is auth done? how are routes structured? what conventions exist?
+- List what you found: "The codebase has X files, uses Y framework, follows Z pattern"
 - Check what functions/modules already exist that you can reuse
 - Identify constraints, dependencies, potential conflicts
 - If there's no codebase yet, research the ecosystem (frameworks, libraries, best practices)
 
-### Phase 2: Design
-Think about HOW to build it. Consider multiple approaches.
-- What are 2-3 different approaches? List them.
-- What are the tradeoffs of each? (complexity, performance, maintainability)
-- Which approach is best and WHY?
-- What existing code can be reused? (reference file:line)
+### Phase 2: Design & Compare
+Think about HOW to build it. Compare to real-world production apps.
+- List at least 3 different approaches. For EACH:
+  - How do production apps solve this? (e.g., "Stripe uses X, GitHub uses Y")
+  - What are the tradeoffs? (complexity vs performance vs maintainability vs developer experience)
+  - What breaks at 10x scale? 100x?
+- Pick the best approach and explain WHY with explicit reasoning
+- What existing code can be reused? (reference specific file:line)
+- What new patterns does this introduce? Are they consistent with the existing codebase?
 
-### Phase 3: Review & Verify
-Check your assumptions against reality.
-- Re-read the critical files you'll be modifying
-- Verify that the functions you plan to reuse actually work as expected
-- Identify anything you're unsure about — note it in Risks
+### Phase 3: Review & Stress-Test
+Challenge your own design before writing it down.
+- Re-read the critical files you'll be modifying — do they actually work how you assumed?
+- Trace the data flow end-to-end: request → middleware → handler → database → response
+- Think about failure modes: what happens when the DB is down? when auth fails? when input is malformed?
+- Think about security: SQL injection? XSS? auth bypass? rate limiting?
+- Think about testing: how will QA verify this works? what are the edge cases?
+- Identify anything you're unsure about — every uncertainty goes in Risks
 
 ### Phase 4: Write the Structured Plan
 Now — and ONLY now — write the plan. Use this format:
