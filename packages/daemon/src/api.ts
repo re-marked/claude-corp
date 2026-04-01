@@ -215,10 +215,8 @@ export function createApi(daemon: Daemon): Server {
           dueAt: (body.dueAt as string) ?? undefined,
         });
 
-        // Post task event + suppress TaskWatcher duplicate + refresh TASKS.md + analytics
-        writeTaskEvent(daemon.corpRoot, `[TASK] "${task.title}" created (priority: ${task.priority})`);
+        // TaskWatcher handles the [TASK] event via fs.watch — don't write here (prevents double)
         daemon.analytics.trackTaskCreated();
-        daemon.taskWatcher.suppressNextCreate(taskPath(daemon.corpRoot, task.id));
         daemon.heartbeat.refreshAll();
 
         // Creating a task does NOT dispatch. Only "hand" dispatches.
@@ -269,13 +267,7 @@ export function createApi(daemon: Daemon): Server {
           const oldTask = readTask(filePath).task;
           const updated = updateTask(filePath, body as any);
 
-          // Post status change event + refresh TASKS.md
-          if (body.status && body.status !== oldTask.status) {
-            writeTaskEvent(
-              daemon.corpRoot,
-              `"${updated.title}" → ${updated.status}`,
-            );
-          }
+          // TaskWatcher handles status change events via fs.watch — don't double-write
           daemon.heartbeat.refreshAll();
 
           json(res, { ok: true, task: updated });
@@ -797,33 +789,41 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
-      // POST /plan — deep planning session
+      // POST /plan — sketch or deep plan, any agent
       if (method === 'POST' && path === '/plan') {
-        const { buildPlanPrompt, randomPlanVerb } = await import('./plan-prompt.js');
+        const { buildPlanPrompt, randomPlanVerb, PLAN_TIMEOUTS } = await import('./plan-prompt.js');
         const { taskId: makeTaskId } = await import('@claudecorp/shared');
         const { writeFileSync, mkdirSync } = await import('node:fs');
         const body = await readBody(req) as Record<string, unknown>;
         const goal = body.goal as string;
         if (!goal) { json(res, { error: 'goal is required' }, 400); return; }
 
+        const planType = ((body.type as string) ?? 'sketch') as 'sketch' | 'plan';
         const channelId = (body.channelId as string) ?? '';
         const projectName = body.projectName as string | undefined;
         const verb = randomPlanVerb();
+        const agentSlug = body.agent as string | undefined;
 
-        // Find CEO
+        // Find target agent — specified, or CEO as default
         const members = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
-        const ceo = members.find((m: any) => m.rank === 'master' && m.type === 'agent');
-        if (!ceo) { json(res, { error: 'No CEO agent found' }, 404); return; }
+        const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+        const target = agentSlug
+          ? members.find((m: any) => m.type === 'agent' && (normalize(m.displayName) === normalize(agentSlug) || m.id === agentSlug))
+          : members.find((m: any) => m.rank === 'master' && m.type === 'agent');
+        if (!target) { json(res, { error: `Agent "${agentSlug ?? 'CEO'}" not found` }, 404); return; }
 
-        const agentDir = ceo.agentDir ? join(daemon.corpRoot, ceo.agentDir).replace(/\\/g, '/') : daemon.corpRoot;
+        const agentDir = target.agentDir ? join(daemon.corpRoot, target.agentDir).replace(/\\/g, '/') : daemon.corpRoot;
+        const slug = normalize(target.displayName);
+        const timeout = PLAN_TIMEOUTS[planType] ?? PLAN_TIMEOUTS.sketch;
+
         const prompt = buildPlanPrompt({
           goal,
-          corpRoot: daemon.corpRoot.replace(/\\/g, '/'),
+          type: planType,
+          agentName: target.displayName,
           agentDir,
+          corpRoot: daemon.corpRoot.replace(/\\/g, '/'),
           projectName,
         });
-
-        const slug = ceo.displayName.toLowerCase().replace(/\s+/g, '-');
 
         try {
           const resp = await fetch(`http://127.0.0.1:${daemon.getPort()}/cc/say`, {
@@ -835,24 +835,36 @@ export function createApi(daemon: Daemon): Server {
               sessionKey: `jack:${slug}`,
               channelId: channelId || undefined,
             }),
-            signal: AbortSignal.timeout(10 * 60 * 1000), // 10 min timeout for planning
+            signal: AbortSignal.timeout(timeout),
           });
 
           const data = await resp.json() as Record<string, unknown>;
 
           if (data.ok && data.response) {
-            // Save plan to file
-            const planId = makeTaskId(); // word-pair ID
+            const planId = makeTaskId();
             const plansDir = join(daemon.corpRoot, 'plans');
             mkdirSync(plansDir, { recursive: true });
-            const planPath = join(plansDir, `${planId}.md`);
-            writeFileSync(planPath, data.response as string, 'utf-8');
+
+            // Add frontmatter to the plan
+            const now = new Date().toISOString();
+            const titleMatch = (data.response as string).match(/^#\s+(?:Plan|Sketch):\s*(.+)/m);
+            const title = titleMatch?.[1]?.trim() ?? goal.slice(0, 60);
+            const frontmatter = `---\nid: ${planId}\ntitle: "${title.replace(/"/g, '\\"')}"\ntype: ${planType}\nauthor: ${target.displayName}\nstatus: draft\ncreatedAt: ${now}\n---\n\n`;
+            const content = frontmatter + (data.response as string);
+
+            writeFileSync(join(plansDir, `${planId}.md`), content, 'utf-8');
+
+            // Write event to #tasks channel
+            const eventVerb = planType === 'sketch' ? 'sketched' : 'planned';
+            writeTaskEvent(daemon.corpRoot, `[PLAN] "${title}" ${eventVerb} by ${target.displayName} → plans/${planId}.md`);
 
             json(res, {
               ok: true,
               planId,
               planPath: `plans/${planId}.md`,
+              planType,
               verb,
+              author: target.displayName,
               response: (data.response as string).slice(0, 1000),
             });
           } else {
