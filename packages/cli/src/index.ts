@@ -273,6 +273,14 @@ async function run() {
       });
       break;
     }
+    case 'dream': {
+      const { cmdDream } = await import('./commands/dream.js');
+      await cmdDream({
+        agent: values.agent as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'plan': {
       const { cmdPlan } = await import('./commands/plan.js');
       await cmdPlan({
@@ -280,6 +288,8 @@ async function run() {
         goal: (values.goal as string | undefined) ?? (positionals.slice(2).join(' ') || undefined),
         project: values.project as string | undefined,
         name: values.name as string | undefined,
+        agent: values.agent as string | undefined,
+        type: values.type as string | undefined,
         json: !!values.json,
       });
       break;

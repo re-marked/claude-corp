@@ -324,26 +324,42 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
-    // /plan <goal> — deep planning session with the CEO
-    if (text.trim().toLowerCase().startsWith('/plan')) {
-      const goal = text.trim().slice(5).trim();
+    // /sketch <goal> — quick plan (5 min)
+    // /plan <goal> — deep plan (20 min)
+    if (text.trim().toLowerCase().startsWith('/sketch') || text.trim().toLowerCase().startsWith('/plan')) {
+      const isSketch = text.trim().toLowerCase().startsWith('/sketch');
+      const cmdLen = isSketch ? 7 : 5;
+      const planType = isSketch ? 'sketch' : 'plan';
+      const goal = text.trim().slice(cmdLen).trim();
       if (!goal) {
-        writeSystemMessage('Usage: /plan <goal>\nCEO goes deep: researches, thinks, returns a structured plan.');
+        writeSystemMessage(isSketch
+          ? 'Usage: /sketch <goal> — quick 5-min outline'
+          : 'Usage: /plan <goal> — deep 20-min research + structured plan');
         return;
       }
-      // Random planning verb for alive feeling
+
+      // Auto-target agent in DM, or default to CEO
+      let targetAgent: string | undefined;
+      if (channel.kind === 'direct') {
+        const agent = members.find(m => m.type === 'agent' && channel.memberIds.includes(m.id));
+        if (agent) targetAgent = agent.displayName.toLowerCase().replace(/\s+/g, '-');
+      }
+
       const verbs = ['brewing', 'devising', 'architecting', 'contemplating', 'deliberating', 'mapping out', 'crafting', 'distilling'];
       const verb = verbs[Math.floor(Math.random() * verbs.length)]!;
-      writeSystemMessage(`CEO is ${verb} a plan for: ${goal}\nThis may take a few minutes...`);
+      const agentName = targetAgent ?? 'CEO';
+      const timeLabel = isSketch ? '~5 min' : 'up to 20 min';
+      writeSystemMessage(`${agentName} is ${verb} a ${planType} for: ${goal}\nThis may take ${timeLabel}...`);
 
       try {
         const result = await daemonClient.createPlan({
           goal,
+          type: planType,
+          agent: targetAgent,
           channelId: channel.id,
         });
         if (result.ok && result.planId) {
-          writeSystemMessage(`Plan saved: ${result.planPath}`);
-          // Enter plan review mode — replace input with approve/edit/dismiss choice
+          writeSystemMessage(`${result.planType === 'sketch' ? 'Sketch' : 'Plan'} saved: ${result.planPath}`);
           setPlanReview({
             planId: result.planId,
             planPath: result.planPath!,
@@ -352,10 +368,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
             editText: '',
           });
         } else {
-          writeSystemMessage(`Plan failed: ${result.error ?? 'unknown'}`);
+          writeSystemMessage(`${planType} failed: ${result.error ?? 'unknown'}`);
         }
       } catch (err) {
-        writeSystemMessage(`Plan error: ${err instanceof Error ? err.message : String(err)}`);
+        writeSystemMessage(`${planType} error: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }

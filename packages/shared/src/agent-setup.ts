@@ -379,13 +379,22 @@ The corp CLI. Use these for all corp operations — do NOT use curl or raw API c
 - \`cc-cli uptime\` — daemon uptime
 - \`cc-cli models\` — list available models
 
+## Shell — ${process.platform === 'win32' ? 'Windows (PowerShell)' : process.platform === 'darwin' ? 'macOS (zsh)' : 'Linux (bash)'}
+${process.platform === 'win32' ? `**You are on Windows.** Your shell is PowerShell, NOT bash.
+- Use \`Get-Content file.txt\` instead of \`cat file.txt\`
+- Use \`dir\` instead of \`ls\` (or \`Get-ChildItem\`)
+- Use semicolons \`;\` to chain commands, NOT \`&&\`
+- Paths use backslashes: \`C:\\Users\\...\` but forward slashes often work too
+- \`grep\` is not available — use \`Select-String -Pattern "..." file.txt\`
+- \`rm -rf\` → \`Remove-Item -Recurse -Force\`
+- \`tail -n 20\` → \`Get-Content file.txt -Tail 20\`
+- **cc-cli commands work normally** — they are Node.js, not shell-dependent` : `Standard Unix shell. Use bash commands normally.`}
+
 ## Build & Test
 - Build: \`cd ${corpRoot.replace(/\\/g, '/')} && pnpm build\` (if codebase project)
 - Always verify your work exists after writing it
 
 ## Notes
-(Add environment-specific notes here: SSH hosts, API endpoints,
-project-specific commands, anything that helps you do your job.
-This is your cheat sheet.)
+(Add environment-specific notes here.)
 `;
 }

@@ -296,7 +296,7 @@ export class DaemonClient {
 
   // --- Loops & Crons ---
 
-  async createPlan(opts: { goal: string; channelId?: string; projectName?: string }): Promise<{ ok: boolean; planId?: string; planPath?: string; verb?: string; response?: string; error?: string }> {
+  async createPlan(opts: { goal: string; type?: 'sketch' | 'plan'; agent?: string; channelId?: string; projectName?: string }): Promise<{ ok: boolean; planId?: string; planPath?: string; planType?: string; verb?: string; author?: string; response?: string; error?: string }> {
     const resp = await fetch(`${this.baseUrl}/plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
