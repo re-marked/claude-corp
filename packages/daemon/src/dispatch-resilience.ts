@@ -212,3 +212,131 @@ export class ContextBlocker {
     this.blockedAt = null;
   }
 }
+
+// ── Dispatch Health Score ──────────────────────────────────────────
+
+/**
+ * Per-agent rolling health score.
+ * Tracks the last N dispatch results (success/failure) and computes a health ratio.
+ *
+ * Score interpretation:
+ *   1.0 = all recent dispatches succeeded (perfect health)
+ *   0.5 = half succeeded (degraded — logged as warning)
+ *   0.0 = all failed (critical — agent should be paused)
+ *
+ * The rolling window means old failures "fall off" as new successes come in.
+ * An agent that had 5 failures but then 10 successes recovers naturally.
+ */
+export class DispatchHealthTracker {
+  /** Rolling window of recent dispatch results per agent (true = success) */
+  private windows = new Map<string, boolean[]>();
+  /** Timestamp of last failure per agent (for "last failed X ago" display) */
+  private lastFailureAt = new Map<string, number>();
+  /** Last error category per agent */
+  private lastErrorCategory = new Map<string, ErrorCategory>();
+  /** Window size — how many recent dispatches to track */
+  private windowSize: number;
+  /** Score below which an agent is "degraded" */
+  private degradedThreshold: number;
+  /** Score below which an agent is "critical" and gets auto-paused */
+  private criticalThreshold: number;
+
+  constructor(opts?: {
+    windowSize?: number;
+    degradedThreshold?: number;
+    criticalThreshold?: number;
+  }) {
+    this.windowSize = opts?.windowSize ?? 10;
+    this.degradedThreshold = opts?.degradedThreshold ?? 0.5;
+    this.criticalThreshold = opts?.criticalThreshold ?? 0.2;
+  }
+
+  /** Record a successful dispatch. */
+  recordSuccess(agentId: string): void {
+    this.push(agentId, true);
+  }
+
+  /** Record a failed dispatch with error context. */
+  recordFailure(agentId: string, error: unknown): void {
+    this.push(agentId, false);
+    const cat = categorizeError(error);
+    this.lastFailureAt.set(agentId, Date.now());
+    this.lastErrorCategory.set(agentId, cat);
+
+    const score = this.getScore(agentId);
+    if (score <= this.criticalThreshold) {
+      logError(`[health] ${agentId} CRITICAL (${(score * 100).toFixed(0)}%) — ${categoryDescription(cat)}`);
+    } else if (score <= this.degradedThreshold) {
+      log(`[health] ${agentId} DEGRADED (${(score * 100).toFixed(0)}%) — ${categoryDescription(cat)}`);
+    }
+  }
+
+  /** Get the health score for an agent (0.0 to 1.0). */
+  getScore(agentId: string): number {
+    const window = this.windows.get(agentId);
+    if (!window || window.length === 0) return 1.0; // No data = healthy
+    const successes = window.filter(Boolean).length;
+    return successes / window.length;
+  }
+
+  /** Get health status label for display. */
+  getStatus(agentId: string): 'healthy' | 'degraded' | 'critical' {
+    const score = this.getScore(agentId);
+    if (score <= this.criticalThreshold) return 'critical';
+    if (score <= this.degradedThreshold) return 'degraded';
+    return 'healthy';
+  }
+
+  /** Is this agent healthy enough to receive dispatches? */
+  isHealthy(agentId: string): boolean {
+    return this.getScore(agentId) > this.criticalThreshold;
+  }
+
+  /** Get detailed health info for a specific agent. */
+  getAgentHealth(agentId: string): {
+    score: number;
+    status: 'healthy' | 'degraded' | 'critical';
+    recentResults: boolean[];
+    lastFailureAt: number | null;
+    lastErrorCategory: ErrorCategory | null;
+  } {
+    return {
+      score: this.getScore(agentId),
+      status: this.getStatus(agentId),
+      recentResults: [...(this.windows.get(agentId) ?? [])],
+      lastFailureAt: this.lastFailureAt.get(agentId) ?? null,
+      lastErrorCategory: this.lastErrorCategory.get(agentId) ?? null,
+    };
+  }
+
+  /** Get all agents and their health scores (for dashboard). */
+  getAllScores(): Map<string, { score: number; status: 'healthy' | 'degraded' | 'critical' }> {
+    const result = new Map<string, { score: number; status: 'healthy' | 'degraded' | 'critical' }>();
+    for (const [agentId] of this.windows) {
+      result.set(agentId, {
+        score: this.getScore(agentId),
+        status: this.getStatus(agentId),
+      });
+    }
+    return result;
+  }
+
+  /** Reset health tracking for an agent (on restart, re-hire, etc). */
+  resetAgent(agentId: string): void {
+    this.windows.delete(agentId);
+    this.lastFailureAt.delete(agentId);
+    this.lastErrorCategory.delete(agentId);
+  }
+
+  private push(agentId: string, success: boolean): void {
+    let window = this.windows.get(agentId);
+    if (!window) {
+      window = [];
+      this.windows.set(agentId, window);
+    }
+    window.push(success);
+    if (window.length > this.windowSize) {
+      window.shift();
+    }
+  }
+}
