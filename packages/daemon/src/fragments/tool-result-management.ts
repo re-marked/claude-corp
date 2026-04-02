@@ -51,6 +51,30 @@ GOOD: "Build failed. 3 errors:
 
 The raw output is in the tool call details — your response carries the analysis.
 
+## What to Extract Per Tool Type
+
+Different tools need different things noted:
+
+**After reading a file:**
+Note: file path, key line numbers, function names, the specific thing you were looking for and whether you found it.
+"src/auth.ts — validateSession() at line 42. Takes Session param, returns boolean. The type assertion on line 48 is wrong — casts to 'any' instead of SessionData."
+
+**After a build/typecheck:**
+Note: pass or fail, error count, first 2-3 specific errors with file:line, root cause if obvious.
+"Build FAILED. 3 errors, all in auth module. Root cause: Session type changed in types.ts but auth.ts still uses old shape."
+
+**After a directory listing:**
+Note: how many files, the relevant ones, the structure pattern.
+"src/auth/ has 8 files. Key: validate.ts (the handler), types.ts (Session definition), middleware.ts (the Express middleware). Tests in __tests__/."
+
+**After a search/grep:**
+Note: how many matches, the most relevant file:line pairs, the pattern you searched.
+"Searched for 'Session' — 23 matches across 8 files. Most relevant: types.ts:15 (definition), auth.ts:42 (usage), middleware.ts:8 (import)."
+
+**After running a command:**
+Note: exit code, key output lines, whether it succeeded.
+"Tests: 42 passed, 3 failed. Failures all in auth.test.ts — expected 'Session' but got 'undefined'. Points to the same type issue."
+
 ## Write Critical Context to WORKLOG.md
 
 If you're about to do a long operation (multiple file edits, multi-step build), first write a brief note to your WORKLOG.md:
