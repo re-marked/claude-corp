@@ -100,4 +100,42 @@ export interface ScheduledClock extends Clock {
   taskId: string | null;
   /** For crons: if set, each fire spawns a fresh task from this template. */
   spawnTaskTemplate: CronTaskTemplate | null;
+
+  // ── Hardening fields (PR0) ────────────────────────────────────────
+
+  /**
+   * Durable flag — controls persistence across daemon restarts.
+   * true (default): saved to clocks.json, rehydrated on restart.
+   * false: session-only, dies with daemon process. Useful for temp monitoring.
+   */
+  durable: boolean;
+
+  /**
+   * Auto-expiry timestamp (ms). Recurring clocks expire after this time.
+   * null = no expiry (default for non-permanent clocks: createdAt + 7 days).
+   * Checked during rehydration — expired clocks are auto-stopped.
+   */
+  expiresAt: number | null;
+
+  /**
+   * Permanent flag — system escape hatch. Permanent clocks never expire,
+   * can't be accidentally deleted, and are always rehydrated.
+   * Used for system crons (heartbeat, dreams, narration).
+   */
+  permanent: boolean;
+
+  /**
+   * Jitter in milliseconds — deterministic per-clock delay added to fire time.
+   * Prevents thundering herd when multiple crons share the same schedule
+   * (e.g., 5 crons at @hourly don't all fire at :00:00).
+   * Computed from FNV-1a hash of clock ID. Range: 0 to maxJitterMs.
+   */
+  jitterMs: number;
+
+  /**
+   * Whether this clock's last rehydration detected a missed fire.
+   * Set during rehydrate(), cleared after the catch-up fire.
+   * Displayed in /clock view as "MISSED — fired late".
+   */
+  missedFire: boolean;
 }

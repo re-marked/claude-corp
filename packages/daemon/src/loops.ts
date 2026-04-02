@@ -104,6 +104,12 @@ export class LoopManager {
       endedAt: null,
       taskId: opts.taskId ?? null,
       spawnTaskTemplate: null, // Loops don't spawn tasks — they drive one
+      // Hardening fields (PR0)
+      durable: true,
+      expiresAt: null, // Loops don't auto-expire — they run until stopped or maxRuns
+      permanent: false,
+      jitterMs: 0, // Loops fire on fixed intervals, jitter not needed
+      missedFire: false,
     };
 
     // Register with ClockManager for observability
