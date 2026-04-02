@@ -46,6 +46,18 @@ export function buildDreamPrompt(opts: DreamPromptOpts): string {
    Read the last few session summaries. What did you work on? What shipped? What failed?`);
   sourceNum++;
 
+  // Observation logs — structured daily activity records (highest-structure source)
+  sources.push(`${sourceNum}. **Observation logs** — \`${opts.agentDir}/observations/\`
+   These are your daily activity journals — timestamped, categorized entries of what you did.
+   List the observations directory, read today's log and yesterday's if they exist.
+   Each entry has a category tag: [TASK], [RESEARCH], [DECISION], [BLOCKED], [LEARNED], [CREATED], etc.
+   This is your most STRUCTURED signal source — use it to identify patterns:
+   - What tasks consumed the most time?
+   - What decisions were made and why?
+   - What got blocked repeatedly?
+   - What did you learn that should be in BRAIN/?`);
+  sourceNum++;
+
   // #general for corp-wide context
   if (opts.generalChannelPath) {
     sources.push(`${sourceNum}. **#general channel** — \`${opts.generalChannelPath}/messages.jsonl\`

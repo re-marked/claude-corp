@@ -1,3 +1,9 @@
+import { existsSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  getObservationLogPath,
+  getObservationStats,
+} from '@claudecorp/shared';
 import type { Fragment } from './types.js';
 
 export const contextFragment: Fragment = {
@@ -68,6 +74,51 @@ The Pulse system pings you every 3 minutes:
 - **Current time:** ${now.toISOString()} (local: ${now.toLocaleString()})
 - **Corp root:** ${ctx.corpRoot}
 
-When running shell commands, use the correct syntax for ${platform}. Timestamps from external tools may be in different timezones — the times above are the Founder's local time.`;
+When running shell commands, use the correct syntax for ${platform}. Timestamps from external tools may be in different timezones — the times above are the Founder's local time.
+
+## Session Continuity
+${buildContinuityHint(ctx.agentDir, now)}`;
   },
 };
+
+/** Build a hint about recent activity for cross-session continuity. */
+function buildContinuityHint(agentDir: string, now: Date): string {
+  const hints: string[] = [];
+
+  // Check WORKLOG.md freshness
+  try {
+    const worklogPath = join(agentDir, 'WORKLOG.md');
+    if (existsSync(worklogPath)) {
+      const stat = statSync(worklogPath);
+      const ageMin = Math.round((now.getTime() - stat.mtimeMs) / 60_000);
+      if (ageMin < 60) {
+        hints.push(`Your WORKLOG.md was updated ${ageMin}m ago — you may have been mid-task. Read it to check.`);
+      }
+    }
+  } catch {}
+
+  // Check today's observation log
+  try {
+    const stats = getObservationStats(agentDir);
+    if (stats && stats.entryCount > 0) {
+      hints.push(`Today's observation log has ${stats.entryCount} entries (last at ${stats.lastEntry}). Read it for context on what you've done today.`);
+    }
+  } catch {}
+
+  // Check INBOX.md size (pending items)
+  try {
+    const inboxPath = join(agentDir, 'INBOX.md');
+    if (existsSync(inboxPath)) {
+      const size = statSync(inboxPath).size;
+      if (size > 500) { // More than just a header
+        hints.push(`Your INBOX.md has pending items. Check it before starting new work.`);
+      }
+    }
+  } catch {}
+
+  if (hints.length === 0) {
+    return 'Fresh session. Read your Casket files (TASKS.md, INBOX.md, WORKLOG.md) to orient.';
+  }
+
+  return hints.join('\n');
+}
