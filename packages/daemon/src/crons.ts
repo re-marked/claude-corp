@@ -26,10 +26,74 @@ import {
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
+import { existsSync, writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import type { ExternalClockHandle } from './clock-manager.js';
 import type { Daemon } from './daemon.js';
 import { saveScheduledClock, removeScheduledClock, loadScheduledClocks, FireStatsWriter } from './scheduled-clock-store.js';
 import { log, logError } from './logger.js';
+
+// ── Hardening constants ────────────────────────────────────────────
+
+/** Default auto-expiry for recurring crons: 7 days */
+const DEFAULT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Max jitter to spread thundering herd: 30 seconds */
+const MAX_JITTER_MS = 30_000;
+
+/** Scheduler lock file — prevents double-firing across concurrent processes */
+const SCHEDULER_LOCK_FILE = '.cron-scheduler.lock';
+
+/** Lock stale threshold: 5 minutes (if a lock is older, it's stale) */
+const LOCK_STALE_MS = 5 * 60 * 1000;
+
+// ── Jitter ─────────────────────────────────────────────────────────
+
+/**
+ * Deterministic jitter from clock ID using FNV-1a hash.
+ * Same clock always gets the same jitter — no randomness.
+ * Borrowed from Claude Code's cronScheduler.ts jitter pattern.
+ */
+function computeJitter(clockId: string, maxMs = MAX_JITTER_MS): number {
+  let hash = 0x811c9dc5; // FNV offset basis
+  for (let i = 0; i < clockId.length; i++) {
+    hash ^= clockId.charCodeAt(i);
+    hash = (hash * 0x01000193) >>> 0; // FNV prime, keep as uint32
+  }
+  return hash % maxMs;
+}
+
+// ── Scheduler Lock ─────────────────────────────────────────────────
+
+/**
+ * Try to acquire the scheduler lock. Returns true if acquired.
+ * Prevents double-firing if two daemon instances run concurrently
+ * (e.g., stale process + fresh start).
+ */
+function tryAcquireSchedulerLock(corpRoot: string): boolean {
+  const lockPath = join(corpRoot, SCHEDULER_LOCK_FILE);
+  try {
+    if (existsSync(lockPath)) {
+      const content = readFileSync(lockPath, 'utf-8');
+      const lockData = JSON.parse(content) as { pid: number; acquiredAt: number };
+      const age = Date.now() - lockData.acquiredAt;
+
+      // If the lock is fresh and held by another PID, we can't acquire
+      if (age < LOCK_STALE_MS && lockData.pid !== process.pid) {
+        return false;
+      }
+      // Stale or same PID — take over
+    }
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }));
+    return true;
+  } catch {
+    return true; // Can't read lock — assume available
+  }
+}
+
+/** Release the scheduler lock. */
+function releaseSchedulerLock(corpRoot: string): void {
+  try { unlinkSync(join(corpRoot, SCHEDULER_LOCK_FILE)); } catch {}
+}
 
 export interface CreateCronOpts {
   /** Human-readable name. Auto-generated if omitted. */
@@ -54,6 +118,12 @@ export interface CreateCronOpts {
   taskDescription?: string;
   /** Channel where output should be written */
   channelId?: string;
+  /** Durable (true=default) persists to clocks.json. false = session-only, dies with daemon. */
+  durable?: boolean;
+  /** Permanent flag — never expires, can't be accidentally deleted. For system crons. */
+  permanent?: boolean;
+  /** Custom expiry duration in ms. Default: 7 days for non-permanent. null = no expiry. */
+  expiryMs?: number | null;
 }
 
 interface CronEntry {
@@ -97,6 +167,21 @@ export class CronManager {
 
     const now = Date.now();
 
+    // Compute deterministic jitter from slug
+    const jitterMs = computeJitter(slug);
+    const isDurable = opts.durable !== false; // Default: durable
+    const isPermanent = opts.permanent === true;
+
+    // Compute expiry: permanent → never, custom → custom, default → 7 days
+    let expiresAt: number | null = null;
+    if (!isPermanent) {
+      if (opts.expiryMs === null) {
+        expiresAt = null; // Explicit no expiry
+      } else {
+        expiresAt = now + (opts.expiryMs ?? DEFAULT_EXPIRY_MS);
+      }
+    }
+
     // Build ScheduledClock
     const clock: ScheduledClock = {
       id: slug,
@@ -133,6 +218,12 @@ export class CronManager {
         priority: (opts.taskPriority as any) ?? 'normal',
         description: opts.taskDescription ?? null,
       } : null,
+      // Hardening fields
+      durable: isDurable,
+      expiresAt,
+      permanent: isPermanent,
+      jitterMs,
+      missedFire: false,
     };
 
     // Register external clock for observability
@@ -266,12 +357,39 @@ export class CronManager {
 
   /** Rehydrate crons from clocks.json on daemon startup. */
   rehydrate(): void {
+    // Acquire scheduler lock — prevents double-firing across concurrent instances
+    if (!tryAcquireSchedulerLock(this.daemon.corpRoot)) {
+      log(`[crons] Scheduler lock held by another process — skipping rehydration`);
+      return;
+    }
+
     const store = loadScheduledClocks(this.daemon.corpRoot);
     let count = 0;
+    let expired = 0;
+    let missed = 0;
 
     for (const cron of store.crons) {
       if (!cron.enabled) continue;
       if (cron.scheduledStatus === 'completed' || cron.scheduledStatus === 'dismissed' || cron.scheduledStatus === 'deleted') continue;
+
+      // Skip non-durable clocks — they're session-only and shouldn't survive restart
+      if (cron.durable === false) {
+        log(`[crons] Skipping ephemeral cron "${cron.name}" — session-only`);
+        continue;
+      }
+
+      // Auto-expiry check — stop expired clocks unless permanent
+      const now = Date.now();
+      if (!cron.permanent && cron.expiresAt && cron.expiresAt < now) {
+        const expiredAgo = Math.round((now - cron.expiresAt) / 3_600_000);
+        log(`[crons] "${cron.name}" expired ${expiredAgo}h ago — auto-stopping`);
+        cron.scheduledStatus = 'completed';
+        cron.enabled = false;
+        cron.endedAt = now;
+        saveScheduledClock(this.daemon.corpRoot, cron);
+        expired++;
+        continue;
+      }
 
       try {
         const expression = this.normalizeExpression(cron.expression);
@@ -288,10 +406,33 @@ export class CronManager {
         });
 
         // Detect missed fires — if stored nextFireAt is in the past, a fire was missed
-        const now = Date.now();
         if (cron.nextFireAt && cron.nextFireAt < now) {
           const missedAgo = Math.round((now - cron.nextFireAt) / 60_000);
-          log(`[crons] "${cron.name}" missed a fire (${missedAgo}m ago) — skipping to next scheduled time`);
+          cron.missedFire = true;
+          missed++;
+
+          if (missedAgo < 60) {
+            // Missed within the last hour — fire catch-up after rehydration (with jitter)
+            log(`[crons] "${cron.name}" missed a fire (${missedAgo}m ago) — scheduling catch-up`);
+            const jitter = cron.jitterMs ?? computeJitter(slug);
+            // Capture handle+cron for the deferred catch-up execution
+            const catchupHandle = handle;
+            const catchupCron = cron;
+            setTimeout(() => {
+              log(`[crons] Catch-up fire: ${catchupCron.name} (missed ${missedAgo}m ago)`);
+              // Trigger the croner job's callback manually by calling trigger()
+              const entry = this.entries.get(slug);
+              if (entry) {
+                entry.job.trigger(); // Actually execute the cron callback
+              }
+              catchupCron.missedFire = false;
+              saveScheduledClock(this.daemon.corpRoot, catchupCron);
+            }, Math.max(jitter, 2000)); // At least 2s after rehydration to let everything settle
+          } else {
+            // Missed more than an hour ago — skip to next, just log
+            log(`[crons] "${cron.name}" missed a fire (${missedAgo}m ago) — too old, skipping to next`);
+            cron.missedFire = false;
+          }
         }
 
         // Create croner job — croner computes next fire from NOW, naturally skipping missed
@@ -300,8 +441,11 @@ export class CronManager {
         // Compute next fire from croner (not from stored value)
         const nextRun = job.nextRun();
         if (nextRun) {
-          handle.updateNextFire(nextRun.getTime());
-          log(`[crons] "${cron.name}" next fire: ${nextRun.toLocaleString()}`);
+          // Apply jitter: delay the next fire by the deterministic jitter amount
+          const jitter = cron.jitterMs ?? 0;
+          const jitteredTime = nextRun.getTime() + jitter;
+          handle.updateNextFire(jitteredTime);
+          log(`[crons] "${cron.name}" next fire: ${nextRun.toLocaleString()}${jitter > 0 ? ` (+${Math.round(jitter / 1000)}s jitter)` : ''}`);
         }
 
         this.entries.set(slug, { job, handle, clock: cron });
@@ -311,7 +455,10 @@ export class CronManager {
       }
     }
 
-    if (count > 0) log(`[crons] Rehydrated ${count} cron(s) from clocks.json`);
+    const summary = [`Rehydrated ${count} cron(s)`];
+    if (expired > 0) summary.push(`${expired} expired`);
+    if (missed > 0) summary.push(`${missed} missed`);
+    if (count > 0 || expired > 0) log(`[crons] ${summary.join(', ')}`);
   }
 
   /** Stop all croner jobs. Called on daemon shutdown. */
@@ -320,7 +467,8 @@ export class CronManager {
       entry.job.stop();
     }
     this.statsWriter.stop();
-    log(`[crons] All ${this.entries.size} cron job(s) stopped`);
+    releaseSchedulerLock(this.daemon.corpRoot);
+    log(`[crons] All ${this.entries.size} cron job(s) stopped, scheduler lock released`);
   }
 
   // ── Private ──────────────────────────────────────────────────────
@@ -352,6 +500,12 @@ export class CronManager {
         logError(`[crons] ${clock.name} error: ${msg}`);
       },
     }, async () => {
+      // Apply deterministic jitter — delay execution to spread thundering herd
+      const jitter = clock.jitterMs ?? 0;
+      if (jitter > 0) {
+        await new Promise(r => setTimeout(r, jitter));
+      }
+
       const start = Date.now();
       let output = '';
 

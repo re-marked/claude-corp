@@ -22,6 +22,7 @@ import {
   type Channel,
   MEMBERS_JSON,
   CHANNELS_JSON,
+  countRecentObservations,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { buildDreamPrompt } from './dream-prompt.js';
@@ -187,10 +188,11 @@ export class DreamManager {
     // Gate 4: Lock free
     if (!this.tryAcquireLock(agentDir)) return closed;
 
-    // Count sessions for the prompt context (not a gate — just informational)
+    // Count sessions + observations for the prompt context (not gates — just informational)
     const sessionsSince = this.countSessionsSince(agentDir, state.lastDreamAt);
+    const observationCount = countRecentObservations(agentDir, 7);
 
-    log(`[dreams] ${agent.displayName} — idle ${Math.round((now - idleStart) / 60_000)}m, ${hoursSince.toFixed(1)}h since last dream, ${sessionsSince} sessions → dreaming`);
+    log(`[dreams] ${agent.displayName} — idle ${Math.round((now - idleStart) / 60_000)}m, ${hoursSince.toFixed(1)}h since last dream, ${sessionsSince} sessions, ${observationCount} observations → dreaming`);
     return { open: true, hoursSince, sessionsSince };
   }
 

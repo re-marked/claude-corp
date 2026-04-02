@@ -149,3 +149,23 @@ export {
   modelAlias,
 } from './models.js';
 export type { ModelEntry } from './models.js';
+
+// Observations — daily append-only agent activity logs
+export {
+  observe,
+  appendObservation,
+  formatObservation,
+  readTodaysObservations,
+  readObservationsForDate,
+  parseObservations,
+  getObservationStats,
+  listObservationLogs,
+  countRecentObservations,
+  getObservationLogPath,
+  getObservationsDir,
+} from './observations.js';
+export type {
+  Observation,
+  ObservationCategory,
+  ObservationLogStats,
+} from './observations.js';

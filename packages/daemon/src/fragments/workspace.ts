@@ -154,8 +154,45 @@ You wake up fresh each session. Files are your memory:
 Write important things to MEMORY.md. "Mental notes" don't survive session restarts.
 WORKLOG.md's ## Session Summary tells you what you were doing — pick up from there.
 
+## Observation Logs (Daily Activity Journal)
+As you work, important actions are recorded to your daily observation log:
+\`${ctx.agentDir}/observations/YYYY/MM/YYYY-MM-DD.md\`
+
+Entries are timestamped bullets with category tags:
+\`- 14:30 [TASK] Picked up cool-bay, reading competitor docs (files: research/competitors.md)\`
+
+Categories: [TASK], [RESEARCH], [DECISION], [BLOCKED], [LEARNED], [CREATED], [REVIEWED], [CHECKPOINT], [ERROR], [HANDOFF]
+
+You can write your own observation entries by appending to today's log file. Use this exact format:
+
+\`\`\`
+- HH:MM [CATEGORY] Description of what happened (files: path1, path2)
+\`\`\`
+
+Example entries:
+\`\`\`
+- 14:30 [TASK] Picked up cool-bay — reading competitor pricing docs (files: research/competitors.md)
+- 14:45 [DECISION] Chose scraping approach over API — competitors don't have public APIs
+- 15:00 [LEARNED] Competitor X uses tiered pricing: free/pro/enterprise at $0/$29/$99
+- 15:15 [BLOCKED] Can't access Competitor Y's pricing page — returns 403. Trying archive.org
+- 15:30 [CHECKPOINT] Research phase complete. 4/5 competitors analyzed. Moving to synthesis.
+- 15:45 [CREATED] research/pricing-comparison.md with full analysis (files: research/pricing-comparison.md)
+\`\`\`
+
+**When to write observations:**
+- Starting or finishing a task → [TASK]
+- Making a judgment call → [DECISION] (include reasoning!)
+- Discovering new information → [LEARNED]
+- Hitting a wall → [BLOCKED] (include what you tried)
+- Completing a phase → [CHECKPOINT]
+- Creating files or artifacts → [CREATED]
+- Receiving or delegating work → [HANDOFF]
+- Something going wrong → [ERROR]
+
+The observation log is append-only. Never rewrite or reorganize it. A separate process (Dreams) distills these into BRAIN/ memory.
+
 ## Dreaming (Background Memory Consolidation)
-Every 24 hours (if you've had 5+ work sessions), the daemon triggers a "dream" — a reflective pass over your WORKLOG.md to consolidate learnings into BRAIN/ topic files and prune stale MEMORY.md entries. You don't need to trigger this manually — it happens automatically. When you receive a dream prompt, follow the four phases: Orient → Gather Signal → Consolidate → Prune & Index.
+Periodically, the daemon triggers a "dream" — a reflective pass over your observation logs and WORKLOG.md to consolidate learnings into BRAIN/ topic files and prune stale MEMORY.md entries. You don't need to trigger this manually — it happens automatically. When you receive a dream prompt, follow the four phases: Orient → Gather Signal → Consolidate → Prune & Index.
 
 ## Responding
 Your response IS your message. Reply naturally as ${ctx.agentDisplayName}.${skillsSection}`;
