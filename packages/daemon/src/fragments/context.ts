@@ -33,6 +33,17 @@ ${workers.map(w => `       │   └── ${w.name} (worker)`).join('\n')}
 - Only escalate to CEO if your supervisor can't resolve`;
     }
 
+    // Environment info — adapted from Claude Code's envInfo section in utils/systemPrompt.ts
+    const now = new Date();
+    const tzOffset = -now.getTimezoneOffset();
+    const tzHours = Math.floor(Math.abs(tzOffset) / 60);
+    const tzMins = Math.abs(tzOffset) % 60;
+    const tzSign = tzOffset >= 0 ? '+' : '-';
+    const tzString = `UTC${tzSign}${String(tzHours).padStart(2, '0')}:${String(tzMins).padStart(2, '0')}`;
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale ?? 'en-US';
+    const platform = process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux';
+    const shell = process.env.SHELL ?? process.env.COMSPEC ?? 'unknown';
+
     return `# Corp Members
 
 ${memberList}
@@ -50,7 +61,13 @@ The Pulse system pings you every 3 minutes:
 - **If you are busy:** You'll get a quick "HEARTBEAT" ping. Reply **HEARTBEAT_OK** immediately and continue your work. Don't stop what you're doing.
 - If you don't respond to 2 consecutive heartbeats, the CEO gets notified.
 
-## Current Time
-${new Date().toISOString()}`;
+## Environment
+- **Platform:** ${platform} (${process.arch})
+- **Shell:** ${shell}
+- **Timezone:** ${tzString} (${locale})
+- **Current time:** ${now.toISOString()} (local: ${now.toLocaleString()})
+- **Corp root:** ${ctx.corpRoot}
+
+When running shell commands, use the correct syntax for ${platform}. Timestamps from external tools may be in different timezones — the times above are the Founder's local time.`;
   },
 };

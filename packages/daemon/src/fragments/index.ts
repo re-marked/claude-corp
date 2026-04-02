@@ -21,9 +21,16 @@ import { inboxFragment } from './inbox.js';
 import { ccCliFragment } from './cc-cli.js';
 import { dredgeFragment } from './dredge.js';
 import { coordinatorFragment } from './coordinator.js';
+import { toolResultManagementFragment } from './tool-result-management.js';
+import { contextPersistenceFragment } from './context-persistence.js';
+import { scratchpadFragment } from './scratchpad.js';
+import { checkpointFragment } from './checkpoint.js';
 
 const FRAGMENTS: Fragment[] = [
   workspaceFragment,
+  toolResultManagementFragment,
+  contextPersistenceFragment,
+  scratchpadFragment,
   taskExecutionFragment,
   backReportingFragment,
   ceoReportingFragment,
@@ -35,6 +42,7 @@ const FRAGMENTS: Fragment[] = [
   channelEtiquetteFragment,
   antiRationalizationFragment,
   outputEfficiencyFragment,
+  checkpointFragment,
   blastRadiusFragment,
   fileLockingFragment,
   debateProtocolFragment,
