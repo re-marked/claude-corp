@@ -128,3 +128,87 @@ export function maxRetries(category: ErrorCategory): number {
   }
   return attempts;
 }
+
+// ── Context Blocking ───────────────────────────────────────────────
+
+/**
+ * Context blocking state machine.
+ * When blocked, all dispatches are paused. Prevents error → dispatch → error loops.
+ *
+ * Adapted from Claude Code's REPL.tsx:2634-2639:
+ *   API error → setContextBlocked(true) → stop all ticks
+ *   Successful response → setContextBlocked(false) → resume
+ */
+export class ContextBlocker {
+  private blocked = false;
+  private blockReason: ErrorCategory | null = null;
+  private blockedAt: number | null = null;
+  private blockCount = 0;
+  /** Categories that auto-block all dispatches (not just the failing agent). */
+  private static BLOCKING_CATEGORIES: Set<ErrorCategory> = new Set(['auth', 'rate_limit', 'overloaded']);
+
+  /** Should this error category trigger a global context block? */
+  static shouldBlock(category: ErrorCategory): boolean {
+    return ContextBlocker.BLOCKING_CATEGORIES.has(category);
+  }
+
+  /** Is the context currently blocked? */
+  isBlocked(): boolean {
+    return this.blocked;
+  }
+
+  /** Get the reason for the current block. */
+  getBlockReason(): ErrorCategory | null {
+    return this.blockReason;
+  }
+
+  /** How long has the context been blocked (ms)? 0 if not blocked. */
+  getBlockDuration(): number {
+    if (!this.blockedAt) return 0;
+    return Date.now() - this.blockedAt;
+  }
+
+  /** Get blocking status info for display. */
+  getStatus(): { blocked: boolean; reason: ErrorCategory | null; blockedAt: number | null; blockCount: number; durationMs: number } {
+    return {
+      blocked: this.blocked,
+      reason: this.blockReason,
+      blockedAt: this.blockedAt,
+      blockCount: this.blockCount,
+      durationMs: this.getBlockDuration(),
+    };
+  }
+
+  /**
+   * Block the context — all dispatches should pause.
+   * Called when a dispatch returns a blocking error (auth, rate limit).
+   */
+  block(reason: ErrorCategory): void {
+    if (this.blocked && this.blockReason === reason) return; // Already blocked for same reason
+    this.blocked = true;
+    this.blockReason = reason;
+    this.blockedAt = Date.now();
+    this.blockCount++;
+    log(`[resilience] Context BLOCKED (${reason}): ${categoryDescription(reason)}. Block #${this.blockCount}`);
+  }
+
+  /**
+   * Unblock the context — dispatches can resume.
+   * Called on: successful dispatch, compaction boundary, manual /clear.
+   */
+  unblock(): void {
+    if (!this.blocked) return;
+    const duration = this.blockedAt ? Math.round((Date.now() - this.blockedAt) / 1000) : 0;
+    log(`[resilience] Context UNBLOCKED after ${duration}s (was: ${this.blockReason})`);
+    this.blocked = false;
+    this.blockReason = null;
+    this.blockedAt = null;
+  }
+
+  /** Reset on manual clear or daemon restart. */
+  reset(): void {
+    this.blocked = false;
+    this.blockReason = null;
+    this.blockedAt = null;
+  }
+}
