@@ -412,15 +412,22 @@ export class CronManager {
           missed++;
 
           if (missedAgo < 60) {
-            // Missed within the last hour — fire now as a catch-up
-            log(`[crons] "${cron.name}" missed a fire (${missedAgo}m ago) — firing catch-up now`);
-            // Defer catch-up fire to after rehydration completes (with jitter)
+            // Missed within the last hour — fire catch-up after rehydration (with jitter)
+            log(`[crons] "${cron.name}" missed a fire (${missedAgo}m ago) — scheduling catch-up`);
             const jitter = cron.jitterMs ?? computeJitter(slug);
+            // Capture handle+cron for the deferred catch-up execution
+            const catchupHandle = handle;
+            const catchupCron = cron;
             setTimeout(() => {
-              log(`[crons] Catch-up fire: ${cron.name} (missed ${missedAgo}m ago)`);
-              cron.missedFire = false;
-              saveScheduledClock(this.daemon.corpRoot, cron);
-            }, jitter);
+              log(`[crons] Catch-up fire: ${catchupCron.name} (missed ${missedAgo}m ago)`);
+              // Trigger the croner job's callback manually by calling trigger()
+              const entry = this.entries.get(slug);
+              if (entry) {
+                entry.job.trigger(); // Actually execute the cron callback
+              }
+              catchupCron.missedFire = false;
+              saveScheduledClock(this.daemon.corpRoot, catchupCron);
+            }, Math.max(jitter, 2000)); // At least 2s after rehydration to let everything settle
           } else {
             // Missed more than an hour ago — skip to next, just log
             log(`[crons] "${cron.name}" missed a fire (${missedAgo}m ago) — too old, skipping to next`);
@@ -493,6 +500,12 @@ export class CronManager {
         logError(`[crons] ${clock.name} error: ${msg}`);
       },
     }, async () => {
+      // Apply deterministic jitter — delay execution to spread thundering herd
+      const jitter = clock.jitterMs ?? 0;
+      if (jitter > 0) {
+        await new Promise(r => setTimeout(r, jitter));
+      }
+
       const start = Date.now();
       let output = '';
 
