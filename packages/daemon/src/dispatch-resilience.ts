@@ -340,3 +340,80 @@ export class DispatchHealthTracker {
     }
   }
 }
+
+// ── Graduated Unblocking ───────────────────────────────────────────
+
+/**
+ * After context is unblocked, dispatches run at reduced frequency
+ * for a grace period. Prevents immediately re-hitting the rate limit.
+ *
+ * The first N dispatches after unblock fire at 2x normal interval.
+ * Once all N succeed, full speed is restored.
+ * If any fail during grace → re-block.
+ *
+ * Adapted from Claude Code's cautious resume pattern.
+ */
+export class GraduatedUnblocker {
+  /** Timestamp when unblocking happened */
+  private unblockedAt: number | null = null;
+  /** Number of successful dispatches since unblock */
+  private successesSinceUnblock = 0;
+  /** How many successful dispatches before returning to full speed */
+  private graceDispatches: number;
+
+  constructor(graceDispatches = 3) {
+    this.graceDispatches = graceDispatches;
+  }
+
+  /** Call when context is unblocked — start the grace period. */
+  startGrace(): void {
+    this.unblockedAt = Date.now();
+    this.successesSinceUnblock = 0;
+    log(`[resilience] Graduated unblock — next ${this.graceDispatches} dispatches at 2x interval`);
+  }
+
+  /** Record a successful dispatch during grace period. */
+  recordSuccess(): void {
+    if (this.unblockedAt === null) return;
+    this.successesSinceUnblock++;
+    if (this.successesSinceUnblock >= this.graceDispatches) {
+      const duration = Math.round((Date.now() - this.unblockedAt) / 1000);
+      log(`[resilience] Grace period complete (${duration}s) — full speed restored`);
+      this.unblockedAt = null;
+    }
+  }
+
+  /** Record a failure during grace — should re-block. Returns true if grace was active. */
+  recordFailure(): boolean {
+    if (this.unblockedAt === null) return false;
+    log(`[resilience] Failure during grace period — should re-block`);
+    this.unblockedAt = null;
+    this.successesSinceUnblock = 0;
+    return true; // Caller should re-block context
+  }
+
+  /** Is the graduated unblock grace period active? */
+  isInGracePeriod(): boolean {
+    return this.unblockedAt !== null;
+  }
+
+  /** Get the throttle multiplier (2x during grace, 1x normal). */
+  getThrottleMultiplier(): number {
+    return this.isInGracePeriod() ? 2 : 1;
+  }
+
+  /** Get grace period progress for display. */
+  getProgress(): { active: boolean; completed: number; required: number } {
+    return {
+      active: this.isInGracePeriod(),
+      completed: this.successesSinceUnblock,
+      required: this.graceDispatches,
+    };
+  }
+
+  /** Reset (on daemon restart). */
+  reset(): void {
+    this.unblockedAt = null;
+    this.successesSinceUnblock = 0;
+  }
+}
