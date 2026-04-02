@@ -87,3 +87,44 @@ export function categoryDescription(cat: ErrorCategory): string {
     case 'unknown': return 'Unknown error — will retry';
   }
 }
+
+// ── Exponential Backoff ────────────────────────────────────────────
+
+/** Backoff configuration per error category. */
+const BACKOFF_CONFIG: Record<ErrorCategory, { baseMs: number; maxMs: number; factor: number }> = {
+  rate_limit:       { baseMs: 5_000,  maxMs: 300_000, factor: 3 },   // 5s → 15s → 45s → 2m → 5m max
+  auth:             { baseMs: 0,      maxMs: 0,       factor: 0 },   // No retry — block
+  timeout:          { baseMs: 3_000,  maxMs: 30_000,  factor: 2 },   // 3s → 6s → 12s → 24s → 30s max
+  context_overflow: { baseMs: 1_000,  maxMs: 10_000,  factor: 2 },   // 1s → 2s → 4s → 8s → 10s max
+  model_unavailable:{ baseMs: 5_000,  maxMs: 60_000,  factor: 2 },   // 5s → 10s → 20s → 40s → 60s max
+  overloaded:       { baseMs: 10_000, maxMs: 300_000, factor: 3 },   // 10s → 30s → 90s → 5m max
+  network:          { baseMs: 2_000,  maxMs: 60_000,  factor: 2 },   // 2s → 4s → 8s → 16s → 32s → 60s max
+  unknown:          { baseMs: 3_000,  maxMs: 30_000,  factor: 2 },   // 3s → 6s → 12s → 24s → 30s max
+};
+
+/** Calculate the backoff delay for a given error category and attempt number. */
+export function getBackoffMs(category: ErrorCategory, attempt: number): number {
+  const config = BACKOFF_CONFIG[category];
+  if (config.maxMs === 0) return 0; // No retry (auth)
+  const delay = config.baseMs * Math.pow(config.factor, attempt);
+  return Math.min(delay, config.maxMs);
+}
+
+/** Check if an error category allows retries. */
+export function isRetryable(category: ErrorCategory): boolean {
+  return BACKOFF_CONFIG[category].maxMs > 0;
+}
+
+/** Get the max number of useful retries for a category (before hitting maxMs ceiling). */
+export function maxRetries(category: ErrorCategory): number {
+  const config = BACKOFF_CONFIG[category];
+  if (config.maxMs === 0) return 0;
+  // How many attempts before we hit maxMs
+  let attempts = 0;
+  let delay = config.baseMs;
+  while (delay < config.maxMs && attempts < 10) {
+    delay *= config.factor;
+    attempts++;
+  }
+  return attempts;
+}
