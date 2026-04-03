@@ -27,7 +27,7 @@
 
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readConfig, type Member, MEMBERS_JSON } from '@claudecorp/shared';
+import { readConfig, listTasks, type Member, MEMBERS_JSON, parseIntervalExpression } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { log, logError } from './logger.js';
 import {
@@ -549,7 +549,7 @@ export class AutoemonManager {
       const response = String(data.response ?? '');
 
       // Parse the response to determine what happened
-      const tickResult = this.parseTickResponse(response, data);
+      const tickResult = this.parseTickResponse(response);
       const productive = tickResult.type === 'productive';
 
       // Record the tick
@@ -586,42 +586,76 @@ export class AutoemonManager {
   /** Parse the agent's tick response to classify what happened. */
   private parseTickResponse(
     response: string,
-    rawData: Record<string, unknown>,
   ): { type: 'productive' | 'idle' | 'sleep' | 'error'; durationMs: number; reason: string } {
-    // Check for SLEEP command
+    // Check for SLEEP command first — highest priority signal
     const sleepMatch = response.match(SLEEP_PATTERN);
     if (sleepMatch) {
       const durationStr = sleepMatch[1]!;
       const reason = sleepMatch[2]?.trim() ?? 'no reason given';
-      const durationMs = this.parseDuration(durationStr);
+      const durationMs = this.parseSleepDuration(durationStr);
       return { type: 'sleep', durationMs, reason };
     }
 
-    // Check for tool calls (evidence of productive work)
-    // The say() response includes tool event info in the raw data
-    const toolEvents = (rawData as any).toolEvents ?? [];
-    if (Array.isArray(toolEvents) && toolEvents.length > 0) {
-      return { type: 'productive', durationMs: 0, reason: `${toolEvents.length} tool calls` };
+    const lower = response.toLowerCase();
+
+    // Explicit idle signals
+    if (lower.includes('heartbeat_ok') || lower.includes('nothing to do') || lower.includes('no pending work')) {
+      return { type: 'idle', durationMs: 0, reason: 'explicit idle' };
     }
 
-    // Check response length — short responses are likely idle
+    // Short response with no work evidence → idle
     if (response.length < IDLE_RESPONSE_MAX_CHARS) {
-      const lower = response.toLowerCase();
-      if (lower.includes('heartbeat_ok') || lower.includes('nothing to do') || lower.includes('no pending')) {
-        return { type: 'idle', durationMs: 0, reason: 'idle response' };
-      }
+      return { type: 'idle', durationMs: 0, reason: 'short response' };
     }
 
-    // Default: if response is substantial (>80 chars), assume productive
-    if (response.length >= IDLE_RESPONSE_MAX_CHARS) {
-      return { type: 'productive', durationMs: 0, reason: 'substantial response' };
+    // Content-based productive detection — look for evidence of actual work
+    // (since /cc/say doesn't return tool event metadata)
+    const productiveSignals = [
+      /\b(?:read|wrote|created|updated|modified|fixed|committed|deleted|moved|renamed)\b/i,
+      /\b(?:build|test|pass|fail|error|warning)\b.*\b(?:pass|fail|success|output)\b/i,
+      /\b(?:src|dist|packages|agents|tasks)\//,     // File paths
+      /\.[a-z]{1,4}(?:\s|$|:|\))/i,                 // File extensions (.ts, .md, .json)
+      /\bline\s+\d+\b/i,                            // Line references
+      /\btask\s+\w+-\w+\b/i,                        // Task IDs (word-pair format)
+      /```[\s\S]*```/,                               // Code blocks (agent showed code)
+      /\b(?:DONE|COMPLETE|BLOCKED|IN_PROGRESS)\b/,   // Status keywords
+      /\bcc-cli\s+\w+/,                             // CLI commands executed
+    ];
+
+    const matchCount = productiveSignals.filter(re => re.test(response)).length;
+
+    // 2+ productive signals → definitely productive
+    if (matchCount >= 2) {
+      return { type: 'productive', durationMs: 0, reason: `${matchCount} work signals detected` };
     }
 
-    return { type: 'idle', durationMs: 0, reason: 'short response' };
+    // 1 signal + long response → probably productive
+    if (matchCount >= 1 && response.length > 200) {
+      return { type: 'productive', durationMs: 0, reason: 'work signal + substantial response' };
+    }
+
+    // Long response but no clear work signals → mild productive (could be planning/thinking)
+    if (response.length > 300) {
+      return { type: 'productive', durationMs: 0, reason: 'long response (planning/thinking)' };
+    }
+
+    // Default: moderate-length response with no clear signals → idle
+    return { type: 'idle', durationMs: 0, reason: 'no clear work signals' };
   }
 
-  /** Parse a duration string like "5m", "30s", "2h", "1h30m" into milliseconds. */
-  private parseDuration(str: string): number {
+  /**
+   * Parse a sleep duration string into milliseconds.
+   * Uses shared parseIntervalExpression for standard formats (5m, 30s, 2h, 1h30m).
+   * Falls back to custom parsing for edge cases.
+   */
+  private parseSleepDuration(str: string): number {
+    // Try shared parser first (handles "5m", "30s", "2h", "1h30m")
+    const parsed = parseIntervalExpression(str);
+    if (parsed !== null) {
+      return Math.max(MIN_TICK_INTERVAL_MS, Math.min(MAX_TICK_INTERVAL_MS, parsed));
+    }
+
+    // Fallback: custom parsing for "5d" or other formats the shared parser doesn't handle
     let total = 0;
     const parts = str.match(/(\d+)([smhd])/gi) ?? [];
     for (const part of parts) {
@@ -636,7 +670,6 @@ export class AutoemonManager {
         case 'd': total += num * 24 * 60 * 60 * 1000; break;
       }
     }
-    // Clamp to min/max sleep bounds
     return Math.max(MIN_TICK_INTERVAL_MS, Math.min(MAX_TICK_INTERVAL_MS, total || DEFAULT_TICK_INTERVAL_MS));
   }
 
@@ -679,10 +712,9 @@ export class AutoemonManager {
   /** Count pending tasks assigned to this agent (quick check). */
   private countAgentPendingTasks(agentId: string): number {
     try {
-      const { listTasks } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
-      const tasks = listTasks(this.daemon.corpRoot, { assignedTo: agentId, status: 'pending' });
+      const pending = listTasks(this.daemon.corpRoot, { assignedTo: agentId, status: 'pending' });
       const inProgress = listTasks(this.daemon.corpRoot, { assignedTo: agentId, status: 'in_progress' });
-      return tasks.length + inProgress.length;
+      return pending.length + inProgress.length;
     } catch { return 0; }
   }
 
