@@ -137,7 +137,7 @@ export function buildSleepWakeTick(opts: {
   /** How long the agent slept (ms) */
   sleptForMs: number;
   /** Why the agent woke up: timer expired, user input, urgent task */
-  wakeReason: 'timer' | 'user_input' | 'urgent_task' | 'manual_wake';
+  wakeReason: 'timer' | 'user_message' | 'urgent_task' | 'manual_wake';
   /** Brief summary of what happened while sleeping (new tasks, messages) */
   whileAsleep?: string;
   context?: TickContext;
@@ -148,7 +148,7 @@ export function buildSleepWakeTick(opts: {
 
   const wakeReasonLabel = {
     timer: 'sleep timer expired',
-    user_input: 'founder sent a message',
+    user_message: 'founder sent a message',
     urgent_task: 'urgent task assigned',
     manual_wake: 'manual /wake command',
   }[opts.wakeReason];

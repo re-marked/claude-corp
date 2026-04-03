@@ -1017,7 +1017,7 @@ export class AutoemonManager {
    */
   isSleeping(agentId: string): boolean {
     const agentState = this.state.agents[agentId];
-    return agentState?.state === 'sleeping' ?? false;
+    return agentState?.state === 'sleeping' || false;
   }
 
   /**

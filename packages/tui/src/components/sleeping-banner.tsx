@@ -27,29 +27,37 @@ interface Props {
 // ── ASCII Night Sky ────────────────────────────────────────────────
 
 const STAR_FRAMES = [
-  // Frame 0: quiet sky
+  // Frame 0: quiet sky with wispy clouds
   [
-    '    ·  ✦      ·        ·    ',
+    '    ·  ✦      ·    ☁   ·    ',
     '  ·       ·      ✧  ·      ',
-    '       ·     ☽       ·   · ',
-    '  ·  ✧    ·     ·       ·  ',
+    '    ☁· ·     ☽       ·   · ',
+    '  ·  ✧    ·     ·    ☁  ·  ',
     '     ·       ·    ✦  ·     ',
   ],
-  // Frame 1: twinkling
+  // Frame 1: twinkling, clouds drift
   [
-    '    ✧  ·      ✦        ·   ',
+    '    ✧  ·   ☁  ✦        ·   ',
     '  ·       ✧      ·  ✦      ',
-    '       ·     ☽       ✧   · ',
+    '       ·     ☽    ☁  ✧   · ',
     '  ✦  ·    ✧     ·       ·  ',
-    '     ✧       ·    ·  ✦     ',
+    '   ☁ ✧       ·    ·  ✦     ',
   ],
-  // Frame 2: different pattern
+  // Frame 2: different pattern, clouds shifted
   [
     '    ·  ✧      ·        ✦   ',
-    '  ✦       ·      ✧  ·      ',
+    '  ✦    ☁  ·      ✧  ·      ',
     '       ✦     ☽       ·   ✧ ',
-    '  ·  ✦    ·     ✧       ·  ',
-    '     ·       ✦    ✧  ·     ',
+    '  ·  ✦    ·  ☁  ✧       ·  ',
+    '     ·       ✦    ✧  · ☁   ',
+  ],
+  // Frame 3: shooting star moment
+  [
+    '    ·  ✦  ━━✧  ·        ·  ',
+    '  ·       ·      ✧  · ☁    ',
+    '    ☁  ·     ☽       ·   · ',
+    '  ·  ✧    ·     ·       ·  ',
+    '     ·    ☁  ·    ✦  ·     ',
   ],
 ];
 
@@ -112,29 +120,52 @@ export function SleepingBanner({ agentName, sleepReason, remainingMs, rank }: Pr
   const zzz = ZZZ_FRAMES[zzzFrame]!;
   const timeLeft = formatRemaining(remaining);
 
-  // Muted indigo/purple colors for the night theme
-  const skyColor = '#6366f1';  // Indigo
-  const moonColor = '#fbbf24'; // Amber for the moon
-  const zzzColor = '#818cf8';  // Light indigo
-  const textColor = '#a5b4fc'; // Lighter indigo
+  // Night theme palette
+  const colors = {
+    dimStar: '#4b5563',    // Grey-500 — faint dots
+    brightStar: '#a5b4fc', // Indigo-300 — bright stars
+    specialStar: '#e0e7ff',// Indigo-100 — sparkle stars (✦✧)
+    moon: '#fbbf24',       // Amber-400 — the moon
+    cloud: '#374151',      // Grey-700 — wispy clouds
+    shootingStar: '#fde68a',// Amber-200 — streak
+    zzz: '#818cf8',        // Indigo-400
+    text: '#a5b4fc',       // Indigo-300
+    border: '#4338ca',     // Indigo-700 — deeper border
+  };
+
+  /** Color a single character based on what it is. */
+  const colorChar = (ch: string): string => {
+    switch (ch) {
+      case '☽': return colors.moon;
+      case '✦': case '✧': return colors.specialStar;
+      case '☁': return colors.cloud;
+      case '━': return colors.shootingStar;
+      case '·': return colors.dimStar;
+      default: return colors.dimStar;
+    }
+  };
 
   return (
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor={skyColor}
+      borderColor={colors.border}
       paddingX={1}
       marginBottom={1}
     >
-      {/* Night sky */}
+      {/* Night sky — each character colored individually */}
       {stars.map((line, i) => (
-        <Text key={i} color={i === 2 ? moonColor : skyColor}>{line}</Text>
+        <Text key={i}>
+          {line.split('').map((ch, j) => (
+            <Text key={j} color={ch === ' ' ? undefined : colorChar(ch)}>{ch}</Text>
+          ))}
+        </Text>
       ))}
 
       {/* Agent info + zzz */}
       <Box marginTop={1} gap={1}>
-        <Text color={textColor} bold>{agentName}</Text>
-        <Text color={zzzColor} bold>{zzz}</Text>
+        <Text color={colors.text} bold>{agentName}</Text>
+        <Text color={colors.zzz} bold>{zzz}</Text>
       </Box>
 
       {/* Sleep reason + remaining */}
@@ -142,13 +173,13 @@ export function SleepingBanner({ agentName, sleepReason, remainingMs, rank }: Pr
         <Text color={COLORS.muted} dimColor>
           {sleepReason ? `"${sleepReason}"` : 'Sleeping...'}
         </Text>
-        <Text color={textColor}>· {timeLeft}</Text>
+        <Text color={colors.text}>· waking in {timeLeft}</Text>
       </Box>
 
       {/* Wake hint */}
       <Box marginTop={1}>
         <Text color={COLORS.muted} italic>
-          Type a message to wake {agentName} instantly
+          type a message to wake {agentName} instantly ↵
         </Text>
       </Box>
     </Box>
