@@ -91,7 +91,7 @@ export class Pulse {
       const agent = online[i]!;
 
       // Skip agents enrolled in autoemon — they receive <tick> prompts instead
-      if ((this.daemon as any).autoemon?.isEnrolled(agent.memberId)) {
+      if (this.daemon.autoemon?.isEnrolled(agent.memberId)) {
         skippedAutoemon++;
         continue;
       }
@@ -226,7 +226,7 @@ export class Pulse {
       if (agent.rank === 'master') continue;
 
       // Don't escalate agents enrolled in autoemon — autoemon handles their health
-      if ((this.daemon as any).autoemon?.isEnrolled(memberId)) continue;
+      if (this.daemon.autoemon?.isEnrolled(memberId)) continue;
 
       // Determine the reason
       const agentProc = this.daemon.processManager.getAgent(memberId);
