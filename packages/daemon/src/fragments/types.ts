@@ -12,6 +12,8 @@ export interface FragmentContext {
   channelKind: 'direct' | 'broadcast' | 'team' | 'system';
   /** Name of this agent's supervisor (CEO for workers, Founder for CEO) */
   supervisorName: string | null;
+  /** Whether this agent is enrolled in autoemon (autonomous tick mode) */
+  autoemonEnrolled?: boolean;
 }
 
 export type FragmentFn = (ctx: FragmentContext) => string;
