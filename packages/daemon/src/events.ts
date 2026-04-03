@@ -17,7 +17,8 @@ export type DaemonEvent =
   | { type: 'loop_created'; name: string; interval: string }
   | { type: 'loop_stopped'; name: string }
   | { type: 'cron_created'; name: string; schedule: string }
-  | { type: 'cron_stopped'; name: string };
+  | { type: 'cron_stopped'; name: string }
+  | { type: 'autoemon_state'; state: string; source?: string; reason?: string };
 
 export class EventBus {
   private wss: WebSocketServer | null = null;
