@@ -895,6 +895,78 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // ── Autoemon endpoints ───────────────────────────────────────────
+
+      // POST /autoemon/activate — start autonomous mode
+      if (method === 'POST' && path === '/autoemon/activate') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const source = (body.source as string) ?? 'manual';
+        const agents = body.agents as string[] | undefined;
+
+        daemon.autoemon.activate(source as any);
+
+        // Enroll specified agents, or run conscription cascade
+        if (agents?.length) {
+          for (const agentId of agents) daemon.autoemon.enroll(agentId);
+        } else {
+          // Conscription cascade: CEO + team leaders on contracts + their workers
+          daemon.autoemon.conscript();
+        }
+
+        // Start the tick loop if not already running
+        daemon.autoemon.startTickLoop();
+
+        json(res, { ok: true, ...daemon.autoemon.getStatus() });
+        return;
+      }
+
+      // POST /autoemon/deactivate — stop autonomous mode
+      if (method === 'POST' && path === '/autoemon/deactivate') {
+        daemon.autoemon.deactivate();
+        json(res, { ok: true, state: 'inactive' });
+        return;
+      }
+
+      // POST /autoemon/pause — pause ticks
+      if (method === 'POST' && path === '/autoemon/pause') {
+        daemon.autoemon.pause();
+        json(res, { ok: true, state: 'paused' });
+        return;
+      }
+
+      // POST /autoemon/resume — resume ticks
+      if (method === 'POST' && path === '/autoemon/resume') {
+        daemon.autoemon.resume();
+        json(res, { ok: true, state: 'active' });
+        return;
+      }
+
+      // GET /autoemon/status — full status with per-agent details
+      if (method === 'GET' && path === '/autoemon/status') {
+        json(res, daemon.autoemon.getStatus());
+        return;
+      }
+
+      // POST /autoemon/enroll — enroll a specific agent
+      if (method === 'POST' && path === '/autoemon/enroll') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const agentId = body.agentId as string;
+        if (!agentId) { json(res, { error: 'agentId required' }, 400); return; }
+        daemon.autoemon.enroll(agentId);
+        json(res, { ok: true, enrolled: daemon.autoemon.getEnrolledAgents() });
+        return;
+      }
+
+      // POST /autoemon/discharge — discharge a specific agent
+      if (method === 'POST' && path === '/autoemon/discharge') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const agentId = body.agentId as string;
+        if (!agentId) { json(res, { error: 'agentId required' }, 400); return; }
+        daemon.autoemon.discharge(agentId);
+        json(res, { ok: true, enrolled: daemon.autoemon.getEnrolledAgents() });
+        return;
+      }
+
       // POST /loops — create a new loop
       if (method === 'POST' && path === '/loops') {
         const body = await readBody(req) as Record<string, unknown>;

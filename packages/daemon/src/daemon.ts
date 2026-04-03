@@ -36,6 +36,7 @@ import { ClockManager } from './clock-manager.js';
 import { LoopManager } from './loops.js';
 import { CronManager } from './crons.js';
 import { DreamManager } from './dreams.js';
+import { AutoemonManager } from './autoemon.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
@@ -56,6 +57,7 @@ export class Daemon {
   loops: LoopManager;
   crons: CronManager;
   dreams: DreamManager;
+  autoemon: AutoemonManager;
   analytics: AnalyticsEngine;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
@@ -92,6 +94,7 @@ export class Daemon {
     this.loops = new LoopManager(this);
     this.crons = new CronManager(this);
     this.dreams = new DreamManager(this);
+    this.autoemon = new AutoemonManager(this);
     this.analytics = new AnalyticsEngine(this);
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
   }
@@ -240,6 +243,12 @@ export class Daemon {
 
     // Start Agent Dreams — background memory consolidation
     this.dreams.start();
+
+    // Start autoemon tick loop if it was active before daemon restart
+    if (this.autoemon.isOn()) {
+      this.autoemon.startTickLoop();
+      log(`[daemon] Autoemon rehydrated — tick loop resumed (${this.autoemon.getEnrolledAgents().length} agents enrolled)`);
+    }
   }
 
   /** Dispatch narration request to Herald via say(). Response = NARRATION.md content. */
@@ -816,6 +825,7 @@ export class Daemon {
     this.hireWatcher.stop();
     this.pulse.stop();
     this.contractWatcher.stop();
+    this.autoemon.stop(); // Persist autoemon state before shutdown
     this.crons.stopAll(); // Stop croner jobs before ClockManager
     this.loops.shutdown(); // Flush loop stats
     this.clocks.stopAll();
