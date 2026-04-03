@@ -86,8 +86,16 @@ export class Pulse {
     // on a single API key. Sequential, not concurrent.
     let responded = 0;
     let missed = 0;
+    let skippedAutoemon = 0;
     for (let i = 0; i < online.length; i++) {
       const agent = online[i]!;
+
+      // Skip agents enrolled in autoemon — they receive <tick> prompts instead
+      if ((this.daemon as any).autoemon?.isEnrolled(agent.memberId)) {
+        skippedAutoemon++;
+        continue;
+      }
+
       if (i > 0) await new Promise(r => setTimeout(r, 1500));
       try {
         const ok = await this.pingAgent(agent.memberId, agent.displayName, now);
@@ -97,7 +105,8 @@ export class Pulse {
       }
     }
 
-    log(`[pulse] Heartbeat results: ${responded} responded, ${missed} missed`);
+    const autoemonNote = skippedAutoemon > 0 ? `, ${skippedAutoemon} on autoemon` : '';
+    log(`[pulse] Heartbeat results: ${responded} responded, ${missed} missed${autoemonNote}`);
 
     // Check for agents that need escalation
     await this.checkEscalations(now);
