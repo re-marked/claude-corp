@@ -5,6 +5,22 @@ export class DaemonClient {
     this.baseUrl = `http://127.0.0.1:${port}`;
   }
 
+  /** Generic GET request to any daemon API path. */
+  async get(path: string): Promise<unknown> {
+    const resp = await fetch(`${this.baseUrl}${path}`);
+    return resp.json();
+  }
+
+  /** Generic POST request to any daemon API path. */
+  async post(path: string, body?: Record<string, unknown>): Promise<unknown> {
+    const resp = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return resp.json();
+  }
+
   async status(): Promise<{ ok: boolean; corpRoot: string; agents: { memberId: string; displayName: string; port: number; status: string }[] }> {
     const resp = await fetch(`${this.baseUrl}/status`);
     return resp.json() as Promise<any>;

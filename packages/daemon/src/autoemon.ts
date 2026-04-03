@@ -90,6 +90,7 @@ export const MAX_TICK_INTERVAL_MS = 30 * 60 * 1000;
 export type AutoemonGlobalState = 'inactive' | 'active' | 'paused' | 'blocked';
 export type AutoemonAgentState = 'active' | 'sleeping' | 'blocked';
 export type ActivationSource = 'slumber' | 'manual' | 'afk';
+export type WakeReason = 'timer' | 'user_message' | 'urgent_task' | 'manual_wake';
 
 /** Persisted state for a single enrolled agent. */
 export interface AgentTickState {
@@ -647,10 +648,12 @@ export class AutoemonManager {
       });
     } else if (wasSleeping) {
       const sleptFor = agentState.sleepUntil! - (agentState.nextTickAt - agentState.tickIntervalMs);
+      const wakeInfo = this.consumeWakeReason(agentId);
       tickMessage = buildSleepWakeTick({
         presence,
         sleptForMs: Math.max(sleptFor, 0),
-        wakeReason: 'timer',
+        wakeReason: wakeInfo?.reason ?? 'timer',
+        whileAsleep: wakeInfo?.detail,
         context: tickContext,
       });
       agentState.sleepUntil = null;
@@ -968,15 +971,71 @@ export class AutoemonManager {
   }
 
   /** Wake an agent from sleep. */
-  wakeAgent(agentId: string): void {
+  /** Wake reasons for telemetry and the sleep-wake tick message. */
+  private pendingWakeReason = new Map<string, { reason: WakeReason; detail?: string }>();
+
+  /** Wake an agent from sleep. Reason tracked for the next tick message. */
+  wakeAgent(agentId: string, reason: WakeReason = 'timer', detail?: string): void {
     const agentState = this.state.agents[agentId];
     if (!agentState || agentState.state !== 'sleeping') return;
+
+    const wasReason = agentState.sleepReason ?? 'unknown';
+    const sleptMs = agentState.sleepUntil ? agentState.sleepUntil - (agentState.nextTickAt - agentState.tickIntervalMs) : 0;
 
     agentState.state = 'active';
     agentState.sleepUntil = null;
     agentState.sleepReason = null;
     agentState.nextTickAt = Date.now(); // Tick immediately on wake
-    log(`[autoemon] ${agentId} woke up`);
+
+    // Store wake reason for the next tick to include in the message
+    this.pendingWakeReason.set(agentId, { reason, detail });
+
+    log(`[autoemon] ${agentId} woke up (reason: ${reason}${detail ? ` — ${detail}` : ''}, was sleeping: "${wasReason}")`);
+
+    // Broadcast for TUI
+    this.daemon.events.broadcast({
+      type: 'autoemon_state',
+      state: 'wake',
+      source: agentId,
+      reason: `${reason}: ${detail ?? ''}`,
+    });
+  }
+
+  /** Consume the pending wake reason for a given agent (called by dispatchTick). */
+  consumeWakeReason(agentId: string): { reason: WakeReason; detail?: string } | null {
+    const pending = this.pendingWakeReason.get(agentId);
+    if (pending) {
+      this.pendingWakeReason.delete(agentId);
+      return pending;
+    }
+    return null;
+  }
+
+  /**
+   * Check if the given agent is sleeping. Used by the router and API
+   * to decide whether to wake the agent on incoming messages/tasks.
+   */
+  isSleeping(agentId: string): boolean {
+    const agentState = this.state.agents[agentId];
+    return agentState?.state === 'sleeping' || false;
+  }
+
+  /**
+   * Get sleep info for display — remaining time, reason, etc.
+   * Returns null if agent is not sleeping.
+   */
+  getSleepInfo(agentId: string): {
+    sleepUntil: number;
+    remainingMs: number;
+    reason: string;
+  } | null {
+    const agentState = this.state.agents[agentId];
+    if (!agentState || agentState.state !== 'sleeping' || !agentState.sleepUntil) return null;
+    return {
+      sleepUntil: agentState.sleepUntil,
+      remainingMs: Math.max(0, agentState.sleepUntil - Date.now()),
+      reason: agentState.sleepReason ?? 'unknown',
+    };
   }
 
   // ── Persistence ──────────────────────────────────────────────────

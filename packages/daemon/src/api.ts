@@ -318,6 +318,14 @@ export function createApi(daemon: Daemon): Server {
           logTaskAssignment(daemon.corpRoot, target.id, updated.title);
           dispatchTaskToDm(daemon, target.id, updated.title, taskId);
 
+          // Wake sleeping autoemon agent if task is urgent (critical/high priority)
+          if (daemon.autoemon.isSleeping(target.id)) {
+            const priority = updated.priority ?? 'normal';
+            if (priority === 'critical' || priority === 'high') {
+              daemon.autoemon.wakeAgent(target.id, 'urgent_task', `Task "${updated.title}" (${priority})`);
+            }
+          }
+
           // Refresh all agents' TASKS.md + casket files
           daemon.heartbeat.refreshAll();
 
@@ -964,6 +972,41 @@ export function createApi(daemon: Daemon): Server {
         if (!agentId) { json(res, { error: 'agentId required' }, 400); return; }
         daemon.autoemon.discharge(agentId);
         json(res, { ok: true, enrolled: daemon.autoemon.getEnrolledAgents() });
+        return;
+      }
+
+      // POST /autoemon/wake — wake a sleeping agent (or all)
+      if (method === 'POST' && path === '/autoemon/wake') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const agentId = body.agentId as string | undefined;
+        const woken: string[] = [];
+
+        if (agentId) {
+          // Wake specific agent
+          if (daemon.autoemon.isSleeping(agentId)) {
+            daemon.autoemon.wakeAgent(agentId, 'manual_wake', 'API /autoemon/wake');
+            woken.push(agentId);
+          }
+        } else {
+          // Wake all sleeping agents
+          for (const id of daemon.autoemon.getEnrolledAgents()) {
+            if (daemon.autoemon.isSleeping(id)) {
+              daemon.autoemon.wakeAgent(id, 'manual_wake', 'API /autoemon/wake (all)');
+              woken.push(id);
+            }
+          }
+        }
+
+        json(res, { ok: true, woken, enrolled: daemon.autoemon.getEnrolledAgents() });
+        return;
+      }
+
+      // GET /autoemon/sleep/:agentId — get sleep info for an agent
+      if (method === 'GET' && path.startsWith('/autoemon/sleep/')) {
+        const agentId = path.split('/')[3];
+        if (!agentId) { json(res, { error: 'agentId required' }, 400); return; }
+        const sleepInfo = daemon.autoemon.getSleepInfo(agentId);
+        json(res, sleepInfo ?? { sleeping: false });
         return;
       }
 
