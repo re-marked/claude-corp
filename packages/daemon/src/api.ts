@@ -905,14 +905,12 @@ export function createApi(daemon: Daemon): Server {
 
         daemon.autoemon.activate(source as any);
 
-        // Enroll specified agents, or just CEO by default
+        // Enroll specified agents, or run conscription cascade
         if (agents?.length) {
           for (const agentId of agents) daemon.autoemon.enroll(agentId);
         } else {
-          // Default: enroll CEO
-          const members = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
-          const ceo = members.find((m: any) => m.rank === 'master' && m.type === 'agent');
-          if (ceo) daemon.autoemon.enroll(ceo.id);
+          // Conscription cascade: CEO + team leaders on contracts + their workers
+          daemon.autoemon.conscript();
         }
 
         // Start the tick loop if not already running

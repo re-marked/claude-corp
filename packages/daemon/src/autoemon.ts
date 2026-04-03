@@ -27,7 +27,15 @@
 
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readConfig, listTasks, type Member, MEMBERS_JSON, parseIntervalExpression } from '@claudecorp/shared';
+import {
+  readConfig,
+  listTasks,
+  listAllContracts,
+  type Member,
+  type Contract,
+  MEMBERS_JSON,
+  parseIntervalExpression,
+} from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { log, logError } from './logger.js';
 import {
@@ -402,6 +410,122 @@ export class AutoemonManager {
     log(`[autoemon] Discharged ${agentId} (${tickCount} ticks, ${productive} productive)`);
   }
 
+  // ── Conscription Cascade ──────────────────────────────────────────
+
+  /**
+   * Conscript agents based on active contracts and hierarchy.
+   * CEO always enrolls. Team leaders on active contracts enroll.
+   * Workers with active tasks on those contracts enroll.
+   *
+   * Called on activation and periodically (every 10 ticks) to pick up
+   * newly hired workers and new contract assignments.
+   */
+  conscript(): void {
+    const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+    const beforeCount = this.enrolled.size;
+
+    // 1. CEO always enrolls (entry point)
+    const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+    if (ceo) this.enroll(ceo.id);
+
+    // 2. Find active contracts → enroll their leads + workers
+    try {
+      const allContracts = listAllContracts(this.daemon.corpRoot);
+      const activeContracts = allContracts.filter(
+        (c) => c.contract.status === 'active',
+      );
+
+      for (const { contract } of activeContracts) {
+        // Enroll the contract lead (team leader)
+        const leaderId = (contract as any).leaderId ?? (contract as any).assignedTo;
+        if (leaderId) {
+          this.enroll(leaderId);
+        }
+
+        // Enroll workers assigned to tasks in this contract
+        try {
+          const allTasks = listTasks(this.daemon.corpRoot, {});
+          const contractTasks = allTasks.filter(
+            (t) => (t.task as any).contractId === contract.id || (t.task as any).parentTaskId === contract.id,
+          );
+          for (const { task } of contractTasks) {
+            if (task.assignedTo && task.status !== 'completed' && task.status !== 'cancelled') {
+              this.enroll(task.assignedTo);
+            }
+          }
+        } catch {} // Tasks might not exist yet
+      }
+    } catch {} // No contracts yet — just CEO
+
+    // 3. Also enroll any agents with active (in_progress) tasks even without contracts
+    try {
+      const activeTasks = listTasks(this.daemon.corpRoot, { status: 'in_progress' });
+      for (const { task } of activeTasks) {
+        if (task.assignedTo) {
+          this.enroll(task.assignedTo);
+        }
+      }
+    } catch {}
+
+    const newlyEnrolled = this.enrolled.size - beforeCount;
+    if (newlyEnrolled > 0) {
+      log(`[autoemon] Conscription: ${newlyEnrolled} new agent(s) enrolled (total: ${this.enrolled.size})`);
+    }
+  }
+
+  /**
+   * Discharge agents whose contracts or tasks completed.
+   * Workers with no active tasks → discharge.
+   * Leaders with no active contracts → discharge.
+   * CEO never discharged.
+   *
+   * Called after contract completion events and periodically.
+   */
+  dischargeCompleted(): void {
+    const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+    const discharged: string[] = [];
+
+    for (const agentId of [...this.enrolled]) {
+      const member = members.find(m => m.id === agentId);
+      if (!member) continue;
+
+      // CEO never discharged
+      if (member.rank === 'master') continue;
+
+      // Check if agent still has active work
+      try {
+        const agentTasks = listTasks(this.daemon.corpRoot, { assignedTo: agentId });
+        const hasActiveWork = agentTasks.some(
+          (t) => t.task.status === 'in_progress' || t.task.status === 'pending',
+        );
+
+        if (!hasActiveWork) {
+          this.discharge(agentId);
+          discharged.push(member.displayName);
+        }
+      } catch {
+        // Can't check tasks — keep enrolled to be safe
+      }
+    }
+
+    if (discharged.length > 0) {
+      log(`[autoemon] Discharged ${discharged.length} agent(s) (no active work): ${discharged.join(', ')}`);
+    }
+  }
+
+  /** Counter for periodic re-scan (every 10 ticks). */
+  private conscriptionCounter = 0;
+
+  /** Called after each tick cycle to check if re-scan is due. */
+  checkConscription(): void {
+    this.conscriptionCounter++;
+    if (this.conscriptionCounter >= 10) {
+      this.conscriptionCounter = 0;
+      this.conscript();
+      this.dischargeCompleted();
+    }
+  }
+
   // ── Tick Loop ─────────────────────────────────────────────────────
 
   /** Start the tick loop — registers a Clock for observability. */
@@ -475,6 +599,9 @@ export class AutoemonManager {
         this.recordError(agentId);
       }
     }
+
+    // Periodic re-scan: pick up new workers, discharge completed
+    this.checkConscription();
   }
 
   /**
