@@ -790,6 +790,14 @@ export class Daemon {
     // Poke the router to process this channel (Windows fs.watch can miss appends)
     setTimeout(() => this.router.pokeChannel(channelId), 100);
 
+    // Wake sleeping autoemon agents if the founder sends them a message
+    if (!isAgent && channel.kind === 'direct') {
+      const otherId = channel.memberIds.find((id) => id !== actualSender.id);
+      if (otherId && this.autoemon.isSleeping(otherId)) {
+        this.autoemon.wakeAgent(otherId, 'user_message', `Founder sent: "${content.slice(0, 60)}"`);
+      }
+    }
+
     // Mark for git commit
     this.gitManager.markDirty(founder.displayName);
 
