@@ -142,6 +142,8 @@ export class AutoemonManager {
   private state: AutoemonPersistedState;
   /** In-memory set of enrolled agent IDs — fast lookup for Pulse skip check */
   private enrolled = new Set<string>();
+  /** Whether the tick loop clock is currently registered */
+  private tickLoopRunning = false;
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -250,6 +252,9 @@ export class AutoemonManager {
   deactivate(): void {
     const prev = this.state.globalState;
     if (prev === 'inactive') return;
+
+    // Stop the tick loop clock first
+    this.stopTickLoop();
 
     // Discharge all agents
     const agentIds = [...this.enrolled];
@@ -401,6 +406,11 @@ export class AutoemonManager {
 
   /** Start the tick loop — registers a Clock for observability. */
   startTickLoop(): void {
+    if (this.tickLoopRunning) {
+      log(`[autoemon] Tick loop already running — skipping re-registration`);
+      return;
+    }
+
     this.daemon.clocks.register({
       id: 'autoemon-tick',
       name: 'Autoemon Ticks',
@@ -410,7 +420,16 @@ export class AutoemonManager {
       description: 'Fires <tick> prompts to enrolled autoemon agents on their adaptive schedules',
       callback: () => this.tickCycle(),
     });
+    this.tickLoopRunning = true;
     log(`[autoemon] Tick loop started (check interval: ${TICK_CHECK_INTERVAL_MS / 1000}s)`);
+  }
+
+  /** Stop the tick loop — removes the Clock. */
+  stopTickLoop(): void {
+    if (!this.tickLoopRunning) return;
+    this.daemon.clocks.remove('autoemon-tick');
+    this.tickLoopRunning = false;
+    log(`[autoemon] Tick loop stopped`);
   }
 
   /**
