@@ -19,20 +19,51 @@ export type FounderPresence = 'watching' | 'idle' | 'away';
 
 // ── Tick Message Builders ──────────────────────────────────────────
 
+/** Brief context snapshot to enrich ticks — saves agents from re-reading files every tick. */
+export interface TickContext {
+  /** Number of pending tasks assigned to this agent */
+  pendingTasks?: number;
+  /** Number of unread inbox items */
+  unreadInbox?: number;
+  /** What the agent was doing last tick (for continuity) */
+  lastAction?: string;
+  /** Current SLUMBER goal (if any) */
+  goal?: string;
+}
+
+/** Format a timestamp that includes date (for midnight-crossing sessions). */
+function formatTickTime(time: Date): string {
+  const date = time.toISOString().slice(0, 10); // YYYY-MM-DD
+  const clock = time.toLocaleTimeString('en-US', { hour12: false });
+  return `${date} ${clock}`;
+}
+
+/** Build optional context attributes for the <tick> tag. */
+function buildContextAttrs(ctx?: TickContext): string {
+  if (!ctx) return '';
+  const attrs: string[] = [];
+  if (ctx.pendingTasks !== undefined) attrs.push(`tasks="${ctx.pendingTasks}"`);
+  if (ctx.unreadInbox !== undefined) attrs.push(`inbox="${ctx.unreadInbox}"`);
+  return attrs.length > 0 ? ' ' + attrs.join(' ') : '';
+}
+
 /**
  * Build a single tick message.
- * The simplest case: just the local time wrapped in XML.
+ * Enriched beyond Claude Code's bare `<tick>time</tick>` with optional
+ * context snapshot and continuity hints.
  */
 export function buildTickMessage(opts: {
   /** Founder's current presence */
   presence: FounderPresence;
   /** Result from a previous backgrounded tick (if any) */
   previousResult?: string;
+  /** Brief context snapshot (saves agent from re-reading files) */
+  context?: TickContext;
   /** Current local time (defaults to now) */
   time?: Date;
 }): string {
   const time = opts.time ?? new Date();
-  const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
+  const timeStr = formatTickTime(time);
 
   const parts: string[] = [];
 
@@ -41,11 +72,21 @@ export function buildTickMessage(opts: {
     parts.push(`<previous-tick-result>${opts.previousResult}</previous-tick-result>`);
   }
 
-  // The tick itself — just the time
-  parts.push(`<tick>${timeStr}</tick>`);
+  // The tick itself — time + optional context attributes
+  parts.push(`<tick${buildContextAttrs(opts.context)}>${timeStr}</tick>`);
 
   // Founder presence — how autonomous the agent should be
   parts.push(`<presence>${opts.presence}</presence>`);
+
+  // Last action hint for continuity (if available)
+  if (opts.context?.lastAction) {
+    parts.push(`<last-action>${opts.context.lastAction}</last-action>`);
+  }
+
+  // SLUMBER goal reminder (if set)
+  if (opts.context?.goal) {
+    parts.push(`<goal>${opts.context.goal}</goal>`);
+  }
 
   return parts.join('\n');
 }
@@ -62,11 +103,12 @@ export function buildBatchedTickMessage(opts: {
   presence: FounderPresence;
   /** Previous backgrounded result */
   previousResult?: string;
+  context?: TickContext;
   /** Time of the latest tick */
   time?: Date;
 }): string {
   const time = opts.time ?? new Date();
-  const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
+  const timeStr = formatTickTime(time);
 
   const parts: string[] = [];
 
@@ -76,12 +118,52 @@ export function buildBatchedTickMessage(opts: {
 
   // Batched ticks — just show the latest with a note
   if (opts.batchCount > 1) {
-    parts.push(`<tick batched="${opts.batchCount}">${timeStr}</tick>`);
+    parts.push(`<tick batched="${opts.batchCount}"${buildContextAttrs(opts.context)}>${timeStr}</tick>`);
   } else {
-    parts.push(`<tick>${timeStr}</tick>`);
+    parts.push(`<tick${buildContextAttrs(opts.context)}>${timeStr}</tick>`);
   }
 
   parts.push(`<presence>${opts.presence}</presence>`);
+
+  return parts.join('\n');
+}
+
+/**
+ * Build a sleep-wake tick — agent just woke up from a SLEEP.
+ * Includes how long they slept and any events that occurred while sleeping.
+ */
+export function buildSleepWakeTick(opts: {
+  presence: FounderPresence;
+  /** How long the agent slept (ms) */
+  sleptForMs: number;
+  /** Why the agent woke up: timer expired, user input, urgent task */
+  wakeReason: 'timer' | 'user_input' | 'urgent_task' | 'manual_wake';
+  /** Brief summary of what happened while sleeping (new tasks, messages) */
+  whileAsleep?: string;
+  context?: TickContext;
+}): string {
+  const time = new Date();
+  const timeStr = formatTickTime(time);
+  const sleptMinutes = Math.round(opts.sleptForMs / 60_000);
+
+  const wakeReasonLabel = {
+    timer: 'sleep timer expired',
+    user_input: 'founder sent a message',
+    urgent_task: 'urgent task assigned',
+    manual_wake: 'manual /wake command',
+  }[opts.wakeReason];
+
+  const parts: string[] = [];
+
+  parts.push(`<tick${buildContextAttrs(opts.context)}>${timeStr}</tick>`);
+  parts.push(`<presence>${opts.presence}</presence>`);
+  parts.push(`<wake-up slept="${sleptMinutes}m" reason="${wakeReasonLabel}">`);
+
+  if (opts.whileAsleep) {
+    parts.push(`While you slept: ${opts.whileAsleep}`);
+  }
+
+  parts.push(`</wake-up>`);
 
   return parts.join('\n');
 }
@@ -101,9 +183,14 @@ export function buildFirstTickMessage(opts: {
   agentName: string;
   /** How autoemon was activated */
   source: 'slumber' | 'manual' | 'afk';
+  /** SLUMBER goal (if any) */
+  goal?: string;
+  /** Number of agents conscripted alongside this one */
+  enrolledCount?: number;
+  context?: TickContext;
 }): string {
   const time = new Date();
-  const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
+  const timeStr = formatTickTime(time);
 
   const sourceLabel = {
     slumber: 'SLUMBER mode',
@@ -111,13 +198,19 @@ export function buildFirstTickMessage(opts: {
     afk: 'AFK mode',
   }[opts.source];
 
+  const goalLine = opts.goal ? `\nGoal: "${opts.goal}"` : '';
+  const enrolledLine = opts.enrolledCount && opts.enrolledCount > 1
+    ? `\n${opts.enrolledCount} agents conscripted for this session.`
+    : '';
+
   return [
-    `<tick first="true">${timeStr}</tick>`,
+    `<tick first="true"${buildContextAttrs(opts.context)}>${timeStr}</tick>`,
     `<presence>${opts.presence}</presence>`,
     `<session-start>`,
-    `You are entering ${sourceLabel}. You will receive periodic <tick> prompts.`,
-    `On each tick, look for useful work. If nothing needs attention, SLEEP.`,
+    `You are entering ${sourceLabel}. You will receive periodic <tick> prompts.${goalLine}${enrolledLine}`,
+    `On each tick, look for useful work. If nothing needs attention, SLEEP with a reason.`,
     `Read your Casket (TASKS.md, INBOX.md, WORKLOG.md) to orient.`,
+    `Write observations to your daily log as you work.`,
     `</session-start>`,
   ].join('\n');
 }
@@ -140,7 +233,7 @@ export function buildCompactionRecoveryTick(opts: {
   productiveCount: number;
 }): string {
   const time = new Date();
-  const timeStr = time.toLocaleTimeString('en-US', { hour12: false });
+  const timeStr = formatTickTime(time);
 
   return [
     `<tick>${timeStr}</tick>`,
