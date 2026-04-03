@@ -23,6 +23,7 @@ import { COLORS, BORDER_STYLE, agentColor } from '../theme.js';
 import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
+import { SleepingBanner } from '../components/sleeping-banner.js';
 import { useCorp } from '../context/corp-context.js';
 
 const THINKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes — agents can work long
@@ -166,6 +167,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     : null;
 
   const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
+
+  // Track sleeping status for DM agents (autoemon)
+  const [sleepInfo, setSleepInfo] = useState<{ sleepUntil: number; remainingMs: number; reason: string } | null>(null);
+  useEffect(() => {
+    if (!isDm || !dmAgent) { setSleepInfo(null); return; }
+
+    const checkSleep = async () => {
+      try {
+        const resp = await daemonClient.get(`/autoemon/sleep/${dmAgent.id}`);
+        const data = resp as any;
+        if (data.sleepUntil) {
+          setSleepInfo({ sleepUntil: data.sleepUntil, remainingMs: data.remainingMs, reason: data.reason });
+        } else {
+          setSleepInfo(null);
+        }
+      } catch { setSleepInfo(null); }
+    };
+
+    checkSleep();
+    const timer = setInterval(checkSleep, 5000); // Poll every 5s
+    return () => clearInterval(timer);
+  }, [isDm, dmAgent?.id]);
 
   useInput((input, key) => {
     if (showHireWizard || showModelWizard) return;
@@ -1505,10 +1528,21 @@ Always consider what happens when things go wrong.`,
         </Box>
       ) : (
         <>
+          {/* Sleeping agent banner — shown in DMs when agent is in autoemon sleep */}
+          {sleepInfo && dmAgent && (
+            <SleepingBanner
+              agentName={dmAgent.displayName}
+              sleepReason={sleepInfo.reason}
+              remainingMs={sleepInfo.remainingMs}
+              rank={dmAgent.rank}
+            />
+          )}
           <MessageInput
             onSend={handleSend}
             disabled={sending}
-            placeholder={jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
+            placeholder={sleepInfo && dmAgent
+              ? `Type to wake ${dmAgent.displayName}...`
+              : jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
             agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
           />
           <Text color={jackMode?.active ? COLORS.warning : COLORS.muted}> {jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  Esc:back</Text>
