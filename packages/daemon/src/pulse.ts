@@ -225,6 +225,9 @@ export class Pulse {
       // Don't escalate CEO to CEO
       if (agent.rank === 'master') continue;
 
+      // Don't escalate agents enrolled in autoemon — autoemon handles their health
+      if ((this.daemon as any).autoemon?.isEnrolled(memberId)) continue;
+
       // Determine the reason
       const agentProc = this.daemon.processManager.getAgent(memberId);
       let reason: string;
