@@ -55,8 +55,8 @@ const TELEMETRY_FILE = 'autoemon-telemetry.jsonl';
 /** How often the tick loop checks for due agents: 10 seconds */
 const TICK_CHECK_INTERVAL_MS = 10 * 1000;
 
-/** Dispatch timeout for tick dispatch: 5 minutes */
-const TICK_DISPATCH_TIMEOUT_MS = 5 * 60 * 1000;
+/** Dispatch timeout for tick dispatch: 90 seconds (ticks should be fast) */
+const TICK_DISPATCH_TIMEOUT_MS = 90 * 1000;
 
 /** Interval for productive agents: stay close */
 const PRODUCTIVE_INTERVAL_MS = 30 * 1000;
@@ -588,17 +588,28 @@ export class AutoemonManager {
 
     if (dueAgents.length === 0) return;
 
-    // Dispatch ticks with 1.5s stagger between agents (like Pulse)
-    for (let i = 0; i < dueAgents.length; i++) {
-      const agentId = dueAgents[i]!;
-      if (i > 0) await new Promise(r => setTimeout(r, 1500));
+    // Dispatch ticks as fire-and-forget — DO NOT await.
+    // The ClockManager has an overlap guard that blocks subsequent fires
+    // if the callback is still running. Dispatches can take 30+ seconds,
+    // which would freeze the entire tick loop. Instead, we fire and track.
+    for (const agentId of dueAgents) {
+      // Mark agent as dispatching so we don't double-dispatch
+      const agentState = this.state.agents[agentId];
+      if (!agentState) continue;
 
-      try {
-        await this.dispatchTick(agentId);
-      } catch (err) {
+      // Set nextTickAt far into the future to prevent re-dispatch
+      // while this tick is in flight. Will be reset on completion.
+      agentState.nextTickAt = Date.now() + 10 * 60 * 1000; // 10min safety
+
+      // Fire-and-forget — handle result asynchronously
+      this.dispatchTick(agentId).catch(err => {
         logError(`[autoemon] Tick dispatch failed for ${agentId}: ${err}`);
         this.recordError(agentId);
-      }
+        // Reset nextTickAt so agent gets another chance
+        if (agentState) {
+          agentState.nextTickAt = Date.now() + agentState.tickIntervalMs;
+        }
+      });
     }
 
     // Periodic re-scan: pick up new workers, discharge completed
