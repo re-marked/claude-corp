@@ -133,16 +133,11 @@ export function SleepingBanner({ agentName, sleepReason, remainingMs, rank }: Pr
     border: '#4338ca',     // Indigo-700 — deeper border
   };
 
-  /** Color a single character based on what it is. */
-  const colorChar = (ch: string): string => {
-    switch (ch) {
-      case '☽': return colors.moon;
-      case '✦': case '✧': return colors.specialStar;
-      case '☁': return colors.cloud;
-      case '━': return colors.shootingStar;
-      case '·': return colors.dimStar;
-      default: return colors.dimStar;
-    }
+  /** Pick dominant color for a sky line — moon line gets amber, shooting star gets warm, rest indigo. */
+  const lineColor = (line: string): string => {
+    if (line.includes('☽')) return colors.moon;
+    if (line.includes('━')) return colors.shootingStar;
+    return colors.brightStar;
   };
 
   return (
@@ -153,13 +148,9 @@ export function SleepingBanner({ agentName, sleepReason, remainingMs, rank }: Pr
       paddingX={1}
       marginBottom={1}
     >
-      {/* Night sky — each character colored individually */}
+      {/* Night sky — one Text per line, dominant color (avoids Yoga WASM overflow from per-char nodes) */}
       {stars.map((line, i) => (
-        <Text key={i}>
-          {line.split('').map((ch, j) => (
-            <Text key={j} color={ch === ' ' ? undefined : colorChar(ch)}>{ch}</Text>
-          ))}
-        </Text>
+        <Text key={i} color={lineColor(line)}>{line}</Text>
       ))}
 
       {/* Agent info + zzz */}
