@@ -716,10 +716,21 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           agentSlug: ceoSlug,
         });
 
+        // Grab analytics before deactivation clears them
+        let analyticsNote = '';
+        try {
+          const analytics = await daemonClient.get('/autoemon/analytics') as any;
+          if (analytics?.totalTicks > 0) {
+            const score = analytics.productivityScore ?? 0;
+            const bar = '█'.repeat(Math.round(score / 10)) + '░'.repeat(10 - Math.round(score / 10));
+            analyticsNote = `\n\nProductivity: ${bar} ${score}%\nTicks: ${analytics.totalTicks} total, ${analytics.productiveTicks} productive, ${analytics.idleTicks} idle`;
+          }
+        } catch {}
+
         // CEO's response is now persisted to JSONL by the say endpoint.
         // Deactivate and mark transition.
         await daemonClient.post('/autoemon/deactivate');
-        writeSystemMessage('☀ SLUMBER ended. Welcome back.');
+        writeSystemMessage(`☀ SLUMBER ended. Welcome back.${analyticsNote}`);
       } catch (err) {
         // Force deactivate even if digest fails
         try { await daemonClient.post('/autoemon/deactivate'); } catch {}
