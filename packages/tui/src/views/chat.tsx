@@ -602,24 +602,22 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           return;
         }
 
-        writeSystemMessage('Waking up... asking CEO for a summary.');
+        writeSystemMessage('Waking up... CEO is preparing a summary.');
 
-        // Ask CEO to summarize before deactivating
-        const wrapUp = await daemonClient.post('/autoemon/wrapup', {
+        // Ask CEO to summarize — pass channelId so response appears naturally in chat
+        const ceoSlug = members.find(m => m.rank === 'master' && m.type === 'agent')
+          ?.displayName.toLowerCase().replace(/\s+/g, '-') ?? 'ceo';
+
+        await daemonClient.post('/autoemon/wrapup', {
           reason: 'wake_command',
-        }) as any;
+          channelId: channel.id,
+          agentSlug: ceoSlug,
+        });
 
-        // Deactivate autoemon
+        // CEO's response appears in the DM naturally (via say channelId).
+        // System message just marks the transition — no duplication.
         await daemonClient.post('/autoemon/deactivate');
-
-        // Show the digest — CEO's own words
-        if (wrapUp.ok && wrapUp.digest) {
-          writeSystemMessage(`☀ SLUMBER ended.\n\nCEO's briefing:\n${wrapUp.digest}`);
-        } else {
-          // Fallback to system digest
-          const fallback = await daemonClient.get('/autoemon/digest') as any;
-          writeSystemMessage(`☀ SLUMBER ended.\n\n${fallback.digest ?? 'No digest available.'}`);
-        }
+        writeSystemMessage('☀ SLUMBER ended. Welcome back.');
       } catch (err) {
         // Force deactivate even if digest fails
         try { await daemonClient.post('/autoemon/deactivate'); } catch {}

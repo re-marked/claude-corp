@@ -1016,8 +1016,9 @@ export function createApi(daemon: Daemon): Server {
       if (method === 'POST' && path === '/autoemon/wrapup') {
         const body = await readBody(req) as Record<string, unknown>;
         const reason = (body.reason as string) ?? 'manual';
+        const wrapChannelId = body.channelId as string | undefined;
         try {
-          const digest = await daemon.autoemon.dispatchWrapUp(reason as any);
+          const digest = await daemon.autoemon.dispatchWrapUp(reason as any, wrapChannelId);
           json(res, { ok: true, digest });
         } catch (err) {
           json(res, { ok: false, digest: daemon.autoemon.generateDigest() }, 500);

@@ -1164,7 +1164,7 @@ export class AutoemonManager {
    * Dispatch a wrap-up prompt to the CEO. The CEO's response IS the wake digest.
    * Called on: duration expiry, /wake command, manual deactivation.
    */
-  async dispatchWrapUp(reason: 'timer' | 'wake_command' | 'manual'): Promise<string> {
+  async dispatchWrapUp(reason: 'timer' | 'wake_command' | 'manual', channelId?: string): Promise<string> {
     const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
     const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
     if (!ceo) return 'No CEO found.';
@@ -1233,6 +1233,7 @@ export class AutoemonManager {
           target: agentSlug,
           message: prompt,
           sessionKey: `autoemon:${agentSlug}`,
+          channelId: channelId ?? undefined,
         }),
         signal: AbortSignal.timeout(90_000),
       });
