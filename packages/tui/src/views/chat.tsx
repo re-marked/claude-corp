@@ -572,16 +572,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         const ceoSlug = ceoMember.displayName.toLowerCase().replace(/\s+/g, '-');
 
         const slumberPrompt = [
-          `The Founder is entering SLUMBER mode${durationMs ? ` for ${durationLabel}` : ''}.`,
-          `You now have autonomous control of the corporation.`,
-          ``,
-          `Acknowledge this transition and briefly state your plan:`,
-          `- What will you focus on?`,
-          `- What's the highest priority?`,
-          `- Any concerns?`,
-          ``,
-          `Keep it brief — the Founder is heading out. After you acknowledge,`,
-          `you'll receive periodic <tick> prompts. Act on them autonomously.`,
+          `[SLUMBER MODE ACTIVATED${durationMs ? ` — ${durationLabel}` : ''}]`,
+          `The Founder is stepping away. You have autonomous control.`,
+          `Acknowledge briefly and continue from where the conversation left off.`,
+          `You'll receive <tick> prompts. Act on them autonomously.`,
         ].join('\n');
 
         // Send to CEO via say() — response appears in the DM naturally
