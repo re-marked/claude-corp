@@ -533,12 +533,26 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         }
       } catch {}
 
+      // Check CEO is online before attempting SLUMBER
+      const ceoMember = members.find(m => m.rank === 'master' && m.type === 'agent');
+      if (!ceoMember) {
+        writeSystemMessage('No CEO found. Cannot enter SLUMBER.');
+        return;
+      }
+      try {
+        const statusCheck = await daemonClient.status();
+        const ceoAgent = statusCheck.agents.find((a: any) => a.memberId === ceoMember.id);
+        if (!ceoAgent || ceoAgent.status !== 'ready') {
+          writeSystemMessage('CEO is offline. Start the daemon and ensure CEO is running before entering SLUMBER.');
+          return;
+        }
+      } catch {}
+
       // Step 1: Tell CEO to acknowledge — SLUMBER doesn't activate until CEO responds
       writeSystemMessage(`Entering SLUMBER ${durationLabel}... asking CEO to acknowledge.`);
 
       try {
-        const ceoSlug = members.find(m => m.rank === 'master' && m.type === 'agent')
-          ?.displayName.toLowerCase().replace(/\s+/g, '-') ?? 'ceo';
+        const ceoSlug = ceoMember.displayName.toLowerCase().replace(/\s+/g, '-');
 
         const slumberPrompt = [
           `The Founder is entering SLUMBER mode${durationMs ? ` for ${durationLabel}` : ''}.`,
@@ -554,19 +568,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         ].join('\n');
 
         // Send to CEO via say() — response appears in the DM naturally
-        const resp = await fetch(`http://127.0.0.1:${daemonPort}/cc/say`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            target: ceoSlug,
-            message: slumberPrompt,
-            sessionKey: `autoemon:${ceoSlug}`,
-            channelId: channel.id,
-          }),
-          signal: AbortSignal.timeout(60_000),
-        });
-
-        const data = await resp.json() as any;
+        const data = await daemonClient.post('/cc/say', {
+          target: ceoSlug,
+          message: slumberPrompt,
+          sessionKey: `autoemon:${ceoSlug}`,
+          channelId: channel.id,
+        }) as any;
 
         if (data.ok) {
           // Step 2: CEO acknowledged — NOW activate autoemon
