@@ -593,6 +593,9 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         }) as any;
 
         if (data.ok) {
+          // Wait for CEO's streamed acknowledgment to render in Static
+          await new Promise(r => setTimeout(r, 3000));
+
           // Step 2: CEO acknowledged — NOW activate autoemon
           await daemonClient.post('/autoemon/activate', {
             source: 'slumber',
