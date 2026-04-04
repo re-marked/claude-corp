@@ -662,6 +662,9 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         wc(join(corpRoot, CJ), corpJson);
 
         if (newValue) {
+          // Start the checker immediately (don't wait for daemon restart)
+          await daemonClient.post('/autoemon/start-away-checker');
+
           writeSystemMessage([
             '⚠️ AUTO-AFK ENABLED',
             '',

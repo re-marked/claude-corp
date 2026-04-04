@@ -1029,6 +1029,13 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /autoemon/start-away-checker — start the Founder Away checker mid-session
+      if (method === 'POST' && path === '/autoemon/start-away-checker') {
+        daemon.autoemon.startFounderAwayChecker();
+        json(res, { ok: true });
+        return;
+      }
+
       // GET /autoemon/analytics — SLUMBER session analytics (current session by default)
       if (method === 'GET' && path === '/autoemon/analytics') {
         const { readTelemetry, computeSessionStats, formatSessionReport } = await import('./slumber-analytics.js');
