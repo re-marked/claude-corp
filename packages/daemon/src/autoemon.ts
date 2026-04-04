@@ -911,11 +911,28 @@ export class AutoemonManager {
     } catch { return 0; }
   }
 
-  /** Get the founder's current presence. Defaults to 'away'. */
+  /**
+   * Get the founder's current presence based on TUI connection + activity.
+   * - watching: TUI connected AND founder interacted within 10 minutes
+   * - idle: TUI connected BUT no interaction for 10+ minutes
+   * - away: TUI disconnected (no WebSocket clients)
+   */
   private getFounderPresence(): FounderPresence {
-    // Will be wired to TUI connection tracking in commit 7.
-    // For now, default to 'away' (most autonomous mode).
-    return 'away';
+    const IDLE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
+    // Check if TUI is connected (any WebSocket clients on the EventBus)
+    const tuiConnected = this.daemon.events.getClientCount() > 0;
+    if (!tuiConnected) return 'away';
+
+    // TUI is connected — check last interaction time
+    const lastInteraction = this.daemon.lastFounderInteractionAt;
+    const sinceLast = Date.now() - lastInteraction;
+
+    if (lastInteraction === 0 || sinceLast > IDLE_THRESHOLD_MS) {
+      return 'idle'; // TUI open but founder hasn't typed in 10+ min
+    }
+
+    return 'watching'; // TUI open and founder is active
   }
 
   // ── Telemetry ────────────────────────────────────────────────────
