@@ -593,6 +593,85 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /wake — end SLUMBER, CEO summarizes what happened
+    if (text.trim().toLowerCase() === '/wake') {
+      try {
+        const status = await daemonClient.get('/autoemon/status') as any;
+        if (status.globalState === 'inactive') {
+          writeSystemMessage('SLUMBER is not active. Nothing to wake from.');
+          return;
+        }
+
+        writeSystemMessage('Waking up... asking CEO for a summary.');
+
+        // Ask CEO to summarize before deactivating
+        const wrapUp = await daemonClient.post('/autoemon/wrapup', {
+          reason: 'wake_command',
+        }) as any;
+
+        // Deactivate autoemon
+        await daemonClient.post('/autoemon/deactivate');
+
+        // Show the digest — CEO's own words
+        if (wrapUp.ok && wrapUp.digest) {
+          writeSystemMessage(`☀ SLUMBER ended.\n\nCEO's briefing:\n${wrapUp.digest}`);
+        } else {
+          // Fallback to system digest
+          const fallback = await daemonClient.get('/autoemon/digest') as any;
+          writeSystemMessage(`☀ SLUMBER ended.\n\n${fallback.digest ?? 'No digest available.'}`);
+        }
+      } catch (err) {
+        // Force deactivate even if digest fails
+        try { await daemonClient.post('/autoemon/deactivate'); } catch {}
+        writeSystemMessage(`SLUMBER ended (digest failed: ${err instanceof Error ? err.message : String(err)})`);
+      }
+      return;
+    }
+
+    // /brief — mid-SLUMBER status update from CEO (doesn't end SLUMBER)
+    if (text.trim().toLowerCase() === '/brief') {
+      try {
+        const status = await daemonClient.get('/autoemon/status') as any;
+        if (status.globalState !== 'active') {
+          writeSystemMessage('SLUMBER is not active. Use /slumber to start.');
+          return;
+        }
+
+        writeSystemMessage('Asking CEO for a brief update...');
+
+        const ceoSlug = members.find(m => m.rank === 'master' && m.type === 'agent')
+          ?.displayName.toLowerCase().replace(/\s+/g, '-') ?? 'ceo';
+
+        const elapsed = status.activatedAt ? Date.now() - status.activatedAt : 0;
+        const elapsedMin = Math.round(elapsed / 60_000);
+
+        const briefPrompt = [
+          `The Founder wants a brief status update. SLUMBER continues after this.`,
+          ``,
+          `Session so far: ${elapsedMin}m elapsed, ${status.totalTicks} ticks, ${status.totalProductiveTicks} productive.`,
+          ``,
+          `Give a quick update:`,
+          `- What have you done so far?`,
+          `- What are you working on now?`,
+          `- Anything urgent?`,
+          ``,
+          `Keep it short — the Founder is just checking in, not ending SLUMBER.`,
+        ].join('\n');
+
+        await daemonClient.post('/cc/say', {
+          target: ceoSlug,
+          message: briefPrompt,
+          sessionKey: `autoemon:${ceoSlug}`,
+          channelId: channel.id,
+        });
+
+        // CEO's response will appear in the DM naturally via streaming
+      } catch (err) {
+        writeSystemMessage(`Brief failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     // /project opens the project wizard
     if (text.trim().toLowerCase() === '/project') {
       setShowProjectWizard(true);
