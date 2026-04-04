@@ -73,10 +73,25 @@ export class DreamManager {
    */
   schedulePostSlumberDreams(agentIds: string[]): void {
     if (agentIds.length === 0) return;
-    log(`[dreams] Scheduling post-SLUMBER dreams for ${agentIds.length} agent(s): ${agentIds.join(', ')}`);
 
-    for (let i = 0; i < agentIds.length; i++) {
-      const agentId = agentIds[i]!;
+    // Only dream agents with recent observations — no signal = no dream
+    const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+    const worthDreaming = agentIds.filter(id => {
+      const member = members.find(m => m.id === id);
+      if (!member?.agentDir) return false;
+      const agentDir = join(this.daemon.corpRoot, member.agentDir);
+      return countRecentObservations(agentDir, 1) > 0;
+    });
+
+    if (worthDreaming.length === 0) {
+      log(`[dreams] No agents have observations — skipping post-SLUMBER dreams`);
+      return;
+    }
+
+    log(`[dreams] Scheduling post-SLUMBER dreams for ${worthDreaming.length}/${agentIds.length} agent(s) with observations`);
+
+    for (let i = 0; i < worthDreaming.length; i++) {
+      const agentId = worthDreaming[i]!;
       const delay = i * 30_000; // 30s stagger between agents
       setTimeout(async () => {
         try {
