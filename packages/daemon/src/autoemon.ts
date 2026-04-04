@@ -141,6 +141,15 @@ export interface AutoemonPersistedState {
   totalTicks: number;
   /** Total productive ticks (lifetime) */
   totalProductiveTicks: number;
+  /** Scheduled SLUMBER window (from /slumber schedule <profile>) */
+  schedule: {
+    profileId: string;
+    startHour: number;
+    endHour: number;
+    durationMs: number;
+    weekdaysOnly: boolean;
+    raw: string;
+  } | null;
   /** Block reason if blocked */
   blockReason: string | null;
 }
@@ -153,6 +162,7 @@ const DEFAULT_PERSISTED_STATE: AutoemonPersistedState = {
   durationMs: null,
   endsAt: null,
   budgetTicks: null,
+  schedule: null,
   agents: {},
   totalTicks: 0,
   totalProductiveTicks: 0,
@@ -1223,7 +1233,7 @@ export class AutoemonManager {
    */
   startFounderAwayChecker(): void {
     // Check if auto-AFK flag is enabled OR a schedule is set
-    const hasSchedule = !!(this.state as any).schedule;
+    const hasSchedule = !!this.state.schedule;
     let hasAutoAfk = false;
     try {
       const corp = readConfig<Corporation>(join(this.daemon.corpRoot, CORP_JSON));
@@ -1335,7 +1345,7 @@ export class AutoemonManager {
     const weekdaysOnly = profile.schedule.toLowerCase().includes('weekday');
 
     // Store schedule in state
-    (this.state as any).schedule = {
+    this.state.schedule = {
       profileId,
       startHour,
       endHour,
@@ -1358,7 +1368,7 @@ export class AutoemonManager {
 
   /** Clear all SLUMBER schedules. */
   clearSchedule(): void {
-    (this.state as any).schedule = null;
+    this.state.schedule = null;
     this.persist();
     log(`[autoemon] Schedule cleared`);
   }
@@ -1368,7 +1378,7 @@ export class AutoemonManager {
    * Called from the Founder Away checker every 2 minutes.
    */
   private checkScheduledActivation(): void {
-    const schedule = (this.state as any).schedule;
+    const schedule = this.state.schedule;
     if (!schedule) return;
     if (this.state.globalState !== 'inactive') return; // Already active
 

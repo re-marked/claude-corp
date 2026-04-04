@@ -285,6 +285,7 @@ const COMMANDS = [
   { name: '/slumber profiles', syntax: '/slumber profiles', desc: 'List available SLUMBER profiles' },
   { name: '/slumber stats', syntax: '/slumber stats', desc: 'SLUMBER analytics — productivity score, tick breakdown' },
   { name: '/slumber wizard', syntax: '/slumber wizard', desc: 'Open the interactive SLUMBER wizard' },
+  { name: '/slumber schedule', syntax: '/slumber schedule <profile>', desc: 'Set recurring SLUMBER (e.g., /slumber schedule night-owl)' },
   { name: '/dangerously-enable-auto-afk', syntax: '/dangerously-enable-auto-afk', desc: 'Toggle auto-SLUMBER when idle 30m+ (Guard Duty)' },
 
   // Utility
