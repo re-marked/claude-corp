@@ -184,14 +184,44 @@ export class Daemon {
     await this.connectOpenClawWS();
     this.router.start();
 
-    // Poke CEO DM on startup — ensures the onboarding kickoff message
-    // (written before daemon started) gets dispatched. Without this,
-    // the router only processes messages appended AFTER it starts watching.
-    const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
-    const ceoDm = channels.find(c => c.kind === 'direct' && c.name.includes('ceo'));
-    if (ceoDm) {
-      setTimeout(() => this.router.pokeChannel(ceoDm.id), 3000);
-    }
+    // Dispatch CEO onboarding kickoff via say() (Jack session) if unresponded.
+    // The kickoff was written before the daemon started, so the router never saw it.
+    // Using say() gives: streaming + persistent Jack session (CEO remembers this).
+    setTimeout(async () => {
+      try {
+        const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
+        const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+        const ceoDm = channels.find(c => c.kind === 'direct' && c.name.includes('ceo'));
+        const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+        if (!ceoDm || !ceo) return;
+
+        // Check if CEO has already responded (don't re-dispatch on restart)
+        const msgPath = join(this.corpRoot, ceoDm.path, MESSAGES_JSONL);
+        const { tailMessages } = await import('@claudecorp/shared');
+        const recent = tailMessages(msgPath, 20);
+        const hasKickoff = recent.some(m => m.senderId === 'system' && m.content.includes('Introduce yourself'));
+        const hasCeoResponse = recent.some(m => m.senderId === ceo.id && m.kind === 'text');
+        if (!hasKickoff || hasCeoResponse) return;
+
+        // Dispatch kickoff via say() — Jack session for memory persistence
+        const ceoSlug = ceo.displayName.toLowerCase().replace(/\s+/g, '-');
+        const kickoffContent = recent.find(m => m.senderId === 'system' && m.content.includes('Introduce yourself'))!.content;
+        log(`[daemon] Dispatching onboarding kickoff to CEO via Jack session`);
+
+        await fetch(`http://127.0.0.1:${this.port}/cc/say`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target: ceoSlug,
+            message: kickoffContent,
+            sessionKey: `jack:${ceoSlug}`,
+            channelId: ceoDm.id,
+          }),
+        });
+      } catch (err) {
+        logError(`[daemon] Kickoff dispatch failed: ${err}`);
+      }
+    }, 5000);
 
     this.gitManager.start(this.clocks);
     this.heartbeat.start();
