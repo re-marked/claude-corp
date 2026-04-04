@@ -1029,13 +1029,25 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
-      // GET /autoemon/analytics — SLUMBER session analytics
+      // GET /autoemon/analytics — SLUMBER session analytics (current session by default)
       if (method === 'GET' && path === '/autoemon/analytics') {
         const { readTelemetry, computeSessionStats, formatSessionReport } = await import('./slumber-analytics.js');
-        const entries = readTelemetry(daemon.corpRoot);
+        const allEntries = readTelemetry(daemon.corpRoot);
+
+        // Filter to current session (since activatedAt) unless ?all=true
+        const url = new URL(req.url ?? '', `http://127.0.0.1`);
+        const showAll = url.searchParams.get('all') === 'true';
+        const activatedAt = daemon.autoemon.getStatus().activatedAt;
+
+        let entries = allEntries;
+        if (!showAll && activatedAt) {
+          const cutoff = new Date(activatedAt).toISOString();
+          entries = allEntries.filter(e => e.timestamp >= cutoff);
+        }
+
         const stats = computeSessionStats(entries);
         const report = formatSessionReport(stats);
-        json(res, { ...stats, report });
+        json(res, { ...stats, report, sessionScope: showAll ? 'all-time' : 'current' });
         return;
       }
 
