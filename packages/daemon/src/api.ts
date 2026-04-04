@@ -682,7 +682,11 @@ export function createApi(daemon: Daemon): Server {
               content: result.content,
               kind: 'text',
               mentions: [],
-              metadata: { source: 'jack', sessionKey: (body.sessionKey as string) ?? null },
+              metadata: {
+                source: 'jack',
+                sessionKey: (body.sessionKey as string) ?? null,
+                slumber: daemon.autoemon.isActive() || undefined,
+              },
               depth: 0,
               originId: '',
               timestamp: new Date().toISOString(),
