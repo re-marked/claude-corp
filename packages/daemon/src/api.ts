@@ -911,8 +911,9 @@ export function createApi(daemon: Daemon): Server {
         const body = await readBody(req) as Record<string, unknown>;
         const source = (body.source as string) ?? 'manual';
         const agents = body.agents as string[] | undefined;
+        const durationMs = body.durationMs as number | undefined;
 
-        daemon.autoemon.activate(source as any);
+        daemon.autoemon.activate(source as any, durationMs);
 
         // Enroll specified agents, or run conscription cascade
         if (agents?.length) {
@@ -1008,6 +1009,31 @@ export function createApi(daemon: Daemon): Server {
         if (!agentId) { json(res, { error: 'agentId required' }, 400); return; }
         const sleepInfo = daemon.autoemon.getSleepInfo(agentId);
         json(res, sleepInfo ?? { sleeping: false });
+        return;
+      }
+
+      // POST /autoemon/wrapup — ask CEO to summarize the SLUMBER session
+      if (method === 'POST' && path === '/autoemon/wrapup') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const reason = (body.reason as string) ?? 'manual';
+        try {
+          const digest = await daemon.autoemon.dispatchWrapUp(reason as any);
+          json(res, { ok: true, digest });
+        } catch (err) {
+          json(res, { ok: false, digest: daemon.autoemon.generateDigest() }, 500);
+        }
+        return;
+      }
+
+      // GET /autoemon/digest — system-generated digest (no CEO narration)
+      if (method === 'GET' && path === '/autoemon/digest') {
+        json(res, { digest: daemon.autoemon.generateDigest() });
+        return;
+      }
+
+      // GET /autoemon/progress — moon phase data for status bar
+      if (method === 'GET' && path === '/autoemon/progress') {
+        json(res, daemon.autoemon.getProgress());
         return;
       }
 
