@@ -651,6 +651,17 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /slumber stats — show SLUMBER analytics
+    if (text.trim().toLowerCase() === '/slumber stats' || text.trim().toLowerCase() === '/stats') {
+      try {
+        const data = await daemonClient.get('/autoemon/analytics') as any;
+        writeSystemMessage(data.report ?? 'No SLUMBER data recorded.');
+      } catch {
+        writeSystemMessage('Failed to load analytics.');
+      }
+      return;
+    }
+
     // /wake — end SLUMBER, CEO summarizes what happened
     if (text.trim().toLowerCase() === '/wake') {
       try {

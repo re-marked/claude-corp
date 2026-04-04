@@ -1029,6 +1029,16 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // GET /autoemon/analytics — SLUMBER session analytics
+      if (method === 'GET' && path === '/autoemon/analytics') {
+        const { readTelemetry, computeSessionStats, formatSessionReport } = await import('./slumber-analytics.js');
+        const entries = readTelemetry(daemon.corpRoot);
+        const stats = computeSessionStats(entries);
+        const report = formatSessionReport(stats);
+        json(res, { ...stats, report });
+        return;
+      }
+
       // GET /autoemon/profiles — list all SLUMBER profiles
       if (method === 'GET' && path === '/autoemon/profiles') {
         const { loadProfiles } = await import('./slumber-profiles.js');
