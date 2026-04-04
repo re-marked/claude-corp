@@ -4,7 +4,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## What WORKS today (v0.10.7)
+## What WORKS today (v0.16.3)
 
 ### Primitives (shipped v0.10.0–v0.10.5)
 - **Casket** — sealed agent workspace: TASKS.md + INBOX.md + WORKLOG.md + STATUS.md auto-generated
@@ -217,6 +217,50 @@ Planner   — (idle) responded OK     +10s
 Researcher— (idle) responded OK     +6s
 Results: 6 responded, 1 missed
 ```
+
+---
+
+## v0.16.0 — Foundation Upgrade (MERGED)
+
+- ✅ 4 new fragments: tool-result-management, context-persistence, scratchpad, checkpoint
+- ✅ Anti-rationalization v2 (3 new patterns from Claude Code)
+- ✅ Context injection: platform, shell, timezone, locale, continuity hints
+- ✅ Observation logs: daily append-only journals (agents/<name>/observations/YYYY/MM/)
+- ✅ Cron hardening: jitter, durable/ephemeral, auto-expiry, scheduler lock, missed detection v2
+- ✅ Dispatch resilience: error categorization, exponential backoff, context blocking, health scores
+
+## v0.16.1 — Autoemon Core (MERGED)
+
+- ✅ AutoemonManager: tick engine with adaptive intervals (30s→5m based on agent behavior)
+- ✅ 5 tick message types with context enrichment (<tick>, <presence>, <mood>, <focus>)
+- ✅ Autoemon fragment: 136-line prompt teaching autonomous work (from Claude Code proactive prompt)
+- ✅ Conscription cascade: CEO → leaders on contracts → workers with tasks
+- ✅ Sleep handling: SLEEP command parsing, interruption on user DM / urgent task / manual wake
+- ✅ Sleeping DM banner: animated ASCII night sky with stars, moon, clouds
+- ✅ Founder presence tracking: watching/idle/away from TUI WebSocket + interaction time
+- ✅ Telemetry: autoemon-telemetry.jsonl with per-tick records
+
+## v0.16.2 — SLUMBER Mode (MERGED)
+
+- ✅ /slumber [duration|profile], /afk — CEO acknowledges then ticks start
+- ✅ /wake — CEO summarizes what happened (digest is CEO's own words)
+- ✅ /brief — mid-SLUMBER check-in without ending session
+- ✅ Duration timer with auto-stop + CEO wrap-up
+- ✅ Moon phase status bar: 🌑→🌕 cycling with progress
+- ✅ Founder presence injected into ticks (watching/idle/away)
+- ✅ All dispatches on jack:<slug> session (full conversation memory)
+- ✅ CEO on corp gateway (killed double dispatch + personal Claude leak)
+
+## v0.16.3 — SLUMBER Premium (MERGED)
+
+- ✅ 4 profiles: 🦉 Night Owl, 🎒 School Day, ⚡ Sprint, 🛡️ Guard Duty
+- ✅ Profile mood + focus injected per tick (<mood>, <focus> XML tags)
+- ✅ Conscription strategies: ceo-only / active-contracts / all-agents per profile
+- ✅ Budget cap: max ticks before auto-stop (Sprint = 200 ticks)
+- ✅ Message styling: ☾ muted indigo night theme for SLUMBER messages
+- ✅ Analytics: productivity bar chart, tick breakdown, per-agent stats, top actions
+- ✅ /slumber profiles, /slumber stats commands
+- ✅ Profile validation for custom profiles
 
 ---
 
