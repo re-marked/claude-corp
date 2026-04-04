@@ -795,6 +795,7 @@ export class MessageRouter {
       agentDisplayName: targetAgent.displayName,
       channelKind: channel.kind,
       supervisorName,
+      autoemonEnrolled: this.daemon.autoemon.isEnrolled(targetAgent.id),
     };
   }
 }

@@ -152,6 +152,7 @@ export class HeartbeatManager {
         agentDisplayName: agent.displayName,
         channelKind: 'direct',
         supervisorName,
+        autoemonEnrolled: this.daemon.autoemon.isEnrolled(agent.id),
       };
 
       // Mark busy during inbox dispatch

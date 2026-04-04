@@ -550,6 +550,7 @@ export function createApi(daemon: Daemon): Server {
           agentDisplayName: target.displayName,
           channelKind: 'direct' as const,
           supervisorName,
+          autoemonEnrolled: daemon.autoemon.isEnrolled(target.id),
         };
 
         // Set target busy
