@@ -468,9 +468,22 @@ export class AutoemonManager {
     const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
     const beforeCount = this.enrolled.size;
 
+    // Get conscription strategy from active profile
+    const profile = this.state.activeProfileId
+      ? getProfile(this.daemon.corpRoot, this.state.activeProfileId)
+      : null;
+    const strategy = profile?.conscription ?? 'active-contracts';
+
     // 1. CEO always enrolls (entry point)
     const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
     if (ceo) this.enroll(ceo.id);
+
+    // CEO-only strategy stops here (Guard Duty)
+    if (strategy === 'ceo-only') {
+      const newlyEnrolled = this.enrolled.size - beforeCount;
+      if (newlyEnrolled > 0) log(`[autoemon] Conscription (${strategy}): ${newlyEnrolled} agent(s) enrolled`);
+      return;
+    }
 
     // 2. Find active contracts → enroll their leads + workers
     try {
@@ -510,6 +523,15 @@ export class AutoemonManager {
         }
       }
     } catch {}
+
+    // 4. All-agents strategy: enroll every online agent (Sprint mode)
+    if (strategy === 'all-agents') {
+      for (const member of members) {
+        if (member.type === 'agent' && member.status !== 'archived') {
+          this.enroll(member.id);
+        }
+      }
+    }
 
     const newlyEnrolled = this.enrolled.size - beforeCount;
     if (newlyEnrolled > 0) {
