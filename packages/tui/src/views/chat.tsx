@@ -171,6 +171,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   // Track sleeping status for DM agents (autoemon)
   const [sleepInfo, setSleepInfo] = useState<{ sleepUntil: number; remainingMs: number; reason: string } | null>(null);
+  const [slumberActive, setSlumberActive] = useState(false);
   useEffect(() => {
     if (!isDm || !dmAgent) { setSleepInfo(null); return; }
 
@@ -183,7 +184,13 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         } else {
           setSleepInfo(null);
         }
-      } catch { setSleepInfo(null); }
+        // Piggyback: check if SLUMBER is active (avoids extra request)
+        const status = await daemonClient.get('/autoemon/status') as any;
+        setSlumberActive(status.globalState === 'active');
+      } catch {
+        setSleepInfo(null);
+        setSlumberActive(false);
+      }
     };
 
     checkSleep();
@@ -1714,7 +1721,7 @@ Always consider what happens when things go wrong.`,
               : jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
             agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
           />
-          <Text color={jackMode?.active ? COLORS.warning : COLORS.muted}> {jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  Esc:back</Text>
+          <Text color={slumberActive ? '#a5b4fc' : jackMode?.active ? COLORS.warning : COLORS.muted}> {slumberActive ? 'SLUMBER active · /wake /brief  ' : ''}{jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  Esc:back</Text>
         </>
       )}
     </Box>

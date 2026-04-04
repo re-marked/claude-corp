@@ -146,6 +146,38 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const lastVisitedRef = React.useRef<Map<string, string>>(new Map());
   const [, forceRender] = useState(0);
   const [bootDone, setBootDone] = useState(false);
+  const [slumberInfo, setSlumberInfo] = useState<import('./components/status-bar.js').SlumberInfo | null>(null);
+
+  // Poll SLUMBER status every 15s when active
+  useEffect(() => {
+    if (!daemonPort || !ready) return;
+    const client = new DaemonClient(daemonPort);
+    let active = true;
+
+    const poll = async () => {
+      try {
+        const status = await client.get('/autoemon/status') as any;
+        if (!active) return;
+        if (status.globalState === 'active') {
+          const progress = await client.get('/autoemon/progress') as any;
+          setSlumberInfo({
+            active: true,
+            fraction: progress.fraction ?? 0,
+            endsAt: progress.endsAt ?? null,
+            totalTicks: progress.totalTicks ?? status.totalTicks ?? 0,
+            enrolledCount: status.enrolledCount ?? 0,
+            productiveTicks: status.totalProductiveTicks ?? 0,
+          });
+        } else {
+          setSlumberInfo(null);
+        }
+      } catch { if (active) setSlumberInfo(null); }
+    };
+
+    poll();
+    const timer = setInterval(poll, 15_000);
+    return () => { active = false; clearInterval(timer); };
+  }, [daemonPort, ready]);
 
   // WebSocket event bus for real-time streaming + dispatch updates
   const events = useDaemonEvents(daemonPort);
@@ -459,6 +491,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
           <StatusBar
             breadcrumbs={viewStack.breadcrumbs(new Map(channels.map((c) => [c.id, c.name])))}
             hints={hints[current.type] ?? ''}
+            slumber={slumberInfo}
           />
         )}
       </Box>
