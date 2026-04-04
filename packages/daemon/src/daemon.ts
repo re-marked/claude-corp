@@ -247,6 +247,7 @@ export class Daemon {
     // Start autoemon tick loop if it was active before daemon restart
     if (this.autoemon.isOn()) {
       this.autoemon.startTickLoop();
+      this.autoemon.rehydrateDurationTimer(); // Restart duration timer if SLUMBER has endsAt
       log(`[daemon] Autoemon rehydrated — tick loop resumed (${this.autoemon.getEnrolledAgents().length} agents enrolled)`);
     }
   }
