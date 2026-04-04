@@ -324,6 +324,17 @@ export class AutoemonManager {
       this.daemon.dreams.schedulePostSlumberDreams(agentIds);
     }
 
+    // Post morning standup to #general if SLUMBER was 4+ hours (overnight)
+    if (this.state.activatedAt) {
+      import('./morning-standup.js').then(({ postMorningStandup }) => {
+        postMorningStandup({
+          corpRoot: this.daemon.corpRoot,
+          activatedAt: this.state.activatedAt!,
+          enrolledAgents: agentIds,
+        }).catch(err => logError(`[autoemon] Morning standup failed: ${err}`));
+      });
+    }
+
     this.daemon.events.broadcast({
       type: 'autoemon_state',
       state: 'inactive',
