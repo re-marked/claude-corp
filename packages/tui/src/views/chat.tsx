@@ -651,6 +651,36 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /dangerously-enable-auto-afk — toggle Founder Away auto-activation
+    if (text.trim().toLowerCase() === '/dangerously-enable-auto-afk') {
+      try {
+        const { readConfig: rc, writeConfig: wc, CORP_JSON: CJ } = await import('@claudecorp/shared');
+        const corpJson = rc<any>(join(corpRoot, CJ));
+        const current = corpJson.dangerouslyEnableAutoAfk ?? false;
+        const newValue = !current;
+        corpJson.dangerouslyEnableAutoAfk = newValue;
+        wc(join(corpRoot, CJ), corpJson);
+
+        if (newValue) {
+          writeSystemMessage([
+            '⚠️ AUTO-AFK ENABLED',
+            '',
+            'When you go idle for 30+ minutes, SLUMBER will activate automatically',
+            'with the Guard Duty profile (CEO monitors only, no new work).',
+            '',
+            'The CEO will notify you in DM when this happens.',
+            'Type /wake to resume control at any time.',
+            'Run this command again to disable.',
+          ].join('\n'));
+        } else {
+          writeSystemMessage('Auto-AFK disabled. SLUMBER will only activate via /slumber or /afk.');
+        }
+      } catch (err) {
+        writeSystemMessage(`Failed to toggle auto-AFK: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     // /slumber stats — show SLUMBER analytics
     if (text.trim().toLowerCase() === '/slumber stats' || text.trim().toLowerCase() === '/stats') {
       try {
