@@ -523,21 +523,41 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // /afk [duration] — alias for /slumber
     if (text.trim().toLowerCase().startsWith('/slumber') || text.trim().toLowerCase().startsWith('/afk')) {
       const parts = text.trim().split(/\s+/).slice(1);
-      const durationStr = parts[0]; // e.g., "3h", "6h30m", "45m"
+      const arg = parts[0]; // e.g., "3h", "night-owl", "sprint"
 
-      // Parse optional duration
+      // Detect: is the arg a profile name or a duration?
       let durationMs: number | undefined;
       let durationLabel = 'indefinitely';
-      if (durationStr) {
-        const parsed = parseIntervalExpression(durationStr);
+      let profileId: string | undefined;
+
+      if (arg) {
+        // Try duration first (3h, 45m, 6h30m)
+        const parsed = parseIntervalExpression(arg);
         if (parsed) {
           durationMs = parsed;
           const hours = Math.floor(parsed / 3_600_000);
           const mins = Math.round((parsed % 3_600_000) / 60_000);
           durationLabel = hours > 0 ? (mins > 0 ? `${hours}h ${mins}m` : `${hours}h`) : `${mins}m`;
         } else {
-          writeSystemMessage(`Invalid duration: "${durationStr}". Use: /slumber 3h, /slumber 45m, /slumber 6h30m`);
-          return;
+          // Not a duration — try as profile name
+          try {
+            const profile = await daemonClient.get(`/autoemon/profile/${arg}`) as any;
+            if (profile?.id) {
+              profileId = profile.id;
+              if (profile.durationMs) {
+                durationMs = profile.durationMs;
+                const hours = Math.floor(profile.durationMs / 3_600_000);
+                const mins = Math.round((profile.durationMs % 3_600_000) / 60_000);
+                durationLabel = hours > 0 ? (mins > 0 ? `${hours}h ${mins}m` : `${hours}h`) : `${mins}m`;
+              }
+            } else {
+              writeSystemMessage(`Unknown profile or duration: "${arg}". Use: /slumber 3h, /slumber night-owl, /slumber sprint`);
+              return;
+            }
+          } catch {
+            writeSystemMessage(`Unknown: "${arg}". Use: /slumber 3h, /slumber night-owl, /slumber sprint`);
+            return;
+          }
         }
       }
 
@@ -591,10 +611,14 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           await daemonClient.post('/autoemon/activate', {
             source: 'slumber',
             durationMs,
+            profileId,
           });
 
-          const moonEmoji = '🌑';
-          writeSystemMessage(`${moonEmoji} SLUMBER active${durationMs ? ` (${durationLabel})` : ''}. CEO acknowledged. Agents are autonomous.\nType /wake to end, /brief for a status update.`);
+          // Use profile icon for the SLUMBER message, or default moon
+          const profileIcon = profileId ? (await daemonClient.get(`/autoemon/profile/${profileId}`) as any)?.icon ?? '🌑' : '🌑';
+          const profileNote = profileId ? ` [${profileId}]` : '';
+          const moonEmoji = profileIcon;
+          writeSystemMessage(`${moonEmoji} SLUMBER active${profileNote}${durationMs ? ` (${durationLabel})` : ''}. CEO acknowledged. Agents are autonomous.\nType /wake to end, /brief for a status update.`);
         } else {
           writeSystemMessage(`CEO failed to acknowledge: ${data.error ?? 'unknown'}. SLUMBER not activated.`);
         }

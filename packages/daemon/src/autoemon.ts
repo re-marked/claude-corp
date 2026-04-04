@@ -36,6 +36,7 @@ import {
   MEMBERS_JSON,
   parseIntervalExpression,
 } from '@claudecorp/shared';
+import { type SlumberProfile, getProfile } from './slumber-profiles.js';
 import type { Daemon } from './daemon.js';
 import { log, logError } from './logger.js';
 import {
@@ -124,10 +125,14 @@ export interface AutoemonPersistedState {
   activatedBy: ActivationSource | null;
   /** When autoemon was activated */
   activatedAt: number | null;
+  /** Active SLUMBER profile ID (null = no profile, default behavior) */
+  activeProfileId: string | null;
   /** SLUMBER duration in ms (null = indefinite) */
   durationMs: number | null;
   /** When SLUMBER should auto-end (activatedAt + durationMs, null = indefinite) */
   endsAt: number | null;
+  /** Budget: max ticks before auto-stop (null = unlimited) */
+  budgetTicks: number | null;
   /** Per-agent state keyed by member ID */
   agents: Record<string, AgentTickState>;
   /** Total ticks across all agents (lifetime) */
@@ -142,8 +147,10 @@ const DEFAULT_PERSISTED_STATE: AutoemonPersistedState = {
   globalState: 'inactive',
   activatedBy: null,
   activatedAt: null,
+  activeProfileId: null,
   durationMs: null,
   endsAt: null,
+  budgetTicks: null,
   agents: {},
   totalTicks: 0,
   totalProductiveTicks: 0,
@@ -234,7 +241,7 @@ export class AutoemonManager {
    * Activate autoemon — start the autonomous work loop.
    * Transitions: INACTIVE → ACTIVE, or PAUSED → ACTIVE (resume).
    */
-  activate(source: ActivationSource, durationMs?: number): void {
+  activate(source: ActivationSource, durationMs?: number, profileId?: string): void {
     const prev = this.state.globalState;
     if (prev === 'active') {
       log(`[autoemon] Already active (activated by ${this.state.activatedBy})`);
@@ -250,9 +257,16 @@ export class AutoemonManager {
     this.state.globalState = 'active';
     this.state.activatedBy = source;
     this.state.activatedAt = now;
-    this.state.durationMs = durationMs ?? null;
-    this.state.endsAt = durationMs ? now + durationMs : null;
+    this.state.activeProfileId = profileId ?? null;
     this.state.blockReason = null;
+
+    // Apply profile settings (overrides manual durationMs if profile provides them)
+    const profile = profileId ? getProfile(this.daemon.corpRoot, profileId) : null;
+    const effectiveDuration = durationMs ?? profile?.durationMs ?? null;
+    const effectiveBudget = profile?.budgetTicks ?? null;
+    this.state.durationMs = effectiveDuration;
+    this.state.endsAt = effectiveDuration ? now + effectiveDuration : null;
+    this.state.budgetTicks = effectiveBudget;
 
     // Start duration timer if a duration was set
     if (durationMs) {
@@ -401,11 +415,15 @@ export class AutoemonManager {
     if (this.enrolled.has(agentId)) return; // Already enrolled
 
     this.enrolled.add(agentId);
+    // Use profile tick interval if active, otherwise default
+    const profile = this.state.activeProfileId ? getProfile(this.daemon.corpRoot, this.state.activeProfileId) : null;
+    const interval = profile?.tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS;
+
     this.state.agents[agentId] = {
       state: 'active',
       enrolledAt: Date.now(),
-      tickIntervalMs: DEFAULT_TICK_INTERVAL_MS,
-      nextTickAt: Date.now() + DEFAULT_TICK_INTERVAL_MS,
+      tickIntervalMs: interval,
+      nextTickAt: Date.now() + interval,
       sleepUntil: null,
       sleepReason: null,
       tickCount: 0,
@@ -643,6 +661,13 @@ export class AutoemonManager {
       });
     }
 
+    // Budget check — auto-stop if tick budget exhausted
+    if (this.state.budgetTicks && this.state.totalTicks >= this.state.budgetTicks) {
+      log(`[autoemon] Budget exhausted (${this.state.totalTicks}/${this.state.budgetTicks} ticks) — wrapping up`);
+      this.dispatchWrapUp('timer').catch(() => {}).finally(() => this.deactivate());
+      return;
+    }
+
     // Periodic re-scan: pick up new workers, discharge completed
     this.checkConscription();
   }
@@ -668,11 +693,18 @@ export class AutoemonManager {
     const isFirstTick = agentState.tickCount === 0;
     const wasSleeping = agentState.sleepUntil !== null;
 
-    // Build the tick context — brief snapshot to save agent from re-reading
+    // Build the tick context — brief snapshot + profile mood/focus
+    const activeProfile = this.state.activeProfileId
+      ? getProfile(this.daemon.corpRoot, this.state.activeProfileId)
+      : null;
+
     const tickContext: TickContext = {
       pendingTasks: this.countAgentPendingTasks(agentId),
       unreadInbox: this.countAgentUnreadInbox(agentId),
-      lastAction: undefined, // Will be populated from telemetry in future
+      lastAction: undefined,
+      mood: activeProfile?.mood,
+      focus: activeProfile?.focus,
+      profileLabel: activeProfile ? `${activeProfile.icon} ${activeProfile.name}` : undefined,
     };
 
     // Get founder presence
