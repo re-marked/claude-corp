@@ -591,6 +591,12 @@ export class AutoemonManager {
   private async tickCycle(): Promise<void> {
     if (this.state.globalState !== 'active') return; // Only tick when active
 
+    // Don't fire ticks while founder is actively chatting — prevents
+    // dual-dispatch (router handles manual messages, autoemon handles ticks).
+    // Ticks resume when founder goes idle (10min) or away (TUI closed).
+    const presence = this.getFounderPresence();
+    if (presence === 'watching') return;
+
     const now = Date.now();
     const dueAgents: string[] = [];
 
