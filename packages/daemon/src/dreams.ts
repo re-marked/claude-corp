@@ -66,6 +66,48 @@ export class DreamManager {
     this.daemon = daemon;
   }
 
+  /**
+   * Schedule dreams for all agents that were active during SLUMBER.
+   * Called on /wake — agents consolidate what they learned autonomously.
+   * Staggered by 30s to avoid overwhelming the gateway.
+   */
+  schedulePostSlumberDreams(agentIds: string[]): void {
+    if (agentIds.length === 0) return;
+
+    // Only dream agents with recent observations — no signal = no dream
+    const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+    const worthDreaming = agentIds.filter(id => {
+      const member = members.find(m => m.id === id);
+      if (!member?.agentDir) return false;
+      const agentDir = join(this.daemon.corpRoot, member.agentDir);
+      return countRecentObservations(agentDir, 1) > 0;
+    });
+
+    if (worthDreaming.length === 0) {
+      log(`[dreams] No agents have observations — skipping post-SLUMBER dreams`);
+      return;
+    }
+
+    log(`[dreams] Scheduling post-SLUMBER dreams for ${worthDreaming.length}/${agentIds.length} agent(s) with observations`);
+
+    for (let i = 0; i < worthDreaming.length; i++) {
+      const agentId = worthDreaming[i]!;
+      const delay = i * 30_000; // 30s stagger between agents
+      setTimeout(async () => {
+        try {
+          const result = await this.forceDream(agentId);
+          if (result.ok) {
+            log(`[dreams] Post-SLUMBER dream complete for ${agentId}`);
+          } else {
+            log(`[dreams] Post-SLUMBER dream failed for ${agentId}: ${result.error}`);
+          }
+        } catch (err) {
+          log(`[dreams] Post-SLUMBER dream error for ${agentId}: ${err}`);
+        }
+      }, delay);
+    }
+  }
+
   /** Force-trigger a dream for a specific agent (skips all gates). For testing/CLI. */
   async forceDream(agentSlug: string): Promise<{ ok: boolean; summary?: string; error?: string }> {
     let members: Member[];
@@ -180,10 +222,14 @@ export class DreamManager {
     const pendingTask = this.daemon.inbox.peekNext(agent.id);
     if (pendingTask) return closed;
 
-    // Gate 3: At least 1 hour since last dream (prevent thrashing)
+    // Gate 3: Cooldown since last dream.
+    // Default: 1 hour. Reduced to 30 min if agent has rich signal (10+ observations today).
+    // Rich signal = more to consolidate = dream sooner.
     const state = this.readDreamState(agentDir);
     const hoursSince = (Date.now() - state.lastDreamAt) / 3_600_000;
-    if (hoursSince < MIN_HOURS_BETWEEN_DREAMS) return closed;
+    const todaysObservations = countRecentObservations(agentDir, 1); // last 24h
+    const cooldownHours = todaysObservations >= 10 ? 0.5 : MIN_HOURS_BETWEEN_DREAMS;
+    if (hoursSince < cooldownHours) return closed;
 
     // Gate 4: Lock free
     if (!this.tryAcquireLock(agentDir)) return closed;

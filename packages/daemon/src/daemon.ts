@@ -292,6 +292,9 @@ export class Daemon {
       this.autoemon.rehydrateDurationTimer(); // Restart duration timer if SLUMBER has endsAt
       log(`[daemon] Autoemon rehydrated — tick loop resumed (${this.autoemon.getEnrolledAgents().length} agents enrolled)`);
     }
+
+    // Start Founder Away checker (if dangerouslyEnableAutoAfk is on in corp.json)
+    this.autoemon.startFounderAwayChecker();
   }
 
   /** Dispatch narration request to Herald via say(). Response = NARRATION.md content. */

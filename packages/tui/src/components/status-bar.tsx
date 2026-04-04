@@ -26,6 +26,8 @@ export interface SlumberInfo {
   totalTicks: number;
   enrolledCount: number;
   productiveTicks: number;
+  profileIcon?: string;  // 🦉🎒⚡🛡️ — from active profile
+  profileName?: string;
 }
 
 interface Props {
@@ -45,15 +47,16 @@ export function StatusBar({ breadcrumbs, hints, slumber }: Props) {
     return () => clearInterval(timer);
   }, [slumber?.active]);
 
-  // SLUMBER indicator
+  // SLUMBER indicator — profile icon overrides moon phase when active
   let slumberText = '';
   if (slumber?.active) {
-    const moon = moonPhase(slumber.fraction);
+    const icon = slumber.profileIcon ?? moonPhase(slumber.fraction);
+    const label = slumber.profileName ? `${slumber.profileName}` : 'SLUMBER';
     const countdown = slumber.endsAt ? formatCountdown(slumber.endsAt - now) : '';
     const tickLabel = `${slumber.totalTicks} ticks`;
     slumberText = countdown
-      ? `SLUMBER ${moon} ${countdown} · ${tickLabel}`
-      : `SLUMBER ${moon} ${tickLabel}`;
+      ? `${label} ${icon} ${countdown} · ${tickLabel}`
+      : `${label} ${icon} ${tickLabel}`;
   }
 
   return (
