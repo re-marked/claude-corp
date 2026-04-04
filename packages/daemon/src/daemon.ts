@@ -183,6 +183,16 @@ export class Daemon {
     // Connect WebSocket BEFORE router starts — so first dispatch uses WS not HTTP
     await this.connectOpenClawWS();
     this.router.start();
+
+    // Poke CEO DM on startup — ensures the onboarding kickoff message
+    // (written before daemon started) gets dispatched. Without this,
+    // the router only processes messages appended AFTER it starts watching.
+    const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
+    const ceoDm = channels.find(c => c.kind === 'direct' && c.name.includes('ceo'));
+    if (ceoDm) {
+      setTimeout(() => this.router.pokeChannel(ceoDm.id), 3000);
+    }
+
     this.gitManager.start(this.clocks);
     this.heartbeat.start();
     this.taskWatcher.start();

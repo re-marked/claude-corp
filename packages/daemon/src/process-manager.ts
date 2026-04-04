@@ -74,33 +74,36 @@ export class ProcessManager {
     // Reserve the gateway port from the allocation pool
     this.nextPort = gw.getPort() + 1;
 
-    // Populate agents.list from existing non-CEO agent members
+    // Populate agents.list from ALL agent members (including CEO)
     const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
     const workers = members.filter(
-      (m) => m.type === 'agent' && m.rank !== 'master' && m.status !== 'archived' && m.agentDir,
+      (m) => m.type === 'agent' && m.status !== 'archived' && m.agentDir,
     );
 
     for (const worker of workers) {
-      // Skip Opus agents — they route to remote gateway, not corp gateway
-      try {
-        const agentConfig = readConfig<{ model?: string }>(
-          join(this.corpRoot, worker.agentDir!, 'config.json'),
-        );
-        if (agentConfig.model?.includes('opus') && this.globalConfig.userGateway) {
-          log(`[gateway] Skipping ${worker.displayName} (Opus) — uses remote gateway`);
-          continue;
-        }
-      } catch {} // Config read failed — default to corp gateway
-
       const agentName = extractAgentSlug(worker.agentDir!);
       const workspace = join(this.corpRoot, worker.agentDir!).replace(/\\/g, '/');
       const agentDir = join(this.corpRoot, '.gateway', 'agents', agentName, 'agent').replace(/\\/g, '/');
+
+      // Read agent config for model override (e.g., Planner uses Opus)
+      let modelOverride: { primary: string } | undefined;
+      try {
+        const agentConfig = readConfig<{ model?: string; provider?: string }>(
+          join(this.corpRoot, worker.agentDir!, 'config.json'),
+        );
+        const defaultModel = this.globalConfig.defaults.model;
+        if (agentConfig.model && agentConfig.model !== defaultModel) {
+          const provider = agentConfig.provider ?? this.globalConfig.defaults.provider;
+          modelOverride = { primary: `${provider}/${agentConfig.model}` };
+        }
+      } catch {}
 
       gw.addAgent({
         id: agentName,
         name: worker.displayName,
         workspace,
         agentDir,
+        model: modelOverride,
       });
     }
 
@@ -125,38 +128,9 @@ export class ProcessManager {
     if (member.type !== 'agent') throw new Error(`Member ${memberId} is not an agent`);
     if (!member.agentDir) throw new Error(`Member ${memberId} has no agentDir`);
 
-    // Check if agent needs a powerful model (Opus) → route to remote gateway
-    // The corp gateway runs Haiku. Agents needing Opus must use the user's OpenClaw.
-    let needsRemoteGateway = member.rank === 'master'; // CEO always remote
-    if (!needsRemoteGateway && this.globalConfig.userGateway) {
-      try {
-        const agentConfig = readConfig<{ model?: string }>(
-          join(this.corpRoot, member.agentDir, 'config.json'),
-        );
-        if (agentConfig.model && agentConfig.model.includes('opus')) {
-          needsRemoteGateway = true;
-          log(`[daemon] ${member.displayName} needs Opus — routing to remote gateway`);
-        }
-      } catch {} // Config read failed — default to corp gateway
-    }
-
-    // Remote gateway agents (CEO + Opus models)
-    if (needsRemoteGateway && this.globalConfig.userGateway) {
-      try {
-        return await this.connectRemoteAgent(memberId, member);
-      } catch {
-        log(`[daemon] ${member.displayName} remote connection failed — falling back to local gateway`);
-      }
-    }
-
-    // Local fallback for remote agents
-    if (needsRemoteGateway) {
-      const agentAbsDir = join(this.corpRoot, member.agentDir);
-      const openclawStateDir = join(agentAbsDir, '.openclaw');
-      return this.spawnLocalAgent(memberId, member, agentAbsDir, openclawStateDir, gatewayToken);
-    }
-
-    // All other agents → shared corp gateway (Haiku)
+    // ALL agents go on the corp gateway. Per-agent model overrides handle Opus
+    // (set in agents.list by hire.ts). No remote gateway routing needed.
+    // This prevents session key collisions with the user's personal OpenClaw.
     return this.registerGatewayAgent(memberId, member);
   }
 
