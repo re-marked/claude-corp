@@ -631,8 +631,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           agentSlug: ceoSlug,
         });
 
-        // CEO's response appears in the DM naturally (via say channelId).
-        // System message just marks the transition — no duplication.
+        // Wait for the CEO's streamed response to fully render before deactivating.
+        // Without this delay, deactivate kills the state mid-stream and the
+        // message disappears from the chat view.
+        await new Promise(r => setTimeout(r, 3000));
+
+        // CEO's response is now in the chat. Deactivate and mark transition.
         await daemonClient.post('/autoemon/deactivate');
         writeSystemMessage('☀ SLUMBER ended. Welcome back.');
       } catch (err) {
