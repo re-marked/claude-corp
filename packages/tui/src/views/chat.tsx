@@ -1398,23 +1398,9 @@ Always consider what happens when things go wrong.`,
         const result = await daemonClient.say(jackMode.agentSlug, text, jackMode.sessionKey, channel.id);
 
         if (result.ok && result.response) {
-          // Write agent response to DM JSONL
-          const agentMsg: ChannelMessage = {
-            id: generateId(),
-            channelId: channel.id,
-            senderId: jackMode.agentId,
-            threadId: null,
-            content: result.response,
-            kind: 'text',
-            mentions: [],
-            metadata: { source: 'jack' },
-            depth: 0,
-            originId: '',
-            timestamp: new Date().toISOString(),
-          };
-          agentMsg.originId = agentMsg.id;
-          appendMessage(messagesPath, agentMsg);
-          setTimeout(() => refreshMessages(), 50); // Force re-read after self-write
+          // Response is already written to JSONL by the say endpoint.
+          // No TUI-side write needed — prevents double messages.
+          setTimeout(() => refreshMessages(), 100);
         } else {
           writeSystemMessage(`Jack dispatch failed: ${(result as any).error ?? 'No response'}`);
         }
