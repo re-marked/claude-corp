@@ -172,6 +172,20 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   // Track sleeping status for DM agents (autoemon)
   const [sleepInfo, setSleepInfo] = useState<{ sleepUntil: number; remainingMs: number; reason: string } | null>(null);
   const [slumberActive, setSlumberActive] = useState(false);
+
+  // Poll SLUMBER status regardless of channel type (every 10s)
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      try {
+        const status = await daemonClient.get('/autoemon/status') as any;
+        if (active) setSlumberActive(status.globalState === 'active');
+      } catch { if (active) setSlumberActive(false); }
+    };
+    check();
+    const timer = setInterval(check, 10_000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
   useEffect(() => {
     if (!isDm || !dmAgent) { setSleepInfo(null); return; }
 
@@ -184,12 +198,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         } else {
           setSleepInfo(null);
         }
-        // Piggyback: check if SLUMBER is active (avoids extra request)
-        const status = await daemonClient.get('/autoemon/status') as any;
-        setSlumberActive(status.globalState === 'active');
       } catch {
         setSleepInfo(null);
-        setSlumberActive(false);
       }
     };
 
