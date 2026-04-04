@@ -759,14 +759,15 @@ export class Daemon {
     const founder = members.find((m) => m.rank === 'owner');
     if (!founder) throw new Error('No founder found');
 
-    // Use provided senderId, or detect the currently-dispatching agent, or default to Founder
+    // Use provided senderId, or default to Founder.
+    // NEVER guess from busy agents — that heuristic causes misattribution
+    // when 0 or 2+ agents are busy (defaults to Founder, making CEO's
+    // words appear as Mark's). All callers must pass explicit senderId.
     let actualSender: Member;
     if (senderId) {
       actualSender = members.find((m) => m.id === senderId) ?? founder;
     } else {
-      // If an agent is currently busy (dispatching), it's likely the one sending this message via exec
-      const busyAgents = members.filter(m => m.type === 'agent' && this.agentWorkStatus.get(m.id) === 'busy');
-      actualSender = busyAgents.length === 1 ? busyAgents[0]! : founder;
+      actualSender = founder;
     }
     const isAgent = actualSender.type === 'agent';
 
