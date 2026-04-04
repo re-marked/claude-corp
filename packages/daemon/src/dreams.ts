@@ -180,10 +180,14 @@ export class DreamManager {
     const pendingTask = this.daemon.inbox.peekNext(agent.id);
     if (pendingTask) return closed;
 
-    // Gate 3: At least 1 hour since last dream (prevent thrashing)
+    // Gate 3: Cooldown since last dream.
+    // Default: 1 hour. Reduced to 30 min if agent has rich signal (10+ observations today).
+    // Rich signal = more to consolidate = dream sooner.
     const state = this.readDreamState(agentDir);
     const hoursSince = (Date.now() - state.lastDreamAt) / 3_600_000;
-    if (hoursSince < MIN_HOURS_BETWEEN_DREAMS) return closed;
+    const todaysObservations = countRecentObservations(agentDir, 1); // last 24h
+    const cooldownHours = todaysObservations >= 10 ? 0.5 : MIN_HOURS_BETWEEN_DREAMS;
+    if (hoursSince < cooldownHours) return closed;
 
     // Gate 4: Lock free
     if (!this.tryAcquireLock(agentDir)) return closed;
