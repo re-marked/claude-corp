@@ -18,6 +18,8 @@ export interface SlumberProfile {
   id: string;
   /** Display name */
   name: string;
+  /** Emoji icon for status bar and display */
+  icon: string;
   /** One-line description */
   description: string;
   /** Tick interval in ms (how often CEO checks in) */
@@ -26,6 +28,8 @@ export interface SlumberProfile {
   durationMs: number | null;
   /** Max ticks before auto-stop (null = unlimited) */
   budgetTicks: number | null;
+  /** Optional cron schedule for automatic activation (e.g., "8am-3pm weekdays") */
+  schedule: string | null;
   /**
    * Mood — injected into the tick <context> tag. Changes how the CEO
    * communicates and what it prioritizes. This is what makes profiles
@@ -54,16 +58,20 @@ export const DEFAULT_PROFILES: SlumberProfile[] = [
   {
     id: 'night-owl',
     name: 'Night Owl',
+    icon: '🦉',
     description: 'Deep work while you sleep — long intervals, quiet focus, no rush',
     tickIntervalMs: 15 * 60 * 1000, // 15 minutes
     durationMs: 8 * 60 * 60 * 1000, // 8 hours
     budgetTicks: null,
+    schedule: '10pm-6am',
     mood: [
       'The corp is in Night Owl mode. The Founder is asleep.',
       'Work quietly and deeply. Take your time with each task.',
       'No urgency — quality over speed. Think before acting.',
       'Write detailed observations. The Founder reads them in the morning.',
       'If you hit a blocker, note it and move on. Don\'t spin.',
+      'DO NOT: hire agents, create contracts, send messages to #general,',
+      'or make architectural decisions. Save those for when the Founder is back.',
     ].join(' '),
     focus: [
       'Focus on deep work: code reviews, research, writing documentation,',
@@ -76,16 +84,20 @@ export const DEFAULT_PROFILES: SlumberProfile[] = [
   {
     id: 'school-day',
     name: 'School Day',
+    icon: '🎒',
     description: 'CEO manages the corp while Mark is at school — moderate pace, full delegation',
     tickIntervalMs: 10 * 60 * 1000, // 10 minutes
     durationMs: 7 * 60 * 60 * 1000, // 7 hours (8am-3pm)
     budgetTicks: null,
+    schedule: '8am-3pm weekdays',
     mood: [
       'The Founder is at school and won\'t be checking in.',
       'You have full autonomy. Run the corp like it\'s yours.',
       'Delegate actively — hire workers if needed, hand tasks, review work.',
       'Make decisions confidently. The Founder trusts your judgment.',
       'Prepare a thorough briefing for when they return.',
+      'DO NOT: wait for approval on routine decisions, ask questions the',
+      'Founder can\'t answer (they\'re in class), or leave agents idle.',
     ].join(' '),
     focus: [
       'Full CEO mode: manage projects, delegate to team leads,',
@@ -99,16 +111,20 @@ export const DEFAULT_PROFILES: SlumberProfile[] = [
   {
     id: 'sprint',
     name: 'Sprint',
+    icon: '⚡',
     description: 'Maximum throughput — fast ticks, all agents, aggressive execution',
     tickIntervalMs: 2 * 60 * 1000, // 2 minutes
     durationMs: 2 * 60 * 60 * 1000, // 2 hours
     budgetTicks: 200,
+    schedule: null,
     mood: [
       'SPRINT MODE. Maximum velocity. Every tick counts.',
       'Move fast. Ship fast. Review fast. Don\'t overthink.',
       'If a task takes more than 2 ticks, break it down or delegate.',
       'Bias toward shipping over perfecting.',
       'Checkpoint every 5 ticks — brief, numbers only.',
+      'DO NOT: refactor, write docs, reorganize, or "improve" things.',
+      'Ship what exists. Polish later. Velocity is the only metric.',
     ].join(' '),
     focus: [
       'Ship as much as possible in the sprint window.',
@@ -122,16 +138,20 @@ export const DEFAULT_PROFILES: SlumberProfile[] = [
   {
     id: 'guard',
     name: 'Guard Duty',
+    icon: '🛡️',
     description: 'Light monitoring — just watch for problems, don\'t start new work',
     tickIntervalMs: 30 * 60 * 1000, // 30 minutes
     durationMs: null, // indefinite
     budgetTicks: null,
+    schedule: null,
     mood: [
       'Guard duty. You\'re watching the fort, not building it.',
       'Check agent health. Check for errors. Check for blockers.',
       'If everything is fine, SLEEP. Don\'t create work that doesn\'t exist.',
       'Only act on genuine problems — crashed agents, failed builds, P0 blockers.',
       'Be the night watchman, not the night shift.',
+      'DO NOT: create tasks, hire agents, start projects, write code,',
+      'or do anything productive. Your ONLY job is watching for fires.',
     ].join(' '),
     focus: [
       'Monitor only: agent health, error logs, blocker escalations.',
@@ -199,6 +219,18 @@ export function deleteProfile(corpRoot: string, id: string): boolean {
   return true;
 }
 
+/** Validate a profile — enforce sane limits. Returns error message or null. */
+export function validateProfile(p: Partial<SlumberProfile>): string | null {
+  if (!p.id || !/^[a-z0-9-]+$/.test(p.id)) return 'id must be lowercase alphanumeric with hyphens';
+  if (!p.name) return 'name is required';
+  if (!p.tickIntervalMs || p.tickIntervalMs < 30_000) return 'tickIntervalMs must be >= 30s (30000ms)';
+  if (p.tickIntervalMs > 60 * 60 * 1000) return 'tickIntervalMs must be <= 1h (3600000ms)';
+  if (p.durationMs !== null && p.durationMs !== undefined && p.durationMs < 60_000) return 'durationMs must be >= 1m (60000ms)';
+  if (p.budgetTicks !== null && p.budgetTicks !== undefined && p.budgetTicks < 1) return 'budgetTicks must be >= 1';
+  if (!p.mood) return 'mood is required — it defines how the CEO behaves';
+  return null;
+}
+
 /** Format a profile for display. */
 export function formatProfile(p: SlumberProfile): string {
   const duration = p.durationMs
@@ -209,10 +241,12 @@ export function formatProfile(p: SlumberProfile): string {
     : `${Math.round(p.tickIntervalMs / 60_000)}m`;
   const budget = p.budgetTicks ? `${p.budgetTicks} ticks max` : 'unlimited';
 
+  const scheduleStr = p.schedule ? ` · Schedule: ${p.schedule}` : '';
+
   return [
-    `${p.name} (${p.id})${p.builtin ? ' [built-in]' : ''}`,
+    `${p.icon} ${p.name} (${p.id})${p.builtin ? ' [built-in]' : ''}`,
     `  ${p.description}`,
-    `  Interval: ${interval} · Duration: ${duration} · Budget: ${budget}`,
+    `  Interval: ${interval} · Duration: ${duration} · Budget: ${budget}${scheduleStr}`,
     `  Conscription: ${p.conscription}`,
     `  Mood: "${p.mood.slice(0, 80)}..."`,
   ].join('\n');
