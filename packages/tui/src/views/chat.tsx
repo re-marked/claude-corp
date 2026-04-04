@@ -628,6 +628,29 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /slumber profiles — list available SLUMBER profiles
+    if (text.trim().toLowerCase() === '/slumber profiles' || text.trim().toLowerCase() === '/profiles') {
+      try {
+        const profiles = await daemonClient.get('/autoemon/profiles') as any[];
+        if (!profiles?.length) {
+          writeSystemMessage('No SLUMBER profiles found.');
+          return;
+        }
+        const lines = profiles.map((p: any) => {
+          const dur = p.durationMs ? `${Math.round(p.durationMs / 3_600_000)}h` : '∞';
+          const interval = p.tickIntervalMs >= 3_600_000
+            ? `${Math.round(p.tickIntervalMs / 3_600_000)}h`
+            : `${Math.round(p.tickIntervalMs / 60_000)}m`;
+          const budget = p.budgetTicks ? `${p.budgetTicks} ticks` : '∞';
+          return `${p.icon} ${p.name} (${p.id})\n   ${p.description}\n   ${interval} ticks · ${dur} duration · ${budget} budget · ${p.conscription}`;
+        });
+        writeSystemMessage(`SLUMBER Profiles:\n\n${lines.join('\n\n')}\n\nUse: /slumber <profile-id>`);
+      } catch {
+        writeSystemMessage('Failed to load profiles.');
+      }
+      return;
+    }
+
     // /wake — end SLUMBER, CEO summarizes what happened
     if (text.trim().toLowerCase() === '/wake') {
       try {
