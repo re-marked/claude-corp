@@ -318,6 +318,12 @@ export class AutoemonManager {
     this.persist();
     log(`[autoemon] DEACTIVATED (prev: ${prev}, was enrolled: ${agentIds.length} agents)`);
 
+    // Schedule post-SLUMBER dreams for agents that were active — they have
+    // fresh observations and WORKLOG entries to consolidate into BRAIN/.
+    if (agentIds.length > 0) {
+      this.daemon.dreams.schedulePostSlumberDreams(agentIds);
+    }
+
     this.daemon.events.broadcast({
       type: 'autoemon_state',
       state: 'inactive',

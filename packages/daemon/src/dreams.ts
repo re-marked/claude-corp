@@ -66,6 +66,33 @@ export class DreamManager {
     this.daemon = daemon;
   }
 
+  /**
+   * Schedule dreams for all agents that were active during SLUMBER.
+   * Called on /wake — agents consolidate what they learned autonomously.
+   * Staggered by 30s to avoid overwhelming the gateway.
+   */
+  schedulePostSlumberDreams(agentIds: string[]): void {
+    if (agentIds.length === 0) return;
+    log(`[dreams] Scheduling post-SLUMBER dreams for ${agentIds.length} agent(s): ${agentIds.join(', ')}`);
+
+    for (let i = 0; i < agentIds.length; i++) {
+      const agentId = agentIds[i]!;
+      const delay = i * 30_000; // 30s stagger between agents
+      setTimeout(async () => {
+        try {
+          const result = await this.forceDream(agentId);
+          if (result.ok) {
+            log(`[dreams] Post-SLUMBER dream complete for ${agentId}`);
+          } else {
+            log(`[dreams] Post-SLUMBER dream failed for ${agentId}: ${result.error}`);
+          }
+        } catch (err) {
+          log(`[dreams] Post-SLUMBER dream error for ${agentId}: ${err}`);
+        }
+      }, delay);
+    }
+  }
+
   /** Force-trigger a dream for a specific agent (skips all gates). For testing/CLI. */
   async forceDream(agentSlug: string): Promise<{ ok: boolean; summary?: string; error?: string }> {
     let members: Member[];
