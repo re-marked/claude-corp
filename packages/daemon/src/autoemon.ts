@@ -302,8 +302,11 @@ export class AutoemonManager {
     // Stop the tick loop clock first
     this.stopTickLoop();
 
-    // Discharge all agents
+    // Capture state BEFORE clearing — needed for post-SLUMBER actions
+    const activatedAt = this.state.activatedAt;
     const agentIds = [...this.enrolled];
+
+    // Discharge all agents
     for (const agentId of agentIds) {
       this.discharge(agentId);
     }
@@ -311,25 +314,26 @@ export class AutoemonManager {
     this.state.globalState = 'inactive';
     this.state.activatedBy = null;
     this.state.activatedAt = null;
+    this.state.activeProfileId = null;
     this.state.durationMs = null;
     this.state.endsAt = null;
+    this.state.budgetTicks = null;
     this.state.blockReason = null;
 
     this.persist();
     log(`[autoemon] DEACTIVATED (prev: ${prev}, was enrolled: ${agentIds.length} agents)`);
 
-    // Schedule post-SLUMBER dreams for agents that were active — they have
-    // fresh observations and WORKLOG entries to consolidate into BRAIN/.
+    // Schedule post-SLUMBER dreams for agents that were active
     if (agentIds.length > 0) {
       this.daemon.dreams.schedulePostSlumberDreams(agentIds);
     }
 
     // Post morning standup to #general if SLUMBER was 4+ hours (overnight)
-    if (this.state.activatedAt) {
+    if (activatedAt) {
       import('./morning-standup.js').then(({ postMorningStandup }) => {
         postMorningStandup({
           corpRoot: this.daemon.corpRoot,
-          activatedAt: this.state.activatedAt!,
+          activatedAt,
           enrolledAgents: agentIds,
         }).catch(err => logError(`[autoemon] Morning standup failed: ${err}`));
       });
