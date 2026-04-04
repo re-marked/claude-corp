@@ -76,6 +76,8 @@ export class Daemon {
   corpGatewayWS: OpenClawWS | null = null;
   /** Track consecutive overloaded errors per agent for gateway restart logic */
   overloadCounts = new Map<string, number>();
+  /** Founder presence tracking for autoemon — when was the last user interaction? */
+  lastFounderInteractionAt = 0;
   private server: Server | null = null;
   private port = 0;
 
@@ -247,6 +249,7 @@ export class Daemon {
     // Start autoemon tick loop if it was active before daemon restart
     if (this.autoemon.isOn()) {
       this.autoemon.startTickLoop();
+      this.autoemon.rehydrateDurationTimer(); // Restart duration timer if SLUMBER has endsAt
       log(`[daemon] Autoemon rehydrated — tick loop resumed (${this.autoemon.getEnrolledAgents().length} agents enrolled)`);
     }
   }
@@ -786,6 +789,11 @@ export class Daemon {
     userMsg.originId = userMsg.id;
     appendMessage(messagesPath, userMsg);
     this.analytics.trackMessage();
+
+    // Track founder interaction for autoemon presence
+    if (!isAgent) {
+      this.lastFounderInteractionAt = Date.now();
+    }
 
     // Poke the router to process this channel (Windows fs.watch can miss appends)
     setTimeout(() => this.router.pokeChannel(channelId), 100);

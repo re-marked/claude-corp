@@ -35,6 +35,11 @@ export class EventBus {
     });
   }
 
+  /** How many TUI clients are connected. 0 = founder is away. */
+  getClientCount(): number {
+    return this.clients.size;
+  }
+
   /** Broadcast an event to all connected clients. */
   broadcast(event: DaemonEvent): void {
     if (this.clients.size === 0) return;

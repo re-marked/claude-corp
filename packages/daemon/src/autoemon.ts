@@ -124,6 +124,10 @@ export interface AutoemonPersistedState {
   activatedBy: ActivationSource | null;
   /** When autoemon was activated */
   activatedAt: number | null;
+  /** SLUMBER duration in ms (null = indefinite) */
+  durationMs: number | null;
+  /** When SLUMBER should auto-end (activatedAt + durationMs, null = indefinite) */
+  endsAt: number | null;
   /** Per-agent state keyed by member ID */
   agents: Record<string, AgentTickState>;
   /** Total ticks across all agents (lifetime) */
@@ -138,6 +142,8 @@ const DEFAULT_PERSISTED_STATE: AutoemonPersistedState = {
   globalState: 'inactive',
   activatedBy: null,
   activatedAt: null,
+  durationMs: null,
+  endsAt: null,
   agents: {},
   totalTicks: 0,
   totalProductiveTicks: 0,
@@ -153,6 +159,8 @@ export class AutoemonManager {
   private enrolled = new Set<string>();
   /** Whether the tick loop clock is currently registered */
   private tickLoopRunning = false;
+  /** Duration timer — auto-deactivates after SLUMBER duration expires */
+  private durationTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
@@ -226,7 +234,7 @@ export class AutoemonManager {
    * Activate autoemon — start the autonomous work loop.
    * Transitions: INACTIVE → ACTIVE, or PAUSED → ACTIVE (resume).
    */
-  activate(source: ActivationSource): void {
+  activate(source: ActivationSource, durationMs?: number): void {
     const prev = this.state.globalState;
     if (prev === 'active') {
       log(`[autoemon] Already active (activated by ${this.state.activatedBy})`);
@@ -238,13 +246,22 @@ export class AutoemonManager {
       return;
     }
 
+    const now = Date.now();
     this.state.globalState = 'active';
     this.state.activatedBy = source;
-    this.state.activatedAt = Date.now();
+    this.state.activatedAt = now;
+    this.state.durationMs = durationMs ?? null;
+    this.state.endsAt = durationMs ? now + durationMs : null;
     this.state.blockReason = null;
 
+    // Start duration timer if a duration was set
+    if (durationMs) {
+      this.startDurationTimer(durationMs);
+    }
+
     this.persist();
-    log(`[autoemon] ACTIVATED (source: ${source}, prev: ${prev})`);
+    const durationLabel = durationMs ? ` for ${Math.round(durationMs / 60_000)}m` : ' (indefinite)';
+    log(`[autoemon] ACTIVATED (source: ${source}${durationLabel}, prev: ${prev})`);
 
     // Broadcast event for TUI
     this.daemon.events.broadcast({
@@ -262,6 +279,12 @@ export class AutoemonManager {
     const prev = this.state.globalState;
     if (prev === 'inactive') return;
 
+    // Cancel duration timer
+    if (this.durationTimer) {
+      clearTimeout(this.durationTimer);
+      this.durationTimer = null;
+    }
+
     // Stop the tick loop clock first
     this.stopTickLoop();
 
@@ -274,6 +297,8 @@ export class AutoemonManager {
     this.state.globalState = 'inactive';
     this.state.activatedBy = null;
     this.state.activatedAt = null;
+    this.state.durationMs = null;
+    this.state.endsAt = null;
     this.state.blockReason = null;
 
     this.persist();
@@ -886,11 +911,28 @@ export class AutoemonManager {
     } catch { return 0; }
   }
 
-  /** Get the founder's current presence. Defaults to 'away'. */
+  /**
+   * Get the founder's current presence based on TUI connection + activity.
+   * - watching: TUI connected AND founder interacted within 10 minutes
+   * - idle: TUI connected BUT no interaction for 10+ minutes
+   * - away: TUI disconnected (no WebSocket clients)
+   */
   private getFounderPresence(): FounderPresence {
-    // Will be wired to TUI connection tracking in commit 7.
-    // For now, default to 'away' (most autonomous mode).
-    return 'away';
+    const IDLE_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
+    // Check if TUI is connected (any WebSocket clients on the EventBus)
+    const tuiConnected = this.daemon.events.getClientCount() > 0;
+    if (!tuiConnected) return 'away';
+
+    // TUI is connected — check last interaction time
+    const lastInteraction = this.daemon.lastFounderInteractionAt;
+    const sinceLast = Date.now() - lastInteraction;
+
+    if (lastInteraction === 0 || sinceLast > IDLE_THRESHOLD_MS) {
+      return 'idle'; // TUI open but founder hasn't typed in 10+ min
+    }
+
+    return 'watching'; // TUI open and founder is active
   }
 
   // ── Telemetry ────────────────────────────────────────────────────
@@ -1075,9 +1117,202 @@ export class AutoemonManager {
 
   // ── Lifecycle ────────────────────────────────────────────────────
 
-  /** Called on daemon shutdown. Persist final state. */
+  /** Called on daemon shutdown. Persist final state + cancel timers. */
   stop(): void {
+    if (this.durationTimer) {
+      clearTimeout(this.durationTimer);
+      this.durationTimer = null;
+    }
     this.persist();
     log(`[autoemon] Stopped. State: ${this.state.globalState}, enrolled: ${this.enrolled.size}`);
+  }
+
+  // ── SLUMBER Duration ─────────────────────────────────────────────
+
+  /**
+   * Start a timer that auto-wraps-up SLUMBER after the given duration.
+   * Before deactivating, dispatches a wrap-up prompt to the CEO so
+   * the CEO summarizes what happened — that IS the wake digest.
+   */
+  private startDurationTimer(durationMs: number): void {
+    if (this.durationTimer) clearTimeout(this.durationTimer);
+
+    this.durationTimer = setTimeout(async () => {
+      log(`[autoemon] SLUMBER duration expired (${Math.round(durationMs / 60_000)}m) — wrapping up`);
+      this.durationTimer = null;
+
+      // Dispatch wrap-up to CEO before deactivating
+      try {
+        await this.dispatchWrapUp('timer');
+      } catch (err) {
+        logError(`[autoemon] Wrap-up dispatch failed: ${err}`);
+      }
+
+      // Deactivate after CEO has responded (or tried to)
+      this.deactivate();
+    }, durationMs);
+
+    log(`[autoemon] Duration timer set: ${Math.round(durationMs / 60_000)}m`);
+  }
+
+  /**
+   * Rehydrate the duration timer after daemon restart.
+   * Checks persisted endsAt — if still in the future, starts a timer
+   * for the remaining time. If expired, triggers immediate wrap-up.
+   */
+  rehydrateDurationTimer(): void {
+    if (!this.state.endsAt) return; // No duration set (indefinite SLUMBER)
+
+    const now = Date.now();
+    const remaining = this.state.endsAt - now;
+
+    if (remaining <= 0) {
+      // SLUMBER should have ended while daemon was down
+      log(`[autoemon] SLUMBER expired while daemon was down — wrapping up now`);
+      this.dispatchWrapUp('timer').catch(() => {}).finally(() => this.deactivate());
+    } else {
+      // Restart timer for remaining duration
+      log(`[autoemon] Rehydrating duration timer: ${Math.round(remaining / 60_000)}m remaining`);
+      this.startDurationTimer(remaining);
+    }
+  }
+
+  /**
+   * Dispatch a wrap-up prompt to the CEO. The CEO's response IS the wake digest.
+   * Called on: duration expiry, /wake command, manual deactivation.
+   */
+  async dispatchWrapUp(reason: 'timer' | 'wake_command' | 'manual', channelId?: string): Promise<string> {
+    const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+    const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+    if (!ceo) return 'No CEO found.';
+
+    const agentSlug = ceo.displayName.toLowerCase().replace(/\s+/g, '-');
+    const elapsed = this.state.activatedAt ? Date.now() - this.state.activatedAt : 0;
+    const elapsedLabel = elapsed > 3_600_000
+      ? `${Math.round(elapsed / 3_600_000)}h ${Math.round((elapsed % 3_600_000) / 60_000)}m`
+      : `${Math.round(elapsed / 60_000)}m`;
+
+    const reasonLabel = {
+      timer: 'SLUMBER duration has expired.',
+      wake_command: 'The Founder typed /wake.',
+      manual: 'SLUMBER was manually stopped.',
+    }[reason];
+
+    // Build per-agent tick summaries from state
+    const agentSummaries = Object.entries(this.state.agents).map(([id, s]) => {
+      const pct = s.tickCount > 0 ? Math.round((s.productiveTickCount / s.tickCount) * 100) : 0;
+      return `  ${id}: ${s.tickCount} ticks, ${s.productiveTickCount} productive (${pct}%), ${s.consecutiveIdleTicks} idle streak, ${s.consecutiveErrors} errors`;
+    }).join('\n');
+
+    // Read recent telemetry for concrete action details
+    let recentActions = '';
+    try {
+      const telPath = join(this.daemon.corpRoot, TELEMETRY_FILE);
+      if (existsSync(telPath)) {
+        const lines = readFileSync(telPath, 'utf-8').trim().split('\n').filter(Boolean);
+        // Get last 20 entries
+        const recent = lines.slice(-20).map(l => {
+          try {
+            const e = JSON.parse(l);
+            return `  ${e.timestamp?.slice(11, 19)} [${e.action}] ${(e.details ?? '').slice(0, 120)}`;
+          } catch { return null; }
+        }).filter(Boolean);
+        if (recent.length > 0) recentActions = `\nRecent tick log:\n${recent.join('\n')}`;
+      }
+    } catch {}
+
+    const prompt = [
+      `SLUMBER is ending. ${reasonLabel}`,
+      ``,
+      `Session stats: ${elapsedLabel} elapsed, ${this.state.totalTicks} ticks fired, ${this.state.totalProductiveTicks} productive.`,
+      `Enrolled agents: ${[...this.enrolled].join(', ') || 'none'}.`,
+      ``,
+      `Per-agent breakdown:`,
+      agentSummaries,
+      recentActions,
+      ``,
+      `Read your observation log (observations/) and WORKLOG.md for what you did.`,
+      `Then summarize for the Founder:`,
+      `- What tasks did you work on?`,
+      `- What decisions did you make?`,
+      `- What got completed?`,
+      `- Anything that needs the Founder's attention?`,
+      `- Any blockers or issues?`,
+      ``,
+      `Be concise but thorough. This is the Founder's wake-up briefing.`,
+    ].join('\n');
+
+    try {
+      const resp = await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: agentSlug,
+          message: prompt,
+          sessionKey: `autoemon:${agentSlug}`,
+          channelId: channelId ?? undefined,
+        }),
+        signal: AbortSignal.timeout(90_000),
+      });
+
+      const data = await resp.json() as Record<string, unknown>;
+      const response = String(data.response ?? 'No response.');
+      log(`[autoemon] CEO wrap-up: ${response.slice(0, 200)}`);
+      return response;
+    } catch (err) {
+      const msg = `Wrap-up failed: ${err instanceof Error ? err.message : String(err)}`;
+      logError(`[autoemon] ${msg}`);
+      return msg;
+    }
+  }
+
+  /**
+   * Generate a brief system-level digest (fallback if CEO wrap-up fails).
+   * Returns stats only — no CEO narration.
+   */
+  generateDigest(): string {
+    const elapsed = this.state.activatedAt ? Date.now() - this.state.activatedAt : 0;
+    const elapsedLabel = elapsed > 3_600_000
+      ? `${Math.round(elapsed / 3_600_000)}h ${Math.round((elapsed % 3_600_000) / 60_000)}m`
+      : `${Math.round(elapsed / 60_000)}m`;
+
+    const lines: string[] = [
+      `SLUMBER ended after ${elapsedLabel}.`,
+      `Ticks: ${this.state.totalTicks} total, ${this.state.totalProductiveTicks} productive.`,
+      `Enrolled: ${[...this.enrolled].join(', ') || 'none'}.`,
+    ];
+
+    // Per-agent summary
+    for (const [agentId, agentState] of Object.entries(this.state.agents)) {
+      const pct = agentState.tickCount > 0
+        ? Math.round((agentState.productiveTickCount / agentState.tickCount) * 100)
+        : 0;
+      lines.push(`  ${agentId}: ${agentState.tickCount} ticks, ${pct}% productive`);
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Get SLUMBER progress info for the moon phase status bar.
+   * - Duration SLUMBER: fraction based on elapsed/total (0→1)
+   * - Indefinite SLUMBER: fraction cycles based on tick count (one full cycle = 16 ticks)
+   */
+  getProgress(): { elapsed: number; total: number | null; fraction: number; endsAt: number | null; totalTicks: number } {
+    const now = Date.now();
+    const elapsed = this.state.activatedAt ? now - this.state.activatedAt : 0;
+    const total = this.state.durationMs;
+
+    let fraction: number;
+    if (total) {
+      // Duration mode: linear progress 0→1
+      fraction = Math.min(1, elapsed / total);
+    } else {
+      // Indefinite mode: moon cycles every 16 ticks (one full lunar cycle)
+      const cycleTicks = 16;
+      fraction = (this.state.totalTicks % cycleTicks) / cycleTicks;
+    }
+
+    return { elapsed, total, fraction, endsAt: this.state.endsAt, totalTicks: this.state.totalTicks };
   }
 }
