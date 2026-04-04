@@ -34,6 +34,8 @@ import {
   type Member,
   type Contract,
   MEMBERS_JSON,
+  CORP_JSON,
+  type Corporation,
   parseIntervalExpression,
 } from '@claudecorp/shared';
 import { type SlumberProfile, getProfile } from './slumber-profiles.js';
@@ -1206,6 +1208,93 @@ export class AutoemonManager {
     }
     this.persist();
     log(`[autoemon] Stopped. State: ${this.state.globalState}, enrolled: ${this.enrolled.size}`);
+  }
+
+  // ── Founder Away (Auto-AFK) ───────────────────────────────────────
+
+  /** Idle threshold for auto-AFK: 30 minutes */
+  private static AUTO_AFK_IDLE_MS = 30 * 60 * 1000;
+
+  /**
+   * Start the Founder Away checker — a clock that runs every 2 minutes
+   * even when autoemon is inactive. Checks if auto-AFK should trigger.
+   */
+  startFounderAwayChecker(): void {
+    // Check if the flag is enabled in corp.json
+    try {
+      const corp = readConfig<Corporation>(join(this.daemon.corpRoot, CORP_JSON));
+      if (!corp.dangerouslyEnableAutoAfk) return;
+    } catch { return; }
+
+    this.daemon.clocks.register({
+      id: 'founder-away-check',
+      name: 'Founder Away',
+      type: 'system',
+      intervalMs: 2 * 60 * 1000, // Check every 2 minutes
+      target: 'founder',
+      description: 'Auto-activates SLUMBER (Guard Duty) when founder idle 30m+ (dangerously enabled)',
+      callback: () => this.checkFounderAway(),
+    });
+    log(`[autoemon] Founder Away checker started (dangerouslyEnableAutoAfk is ON)`);
+  }
+
+  /**
+   * Check if the founder has been idle long enough to auto-activate SLUMBER.
+   * Only fires if: flag enabled + autoemon inactive + founder idle 30m+.
+   */
+  private async checkFounderAway(): Promise<void> {
+    // Don't auto-activate if already active
+    if (this.state.globalState !== 'inactive') return;
+
+    // Re-check the flag (might have been disabled)
+    try {
+      const corp = readConfig<Corporation>(join(this.daemon.corpRoot, CORP_JSON));
+      if (!corp.dangerouslyEnableAutoAfk) return;
+    } catch { return; }
+
+    // Check founder presence
+    const presence = this.getFounderPresence();
+    if (presence !== 'away') {
+      // Also check idle duration explicitly (presence 'idle' = 10min, we need 30min)
+      const idleMs = Date.now() - this.daemon.lastFounderInteractionAt;
+      if (this.daemon.lastFounderInteractionAt === 0 || idleMs < AutoemonManager.AUTO_AFK_IDLE_MS) return;
+    }
+
+    // Auto-activate with Guard Duty profile (safest)
+    log(`[autoemon] Founder idle 30m+ — auto-activating SLUMBER (Guard Duty)`);
+    this.activate('afk', undefined, 'guard');
+    this.conscript();
+    this.startTickLoop();
+
+    // Notify CEO via DM
+    try {
+      const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+      const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+      if (ceo) {
+        const ceoSlug = ceo.displayName.toLowerCase().replace(/\s+/g, '-');
+        const channels = readConfig<any[]>(join(this.daemon.corpRoot, 'channels.json'));
+        const ceoDm = channels.find((c: any) => c.kind === 'direct' && c.name.includes('ceo'));
+
+        await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target: ceoSlug,
+            message: [
+              '[AUTO-AFK] Founder has been idle for 30+ minutes.',
+              'SLUMBER activated automatically with Guard Duty profile.',
+              'You are in watchman mode — monitor for problems only.',
+              'The Founder can type /wake to resume control at any time.',
+            ].join('\n'),
+            sessionKey: `jack:${ceoSlug}`,
+            channelId: ceoDm?.id,
+          }),
+        });
+        log(`[autoemon] CEO notified of auto-AFK activation`);
+      }
+    } catch (err) {
+      logError(`[autoemon] Failed to notify CEO of auto-AFK: ${err}`);
+    }
   }
 
   // ── SLUMBER Duration ─────────────────────────────────────────────
