@@ -9,5 +9,11 @@ export interface Corporation {
   theme: string;
   /** Default DM mode: 'jack' (persistent session, recommended) or 'async' (stateless dispatch) */
   defaultDmMode?: DmMode;
+  /**
+   * Founder Away: auto-activate SLUMBER when founder goes idle 30+ minutes.
+   * OFF by default. Requires explicit opt-in because the CEO will start
+   * working autonomously without being asked. Uses Guard Duty profile.
+   */
+  dangerouslyEnableAutoAfk?: boolean;
   createdAt: string;
 }
