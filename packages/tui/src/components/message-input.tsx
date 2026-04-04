@@ -284,6 +284,7 @@ const COMMANDS = [
   { name: '/brief', syntax: '/brief', desc: 'Mid-SLUMBER status update from CEO' },
   { name: '/slumber profiles', syntax: '/slumber profiles', desc: 'List available SLUMBER profiles' },
   { name: '/slumber stats', syntax: '/slumber stats', desc: 'SLUMBER analytics — productivity score, tick breakdown' },
+  { name: '/slumber wizard', syntax: '/slumber wizard', desc: 'Open the interactive SLUMBER wizard' },
   { name: '/dangerously-enable-auto-afk', syntax: '/dangerously-enable-auto-afk', desc: 'Toggle auto-SLUMBER when idle 30m+ (Guard Duty)' },
 
   // Utility

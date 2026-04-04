@@ -11,6 +11,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
+import { parseIntervalExpression } from '@claudecorp/shared';
 import { COLORS } from '../theme.js';
 import { useCorp } from '../context/corp-context.js';
 
@@ -90,15 +91,11 @@ export function AfkWizard({ onLaunch, onCancel }: Props) {
 
     if (step === 'confirm') {
       if (key.return) {
-        // Parse duration
+        // Parse duration using shared parser (handles 3h, 45m, 1h30m, etc.)
         let durationMs: number | undefined;
         if (durationInput.trim()) {
-          const match = durationInput.match(/(\d+)\s*h/i);
-          const matchM = durationInput.match(/(\d+)\s*m/i);
-          let ms = 0;
-          if (match) ms += parseInt(match[1]!) * 3_600_000;
-          if (matchM) ms += parseInt(matchM[1]!) * 60_000;
-          if (ms > 0) durationMs = ms;
+          const parsed = parseIntervalExpression(durationInput.trim());
+          if (parsed) durationMs = parsed;
         }
         onLaunch(selectedProfile!.id, durationMs, goalInput.trim() || undefined);
       }
