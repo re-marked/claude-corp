@@ -670,27 +670,6 @@ export function createApi(daemon: Daemon): Server {
             } : undefined,
           );
 
-          // Write the agent's response to channel JSONL so it persists in chat history.
-          // Without this, the response only exists in the streaming state (in-memory)
-          // and vanishes when the stream ends or a re-render triggers.
-          if (channelMsgPath && result.content.trim()) {
-            const responseMsg: ChannelMessage = {
-              id: generateId(),
-              channelId,
-              senderId: target.id,
-              threadId: null,
-              content: result.content,
-              kind: 'text',
-              mentions: [],
-              metadata: { source: 'jack', sessionKey: (body.sessionKey as string) ?? null },
-              depth: 0,
-              originId: '',
-              timestamp: new Date().toISOString(),
-            };
-            responseMsg.originId = responseMsg.id;
-            appendMessage(channelMsgPath, responseMsg);
-          }
-
           // Clean up streaming state + emit end events
           if (channelId) {
             daemon.streaming.delete(target.id);
