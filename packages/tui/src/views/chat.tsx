@@ -705,6 +705,77 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
+    // /slumber schedule <profile> — register a recurring SLUMBER cron
+    if (text.trim().toLowerCase().startsWith('/slumber schedule')) {
+      const scheduleArg = text.trim().split(/\s+/).slice(2).join(' ');
+      if (!scheduleArg) {
+        writeSystemMessage('Usage: /slumber schedule <profile-id>\nExample: /slumber schedule night-owl\nThe profile\'s schedule field determines activation times.');
+        return;
+      }
+
+      try {
+        const profile = await daemonClient.get(`/autoemon/profile/${scheduleArg}`) as any;
+        if (!profile?.id) {
+          writeSystemMessage(`Profile "${scheduleArg}" not found. Use /slumber profiles to see available profiles.`);
+          return;
+        }
+        if (!profile.schedule) {
+          writeSystemMessage(`Profile "${profile.name}" has no schedule defined. Only Night Owl (10pm-6am) and School Day (8am-3pm weekdays) have schedules.`);
+          return;
+        }
+
+        // Parse schedule string into start/end hours
+        const schedMatch = profile.schedule.match(/(\d{1,2})(am|pm)-(\d{1,2})(am|pm)/i);
+        if (!schedMatch) {
+          writeSystemMessage(`Cannot parse schedule "${profile.schedule}". Expected format: "10pm-6am" or "8am-3pm".`);
+          return;
+        }
+
+        let startHour = parseInt(schedMatch[1]!);
+        if (schedMatch[2]!.toLowerCase() === 'pm' && startHour !== 12) startHour += 12;
+        if (schedMatch[2]!.toLowerCase() === 'am' && startHour === 12) startHour = 0;
+
+        let endHour = parseInt(schedMatch[3]!);
+        if (schedMatch[4]!.toLowerCase() === 'pm' && endHour !== 12) endHour += 12;
+        if (schedMatch[4]!.toLowerCase() === 'am' && endHour === 12) endHour = 0;
+
+        // Calculate duration
+        let durationHours = endHour - startHour;
+        if (durationHours <= 0) durationHours += 24; // Overnight wrap
+
+        const isWeekdays = profile.schedule.toLowerCase().includes('weekday');
+        const cronDays = isWeekdays ? '1-5' : '*';
+
+        // Register activation cron
+        const cronExpr = `0 ${startHour} * * ${cronDays}`;
+        const durationMs = durationHours * 3_600_000;
+
+        await daemonClient.post('/crons', {
+          schedule: cronExpr,
+          command: `Activate SLUMBER with profile ${profile.id} for ${durationHours}h`,
+          name: `slumber-${profile.id}`,
+          targetAgent: 'ceo',
+          durable: true,
+          permanent: false,
+          expiryMs: null, // Never expires — it's a schedule
+        });
+
+        writeSystemMessage([
+          `${profile.icon} SLUMBER schedule registered: ${profile.name}`,
+          `  Activates: ${schedMatch[1]}${schedMatch[2]} daily${isWeekdays ? ' (weekdays)' : ''}`,
+          `  Duration: ${durationHours}h`,
+          `  Profile: ${profile.id}`,
+          `  Cron: ${cronExpr}`,
+          '',
+          'The CEO will enter SLUMBER automatically at the scheduled time.',
+          'Use /cron list to see scheduled jobs. /cron stop slumber-${profile.id} to remove.',
+        ].join('\n'));
+      } catch (err) {
+        writeSystemMessage(`Schedule failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     // /slumber stats — show SLUMBER analytics
     if (text.trim().toLowerCase() === '/slumber stats' || text.trim().toLowerCase() === '/stats') {
       try {
