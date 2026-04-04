@@ -9,6 +9,7 @@ import {
   readConfig,
   appendMessage,
   generateId,
+  parseIntervalExpression,
   MEMBERS_JSON,
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
@@ -497,6 +498,90 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         writeSystemMessage(`Daemon: 127.0.0.1:${daemonPort}\n\nAgent Status:\n${lines.join('\n')}`);
       } catch {
         writeSystemMessage('Failed to get status');
+      }
+      return;
+    }
+
+    // /slumber [duration] — enter SLUMBER mode (autonomous CEO)
+    // /afk [duration] — alias for /slumber
+    if (text.trim().toLowerCase().startsWith('/slumber') || text.trim().toLowerCase().startsWith('/afk')) {
+      const parts = text.trim().split(/\s+/).slice(1);
+      const durationStr = parts[0]; // e.g., "3h", "6h30m", "45m"
+
+      // Parse optional duration
+      let durationMs: number | undefined;
+      let durationLabel = 'indefinitely';
+      if (durationStr) {
+        const parsed = parseIntervalExpression(durationStr);
+        if (parsed) {
+          durationMs = parsed;
+          const hours = Math.floor(parsed / 3_600_000);
+          const mins = Math.round((parsed % 3_600_000) / 60_000);
+          durationLabel = hours > 0 ? (mins > 0 ? `${hours}h ${mins}m` : `${hours}h`) : `${mins}m`;
+        } else {
+          writeSystemMessage(`Invalid duration: "${durationStr}". Use: /slumber 3h, /slumber 45m, /slumber 6h30m`);
+          return;
+        }
+      }
+
+      // Check if already in SLUMBER
+      try {
+        const status = await daemonClient.get('/autoemon/status') as any;
+        if (status.globalState === 'active') {
+          writeSystemMessage(`SLUMBER is already active (${status.enrolledCount} agents enrolled). Use /wake to stop.`);
+          return;
+        }
+      } catch {}
+
+      // Step 1: Tell CEO to acknowledge — SLUMBER doesn't activate until CEO responds
+      writeSystemMessage(`Entering SLUMBER ${durationLabel}... asking CEO to acknowledge.`);
+
+      try {
+        const ceoSlug = members.find(m => m.rank === 'master' && m.type === 'agent')
+          ?.displayName.toLowerCase().replace(/\s+/g, '-') ?? 'ceo';
+
+        const slumberPrompt = [
+          `The Founder is entering SLUMBER mode${durationMs ? ` for ${durationLabel}` : ''}.`,
+          `You now have autonomous control of the corporation.`,
+          ``,
+          `Acknowledge this transition and briefly state your plan:`,
+          `- What will you focus on?`,
+          `- What's the highest priority?`,
+          `- Any concerns?`,
+          ``,
+          `Keep it brief — the Founder is heading out. After you acknowledge,`,
+          `you'll receive periodic <tick> prompts. Act on them autonomously.`,
+        ].join('\n');
+
+        // Send to CEO via say() — response appears in the DM naturally
+        const resp = await fetch(`http://127.0.0.1:${daemonPort}/cc/say`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target: ceoSlug,
+            message: slumberPrompt,
+            sessionKey: `autoemon:${ceoSlug}`,
+            channelId: channel.id,
+          }),
+          signal: AbortSignal.timeout(60_000),
+        });
+
+        const data = await resp.json() as any;
+
+        if (data.ok) {
+          // Step 2: CEO acknowledged — NOW activate autoemon
+          await daemonClient.post('/autoemon/activate', {
+            source: 'slumber',
+            durationMs,
+          });
+
+          const moonEmoji = '🌑';
+          writeSystemMessage(`${moonEmoji} SLUMBER active${durationMs ? ` (${durationLabel})` : ''}. CEO acknowledged. Agents are autonomous.\nType /wake to end, /brief for a status update.`);
+        } else {
+          writeSystemMessage(`CEO failed to acknowledge: ${data.error ?? 'unknown'}. SLUMBER not activated.`);
+        }
+      } catch (err) {
+        writeSystemMessage(`SLUMBER activation failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       return;
     }
