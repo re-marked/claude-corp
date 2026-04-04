@@ -52,7 +52,7 @@ interface Props {
 }
 
 export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCalls = [], onNavigate }: Props) {
-  const { corpRoot, daemonClient, members: ctxMembers } = useCorp();
+  const { corpRoot, daemonClient, daemonPort, members: ctxMembers } = useCorp();
   const [activeThread, setActiveThread] = useState<string | undefined>(undefined);
   const { messages, threadCounts, refresh: refreshMessages } = useMessages(messagesPath, 50, activeThread);
   const [sending, setSending] = useState(false);
@@ -485,7 +485,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
-    // /status shows agent work status inline
+    // /status shows agent work status + daemon port inline
     if (text.trim().toLowerCase() === '/status') {
       try {
         const status = await daemonClient.status();
@@ -494,7 +494,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           const icon = ws === 'idle' || ws === 'busy' ? '\u25CF' : '\u25CB';
           return `${icon} ${a.displayName.padEnd(16)} ${ws}`;
         });
-        writeSystemMessage(`Agent Status:\n${lines.join('\n')}`);
+        writeSystemMessage(`Daemon: 127.0.0.1:${daemonPort}\n\nAgent Status:\n${lines.join('\n')}`);
       } catch {
         writeSystemMessage('Failed to get status');
       }
