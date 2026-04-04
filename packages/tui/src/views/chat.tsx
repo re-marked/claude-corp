@@ -588,7 +588,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         const data = await daemonClient.post('/cc/say', {
           target: ceoSlug,
           message: slumberPrompt,
-          sessionKey: `autoemon:${ceoSlug}`,
+          sessionKey: `jack:${ceoSlug}`,
           channelId: channel.id,
         }) as any;
 
@@ -676,7 +676,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         await daemonClient.post('/cc/say', {
           target: ceoSlug,
           message: briefPrompt,
-          sessionKey: `autoemon:${ceoSlug}`,
+          sessionKey: `jack:${ceoSlug}`,
           channelId: channel.id,
         });
 

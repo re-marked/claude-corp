@@ -12,7 +12,7 @@
  * - Clean ownership: each agent has exactly one heartbeat source
  *
  * Borrowed from Claude Code's proactive module:
- * - One continuous session per agent (autoemon:<slug>), compaction handles growth
+ * - Uses the same jack:<slug> session as normal DM chat — full conversation memory
  * - Agent-driven observation logging (prompt teaches, daemon doesn't auto-record)
  * - Explicit activation only (no auto-suggest)
  * - Tick telemetry persisted locally to autoemon-telemetry.jsonl
@@ -708,7 +708,7 @@ export class AutoemonManager {
     }
 
     // Dispatch via say() — persistent session per agent
-    const sessionKey = `autoemon:${agentSlug}`;
+    const sessionKey = `jack:${agentSlug}`;
     const startTime = Date.now();
 
     log(`[autoemon] Tick #${agentState.tickCount + 1} → ${member.displayName} (interval: ${Math.round(agentState.tickIntervalMs / 1000)}s)`);
@@ -1255,7 +1255,7 @@ export class AutoemonManager {
         body: JSON.stringify({
           target: agentSlug,
           message: prompt,
-          sessionKey: `autoemon:${agentSlug}`,
+          sessionKey: `jack:${agentSlug}`,
           channelId: channelId ?? undefined,
         }),
         signal: AbortSignal.timeout(90_000),
