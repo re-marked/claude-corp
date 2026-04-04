@@ -25,9 +25,17 @@ import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
 import { SleepingBanner } from '../components/sleeping-banner.js';
+import { AfkWizard } from './afk-wizard.js';
 import { useCorp } from '../context/corp-context.js';
 
 const THINKING_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes — agents can work long
+
+function formatMs(ms: number): string {
+  const hours = Math.floor(ms / 3_600_000);
+  const mins = Math.round((ms % 3_600_000) / 60_000);
+  if (hours > 0) return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  return `${mins}m`;
+}
 
 interface StreamData {
   agentName: string;
@@ -65,6 +73,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showTaskWizard, setShowTaskWizard] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
+  const [showAfkWizard, setShowAfkWizard] = useState(false);
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
 
   // Plan review mode — replaces input when a plan arrives
@@ -523,7 +532,19 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // /afk [duration] — alias for /slumber
     if (text.trim().toLowerCase().startsWith('/slumber') || text.trim().toLowerCase().startsWith('/afk')) {
       const parts = text.trim().split(/\s+/).slice(1);
-      const arg = parts[0]; // e.g., "3h", "night-owl", "sprint"
+      const arg = parts[0]; // e.g., "3h", "night-owl", "sprint", "wizard", "profiles", "stats"
+
+      // /afk with no args → open the AFK wizard
+      if (!arg && text.trim().toLowerCase() === '/afk') {
+        setShowAfkWizard(true);
+        return;
+      }
+
+      // /slumber wizard → also opens the wizard
+      if (arg === 'wizard') {
+        setShowAfkWizard(true);
+        return;
+      }
 
       // Detect: is the arg a profile name or a duration?
       let durationMs: number | undefined;
@@ -1540,6 +1561,45 @@ Always consider what happens when things go wrong.`,
     writeSystemMessage(`Team "${name}" created. A team channel has been added.`);
     setTimeout(() => setShowTeamWizard(false), 1500);
   };
+
+  if (showAfkWizard) {
+    return (
+      <Box flexDirection="column" minHeight={10}>
+        <AfkWizard
+          onLaunch={async (profileId, durationMs, goal) => {
+            setShowAfkWizard(false);
+            // Reuse the existing SLUMBER activation flow
+            const ceoMember = members.find(m => m.rank === 'master' && m.type === 'agent');
+            if (!ceoMember) { writeSystemMessage('No CEO found.'); return; }
+            const ceoSlug = ceoMember.displayName.toLowerCase().replace(/\s+/g, '-');
+
+            const durationLabel = durationMs ? formatMs(durationMs) : 'indefinitely';
+            writeSystemMessage(`Entering SLUMBER (${profileId})... asking CEO to acknowledge.`);
+
+            try {
+              const data = await daemonClient.post('/cc/say', {
+                target: ceoSlug,
+                message: `[SLUMBER MODE ACTIVATED — ${profileId}${durationMs ? ` for ${durationLabel}` : ''}${goal ? `\nGoal: ${goal}` : ''}]\nThe Founder is stepping away. You have autonomous control.\nAcknowledge briefly and continue from where the conversation left off.\nYou'll receive <tick> prompts. Act on them autonomously.`,
+                sessionKey: `jack:${ceoSlug}`,
+                channelId: channel.id,
+              }) as any;
+
+              if (data.ok) {
+                await daemonClient.post('/autoemon/activate', { source: 'slumber', durationMs, profileId });
+                const profile = await daemonClient.get(`/autoemon/profile/${profileId}`) as any;
+                writeSystemMessage(`${profile?.icon ?? '🌑'} SLUMBER active [${profileId}]${durationMs ? ` (${durationLabel})` : ''}. CEO acknowledged.\nType /wake to end, /brief for a status update.`);
+              } else {
+                writeSystemMessage(`CEO failed to acknowledge: ${data.error ?? 'unknown'}`);
+              }
+            } catch (err) {
+              writeSystemMessage(`SLUMBER failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }}
+          onCancel={() => setShowAfkWizard(false)}
+        />
+      </Box>
+    );
+  }
 
   if (showProjectWizard) {
     return (
