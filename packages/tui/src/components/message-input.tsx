@@ -279,9 +279,11 @@ const COMMANDS = [
 
   // SLUMBER (autonomous mode)
   { name: '/slumber', syntax: '/slumber [duration]', desc: 'Enter SLUMBER — CEO goes autonomous (e.g., /slumber 3h)' },
-  { name: '/afk', syntax: '/afk [duration]', desc: 'Alias for /slumber — enter autonomous mode' },
+  { name: '/afk', syntax: '/afk [duration|profile]', desc: 'Alias for /slumber — enter autonomous mode' },
   { name: '/wake', syntax: '/wake', desc: 'End SLUMBER — CEO summarizes what happened' },
   { name: '/brief', syntax: '/brief', desc: 'Mid-SLUMBER status update from CEO' },
+  { name: '/slumber profiles', syntax: '/slumber profiles', desc: 'List available SLUMBER profiles' },
+  { name: '/slumber stats', syntax: '/slumber stats', desc: 'SLUMBER analytics — productivity score, tick breakdown' },
 
   // Utility
   { name: '/theme', syntax: '/theme [name]', desc: 'Switch color palette' },

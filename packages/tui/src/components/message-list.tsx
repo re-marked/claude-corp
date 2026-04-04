@@ -144,19 +144,28 @@ export function MessageList({ messages, members }: Props) {
           );
         }
 
+        // Detect SLUMBER messages — render with muted indigo night theme
+        const meta = msg.metadata as Record<string, unknown> | null;
+        const isSlumber = meta?.slumber === true;
+        const slumberNameColor = '#818cf8'; // Indigo-400
+        const slumberTextColor = '#a5b4fc'; // Indigo-300
+
         return (
           <Box key={msg.id} flexDirection="column" marginBottom={1}>
             <Box gap={1}>
-              {isCeo ? (
+              {isSlumber ? (
+                // SLUMBER mode: muted indigo name with moon indicator
+                <Text bold color={slumberNameColor}>{'\u263E'} {name}</Text>
+              ) : isCeo ? (
                 <RainbowText>{name}</RainbowText>
               ) : (
                 <Text bold color={senderColor(sender, msg.senderId)}>
                   {name}
                 </Text>
               )}
-              <Text color={COLORS.subtle}>{time}</Text>
+              <Text color={isSlumber ? '#6366f1' : COLORS.subtle}>{time}</Text>
             </Box>
-            <Text wrap="wrap">{renderContent(msg.content, memberMap)}</Text>
+            <Text wrap="wrap" color={isSlumber ? slumberTextColor : undefined}>{renderContent(msg.content, memberMap)}</Text>
           </Box>
         );
       })}

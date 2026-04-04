@@ -29,6 +29,12 @@ export interface TickContext {
   lastAction?: string;
   /** Current SLUMBER goal (if any) */
   goal?: string;
+  /** Active profile mood — changes how the CEO behaves */
+  mood?: string;
+  /** Active profile focus directive — what to prioritize */
+  focus?: string;
+  /** Active profile name + icon for display */
+  profileLabel?: string;
 }
 
 /** Format a timestamp that includes date (for midnight-crossing sessions). */
@@ -86,6 +92,16 @@ export function buildTickMessage(opts: {
   // SLUMBER goal reminder (if set)
   if (opts.context?.goal) {
     parts.push(`<goal>${opts.context.goal}</goal>`);
+  }
+
+  // Profile mood — changes how the agent behaves (the soul of profiles)
+  if (opts.context?.mood) {
+    parts.push(`<mood>${opts.context.mood}</mood>`);
+  }
+
+  // Profile focus — what to prioritize
+  if (opts.context?.focus) {
+    parts.push(`<focus>${opts.context.focus}</focus>`);
   }
 
   return parts.join('\n');

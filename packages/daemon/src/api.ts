@@ -682,7 +682,11 @@ export function createApi(daemon: Daemon): Server {
               content: result.content,
               kind: 'text',
               mentions: [],
-              metadata: { source: 'jack', sessionKey: (body.sessionKey as string) ?? null },
+              metadata: {
+                source: 'jack',
+                sessionKey: (body.sessionKey as string) ?? null,
+                slumber: daemon.autoemon.isActive() || undefined,
+              },
               depth: 0,
               originId: '',
               timestamp: new Date().toISOString(),
@@ -933,8 +937,9 @@ export function createApi(daemon: Daemon): Server {
         const source = (body.source as string) ?? 'manual';
         const agents = body.agents as string[] | undefined;
         const durationMs = body.durationMs as number | undefined;
+        const profileId = body.profileId as string | undefined;
 
-        daemon.autoemon.activate(source as any, durationMs);
+        daemon.autoemon.activate(source as any, durationMs, profileId);
 
         // Enroll specified agents, or run conscription cascade
         if (agents?.length) {
@@ -1021,6 +1026,45 @@ export function createApi(daemon: Daemon): Server {
         }
 
         json(res, { ok: true, woken, enrolled: daemon.autoemon.getEnrolledAgents() });
+        return;
+      }
+
+      // GET /autoemon/analytics — SLUMBER session analytics (current session by default)
+      if (method === 'GET' && path === '/autoemon/analytics') {
+        const { readTelemetry, computeSessionStats, formatSessionReport } = await import('./slumber-analytics.js');
+        const allEntries = readTelemetry(daemon.corpRoot);
+
+        // Filter to current session (since activatedAt) unless ?all=true
+        const url = new URL(req.url ?? '', `http://127.0.0.1`);
+        const showAll = url.searchParams.get('all') === 'true';
+        const activatedAt = daemon.autoemon.getStatus().activatedAt;
+
+        let entries = allEntries;
+        if (!showAll && activatedAt) {
+          const cutoff = new Date(activatedAt).toISOString();
+          entries = allEntries.filter(e => e.timestamp >= cutoff);
+        }
+
+        const stats = computeSessionStats(entries);
+        const report = formatSessionReport(stats);
+        json(res, { ...stats, report, sessionScope: showAll ? 'all-time' : 'current' });
+        return;
+      }
+
+      // GET /autoemon/profiles — list all SLUMBER profiles
+      if (method === 'GET' && path === '/autoemon/profiles') {
+        const { loadProfiles } = await import('./slumber-profiles.js');
+        json(res, loadProfiles(daemon.corpRoot));
+        return;
+      }
+
+      // GET /autoemon/profile/:id — get a specific profile
+      if (method === 'GET' && path.startsWith('/autoemon/profile/')) {
+        const profileId = path.split('/')[3];
+        if (!profileId) { json(res, { error: 'profileId required' }, 400); return; }
+        const { getProfile: gp } = await import('./slumber-profiles.js');
+        const profile = gp(daemon.corpRoot, profileId);
+        json(res, profile ?? { error: 'Profile not found' }, profile ? 200 : 404);
         return;
       }
 
