@@ -160,6 +160,17 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         if (!active) return;
         if (status.globalState === 'active') {
           const progress = await client.get('/autoemon/progress') as any;
+          // Fetch profile info if a profile is active
+          let profileIcon: string | undefined;
+          let profileName: string | undefined;
+          if (status.activeProfileId) {
+            try {
+              const profile = await client.get(`/autoemon/profile/${status.activeProfileId}`) as any;
+              if (profile?.icon) profileIcon = profile.icon;
+              if (profile?.name) profileName = profile.name;
+            } catch {}
+          }
+
           setSlumberInfo({
             active: true,
             fraction: progress.fraction ?? 0,
@@ -167,6 +178,8 @@ function ResumeView({ corpPath }: { corpPath: string }) {
             totalTicks: progress.totalTicks ?? status.totalTicks ?? 0,
             enrolledCount: status.enrolledCount ?? 0,
             productiveTicks: status.totalProductiveTicks ?? 0,
+            profileIcon,
+            profileName,
           });
         } else {
           setSlumberInfo(null);

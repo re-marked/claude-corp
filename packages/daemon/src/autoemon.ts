@@ -217,6 +217,7 @@ export class AutoemonManager {
     globalState: AutoemonGlobalState;
     activatedBy: ActivationSource | null;
     activatedAt: number | null;
+    activeProfileId: string | null;
     enrolledCount: number;
     enrolledAgents: string[];
     totalTicks: number;
@@ -228,6 +229,7 @@ export class AutoemonManager {
       globalState: this.state.globalState,
       activatedBy: this.state.activatedBy,
       activatedAt: this.state.activatedAt,
+      activeProfileId: this.state.activeProfileId,
       enrolledCount: this.enrolled.size,
       enrolledAgents: [...this.enrolled],
       totalTicks: this.state.totalTicks,
