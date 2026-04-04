@@ -1139,6 +1139,28 @@ export class AutoemonManager {
   }
 
   /**
+   * Rehydrate the duration timer after daemon restart.
+   * Checks persisted endsAt — if still in the future, starts a timer
+   * for the remaining time. If expired, triggers immediate wrap-up.
+   */
+  rehydrateDurationTimer(): void {
+    if (!this.state.endsAt) return; // No duration set (indefinite SLUMBER)
+
+    const now = Date.now();
+    const remaining = this.state.endsAt - now;
+
+    if (remaining <= 0) {
+      // SLUMBER should have ended while daemon was down
+      log(`[autoemon] SLUMBER expired while daemon was down — wrapping up now`);
+      this.dispatchWrapUp('timer').catch(() => {}).finally(() => this.deactivate());
+    } else {
+      // Restart timer for remaining duration
+      log(`[autoemon] Rehydrating duration timer: ${Math.round(remaining / 60_000)}m remaining`);
+      this.startDurationTimer(remaining);
+    }
+  }
+
+  /**
    * Dispatch a wrap-up prompt to the CEO. The CEO's response IS the wake digest.
    * Called on: duration expiry, /wake command, manual deactivation.
    */
@@ -1159,13 +1181,41 @@ export class AutoemonManager {
       manual: 'SLUMBER was manually stopped.',
     }[reason];
 
+    // Build per-agent tick summaries from state
+    const agentSummaries = Object.entries(this.state.agents).map(([id, s]) => {
+      const pct = s.tickCount > 0 ? Math.round((s.productiveTickCount / s.tickCount) * 100) : 0;
+      return `  ${id}: ${s.tickCount} ticks, ${s.productiveTickCount} productive (${pct}%), ${s.consecutiveIdleTicks} idle streak, ${s.consecutiveErrors} errors`;
+    }).join('\n');
+
+    // Read recent telemetry for concrete action details
+    let recentActions = '';
+    try {
+      const telPath = join(this.daemon.corpRoot, TELEMETRY_FILE);
+      if (existsSync(telPath)) {
+        const lines = readFileSync(telPath, 'utf-8').trim().split('\n').filter(Boolean);
+        // Get last 20 entries
+        const recent = lines.slice(-20).map(l => {
+          try {
+            const e = JSON.parse(l);
+            return `  ${e.timestamp?.slice(11, 19)} [${e.action}] ${(e.details ?? '').slice(0, 120)}`;
+          } catch { return null; }
+        }).filter(Boolean);
+        if (recent.length > 0) recentActions = `\nRecent tick log:\n${recent.join('\n')}`;
+      }
+    } catch {}
+
     const prompt = [
       `SLUMBER is ending. ${reasonLabel}`,
       ``,
       `Session stats: ${elapsedLabel} elapsed, ${this.state.totalTicks} ticks fired, ${this.state.totalProductiveTicks} productive.`,
       `Enrolled agents: ${[...this.enrolled].join(', ') || 'none'}.`,
       ``,
-      `Summarize everything that happened during this SLUMBER session:`,
+      `Per-agent breakdown:`,
+      agentSummaries,
+      recentActions,
+      ``,
+      `Read your observation log (observations/) and WORKLOG.md for what you did.`,
+      `Then summarize for the Founder:`,
       `- What tasks did you work on?`,
       `- What decisions did you make?`,
       `- What got completed?`,
@@ -1225,12 +1275,26 @@ export class AutoemonManager {
     return lines.join('\n');
   }
 
-  /** Get SLUMBER progress info for the moon phase status bar. */
-  getProgress(): { elapsed: number; total: number | null; fraction: number; endsAt: number | null } {
+  /**
+   * Get SLUMBER progress info for the moon phase status bar.
+   * - Duration SLUMBER: fraction based on elapsed/total (0→1)
+   * - Indefinite SLUMBER: fraction cycles based on tick count (one full cycle = 16 ticks)
+   */
+  getProgress(): { elapsed: number; total: number | null; fraction: number; endsAt: number | null; totalTicks: number } {
     const now = Date.now();
     const elapsed = this.state.activatedAt ? now - this.state.activatedAt : 0;
     const total = this.state.durationMs;
-    const fraction = total ? Math.min(1, elapsed / total) : 0;
-    return { elapsed, total, fraction, endsAt: this.state.endsAt };
+
+    let fraction: number;
+    if (total) {
+      // Duration mode: linear progress 0→1
+      fraction = Math.min(1, elapsed / total);
+    } else {
+      // Indefinite mode: moon cycles every 16 ticks (one full lunar cycle)
+      const cycleTicks = 16;
+      fraction = (this.state.totalTicks % cycleTicks) / cycleTicks;
+    }
+
+    return { elapsed, total, fraction, endsAt: this.state.endsAt, totalTicks: this.state.totalTicks };
   }
 }
