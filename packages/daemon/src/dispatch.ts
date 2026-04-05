@@ -60,10 +60,18 @@ export async function dispatchViaWebSocket(
     // Listen for agent events (tool calls, lifecycle)
     const unsubAgent = ws.onAgentEvent(runId, (event: AgentEvent) => {
       if (event.stream === 'assistant') {
-        const delta = (event.data as any).delta ?? (event.data as any).text ?? '';
+        const data = event.data as any;
+        const delta = data.delta ?? data.text ?? '';
         if (typeof delta === 'string' && delta) {
-          accumulated += delta;
-          callbacks.onToken?.(accumulated);
+          // Filter out tool results leaking into the assistant stream.
+          // Tool results come as JSON objects with "content" arrays or "status"/"error" keys.
+          // Real assistant text is plain language, not JSON.
+          if (delta.startsWith('{"content":[') || delta.startsWith('{"status":') || delta.startsWith('{"type":"')) {
+            // Tool result — skip, don't add to accumulated stream
+          } else {
+            accumulated += delta;
+            callbacks.onToken?.(accumulated);
+          }
         }
       }
 
