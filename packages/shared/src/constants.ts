@@ -10,8 +10,13 @@ export const DAEMON_PORT_PATH = join(CLAUDECORP_HOME, '.daemon.port');
 export const DAEMON_LOG_PATH = join(CLAUDECORP_HOME, '.daemon.log');
 
 export const DEFAULT_PORT_RANGE: [number, number] = [18800, 18999];
-export const DEFAULT_MODEL = 'claude-sonnet-4-6';
-export const DEFAULT_PROVIDER = 'anthropic';
+/**
+ * Fallback model when no gateway config exists.
+ * In practice, the corp gateway inherits from ~/.openclaw/openclaw.json,
+ * so this is only used during first-run scaffolding.
+ */
+export const DEFAULT_MODEL = 'gpt-5.4';
+export const DEFAULT_PROVIDER = 'openai-codex';
 export const DEFAULT_LOG_LEVEL = 'info' as const;
 
 export const MAX_DEPTH = 0; // 0 = unlimited agent-to-agent depth
