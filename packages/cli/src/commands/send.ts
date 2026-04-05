@@ -10,6 +10,7 @@ import { getClient, getCorpRoot, resolveChannel, getMembers, getFounder } from '
 export async function cmdSend(opts: {
   channel: string;
   message: string;
+  from?: string;
   wait: boolean;
   timeout: number;
   json: boolean;
@@ -23,12 +24,35 @@ export async function cmdSend(opts: {
     process.exit(1);
   }
 
+  // --from is MANDATORY. Prevents misattribution.
+  // Agents calling cc-cli send without --from get a clear error
+  // teaching them to use cc-cli say instead.
+  if (!opts.from) {
+    console.error('ERROR: --from is required.');
+    console.error('');
+    console.error('  cc-cli send --channel general --from founder --message "hello"');
+    console.error('');
+    console.error('If you are an AGENT, do NOT use cc-cli send.');
+    console.error('Use cc-cli say instead — it handles attribution correctly:');
+    console.error('  cc-cli say --agent <target> --message "your message"');
+    process.exit(1);
+  }
+
   const client = getClient();
   const corpRoot = await getCorpRoot();
   const channel = resolveChannel(corpRoot, opts.channel);
   const founder = getFounder(corpRoot);
   const members = getMembers(corpRoot);
   const messagesPath = join(corpRoot, channel.path, MESSAGES_JSONL);
+
+  // Resolve --from to a member ID
+  const fromMember = members.find((m: Member) =>
+    m.id === opts.from || m.displayName.toLowerCase().replace(/\s+/g, '-') === opts.from!.toLowerCase() || (opts.from === 'founder' && m.rank === 'owner'),
+  );
+  if (!fromMember) {
+    console.error(`Unknown sender: "${opts.from}". Use "founder" or a member name/ID.`);
+    process.exit(1);
+  }
 
   // Record byte offset BEFORE sending (for --wait)
   let offsetBefore = 0;
@@ -38,7 +62,7 @@ export async function cmdSend(opts: {
     } catch {}
   }
 
-  const result = await client.sendMessage(channel.id, opts.message, founder.id);
+  const result = await client.sendMessage(channel.id, opts.message, fromMember.id);
 
   if (opts.json && !opts.wait) {
     console.log(JSON.stringify(result));

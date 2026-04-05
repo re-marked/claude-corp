@@ -180,6 +180,7 @@ async function run() {
       await cmdSend({
         channel: values.channel as string,
         message: values.message as string,
+        from: values.from as string | undefined,
         wait: !!values.wait,
         timeout: parseInt(values.timeout as string) || 120,
         json: !!values.json,
