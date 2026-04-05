@@ -35,6 +35,8 @@ export function useDaemonEvents(port: number): DaemonEventState {
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const streamBufferRef = useRef<Map<string, StreamState>>(new Map());
+  /** Tracks how much accumulated text to skip per agent — reset on tool_start */
+  const streamOffsetRef = useRef<Map<string, number>>(new Map());
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flushStreams = useCallback(() => {
@@ -64,18 +66,28 @@ export function useDaemonEvents(port: number): DaemonEventState {
               setStreams(new Map(streamBufferRef.current));
               break;
 
-            case 'stream_token':
+            case 'stream_token': {
+              // Show only text after the last tool call — prevents accumulation
+              // of stale checkpoints across the entire turn.
+              const offset = streamOffsetRef.current.get(event.agentName) ?? 0;
               streamBufferRef.current.set(event.agentName, {
                 agentName: event.agentName,
-                content: event.content,
+                content: event.content.slice(offset),
                 channelId: event.channelId,
               });
               if (!flushTimerRef.current) {
                 flushTimerRef.current = setTimeout(flushStreams, 30);
               }
               break;
+            }
 
             case 'tool_start':
+              // Save current accumulated length — preview will only show text after this point
+              if (streamBufferRef.current.has(event.agentName)) {
+                const current = streamBufferRef.current.get(event.agentName)!;
+                const fullLength = (streamOffsetRef.current.get(event.agentName) ?? 0) + current.content.length;
+                streamOffsetRef.current.set(event.agentName, fullLength);
+              }
               setToolActivity((prev) => {
                 const next = new Map(prev);
                 next.set(event.agentName, {
@@ -103,6 +115,7 @@ export function useDaemonEvents(port: number): DaemonEventState {
                 return next;
               });
               streamBufferRef.current.delete(event.agentName);
+              streamOffsetRef.current.delete(event.agentName);
               setToolActivity((prev) => {
                 const next = new Map(prev);
                 next.delete(event.agentName);
