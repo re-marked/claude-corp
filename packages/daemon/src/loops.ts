@@ -11,12 +11,10 @@
 
 import {
   type ScheduledClock,
-  type ChannelMessage,
   parseIntervalExpression,
   formatIntervalMs,
   readConfig,
-  appendMessage,
-  generateId,
+  post,
   readTask,
   updateTask,
   taskPath,
@@ -322,21 +320,13 @@ export class LoopManager {
       const msgPath = join(this.daemon.corpRoot, ch.path, MESSAGES_JSONL);
 
       // Agent dispatch → message from the agent. Shell → system message.
-      const msg: ChannelMessage = {
-        id: generateId(),
-        channelId: clock.channelId,
+      post(clock.channelId, msgPath, {
         senderId: agentMemberId ?? 'system',
-        threadId: null,
         content: agentMemberId ? output : `[${clock.name}] ${output}`,
+        source: 'loop',
         kind: agentMemberId ? 'text' : 'system',
-        mentions: [],
-        metadata: { source: 'loop', loopId: clock.id },
-        depth: 0,
-        originId: '',
-        timestamp: new Date().toISOString(),
-      };
-      msg.originId = msg.id;
-      appendMessage(msgPath, msg);
+        metadata: { loopId: clock.id },
+      });
     } catch {
       // Non-fatal — loop still works, just can't post to channel
     }

@@ -3,12 +3,16 @@ import { join } from 'node:path';
 import {
   type ContractStatus,
   type Member,
+  type Channel,
   readContract,
   updateContract,
   contractPath,
   readTask,
   readConfig,
+  post,
   MEMBERS_JSON,
+  CHANNELS_JSON,
+  MESSAGES_JSONL,
 } from '@claudecorp/shared';
 import { writeTaskEvent, dispatchTaskToDm, logTaskAssignment } from './task-events.js';
 import { hireAgent } from './hire.js';
@@ -221,34 +225,24 @@ export class ContractWatcher {
   /** Send a notification to an agent's DM. */
   private notifyViaDm(memberId: string, content: string): void {
     try {
-      const { readConfig: rc, type, Channel, appendMessage, generateId, CHANNELS_JSON, MESSAGES_JSONL } = require('@claudecorp/shared');
-      const channels = rc(join(this.daemon.corpRoot, CHANNELS_JSON));
-      const members = rc(join(this.daemon.corpRoot, MEMBERS_JSON));
-      const founder = members.find((m: any) => m.rank === 'owner');
+      const channels = readConfig<Channel[]>(join(this.daemon.corpRoot, CHANNELS_JSON));
+      const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+      const founder = members.find((m) => m.rank === 'owner');
 
-      const dmChannel = channels.find((c: any) =>
+      const dmChannel = channels.find((c) =>
         c.kind === 'direct' &&
         c.memberIds.includes(memberId) &&
         (founder ? c.memberIds.includes(founder.id) : true),
       );
       if (!dmChannel) return;
 
-      const { appendMessage: append, generateId: genId, MESSAGES_JSONL: MJSONL } = require('@claudecorp/shared');
-      const msg = {
-        id: genId(),
-        channelId: dmChannel.id,
+      post(dmChannel.id, join(this.daemon.corpRoot, dmChannel.path, MESSAGES_JSONL), {
         senderId: 'system',
-        threadId: null,
         content,
-        kind: 'text',
+        source: 'warden',
         mentions: [memberId],
-        metadata: { source: 'contract-watcher' },
-        depth: 0,
-        originId: '',
-        timestamp: new Date().toISOString(),
-      };
-      (msg as any).originId = msg.id;
-      append(join(this.daemon.corpRoot, dmChannel.path, MJSONL), msg);
+        metadata: { taskAction: 'contract-notify' },
+      });
       setTimeout(() => this.daemon.router.pokeChannel(dmChannel.id), 100);
     } catch (err) {
       logError(`[contract-watcher] DM notification failed: ${err}`);

@@ -8,8 +8,6 @@ import {
   type GlobalConfig,
   type AgentWorkStatus,
   readConfig,
-  appendMessage,
-  generateId,
   post,
   resolveMentions,
   MEMBERS_JSON,

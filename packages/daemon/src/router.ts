@@ -8,8 +8,7 @@ import {
   readNewLines,
   getFileSize,
   tailMessages,
-  appendMessage,
-  generateId,
+  post,
   resolveMentions,
   MEMBERS_JSON,
   CHANNELS_JSON,
@@ -177,21 +176,15 @@ export class MessageRouter {
     if (msg.kind === 'text' && msg.content.trim() === '/uptime') {
       const uptime = this.daemon.getUptime();
       const totalMessages = this.daemon.countAllMessages();
-      const responseMsg: ChannelMessage = {
-        id: generateId(),
-        channelId: channel.id,
-        senderId: 'system',
-        threadId: msg.threadId,
-        content: `⏱ Uptime: ${uptime} | 📨 Messages: ${totalMessages} total across all channels`,
-        kind: 'system',
-        mentions: [],
-        metadata: null,
-        depth: 0,
-        originId: msg.originId || msg.id,
-        timestamp: new Date().toISOString(),
-      };
       const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
-      appendMessage(msgPath, responseMsg);
+      post(channel.id, msgPath, {
+        senderId: 'system',
+        content: `⏱ Uptime: ${uptime} | 📨 Messages: ${totalMessages} total across all channels`,
+        source: 'router',
+        kind: 'system',
+        threadId: msg.threadId,
+        originId: msg.originId || msg.id,
+      });
       return;
     }
 
@@ -423,20 +416,16 @@ export class MessageRouter {
             if (streaming?.content?.trim()) {
               const segText = streaming.content.trim();
               lastFlushedLength += streaming.content.length;
-              const segMsg: ChannelMessage = {
-                id: generateId(),
-                channelId: channel.id,
+              post(channel.id, msgPath, {
                 senderId: targetId,
-                threadId: msg.threadId,
                 content: segText,
-                kind: 'text',
+                source: 'router',
+                threadId: msg.threadId,
                 mentions: resolveMentions(segText, members),
-                metadata: { source: 'router', segment: true },
                 depth: msg.depth + 1,
                 originId: msg.originId,
-                timestamp: new Date().toISOString(),
-              };
-              appendMessage(msgPath, segMsg);
+                metadata: { segment: true },
+              });
               this.daemon.streaming.delete(targetId);
             }
             this.daemon.events.broadcast({
@@ -452,16 +441,15 @@ export class MessageRouter {
             const args = tool.args ?? toolArgsCache.get(tool.toolCallId);
             toolArgsCache.delete(tool.toolCallId); // Clean up
 
-            const toolMsg: ChannelMessage = {
-              id: generateId(),
-              channelId: channel.id,
+            post(channel.id, msgPath, {
               senderId: targetId,
-              threadId: msg.threadId,
               content: this.formatToolMessage(tool.name, args),
+              source: 'router',
               kind: 'tool_event',
-              mentions: [],
+              threadId: msg.threadId,
+              depth: msg.depth + 1,
+              originId: msg.originId,
               metadata: {
-                source: 'router',
                 toolName: tool.name,
                 toolCallId: tool.toolCallId,
                 toolArgs: args,
@@ -469,11 +457,7 @@ export class MessageRouter {
                   ? (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result)).slice(0, 300)
                   : undefined,
               },
-              depth: msg.depth + 1,
-              originId: msg.originId,
-              timestamp: new Date().toISOString(),
-            };
-            appendMessage(msgPath, toolMsg);
+            });
             this.daemon.events.broadcast({
               type: 'tool_end',
               agentName: target.displayName,
@@ -516,20 +500,15 @@ export class MessageRouter {
           log(`[router] ${target.displayName} returned empty — retry ${attempt}/${maxRetries} in 5s`);
 
           // Write visible retry message
-          const retryMsg: ChannelMessage = {
-            id: generateId(),
-            channelId: channel.id,
+          post(channel.id, msgPath, {
             senderId: 'system',
-            threadId: msg.threadId,
             content: `${target.displayName} didn't respond. Retrying... (${attempt}/${maxRetries})`,
+            source: 'router',
             kind: 'system',
-            mentions: [],
-            metadata: { source: 'router' },
+            threadId: msg.threadId,
             depth: msg.depth,
             originId: msg.originId,
-            timestamp: new Date().toISOString(),
-          };
-          appendMessage(msgPath, retryMsg);
+          });
 
           // Retry after delay
           this.daemon.streaming.delete(targetId);
@@ -547,20 +526,15 @@ export class MessageRouter {
         // All retries exhausted
         this.retryCount.delete(retryKey);
         log(`[router] ${target.displayName} returned empty after ${maxRetries} retries — giving up`);
-        const failMsg: ChannelMessage = {
-          id: generateId(),
-          channelId: channel.id,
+        post(channel.id, msgPath, {
           senderId: 'system',
-          threadId: msg.threadId,
           content: `${target.displayName} failed to respond after ${maxRetries} attempts.`,
+          source: 'router',
           kind: 'system',
-          mentions: [],
-          metadata: { source: 'router' },
+          threadId: msg.threadId,
           depth: msg.depth,
           originId: msg.originId,
-          timestamp: new Date().toISOString(),
-        };
-        appendMessage(msgPath, failMsg);
+        });
         this.daemon.streaming.delete(targetId);
         this.activeDispatches.delete(target.displayName);
         this.daemon.setAgentWorkStatus(targetId, target.displayName, 'broken');
@@ -586,22 +560,16 @@ export class MessageRouter {
 
       // If agent used [thread] at the very start (no main content), entire response is threaded
       if (threadContent && !mainContent) {
-        const threadMsg: ChannelMessage = {
-          id: generateId(),
-          channelId: channel.id,
+        log(`[router] WRITING ${target.displayName}'s threaded response (${threadContent.length} chars)`);
+        const responseMsg = post(channel.id, msgPath, {
           senderId: targetId,
-          threadId: responseThreadId,
           content: threadContent,
-          kind: 'text',
+          source: 'router',
+          threadId: responseThreadId,
           mentions: resolveMentions(threadContent, members),
-          metadata: { source: 'router' },
           depth: msg.depth + 1,
           originId: msg.originId,
-          timestamp: new Date().toISOString(),
-        };
-        log(`[router] WRITING ${target.displayName}'s threaded response (${threadContent.length} chars)`);
-        appendMessage(msgPath, threadMsg);
-        const responseMsg = threadMsg;
+        });
 
         log(`[router] ${target.displayName} responded in thread in #${channel.name}`);
         this.daemon.streaming.delete(targetId);
@@ -614,44 +582,30 @@ export class MessageRouter {
       }
 
       // Write main channel response
-      const mainMsg: ChannelMessage = {
-        id: generateId(),
-        channelId: channel.id,
+      log(`[router] WRITING ${target.displayName}'s response (${mainContent.length} chars) "${mainContent.substring(0, 80)}"`);
+      post(channel.id, msgPath, {
         senderId: targetId,
-        threadId: msg.threadId,
         content: mainContent,
-        kind: 'text',
+        source: 'router',
+        threadId: msg.threadId,
         mentions: resolveMentions(mainContent, members),
-        metadata: { source: 'router' },
         depth: msg.depth + 1,
         originId: msg.originId,
-        timestamp: new Date().toISOString(),
-      };
-
-      log(`[router] WRITING ${target.displayName}'s response (${mainContent.length} chars) "${mainContent.substring(0, 80)}"`);
-      appendMessage(msgPath, mainMsg);
+      });
 
       // Write thread portion as a separate message if it exists
       if (threadContent && mainContent) {
-        const threadMsg: ChannelMessage = {
-          id: generateId(),
-          channelId: channel.id,
+        post(channel.id, msgPath, {
           senderId: targetId,
-          threadId: responseThreadId,
           content: threadContent,
-          kind: 'text',
+          source: 'router',
+          threadId: responseThreadId,
           mentions: resolveMentions(threadContent, members),
-          metadata: { source: 'router' },
           depth: msg.depth + 1,
           originId: msg.originId,
-          timestamp: new Date().toISOString(),
-        };
-        appendMessage(msgPath, threadMsg);
+        });
         log(`[router] WRITING ${target.displayName}'s thread reply (${threadContent.length} chars)`);
       }
-
-      // Use mainMsg as the "responseMsg" for the rest of the flow
-      const responseMsg = mainMsg;
 
       log(`[router] ${target.displayName} responded in #${channel.name}`);
 

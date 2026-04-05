@@ -5,10 +5,8 @@ import TextInput from 'ink-text-input';
 import {
   type Channel,
   type Member,
-  type ChannelMessage,
   readConfig,
-  appendMessage,
-  generateId,
+  post,
   parseIntervalExpression,
   MEMBERS_JSON,
   MESSAGES_JSONL,
@@ -266,21 +264,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   });
 
   const writeSystemMessage = (content: string) => {
-    const sysMsg: ChannelMessage = {
-      id: generateId(),
-      channelId: channel.id,
+    post(channel.id, join(corpRoot, channel.path, MESSAGES_JSONL), {
       senderId: 'system',
-      threadId: null,
       content,
+      source: 'system',
       kind: 'system',
-      mentions: [],
-      metadata: null,
-      depth: 0,
-      originId: '',
-      timestamp: new Date().toISOString(),
-    };
-    sysMsg.originId = sysMsg.id;
-    appendMessage(join(corpRoot, channel.path, MESSAGES_JSONL), sysMsg);
+    });
   };
 
   const handleHired = (agentName: string, displayName: string) => {
@@ -1528,21 +1517,11 @@ Always consider what happens when things go wrong.`,
       setThinkingAgents([jackMode.agentName]);
 
       // Write user message to DM JSONL (so it appears in chat history)
-      const userMsg: ChannelMessage = {
-        id: generateId(),
-        channelId: channel.id,
+      post(channel.id, messagesPath, {
         senderId: members.find(m => m.rank === 'owner')?.id ?? 'system',
-        threadId: null,
         content: text,
-        kind: 'text',
-        mentions: [],
-        metadata: { source: 'jack' },
-        depth: 0,
-        originId: '',
-        timestamp: new Date().toISOString(),
-      };
-      userMsg.originId = userMsg.id;
-      appendMessage(messagesPath, userMsg);
+        source: 'user',
+      });
       setTimeout(() => refreshMessages(), 50); // Force re-read after self-write
 
       // Send raw message — OpenClaw manages conversation history via persistent session key.

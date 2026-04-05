@@ -13,13 +13,11 @@ import { Cron } from 'croner';
 import cronstrue from 'cronstrue';
 import {
   type ScheduledClock,
-  type ChannelMessage,
   isCronPreset,
   cronPresetToExpression,
   isRawCronExpression,
   readConfig,
-  appendMessage,
-  generateId,
+  post,
   createTask,
   CHANNELS_JSON,
   MEMBERS_JSON,
@@ -673,21 +671,13 @@ export class CronManager {
         } catch {}
       }
 
-      const msg: ChannelMessage = {
-        id: generateId(),
-        channelId: clock.channelId,
+      post(clock.channelId, msgPath, {
         senderId,
-        threadId: null,
         content: senderId !== 'system' ? output : `[${clock.name}] ${output}`,
+        source: 'cron',
         kind: senderId !== 'system' ? 'text' : 'system',
-        mentions: [],
-        metadata: { source: 'cron', cronId: clock.id },
-        depth: 0,
-        originId: '',
-        timestamp: new Date().toISOString(),
-      };
-      msg.originId = msg.id;
-      appendMessage(msgPath, msg);
+        metadata: { cronId: clock.id },
+      });
     } catch {
       // Non-fatal
     }
