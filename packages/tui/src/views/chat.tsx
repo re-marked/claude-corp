@@ -1534,7 +1534,10 @@ Always consider what happens when things go wrong.`,
         if (result.ok && result.response) {
           // Response is already written to JSONL by the say endpoint.
           // No TUI-side write needed — prevents double messages.
+          // Multiple refreshes to handle Windows fs.watch timing quirks.
+          refreshMessages();
           setTimeout(() => refreshMessages(), 100);
+          setTimeout(() => refreshMessages(), 500);
         } else {
           writeSystemMessage(`Jack dispatch failed: ${(result as any).error ?? 'No response'}`);
         }
