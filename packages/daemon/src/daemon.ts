@@ -10,6 +10,7 @@ import {
   readConfig,
   appendMessage,
   generateId,
+  post,
   resolveMentions,
   MEMBERS_JSON,
   CHANNELS_JSON,
@@ -664,21 +665,12 @@ export class Daemon {
           (founder ? c.memberIds.includes(founder.id) : true),
         );
         if (dmChannel && data.response?.trim()) {
-          const responseMsg: ChannelMessage = {
-            id: generateId(),
-            channelId: dmChannel.id,
+          post(dmChannel.id, join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), {
             senderId: failsafe.id,
-            threadId: null,
             content: data.response,
-            kind: 'text',
-            mentions: [],
-            metadata: { source: 'failsafe-heartbeat' },
-            depth: 0,
-            originId: '',
-            timestamp: new Date().toISOString(),
-          };
-          responseMsg.originId = responseMsg.id;
-          appendMessage(join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), responseMsg);
+            source: 'system',
+            metadata: { heartbeat: 'failsafe' },
+          });
         }
       } else {
         logError(`[daemon] Failsafe say() failed: ${data.error ?? 'unknown'}`);
@@ -817,21 +809,15 @@ export class Daemon {
     const messagesPath = join(this.corpRoot, channel.path, 'messages.jsonl');
 
     // Write message
-    const userMsg: ChannelMessage = {
-      id: generateId(),
-      channelId,
+    const userMsg = post(channelId, messagesPath, {
       senderId: actualSender.id,
-      threadId: null,
       content,
-      kind: 'text',
-      mentions: [],
-      metadata: { source: isAgent ? 'router' : 'user' },
-      depth: 0,
-      originId: '',
-      timestamp: new Date().toISOString(),
-    };
-    userMsg.originId = userMsg.id;
-    appendMessage(messagesPath, userMsg);
+      source: isAgent ? 'router' : 'user',
+    });
+    if (!userMsg) {
+      // Deduped — same message sent within 5s. Return empty dispatch.
+      return { message: {} as any, dispatching: false, dispatchTargets: [] };
+    }
     this.analytics.trackMessage();
 
     // Track founder interaction for autoemon presence
