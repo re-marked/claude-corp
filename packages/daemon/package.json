@@ -19,5 +19,11 @@
   },
   "devDependencies": {
     "@types/ws": "^8.18.1"
-  }
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist"
+  ]
 }

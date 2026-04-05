@@ -24,5 +24,11 @@
   "devDependencies": {
     "@types/react": "^19.2.14",
     "@types/ws": "^8.18.1"
-  }
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist"
+  ]
 }

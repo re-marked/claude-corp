@@ -13,5 +13,11 @@
   "dependencies": {
     "gray-matter": "^4.0.3",
     "simple-git": "^3.33.0"
-  }
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "files": [
+    "dist"
+  ]
 }
