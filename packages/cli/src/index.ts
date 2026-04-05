@@ -85,6 +85,16 @@ Commands:
   logs       Show daemon logs
   dogfood    Set up dogfood project + dev team + task
 
+SLUMBER commands:
+  slumber [duration|profile]          Activate SLUMBER (e.g., slumber 3h, slumber night-owl)
+  slumber profiles                    List available SLUMBER profiles
+  slumber stats                       Show SLUMBER analytics
+  slumber status                      Show autoemon state
+  slumber schedule <profile>          Set recurring schedule
+  slumber schedule off                Clear schedule
+  wake                                End SLUMBER — CEO summarizes what happened
+  brief                               Mid-SLUMBER check-in from CEO
+
 Automation commands:
   loop create --interval "5m" --command "cc-cli status"
   loop create --interval "5m" --agent ceo --command "Check status"
@@ -279,6 +289,21 @@ async function run() {
         agent: values.agent as string | undefined,
         json: !!values.json,
       });
+      break;
+    }
+    case 'slumber': {
+      const { cmdSlumber } = await import('./commands/slumber.js');
+      await cmdSlumber({ args: positionals.slice(1), json: !!values.json });
+      break;
+    }
+    case 'wake': {
+      const { cmdWake } = await import('./commands/slumber.js');
+      await cmdWake({ json: !!values.json });
+      break;
+    }
+    case 'brief': {
+      const { cmdBrief } = await import('./commands/slumber.js');
+      await cmdBrief({ json: !!values.json });
       break;
     }
     case 'plan': {
