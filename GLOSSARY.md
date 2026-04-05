@@ -353,4 +353,4 @@ No database. No cloud. Everything on disk, everything in git. `git log` is the a
 
 **What it means:** The unified message persistence primitive.
 
-**Plain English:** Every message written to a channel JSONL file should go through `post()`. It enforces mandatory sender attribution (no guessing), deduplicates within 5 seconds (prevents double-write bugs), and auto-generates IDs and timestamps. Before Post, 23 different places manually constructed messages — each could misattribute or duplicate. Post makes bad attribution structurally impossible.
+**Plain English:** Every message written to a channel JSONL file should go through `post()`. It enforces mandatory sender attribution (no guessing), deduplicates within 5 seconds (prevents double-write bugs), and auto-generates IDs and timestamps. Before Post, 23 different call sites manually constructed messages — each could misattribute or duplicate. Post makes bad attribution structurally impossible.
