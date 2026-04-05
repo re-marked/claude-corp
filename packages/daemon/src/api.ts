@@ -12,7 +12,6 @@ import {
   listTeams,
   readConfig,
   writeConfig,
-  appendMessage,
   generateId,
   post,
   KNOWN_MODELS,
