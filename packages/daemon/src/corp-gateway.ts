@@ -433,11 +433,11 @@ export class CorpGateway {
     const defaultModel = `${provider}/${this.globalConfig.defaults.model}`;
     const fallbacks = this.globalConfig.defaults.fallbackChain;
 
-    // Always have a fallback chain — even if user didn't configure one.
-    // Without it, one overloaded error = hard failure for ALL agents.
+    // Fallback chain — provider-prefixed strings pass through, bare names get prefixed.
+    // Empty chain is fine — OpenClaw handles failover natively.
     const fallbackModels = fallbacks && fallbacks.length > 0
-      ? fallbacks.map(m => `${provider}/${m}`)
-      : [`${provider}/claude-haiku-4-5`]; // safe default fallback
+      ? fallbacks.map(m => m.includes('/') ? m : `${provider}/${m}`)
+      : [];
 
     return {
       agents: {
