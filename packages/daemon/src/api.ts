@@ -14,6 +14,7 @@ import {
   writeConfig,
   appendMessage,
   generateId,
+  post,
   KNOWN_MODELS,
   resolveModelAlias,
   writeGlobalConfig,
@@ -642,16 +643,12 @@ export function createApi(daemon: Daemon): Server {
                 // Write tool_event message to channel JSONL (visible in chat history)
                 if (channelMsgPath) {
                   const toolContent = formatToolMsg(tool.name, args);
-                  const toolMsg: ChannelMessage = {
-                    id: generateId(),
-                    channelId,
+                  post(channelId, channelMsgPath, {
                     senderId: target.id,
-                    threadId: null,
                     content: toolContent,
+                    source: 'jack',
                     kind: 'tool_event',
-                    mentions: [],
                     metadata: {
-                      source: 'jack',
                       toolName: tool.name,
                       toolCallId: tool.toolCallId,
                       toolArgs: args,
@@ -659,12 +656,7 @@ export function createApi(daemon: Daemon): Server {
                         ? (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result)).slice(0, 300)
                         : undefined,
                     },
-                    depth: 0,
-                    originId: '',
-                    timestamp: new Date().toISOString(),
-                  };
-                  toolMsg.originId = toolMsg.id;
-                  appendMessage(channelMsgPath, toolMsg);
+                  });
                 }
               },
             } : undefined,
@@ -674,25 +666,13 @@ export function createApi(daemon: Daemon): Server {
           // Without this, the response only exists in the streaming state (in-memory)
           // and vanishes when the stream ends or a re-render triggers.
           if (channelMsgPath && result.content.trim()) {
-            const responseMsg: ChannelMessage = {
-              id: generateId(),
-              channelId,
+            post(channelId, channelMsgPath, {
               senderId: target.id,
-              threadId: null,
               content: result.content,
-              kind: 'text',
-              mentions: [],
-              metadata: {
-                source: 'jack',
-                sessionKey: (body.sessionKey as string) ?? null,
-                slumber: daemon.autoemon.isActive() || undefined,
-              },
-              depth: 0,
-              originId: '',
-              timestamp: new Date().toISOString(),
-            };
-            responseMsg.originId = responseMsg.id;
-            appendMessage(channelMsgPath, responseMsg);
+              source: 'jack',
+              slumber: daemon.autoemon.isActive(),
+              metadata: { sessionKey: (body.sessionKey as string) ?? null },
+            });
           }
 
           // Clean up streaming state + emit end events
