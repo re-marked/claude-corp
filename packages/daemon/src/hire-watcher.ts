@@ -4,11 +4,9 @@ import {
   parseFrontmatter,
   stringifyFrontmatter,
   readConfig,
-  appendMessage,
-  generateId,
+  post,
   type Member,
   type Channel,
-  type ChannelMessage,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -158,21 +156,13 @@ export class HireWatcher {
       const general = channels.find((c) => c.name.includes('general') || c.name.includes('lobby'));
       if (!general) return;
 
-      const msg: ChannelMessage = {
-        id: generateId(),
-        channelId: general.id,
+      const msgPath = join(this.daemon.corpRoot, general.path, MESSAGES_JSONL);
+      post(general.id, msgPath, {
         senderId: 'system',
-        threadId: null,
         content: `[HIRE] ${content}`,
+        source: 'hire',
         kind: 'system',
-        mentions: [],
-        metadata: null,
-        depth: 0,
-        originId: '',
-        timestamp: new Date().toISOString(),
-      };
-      msg.originId = msg.id;
-      appendMessage(join(this.daemon.corpRoot, general.path, MESSAGES_JSONL), msg);
+      });
     } catch {}
   }
 
