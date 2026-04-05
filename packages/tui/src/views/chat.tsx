@@ -1516,11 +1516,13 @@ Always consider what happens when things go wrong.`,
       setThinking(true);
       setThinkingAgents([jackMode.agentName]);
 
-      // Write user message to DM JSONL (so it appears in chat history)
+      // Write user message to DM JSONL (so it appears in chat history).
+      // Source MUST be 'jack' — router skips jack messages to prevent double dispatch.
+      // The say() call below handles the actual dispatch.
       post(channel.id, messagesPath, {
         senderId: members.find(m => m.rank === 'owner')?.id ?? 'system',
         content: text,
-        source: 'user',
+        source: 'jack',
       });
       setTimeout(() => refreshMessages(), 50); // Force re-read after self-write
 
