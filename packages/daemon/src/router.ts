@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   type Member,
   type Channel,
+  type ChannelMessage,
   readConfig,
   readNewLines,
   getFileSize,
