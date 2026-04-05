@@ -26,9 +26,9 @@ When in doubt about a design decision, check `docs/` first.
 
 - **Runtime**: Node.js 22+ / TypeScript (strict)
 - **TUI**: Ink (React for terminal) + Flexbox layout
-- **Agent runtime**: OpenClaw (local gateway instances, one per agent)
-- **Process management**: execa
-- **Git operations**: SimpleGit
+- **Agent runtime**: OpenClaw (single corp gateway, per-agent model overrides)
+- **Testing**: vitest (62 tests, <1s)
+- **CI**: GitHub Actions (build + type-check + test)
 - **Build**: tsup
 - **Package manager**: pnpm (monorepo with workspaces)
 - **Data**: Files only — no database
@@ -37,9 +37,11 @@ When in doubt about a design decision, check `docs/` first.
 
 ```
 packages/
-  shared/       # Types, file format parsers (JSONL, frontmatter, JSON), constants
-  daemon/       # Router (fs.watch + webhook dispatch), process manager (execa), git manager
+  shared/       # Types, parsers, primitives (Post, observations, IDs, profiles)
+  daemon/       # Router, process manager, autoemon, pulse, dreams, clocks
   tui/          # Ink app — views, components, hooks. Entry point: `claudecorp` command
+  cli/          # Headless CLI (cc-cli) — 37+ commands
+tests/          # vitest test suite
 docs/           # Design spec (Obsidian vault)
 ```
 
@@ -107,10 +109,10 @@ Key principles:
 - Navigation: Ctrl+K fuzzy finder
 
 ### Agent Runtime
-- Each agent = separate OpenClaw gateway on unique localhost port
-- Built-in heartbeat (30min default), cron, hooks, webhooks
+- ALL agents share a single corp gateway (Haiku default, per-agent model overrides for Opus)
+- Pulse heartbeat (5min) monitors idle/busy agents — Autoemon replaces it during SLUMBER
 - Agents read/write freely to filesystem (their workspace AND corp files)
-- Sub-agents are OpenClaw-native (ephemeral, no daemon involvement)
+- Dreams: agents consolidate observations into BRAIN/ memory during idle
 
 ## Message Flow
 
@@ -151,6 +153,7 @@ The entire corp is a git repo. Every change = commit.
 ```bash
 pnpm build            # Build all packages (MUST run before testing)
 pnpm type-check       # Type-check all
+pnpm test             # Run vitest (62 tests, <1s)
 ```
 
 ### Running the TUI
@@ -188,23 +191,13 @@ Use `%USERPROFILE%` not `~/`. Give full absolute paths always.
 
 ## Branching Strategy
 
-- **`main`** = stable production. Do NOT push directly.
-- **`dev`** = integration branch. All work merges here.
-- **`feature/*`** = short-lived branches off `dev`.
+- **`main`** = production. Feature branches + PRs for significant work.
+- **`feature/*`** = short-lived branches off `main`.
+- Small fixes can go directly to main. Multi-commit features use PRs.
 
-**Merge flow**: `feature/xyz` → rebase onto `dev` → merge with `--no-ff` → delete feature branch.
+**Merge flow**: `feature/xyz` → PR → merge → delete branch.
 
-```bash
-git checkout feature/xyz
-git rebase dev                    # Linearize commits on top of dev
-git checkout dev
-git merge --no-ff feature/xyz     # Merge commit marks the join point
-git branch -d feature/xyz         # Clean up
-```
-
-This gives: linear commit history within each feature + merge commits marking where features landed. Individual commits are preserved (no squash). Merge commits act as phase markers.
-
-When `dev` is stable and tested, merge into `main` the same way.
+CI runs on every push and PR: build + type-check + test.
 
 ## Key Conventions
 
@@ -216,6 +209,8 @@ When `dev` is stable and tested, merge into `main` the same way.
 - **File-first**: When in doubt, make it a file. Files are git-tracked, human-readable, agent-accessible.
 - **Agents write freely**: Don't gate filesystem access behind commands. Only process management (spawning agents) goes through the daemon.
 - **OpenClaw native features**: Use built-in heartbeat, cron, hooks, webhooks. Don't reinvent.
+- **Post primitive**: ALL channel JSONL writes go through `post()` from `@claudecorp/shared`. Mandatory senderId, 5s dedup. Never use raw `appendMessage` for channels.
+- **cc-cli send requires --from**: Agents must use `cc-cli say`, not `cc-cli send`. Send is founder-only.
 
 ## Behavioral Rules — CRITICAL
 
@@ -233,7 +228,8 @@ These are non-negotiable. Mark has validated these through extensive collaborati
 - After EVERY commit, audit: "Is this the BEST version or the FASTEST version?"
 - If it's the fastest, go back and make it twice better before moving on.
 - Use the **quality-audit skill** (`.claude/skills/quality-audit/SKILL.md`) after each task.
-- A PostToolUse hook fires after `git commit` to remind about quality auditing.
+- A PostToolUse hook fires after `git push` to remind about quality auditing.
+- A PostToolUse hook fires after every `Write|Edit` to remind about granular commits.
 
 ### Think Like a System Architect
 - Before coding, think about how the primitive fits the whole system.
