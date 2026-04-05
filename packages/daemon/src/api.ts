@@ -1029,6 +1029,25 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /autoemon/schedule — set a recurring SLUMBER schedule from a profile
+      if (method === 'POST' && path === '/autoemon/schedule') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const profileId = body.profileId as string;
+        if (!profileId) { json(res, { error: 'profileId required' }, 400); return; }
+        const result = daemon.autoemon.setSchedule(profileId);
+        // Start the checker if not already running
+        if (result.ok) daemon.autoemon.startFounderAwayChecker();
+        json(res, result, result.ok ? 200 : 400);
+        return;
+      }
+
+      // POST /autoemon/schedule/clear — clear all schedules
+      if (method === 'POST' && path === '/autoemon/schedule/clear') {
+        daemon.autoemon.clearSchedule();
+        json(res, { ok: true });
+        return;
+      }
+
       // POST /autoemon/start-away-checker — start the Founder Away checker mid-session
       if (method === 'POST' && path === '/autoemon/start-away-checker') {
         daemon.autoemon.startFounderAwayChecker();

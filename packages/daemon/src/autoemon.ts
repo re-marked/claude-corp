@@ -141,6 +141,15 @@ export interface AutoemonPersistedState {
   totalTicks: number;
   /** Total productive ticks (lifetime) */
   totalProductiveTicks: number;
+  /** Scheduled SLUMBER window (from /slumber schedule <profile>) */
+  schedule: {
+    profileId: string;
+    startHour: number;
+    endHour: number;
+    durationMs: number;
+    weekdaysOnly: boolean;
+    raw: string;
+  } | null;
   /** Block reason if blocked */
   blockReason: string | null;
 }
@@ -153,6 +162,7 @@ const DEFAULT_PERSISTED_STATE: AutoemonPersistedState = {
   durationMs: null,
   endsAt: null,
   budgetTicks: null,
+  schedule: null,
   agents: {},
   totalTicks: 0,
   totalProductiveTicks: 0,
@@ -1222,11 +1232,15 @@ export class AutoemonManager {
    * even when autoemon is inactive. Checks if auto-AFK should trigger.
    */
   startFounderAwayChecker(): void {
-    // Check if the flag is enabled in corp.json
+    // Check if auto-AFK flag is enabled OR a schedule is set
+    const hasSchedule = !!this.state.schedule;
+    let hasAutoAfk = false;
     try {
       const corp = readConfig<Corporation>(join(this.daemon.corpRoot, CORP_JSON));
-      if (!corp.dangerouslyEnableAutoAfk) return;
-    } catch { return; }
+      hasAutoAfk = !!corp.dangerouslyEnableAutoAfk;
+    } catch {}
+
+    if (!hasAutoAfk && !hasSchedule) return;
 
     this.daemon.clocks.register({
       id: 'founder-away-check',
@@ -1245,6 +1259,9 @@ export class AutoemonManager {
    * Only fires if: flag enabled + autoemon inactive + founder idle 30m+.
    */
   private async checkFounderAway(): Promise<void> {
+    // Check scheduled SLUMBER activation (time-based, independent of idle)
+    this.checkScheduledActivation();
+
     // Don't auto-activate if already active
     if (this.state.globalState !== 'inactive') return;
 
@@ -1296,6 +1313,114 @@ export class AutoemonManager {
       }
     } catch (err) {
       logError(`[autoemon] Failed to notify CEO of auto-AFK: ${err}`);
+    }
+  }
+
+  // ── SLUMBER Schedule ──────────────────────────────────────────────
+
+  /**
+   * Set a recurring SLUMBER schedule from a profile.
+   * Stores in autoemon-state.json. The Founder Away checker
+   * also checks this schedule on every 2-minute cycle.
+   */
+  setSchedule(profileId: string): { ok: boolean; error?: string; schedule?: string; durationLabel?: string; profileName?: string; icon?: string; profileId?: string } {
+    const profile = getProfile(this.daemon.corpRoot, profileId);
+    if (!profile) return { ok: false, error: `Profile "${profileId}" not found` };
+    if (!profile.schedule) return { ok: false, error: `Profile "${profile.name}" has no schedule` };
+
+    // Parse schedule "10pm-6am" or "8am-3pm weekdays"
+    const match = profile.schedule.match(/(\d{1,2})(am|pm)-(\d{1,2})(am|pm)/i);
+    if (!match) return { ok: false, error: `Cannot parse schedule "${profile.schedule}"` };
+
+    let startHour = parseInt(match[1]!);
+    if (match[2]!.toLowerCase() === 'pm' && startHour !== 12) startHour += 12;
+    if (match[2]!.toLowerCase() === 'am' && startHour === 12) startHour = 0;
+
+    let endHour = parseInt(match[3]!);
+    if (match[4]!.toLowerCase() === 'pm' && endHour !== 12) endHour += 12;
+    if (match[4]!.toLowerCase() === 'am' && endHour === 12) endHour = 0;
+
+    let durationHours = endHour - startHour;
+    if (durationHours <= 0) durationHours += 24;
+    const weekdaysOnly = profile.schedule.toLowerCase().includes('weekday');
+
+    // Store schedule in state
+    this.state.schedule = {
+      profileId,
+      startHour,
+      endHour,
+      durationMs: durationHours * 3_600_000,
+      weekdaysOnly,
+      raw: profile.schedule,
+    };
+    this.persist();
+
+    log(`[autoemon] Schedule set: ${profile.name} (${profile.schedule})`);
+    return {
+      ok: true,
+      schedule: profile.schedule,
+      durationLabel: `${durationHours}h`,
+      profileName: profile.name,
+      icon: profile.icon,
+      profileId,
+    };
+  }
+
+  /** Clear all SLUMBER schedules. */
+  clearSchedule(): void {
+    this.state.schedule = null;
+    this.persist();
+    log(`[autoemon] Schedule cleared`);
+  }
+
+  /**
+   * Check if current time is within a scheduled SLUMBER window.
+   * Called from the Founder Away checker every 2 minutes.
+   */
+  private checkScheduledActivation(): void {
+    const schedule = this.state.schedule;
+    if (!schedule) return;
+    if (this.state.globalState !== 'inactive') return; // Already active
+
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentDay = now.getDay(); // 0=Sun, 6=Sat
+
+    // Weekday check
+    if (schedule.weekdaysOnly && (currentDay === 0 || currentDay === 6)) return;
+
+    // Window check — handle overnight wrap (22-6 means 22,23,0,1,2,3,4,5)
+    let inWindow: boolean;
+    if (schedule.startHour < schedule.endHour) {
+      // Normal window: 8am-3pm
+      inWindow = currentHour >= schedule.startHour && currentHour < schedule.endHour;
+    } else {
+      // Overnight: 10pm-6am
+      inWindow = currentHour >= schedule.startHour || currentHour < schedule.endHour;
+    }
+
+    if (!inWindow) return;
+
+    // In window — activate!
+    log(`[autoemon] Scheduled activation: ${schedule.profileId} (${schedule.raw})`);
+    this.activate('slumber', schedule.durationMs, schedule.profileId);
+    this.conscript();
+    this.startTickLoop();
+
+    // Notify CEO
+    const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+    const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
+    if (ceo) {
+      const ceoSlug = ceo.displayName.toLowerCase().replace(/\s+/g, '-');
+      fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: ceoSlug,
+          message: `[SCHEDULED SLUMBER] Profile: ${schedule.profileId}. Window: ${schedule.raw}. You have autonomous control.`,
+          sessionKey: `jack:${ceoSlug}`,
+        }),
+      }).catch(() => {});
     }
   }
 
