@@ -169,3 +169,7 @@ export type {
   ObservationCategory,
   ObservationLogStats,
 } from './observations.js';
+
+// Post — unified message persistence primitive
+export { post } from './post.js';
+export type { PostSource, PostKind, PostOpts } from './post.js';

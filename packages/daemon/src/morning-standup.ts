@@ -18,11 +18,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   readConfig,
-  appendMessage,
-  generateId,
+  post,
   type Member,
   type Channel,
-  type ChannelMessage,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -152,21 +150,13 @@ export async function postMorningStandup(opts: StandupOpts): Promise<boolean> {
 
   // Write to #general
   const msgPath = join(opts.corpRoot, general.path, MESSAGES_JSONL);
-  const msg: ChannelMessage = {
-    id: generateId(),
-    channelId: general.id,
+  post(general.id, msgPath, {
     senderId: 'system',
-    threadId: null,
     content: standupContent,
+    source: 'standup',
     kind: 'system',
-    mentions: [],
-    metadata: { source: 'standup', slumberDurationMs: elapsed },
-    depth: 0,
-    originId: '',
-    timestamp: new Date().toISOString(),
-  };
-  msg.originId = msg.id;
-  appendMessage(msgPath, msg);
+    metadata: { slumberDurationMs: elapsed },
+  });
 
   log(`[standup] Posted morning standup to #general (${agentSummaries.length} agents, ${elapsedHours}h session)`);
   return true;
