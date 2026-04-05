@@ -2,13 +2,11 @@ import { join } from 'node:path';
 import {
   type Channel,
   type Member,
-  type ChannelMessage,
   type Corporation,
   readConfig,
   readTask,
   taskPath,
-  appendMessage,
-  generateId,
+  post,
   getTheme,
   type ThemeId,
   CHANNELS_JSON,
@@ -28,21 +26,13 @@ export function writeTaskEvent(corpRoot: string, content: string): void {
     const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
     if (!tasksChannel) return;
 
-    const msg: ChannelMessage = {
-      id: generateId(),
-      channelId: tasksChannel.id,
+    const msgPath = join(corpRoot, tasksChannel.path, MESSAGES_JSONL);
+    post(tasksChannel.id, msgPath, {
       senderId: 'system',
-      threadId: null,
       content,
+      source: 'task',
       kind: 'task_event',
-      mentions: [],
-      metadata: null,
-      depth: 0,
-      originId: '',
-      timestamp: new Date().toISOString(),
-    };
-    msg.originId = msg.id;
-    appendMessage(join(corpRoot, tasksChannel.path, MESSAGES_JSONL), msg);
+    });
   } catch {
     // Non-fatal
   }
@@ -145,21 +135,13 @@ export function dispatchTaskToDm(
       // Fall back to basic message if task file can't be read
     }
 
-    const msg: ChannelMessage = {
-      id: generateId(),
-      channelId: dmChannel.id,
+    post(dmChannel.id, join(corpRoot, dmChannel.path, MESSAGES_JSONL), {
       senderId: 'system',
-      threadId: null,
       content: taskContext,
-      kind: 'text',
+      source: 'task',
       mentions: [assigneeId],
-      metadata: { source: 'task-dispatch' },
-      depth: 0,
-      originId: '',
-      timestamp: new Date().toISOString(),
-    };
-    msg.originId = msg.id;
-    appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+      metadata: { taskAction: 'dispatch' },
+    });
 
     // Poke router to process (Windows fs.watch can miss appends on new files)
     setTimeout(() => daemon.router.pokeChannel(dmChannel.id), 100);
@@ -196,21 +178,13 @@ export function dispatchBlockerToDm(
     );
     if (!dmChannel) return;
 
-    const msg: ChannelMessage = {
-      id: generateId(),
-      channelId: dmChannel.id,
+    post(dmChannel.id, join(corpRoot, dmChannel.path, MESSAGES_JSONL), {
       senderId: 'system',
-      threadId: null,
       content: `Task "${taskTitle}" is BLOCKED by ${assigneeName}. Read the task file for details and help unblock.`,
-      kind: 'text',
+      source: 'task',
       mentions: [creatorId],
-      metadata: { source: 'task-blocker' },
-      depth: 0,
-      originId: '',
-      timestamp: new Date().toISOString(),
-    };
-    msg.originId = msg.id;
-    appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+      metadata: { taskAction: 'blocker' },
+    });
     setTimeout(() => daemon.router.pokeChannel(dmChannel.id), 100);
 
     log(`[task-events] Blocker notification sent to ${creator.displayName}'s DM`);
@@ -245,21 +219,13 @@ export function dispatchCompletionToCeo(
     );
     if (!dmChannel) return;
 
-    const msg: ChannelMessage = {
-      id: generateId(),
-      channelId: dmChannel.id,
+    post(dmChannel.id, join(corpRoot, dmChannel.path, MESSAGES_JSONL), {
       senderId: 'system',
-      threadId: null,
       content: `Task "${taskTitle}" has been marked as ${taskStatus} by ${assigneeName}. Review and report to the Founder.`,
-      kind: 'text',
+      source: 'task',
       mentions: [ceo.id],
-      metadata: { source: 'task-completion' },
-      depth: 0,
-      originId: '',
-      timestamp: new Date().toISOString(),
-    };
-    msg.originId = msg.id;
-    appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+      metadata: { taskAction: 'completion' },
+    });
     setTimeout(() => daemon.router.pokeChannel(dmChannel.id), 100);
 
     log(`[task-events] Completion notification for "${taskTitle}" sent to CEO's DM`);
@@ -308,21 +274,13 @@ export function dispatchToHander(
       content = `Task "${taskTitle}" status changed to ${taskStatus} by ${assigneeName}.`;
     }
 
-    const msg: ChannelMessage = {
-      id: generateId(),
-      channelId: dmChannel.id,
+    post(dmChannel.id, join(corpRoot, dmChannel.path, MESSAGES_JSONL), {
       senderId: 'system',
-      threadId: null,
       content,
-      kind: 'text',
+      source: 'task',
       mentions: [handerId],
-      metadata: { source: 'task-hander-notify' },
-      depth: 0,
-      originId: '',
-      timestamp: new Date().toISOString(),
-    };
-    msg.originId = msg.id;
-    appendMessage(join(corpRoot, dmChannel.path, MESSAGES_JSONL), msg);
+      metadata: { taskAction: 'hander-notify' },
+    });
     setTimeout(() => daemon.router.pokeChannel(dmChannel.id), 100);
 
     log(`[task-events] Hander notification for "${taskTitle}" (${taskStatus}) sent to ${hander.displayName}'s DM`);
