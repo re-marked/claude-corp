@@ -19,8 +19,15 @@ import {
   DEFAULT_TICK_INTERVAL_MS,
   MIN_TICK_INTERVAL_MS,
   MAX_TICK_INTERVAL_MS,
+  SLEEP_PATTERN,
   type AutoemonGlobalState,
 } from '../packages/daemon/src/autoemon.js';
+import {
+  buildTickMessage,
+  buildFirstTickMessage,
+  buildSleepWakeTick,
+  buildBatchedTickMessage,
+} from '../packages/daemon/src/autoemon-prompt.js';
 
 // ── Minimal mock daemon ────────────────────────────────────────────
 // AutoemonManager reads state from disk and uses daemon services.
@@ -421,5 +428,201 @@ describe('AutoemonManager — status reporting', () => {
     const s1 = manager.getStatus();
     const s2 = manager.getStatus();
     expect(s1.agents).not.toBe(s2.agents); // Different objects
+  });
+});
+
+describe('SLEEP_PATTERN — agent sleep command parsing', () => {
+  it('parses basic SLEEP with duration', () => {
+    const match = 'SLEEP 5m — waiting for build'.match(SLEEP_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('5m');
+    expect(match![2]).toBe('waiting for build');
+  });
+
+  it('parses SLEEP without reason', () => {
+    const match = 'SLEEP 10m'.match(SLEEP_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('10m');
+    expect(match![2]).toBeUndefined();
+  });
+
+  it('parses seconds', () => {
+    const match = 'SLEEP 30s — quick break'.match(SLEEP_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('30s');
+  });
+
+  it('parses hours', () => {
+    const match = 'SLEEP 2h — long running task'.match(SLEEP_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('2h');
+  });
+
+  it('parses compound duration (1h30m)', () => {
+    const match = 'SLEEP 1h30m — overnight'.match(SLEEP_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('1h30m');
+  });
+
+  it('is case-insensitive', () => {
+    const match = 'sleep 5m — reason'.match(SLEEP_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('5m');
+  });
+
+  it('matches SLEEP embedded in longer response', () => {
+    const response = 'Nothing to do right now. SLEEP 15m — no pending tasks. Will check back later.';
+    const match = response.match(SLEEP_PATTERN);
+    expect(match).not.toBeNull();
+    expect(match![1]).toBe('15m');
+    expect(match![2]).toBe('no pending tasks. Will check back later.');
+  });
+
+  it('does not match non-SLEEP text', () => {
+    expect('I will sleep now'.match(SLEEP_PATTERN)).toBeNull();
+    expect('SLEEPING 5m'.match(SLEEP_PATTERN)).toBeNull();
+    expect('SLEEP — no duration'.match(SLEEP_PATTERN)).toBeNull();
+  });
+});
+
+describe('buildTickMessage — tick prompt construction', () => {
+  const fixedTime = new Date('2026-04-05T14:30:00Z');
+
+  it('builds basic tick with presence', () => {
+    const msg = buildTickMessage({ presence: 'away', time: fixedTime });
+    expect(msg).toContain('<tick>');
+    expect(msg).toContain('</tick>');
+    expect(msg).toContain('<presence>away</presence>');
+    expect(msg).toContain('2026-04-05');
+  });
+
+  it('includes context attributes', () => {
+    const msg = buildTickMessage({
+      presence: 'idle',
+      context: { pendingTasks: 3, unreadInbox: 1 },
+      time: fixedTime,
+    });
+    expect(msg).toContain('tasks="3"');
+    expect(msg).toContain('inbox="1"');
+  });
+
+  it('includes mood and focus from profile', () => {
+    const msg = buildTickMessage({
+      presence: 'away',
+      context: {
+        mood: 'You are in night owl mode. Be quiet and deep.',
+        focus: 'Focus on code quality over speed.',
+      },
+      time: fixedTime,
+    });
+    expect(msg).toContain('<mood>You are in night owl mode');
+    expect(msg).toContain('<focus>Focus on code quality');
+  });
+
+  it('includes previous tick result', () => {
+    const msg = buildTickMessage({
+      presence: 'away',
+      previousResult: 'Built 3 files successfully',
+      time: fixedTime,
+    });
+    expect(msg).toContain('<previous-tick-result>Built 3 files successfully</previous-tick-result>');
+  });
+
+  it('includes last action for continuity', () => {
+    const msg = buildTickMessage({
+      presence: 'idle',
+      context: { lastAction: 'reviewing PR #42' },
+      time: fixedTime,
+    });
+    expect(msg).toContain('<last-action>reviewing PR #42</last-action>');
+  });
+});
+
+describe('buildFirstTickMessage — session start', () => {
+  it('includes session-start block', () => {
+    const msg = buildFirstTickMessage({
+      presence: 'away',
+      agentName: 'CEO',
+      source: 'slumber',
+    });
+    expect(msg).toContain('<session-start>');
+    expect(msg).toContain('SLUMBER mode');
+    expect(msg).toContain('</session-start>');
+    expect(msg).toContain('first="true"');
+  });
+
+  it('includes goal when provided', () => {
+    const msg = buildFirstTickMessage({
+      presence: 'away',
+      agentName: 'CEO',
+      source: 'slumber',
+      goal: 'Ship the auth module',
+    });
+    expect(msg).toContain('Ship the auth module');
+  });
+
+  it('includes enrolled count', () => {
+    const msg = buildFirstTickMessage({
+      presence: 'away',
+      agentName: 'CEO',
+      source: 'afk',
+      enrolledCount: 5,
+    });
+    expect(msg).toContain('5 agents conscripted');
+    expect(msg).toContain('AFK mode');
+  });
+});
+
+describe('buildSleepWakeTick — wake-up message', () => {
+  it('includes sleep duration and reason', () => {
+    const msg = buildSleepWakeTick({
+      presence: 'away',
+      sleptForMs: 15 * 60_000,
+      wakeReason: 'timer',
+    });
+    expect(msg).toContain('slept="15m"');
+    expect(msg).toContain('sleep timer expired');
+  });
+
+  it('includes while-asleep summary', () => {
+    const msg = buildSleepWakeTick({
+      presence: 'idle',
+      sleptForMs: 5 * 60_000,
+      wakeReason: 'user_message',
+      whileAsleep: '2 new tasks assigned',
+    });
+    expect(msg).toContain('founder sent a message');
+    expect(msg).toContain('While you slept: 2 new tasks assigned');
+  });
+
+  it('handles urgent task wake', () => {
+    const msg = buildSleepWakeTick({
+      presence: 'away',
+      sleptForMs: 30_000,
+      wakeReason: 'urgent_task',
+    });
+    expect(msg).toContain('urgent task assigned');
+  });
+});
+
+describe('buildBatchedTickMessage — missed ticks', () => {
+  const fixedTime = new Date('2026-04-05T14:30:00Z');
+
+  it('includes batch count', () => {
+    const msg = buildBatchedTickMessage({
+      batchCount: 3,
+      presence: 'away',
+      time: fixedTime,
+    });
+    expect(msg).toContain('batched="3"');
+  });
+
+  it('single tick has no batch attribute', () => {
+    const msg = buildBatchedTickMessage({
+      batchCount: 1,
+      presence: 'away',
+      time: fixedTime,
+    });
+    expect(msg).not.toContain('batched');
   });
 });

@@ -77,7 +77,7 @@ const AUTO_SLOW_THRESHOLD = 3;
 const IDLE_RESPONSE_MAX_CHARS = 80;
 
 /** Regex to detect SLEEP command in agent response */
-const SLEEP_PATTERN = /SLEEP\s+(\d+[smhd](?:\d+[smh])?)\s*(?:—\s*(.+))?/i;
+export const SLEEP_PATTERN = /SLEEP\s+(\d+[smhd](?:\d+[smh])?)\s*(?:—\s*(.+))?/i;
 
 /** Default tick interval: 2 minutes */
 export const DEFAULT_TICK_INTERVAL_MS = 2 * 60 * 1000;
