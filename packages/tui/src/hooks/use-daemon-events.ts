@@ -76,16 +76,6 @@ export function useDaemonEvents(port: number): DaemonEventState {
               break;
 
             case 'tool_start':
-              // Clear streaming preview when a tool starts — the text before
-              // the tool call is already written to JSONL by the router/say endpoint.
-              // Without this, the preview accumulates ALL text from the entire turn,
-              // showing stale checkpoints alongside the current one.
-              streamBufferRef.current.set(event.agentName, {
-                agentName: event.agentName,
-                content: '',
-                channelId: event.channelId,
-              });
-              setStreams(new Map(streamBufferRef.current));
               setToolActivity((prev) => {
                 const next = new Map(prev);
                 next.set(event.agentName, {
