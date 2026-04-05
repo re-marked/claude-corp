@@ -29,13 +29,17 @@
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "type-check": "pnpm -r type-check",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "pnpm build"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "files": [
     "packages/shared/dist",
@@ -46,13 +50,13 @@
     "LICENSE"
   ],
   "dependencies": {
+    "execa": "^9.6.1",
     "ink": "^6.8.0",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "react": "^19.2.4",
-    "ws": "^8.19.0",
-    "execa": "^9.6.1",
     "simple-git": "^3.28.0",
+    "ws": "^8.19.0",
     "yaml": "^2.8.0"
   },
   "devDependencies": {
@@ -60,6 +64,7 @@
     "@types/react": "^19.2.14",
     "@types/ws": "^8.18.1",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
   }
 }
