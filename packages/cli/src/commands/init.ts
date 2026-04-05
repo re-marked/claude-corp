@@ -2,10 +2,8 @@ import {
   scaffoldCorp,
   setupCeo,
   ensureGlobalConfig,
-  appendMessage,
-  generateId,
+  post,
   type ThemeId,
-  type ChannelMessage,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
 
@@ -31,21 +29,11 @@ export async function cmdInit(opts: { name: string; user: string; theme: string 
 
   // Write kickoff system message (same as onboarding)
   const dmPath = join(corpRoot, dmChannel.path, 'messages.jsonl');
-  const kickoff: ChannelMessage = {
-    id: generateId(),
-    channelId: dmChannel.id,
+  post(dmChannel.id, dmPath, {
     senderId: 'system',
-    threadId: null,
     content: `New corporation "${opts.name}" created. The Founder is here. Introduce yourself and begin the onboarding interview — ask what they want this corporation to accomplish.`,
-    kind: 'text',
-    mentions: [],
-    metadata: null,
-    depth: 0,
-    originId: '',
-    timestamp: new Date().toISOString(),
-  };
-  kickoff.originId = kickoff.id;
-  appendMessage(dmPath, kickoff);
+    source: 'system',
+  });
 
   console.log(`\nCorporation "${opts.name}" ready.`);
   console.log(`Start the daemon: claudecorp-cli start`);
