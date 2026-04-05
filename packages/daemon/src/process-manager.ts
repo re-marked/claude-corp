@@ -1,4 +1,4 @@
-import { execa, type ResultPromise } from 'execa';
+import { type ResultPromise } from 'execa';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import {
@@ -181,125 +181,8 @@ export class ProcessManager {
     return agentProc;
   }
 
-  private async connectRemoteAgent(memberId: string, member: Member): Promise<AgentProcess> {
-    const gw = this.globalConfig.userGateway;
-    if (!gw) {
-      throw new Error(`Agent ${member.displayName} is remote but no user OpenClaw gateway detected`);
-    }
-
-    const agentProc: AgentProcess = {
-      memberId,
-      displayName: member.displayName,
-      port: gw.port,
-      status: 'starting',
-      gatewayToken: gw.token,
-      process: null,
-      mode: 'remote',
-      model: 'openclaw:main',
-    };
-
-    this.agents.set(memberId, agentProc);
-
-    try {
-      await this.healthCheck(agentProc, 5);
-      log(`[daemon] CEO connected to OpenClaw gateway on port ${gw.port}`);
-    } catch {
-      agentProc.status = 'crashed';
-      throw new Error(
-        `Cannot reach OpenClaw gateway at 127.0.0.1:${gw.port}. ` +
-        'Make sure OpenClaw is running: openclaw gateway run',
-      );
-    }
-
-    return agentProc;
-  }
-
-  private async spawnLocalAgent(
-    memberId: string,
-    member: Member,
-    agentAbsDir: string,
-    openclawStateDir: string,
-    gatewayToken?: string,
-  ): Promise<AgentProcess> {
-    const port = this.allocatePort();
-
-    if (!gatewayToken) {
-      const openclawConfig = readConfig<{ gateway: { auth: { token: string } } }>(
-        join(openclawStateDir, 'openclaw.json'),
-      );
-      gatewayToken = openclawConfig.gateway.auth.token;
-    }
-
-    const agentProc: AgentProcess = {
-      memberId,
-      displayName: member.displayName,
-      port,
-      status: 'starting',
-      gatewayToken,
-      process: null,
-      mode: 'local',
-      model: 'openclaw:main',
-    };
-
-    this.agents.set(memberId, agentProc);
-
-    const normalizedStateDir = openclawStateDir.replace(/\\/g, '/');
-
-    const openclawConfigPath = join(openclawStateDir, 'openclaw.json');
-    const ocConfig = readConfig<Record<string, unknown>>(openclawConfigPath);
-    const gw = (ocConfig.gateway ?? {}) as Record<string, unknown>;
-    gw.port = port;
-    ocConfig.gateway = gw;
-    writeConfig(openclawConfigPath, ocConfig);
-
-    const proc = execa(this.openclawBinary, [
-      'gateway', 'run',
-      '--port', String(port),
-      '--bind', 'loopback',
-      '--allow-unconfigured',
-    ], {
-      env: {
-        ...process.env,
-        OPENCLAW_STATE_DIR: normalizedStateDir,
-      },
-      stdio: 'pipe',
-      reject: false,
-    });
-
-    agentProc.process = proc;
-
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      const line = chunk.toString().trim();
-      if (line) log(`[${member.displayName}] ${line}`);
-    });
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      const line = chunk.toString().trim();
-      if (line) logError(`[${member.displayName}] ${line}`);
-    });
-
-    this.updateMemberPort(memberId, port);
-
-    this.healthCheck(agentProc, 30).catch(() => {
-      agentProc.status = 'crashed';
-    });
-
-    proc.then((result) => {
-      if (agentProc.status !== 'stopped') {
-        agentProc.status = 'crashed';
-        logError(`[daemon] Agent ${member.displayName} exited with code ${result.exitCode}`);
-        if (result.stderr) {
-          logError(`[daemon] stderr: ${result.stderr}`);
-        }
-      }
-      agentProc.process = null;
-      this.updateMemberPort(memberId, null);
-    }).catch(() => {
-      agentProc.status = 'crashed';
-      agentProc.process = null;
-    });
-
-    return agentProc;
-  }
+  // connectRemoteAgent and spawnLocalAgent removed in v0.16.6 —
+  // all agents now use the corp gateway with per-agent model overrides.
 
   private async healthCheck(agent: AgentProcess, maxAttempts: number): Promise<void> {
     const interval = 1000;
