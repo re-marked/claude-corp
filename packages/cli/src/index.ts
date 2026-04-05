@@ -123,7 +123,7 @@ Common flags:
 Examples:
   cc-cli init --name my-corp --user Mark --theme corporate
   cc-cli start &
-  cc-cli send --channel general --message "hello @CEO" --wait
+  cc-cli send --channel general --from founder --message "hello @CEO" --wait
   cc-cli hire --name Researcher --rank worker --model haiku
   cc-cli task create --title "Research competitors" --assigned researcher
   cc-cli models default --model opus
