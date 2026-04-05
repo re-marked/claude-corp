@@ -12,6 +12,7 @@ const { values, positionals } = parseArgs({
     theme: { type: 'string' },
     channel: { type: 'string' },
     message: { type: 'string' },
+    from: { type: 'string' },
     rank: { type: 'string' },
     model: { type: 'string' },
     agent: { type: 'string' },
