@@ -1714,16 +1714,24 @@ Always consider what happens when things go wrong.`,
       let resultPreview = '';
       if (rawResult) {
         let cleaned = rawResult;
-        // Strip cc-cli JSON wrapper: {"content":[{"type":"text","text":"actual text...
+        // Strip JSON wrapper: {"content":[{"type":"text","text":"actual text...
+        // Try full parse first, then regex fallback for truncated JSON
         try {
           const parsed = JSON.parse(cleaned);
           if (parsed?.content?.[0]?.text) {
             cleaned = parsed.content[0].text;
+          } else if (parsed?.status === 'error') {
+            cleaned = `error: ${parsed.error ?? 'unknown'}`;
           } else if (typeof parsed === 'string') {
             cleaned = parsed;
           }
         } catch {
-          // Not JSON — use as-is
+          // Truncated JSON — regex extract the text value
+          const textMatch = cleaned.match(/"text"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)/);
+          if (textMatch?.[1]) {
+            cleaned = textMatch[1].replace(/\\n/g, '\n').replace(/\\r/g, '').replace(/\\"/g, '"');
+          }
+          // If regex fails too, show raw but truncated — don't hide it
         }
         // Take first meaningful line, truncate
         const firstLine = cleaned.split('\n').find((l: string) => l.trim())?.trim() ?? '';
