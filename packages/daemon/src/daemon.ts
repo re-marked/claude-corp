@@ -39,6 +39,8 @@ import { AutoemonManager } from './autoemon.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { createApi } from './api.js';
+import { recoverCrashedAgents, recoverCeoGateway, recoverCorpGateway } from './daemon-recovery.js';
+import { killStaleProcesses } from './stale-cleanup.js';
 import { log, logError } from './logger.js';
 
 export class Daemon {
@@ -142,7 +144,7 @@ export class Daemon {
 
   async start(): Promise<number> {
     // Kill any stale daemon from a previous session (prevents double dispatch)
-    await this.killStaleDaemon();
+    await killStaleProcesses(this.corpRoot);
 
     // Ensure .gateway/ is gitignored (older corps may lack this)
     this.ensureGatewayGitignored();
@@ -253,7 +255,7 @@ export class Daemon {
       intervalMs: 30 * 1000, // Every 30 seconds
       target: 'Daemon',
       description: 'Detects crashed agents and attempts respawn — self-healing at daemon level',
-      callback: () => this.recoverCrashedAgents(),
+      callback: () => recoverCrashedAgents(this),
     });
 
     // CEO Gateway Recovery — monitors the CEO's OpenClaw connection
@@ -264,7 +266,7 @@ export class Daemon {
       intervalMs: 30 * 1000,
       target: 'CEO',
       description: 'Monitors CEO gateway health, reconnects WebSocket, respawns on failure',
-      callback: () => this.recoverCeoGateway(),
+      callback: () => recoverCeoGateway(this),
     });
 
     // Corp Gateway Recovery — picks up after autoRestart exhausts its 3 attempts
@@ -275,7 +277,7 @@ export class Daemon {
       intervalMs: 60 * 1000,
       target: 'Workers',
       description: 'Recovers corp gateway after auto-restart exhaustion, reconnects WebSocket',
-      callback: () => this.recoverCorpGateway(),
+      callback: () => recoverCorpGateway(this),
     });
 
     // Rehydrate user-created loops and crons from clocks.json
@@ -333,293 +335,8 @@ export class Daemon {
     }
   }
 
-  /**
-   * Self-healing: detect crashed agents and attempt to respawn them.
-   * Runs every 30 seconds. Tracks consecutive failures per agent to avoid
-   * infinite retry loops — gives up after 5 consecutive failures and logs.
-   */
-  private recoveryAttempts = new Map<string, number>();
-  private static MAX_RECOVERY_ATTEMPTS = 5;
-
-  private async recoverCrashedAgents(): Promise<void> {
-    const agents = this.processManager.listAgents();
-    const crashed = agents.filter(a => a.status === 'crashed');
-
-    if (crashed.length === 0) {
-      // Reset all recovery counters when everything is healthy
-      this.recoveryAttempts.clear();
-      return;
-    }
-
-    for (const agent of crashed) {
-      const attempts = this.recoveryAttempts.get(agent.memberId) ?? 0;
-
-      if (attempts >= Daemon.MAX_RECOVERY_ATTEMPTS) {
-        // Already gave up on this one — log once at threshold, then stay quiet
-        if (attempts === Daemon.MAX_RECOVERY_ATTEMPTS) {
-          logError(`[recovery] ${agent.displayName} — gave up after ${attempts} attempts. Manual restart needed.`);
-          this.recoveryAttempts.set(agent.memberId, attempts + 1); // Prevent re-logging
-          this.analytics.trackError(agent.memberId);
-        }
-        continue;
-      }
-
-      this.recoveryAttempts.set(agent.memberId, attempts + 1);
-      log(`[recovery] ${agent.displayName} crashed — attempting respawn (attempt ${attempts + 1}/${Daemon.MAX_RECOVERY_ATTEMPTS})`);
-
-      try {
-        // Stop the old crashed process cleanly
-        await this.processManager.stopAgent(agent.memberId);
-
-        // Wait a beat for port release
-        await new Promise(r => setTimeout(r, 1000));
-
-        // Respawn
-        const respawned = await this.processManager.spawnAgent(agent.memberId);
-
-        if (respawned.status === 'ready' || respawned.status === 'starting') {
-          log(`[recovery] ${agent.displayName} respawned successfully (status: ${respawned.status})`);
-          this.recoveryAttempts.delete(agent.memberId);
-
-          // Reconnect WebSocket if this was the CEO (remote mode)
-          if (respawned.mode === 'remote' || respawned.mode === 'local') {
-            // Re-establish WebSocket for tool events
-            try {
-              this.openclawWS = new OpenClawWS(respawned.port, respawned.gatewayToken);
-              await this.openclawWS.connect();
-            } catch {
-              // Non-fatal — HTTP fallback still works
-            }
-          }
-
-          // Update work status
-          this.agentWorkStatus.set(agent.memberId, 'idle');
-
-          // Flush any queued tasks for this agent
-          const queued = this.inbox.peekNext(agent.memberId);
-          if (queued) {
-            log(`[recovery] ${agent.displayName} has queued work — inbox will dispatch on next idle`);
-          }
-
-          this.analytics.trackStatusChange(agent.memberId, agent.displayName, 'idle');
-        } else {
-          logError(`[recovery] ${agent.displayName} respawn returned status: ${respawned.status}`);
-        }
-      } catch (err) {
-        logError(`[recovery] ${agent.displayName} respawn failed: ${err}`);
-      }
-    }
-  }
-
-  /**
-   * CEO Gateway Recovery — verify the CEO's OpenClaw is reachable.
-   * If unreachable: mark crashed (agent-recovery handles respawn).
-   * If reachable but WebSocket disconnected: reconnect.
-   */
-  private ceoRecoveryFailures = 0;
-
-  private async recoverCeoGateway(): Promise<void> {
-    try {
-      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
-      const ceo = members.find(m => m.rank === 'master' && m.type === 'agent');
-      if (!ceo) return;
-
-      const agentProc = this.processManager.getAgent(ceo.id);
-      if (!agentProc) return;
-
-      // Skip if already crashed — agent-recovery handles that
-      if (agentProc.status === 'crashed' || agentProc.status === 'stopped') return;
-
-      // Health ping the CEO's gateway
-      try {
-        const resp = await fetch(`http://127.0.0.1:${agentProc.port}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${agentProc.gatewayToken}`,
-          },
-          body: JSON.stringify({ model: agentProc.model, messages: [] }),
-          signal: AbortSignal.timeout(3000),
-        });
-
-        if (resp.status >= 500) throw new Error(`HTTP ${resp.status}`);
-
-        // Gateway is reachable — reset failure counter
-        this.ceoRecoveryFailures = 0;
-
-        // Check WebSocket — reconnect if disconnected
-        const wsClient = agentProc.mode === 'remote' ? this.openclawWS : null;
-        if (agentProc.mode === 'remote' && (!wsClient || !wsClient.isConnected())) {
-          log('[ceo-recovery] WebSocket disconnected — reconnecting...');
-          try {
-            this.openclawWS = new OpenClawWS(agentProc.port, agentProc.gatewayToken);
-            await this.openclawWS.connect();
-            log('[ceo-recovery] WebSocket reconnected');
-          } catch {
-            logError('[ceo-recovery] WebSocket reconnect failed (HTTP fallback active)');
-          }
-        }
-
-        // Local mode CEO — check WebSocket too
-        if (agentProc.mode === 'local' && (!this.openclawWS || !this.openclawWS.isConnected())) {
-          try {
-            this.openclawWS = new OpenClawWS(agentProc.port, agentProc.gatewayToken);
-            await this.openclawWS.connect();
-            log('[ceo-recovery] Local CEO WebSocket reconnected');
-          } catch {
-            // Non-fatal
-          }
-        }
-      } catch {
-        // Gateway unreachable
-        this.ceoRecoveryFailures++;
-
-        if (this.ceoRecoveryFailures >= 3) {
-          // Confirmed dead — try to auto-start OpenClaw if remote mode
-          if (agentProc.mode === 'remote') {
-            log('[ceo-recovery] CEO remote gateway dead — attempting to start OpenClaw...');
-            try {
-              const { execa: run } = await import('execa');
-              // Check if openclaw is already running on the expected port
-              const gw = this.globalConfig.userGateway;
-              if (gw) {
-                const proc = run('openclaw', ['gateway', 'run'], {
-                  stdio: 'pipe',
-                  reject: false,
-                  detached: true,
-                });
-                // Don't await — let it run in background. Give it 5s to start.
-                proc.unref?.();
-                await new Promise(r => setTimeout(r, 5000));
-
-                // Check if it came up
-                try {
-                  const check = await fetch(`http://127.0.0.1:${gw.port}/v1/chat/completions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${gw.token}` },
-                    body: JSON.stringify({ model: 'openclaw:main', messages: [] }),
-                    signal: AbortSignal.timeout(3000),
-                  });
-                  if (check.status < 500) {
-                    log('[ceo-recovery] OpenClaw started successfully — CEO will recover on next agent-recovery tick');
-                    this.ceoRecoveryFailures = 0;
-                  }
-                } catch {
-                  logError('[ceo-recovery] OpenClaw start attempted but gateway still unreachable');
-                }
-              }
-            } catch (err) {
-              logError(`[ceo-recovery] Failed to start OpenClaw: ${err}`);
-            }
-          }
-
-          // Mark crashed so agent-recovery handles respawn
-          logError(`[ceo-recovery] CEO gateway unreachable (${this.ceoRecoveryFailures} consecutive failures) — marking crashed`);
-          agentProc.status = 'crashed';
-          this.ceoRecoveryFailures = 0; // Reset so agent-recovery gets a fresh start
-        } else {
-          log(`[ceo-recovery] CEO gateway ping failed (${this.ceoRecoveryFailures}/3)`);
-        }
-      }
-    } catch (err) {
-      logError(`[ceo-recovery] Unexpected error: ${err}`);
-    }
-  }
-
-  /**
-   * Corp Gateway Recovery — picks up after the built-in autoRestart exhausts.
-   * Also reconnects the daemon's WebSocket to the corp gateway and updates
-   * worker agent statuses after gateway recovery.
-   */
-  private corpGatewayRecoveryAttempts = 0;
-
-  private async recoverCorpGateway(): Promise<void> {
-    try {
-      const corpGw = this.processManager.corpGateway;
-      if (!corpGw) return; // No corp gateway configured
-
-      const gwStatus = corpGw.getStatus();
-
-      // Gateway is healthy — check WebSocket connection
-      if (gwStatus === 'ready') {
-        this.corpGatewayRecoveryAttempts = 0;
-
-        // Reconnect WebSocket if disconnected
-        if (!this.corpGatewayWS || !this.corpGatewayWS.isConnected()) {
-          try {
-            this.corpGatewayWS = new OpenClawWS(corpGw.getPort(), corpGw.getToken());
-            await this.corpGatewayWS.connect();
-            log('[corp-gw-recovery] WebSocket reconnected to corp gateway');
-          } catch {
-            // Non-fatal — HTTP fallback works
-          }
-        }
-
-        // Verify worker agents reflect gateway status
-        const agents = this.processManager.listAgents();
-        for (const agent of agents) {
-          if (agent.mode === 'gateway' && agent.status !== 'ready') {
-            agent.status = 'ready';
-            agent.port = corpGw.getPort();
-            agent.gatewayToken = corpGw.getToken();
-            log(`[corp-gw-recovery] Updated ${agent.displayName} → ready (gateway is healthy)`);
-          }
-        }
-        return;
-      }
-
-      // Gateway is stopped but has agents — this means autoRestart exhausted
-      if (gwStatus === 'stopped' && corpGw.hasAgents()) {
-        this.corpGatewayRecoveryAttempts++;
-
-        if (this.corpGatewayRecoveryAttempts > 10) {
-          // Give up after 10 attempts (10 minutes at 60s interval)
-          if (this.corpGatewayRecoveryAttempts === 11) {
-            logError('[corp-gw-recovery] Exhausted 10 recovery attempts — corp gateway is down. Restart TUI to recover.');
-          }
-          return;
-        }
-
-        log(`[corp-gw-recovery] Corp gateway stopped — attempting recovery (attempt ${this.corpGatewayRecoveryAttempts}/10)`);
-
-        try {
-          // Refresh auth in case API keys changed
-          corpGw.refreshAllAuth();
-
-          // Attempt restart
-          await corpGw.start();
-          log(`[corp-gw-recovery] Corp gateway recovered on port ${corpGw.getPort()}`);
-
-          // Reconnect WebSocket
-          try {
-            this.corpGatewayWS = new OpenClawWS(corpGw.getPort(), corpGw.getToken());
-            await this.corpGatewayWS.connect();
-            log('[corp-gw-recovery] WebSocket connected to recovered corp gateway');
-          } catch {
-            logError('[corp-gw-recovery] WebSocket connect failed after recovery');
-          }
-
-          // Mark all gateway workers as ready
-          const agents = this.processManager.listAgents();
-          for (const agent of agents) {
-            if (agent.mode === 'gateway') {
-              agent.status = 'ready';
-              agent.port = corpGw.getPort();
-              agent.gatewayToken = corpGw.getToken();
-              this.agentWorkStatus.set(agent.memberId, 'idle');
-              log(`[corp-gw-recovery] ${agent.displayName} → ready`);
-            }
-          }
-
-          this.corpGatewayRecoveryAttempts = 0;
-        } catch (err) {
-          logError(`[corp-gw-recovery] Recovery failed: ${err}`);
-        }
-      }
-    } catch (err) {
-      logError(`[corp-gw-recovery] Unexpected error: ${err}`);
-    }
-  }
+  // Recovery methods extracted to daemon-recovery.ts
+  // Stale process cleanup extracted to stale-cleanup.ts
 
   /**
    * Dispatch monitoring protocol to Failsafe via say() — the proven Jack path.
@@ -893,181 +610,6 @@ export class Daemon {
     return this.port;
   }
 
-  /**
-   * Kill ALL Claude Corp processes from a previous session.
-   *
-   * Orphans can survive in 3 places:
-   * 1. The daemon itself (tracked by .daemon.pid)
-   * 2. The corp gateway (openclaw process on .gateway/ port)
-   * 3. Local agent gateways (openclaw per agent, each on their own port)
-   *
-   * We scan the corp structure, find every port that was in use,
-   * and kill the process holding each one. Then clean up state files.
-   */
-  private async killStaleDaemon(): Promise<void> {
-    const portsToKill = new Set<number>();
-    const pidsToKill = new Set<number>();
-
-    // 1. Old daemon PID
-    try {
-      if (existsSync(DAEMON_PID_PATH)) {
-        const oldPid = parseInt(readFileSync(DAEMON_PID_PATH, 'utf-8').trim(), 10);
-        if (oldPid && oldPid !== process.pid) {
-          pidsToKill.add(oldPid);
-        }
-      }
-    } catch {}
-
-    // 2. Old daemon port
-    try {
-      if (existsSync(DAEMON_PORT_PATH)) {
-        const oldPort = parseInt(readFileSync(DAEMON_PORT_PATH, 'utf-8').trim(), 10);
-        if (oldPort) portsToKill.add(oldPort);
-      }
-    } catch {}
-
-    // 3. Corp gateway port — read from .gateway/openclaw.json
-    try {
-      const gwConfigPath = join(this.corpRoot, '.gateway', 'openclaw.json');
-      if (existsSync(gwConfigPath)) {
-        const gwConfig = JSON.parse(readFileSync(gwConfigPath, 'utf-8'));
-        const gwPort = gwConfig?.gateway?.port;
-        if (gwPort && typeof gwPort === 'number') portsToKill.add(gwPort);
-      }
-    } catch {}
-
-    // 4. Local agent gateway ports — scan agents/*/config.json for port,
-    //    and agents/*/.openclaw/openclaw.json for gateway.port
-    try {
-      const agentsDir = join(this.corpRoot, 'agents');
-      if (existsSync(agentsDir)) {
-        const agents = readdirSync(agentsDir, { withFileTypes: true });
-        for (const agent of agents) {
-          if (!agent.isDirectory()) continue;
-
-          // Check agent config.json for port
-          try {
-            const configPath = join(agentsDir, agent.name, 'config.json');
-            if (existsSync(configPath)) {
-              const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-              if (config.port && typeof config.port === 'number') {
-                portsToKill.add(config.port);
-              }
-            }
-          } catch {}
-
-          // Check agent's .openclaw/openclaw.json for gateway port
-          try {
-            const ocConfigPath = join(agentsDir, agent.name, '.openclaw', 'openclaw.json');
-            if (existsSync(ocConfigPath)) {
-              const ocConfig = JSON.parse(readFileSync(ocConfigPath, 'utf-8'));
-              const agentPort = ocConfig?.gateway?.port;
-              if (agentPort && typeof agentPort === 'number') {
-                portsToKill.add(agentPort);
-              }
-            }
-          } catch {}
-        }
-      }
-    } catch {}
-
-    // 5. Project-scoped agent ports — scan projects/*/agents/*
-    try {
-      const projectsDir = join(this.corpRoot, 'projects');
-      if (existsSync(projectsDir)) {
-        const projects = readdirSync(projectsDir, { withFileTypes: true });
-        for (const proj of projects) {
-          if (!proj.isDirectory()) continue;
-          const projAgentsDir = join(projectsDir, proj.name, 'agents');
-          if (!existsSync(projAgentsDir)) continue;
-          const projAgents = readdirSync(projAgentsDir, { withFileTypes: true });
-          for (const agent of projAgents) {
-            if (!agent.isDirectory()) continue;
-            try {
-              const configPath = join(projAgentsDir, agent.name, 'config.json');
-              if (existsSync(configPath)) {
-                const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-                if (config.port && typeof config.port === 'number') portsToKill.add(config.port);
-              }
-            } catch {}
-            try {
-              const ocConfigPath = join(projAgentsDir, agent.name, '.openclaw', 'openclaw.json');
-              if (existsSync(ocConfigPath)) {
-                const ocConfig = JSON.parse(readFileSync(ocConfigPath, 'utf-8'));
-                const p = ocConfig?.gateway?.port;
-                if (p && typeof p === 'number') portsToKill.add(p);
-              }
-            } catch {}
-          }
-        }
-      }
-    } catch {}
-
-    if (pidsToKill.size === 0 && portsToKill.size === 0) return;
-
-    log(`[daemon] Cleaning up stale processes — ${pidsToKill.size} PIDs, ${portsToKill.size} ports`);
-    const { execa: run } = await import('execa');
-
-    // Kill PIDs first (with process tree on Windows)
-    for (const pid of pidsToKill) {
-      try {
-        if (process.platform === 'win32') {
-          await run('taskkill', ['/F', '/T', '/PID', String(pid)], { reject: false, timeout: 5000 });
-        } else {
-          try { process.kill(pid, 'SIGTERM'); } catch {}
-        }
-        log(`[daemon] Killed stale PID ${pid}`);
-      } catch {}
-    }
-
-    // Kill anything holding our ports
-    if (process.platform === 'win32') {
-      for (const port of portsToKill) {
-        try {
-          const check = await run('cmd', ['/c', `netstat -ano | findstr :${port} | findstr LISTENING`], { reject: false, timeout: 5000 });
-          if (check.stdout) {
-            // Extract all unique PIDs from netstat output
-            const lines = check.stdout.trim().split('\n');
-            for (const line of lines) {
-              const match = line.trim().match(/\s(\d+)\s*$/);
-              if (match?.[1]) {
-                const holderPid = parseInt(match[1]);
-                if (holderPid !== process.pid && !pidsToKill.has(holderPid)) {
-                  await run('taskkill', ['/F', '/T', '/PID', String(holderPid)], { reject: false, timeout: 5000 });
-                  log(`[daemon] Killed stale process on port ${port} (PID ${holderPid})`);
-                }
-              }
-            }
-          }
-        } catch {}
-      }
-    } else {
-      // Unix: kill processes on ports via lsof
-      for (const port of portsToKill) {
-        try {
-          const check = await run('lsof', ['-ti', `:${port}`], { reject: false, timeout: 5000 });
-          if (check.stdout) {
-            for (const pidStr of check.stdout.trim().split('\n')) {
-              const pid = parseInt(pidStr);
-              if (pid && pid !== process.pid) {
-                try { process.kill(pid, 'SIGTERM'); } catch {}
-                log(`[daemon] Killed stale process on port ${port} (PID ${pid})`);
-              }
-            }
-          }
-        } catch {}
-      }
-    }
-
-    // Wait for processes to die
-    await new Promise(r => setTimeout(r, 2000));
-
-    // Clean up stale files
-    try { unlinkSync(DAEMON_PID_PATH); } catch {}
-    try { unlinkSync(DAEMON_PORT_PATH); } catch {}
-
-    log(`[daemon] Stale process cleanup complete`);
-  }
 
   /** Get formatted uptime string like "12m 34s" or "1h 5m 12s" */
   getUptime(): string {
