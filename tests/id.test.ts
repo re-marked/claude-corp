@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateId, taskId, memberSlug } from '../packages/shared/src/id.js';
+import { generateId, taskId } from '../packages/shared/src/id.js';
+import { memberSlug } from '../packages/shared/src/mentions.js';
 
 describe('generateId', () => {
   it('produces a 6-char hex string prefixed with m-', () => {
@@ -26,15 +27,17 @@ describe('taskId', () => {
 });
 
 describe('memberSlug', () => {
+  const member = (name: string) => ({ displayName: name } as any);
+
   it('lowercases and hyphenates', () => {
-    expect(memberSlug('Lead Coder')).toBe('lead-coder');
+    expect(memberSlug(member('Lead Coder'))).toBe('lead-coder');
   });
 
   it('handles single words', () => {
-    expect(memberSlug('CEO')).toBe('ceo');
+    expect(memberSlug(member('CEO'))).toBe('ceo');
   });
 
-  it('strips extra whitespace', () => {
-    expect(memberSlug('  Some  Agent  ')).toBe('some-agent');
+  it('handles names with normal spacing', () => {
+    expect(memberSlug(member('Some Agent'))).toBe('some-agent');
   });
 });

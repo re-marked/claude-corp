@@ -91,9 +91,10 @@ describe('DispatchHealthTracker', () => {
 
   it('degrades on failures', () => {
     const ht = new DispatchHealthTracker({ windowSize: 4 });
-    ht.recordFailure('ceo', new Error('timeout'));
-    ht.recordFailure('ceo', new Error('timeout'));
-    ht.recordFailure('ceo', new Error('timeout'));
+    ht.recordSuccess('ceo'); // 1 success
+    ht.recordFailure('ceo', new Error('timeout')); // 1 fail
+    ht.recordFailure('ceo', new Error('timeout')); // 2 fails
+    // Score: 1/3 = 33% → degraded (between 0.2 and 0.5)
     expect(ht.getScore('ceo')).toBeLessThan(0.5);
     expect(ht.getStatus('ceo')).toBe('degraded');
   });
