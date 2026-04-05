@@ -5,8 +5,11 @@ import TextInput from 'ink-text-input';
 import {
   type Channel,
   type Member,
+  type ChannelMessage,
   readConfig,
   post,
+  appendMessage,
+  generateId,
   parseIntervalExpression,
   MEMBERS_JSON,
   MESSAGES_JSONL,
@@ -264,12 +267,21 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   });
 
   const writeSystemMessage = (content: string) => {
-    post(channel.id, join(corpRoot, channel.path, MESSAGES_JSONL), {
+    const sysMsg: ChannelMessage = {
+      id: generateId(),
+      channelId: channel.id,
       senderId: 'system',
+      threadId: null,
       content,
-      source: 'system',
       kind: 'system',
-    });
+      mentions: [],
+      metadata: { source: 'system' },
+      depth: 0,
+      originId: '',
+      timestamp: new Date().toISOString(),
+    };
+    sysMsg.originId = sysMsg.id;
+    appendMessage(join(corpRoot, channel.path, MESSAGES_JSONL), sysMsg);
   };
 
   const handleHired = (agentName: string, displayName: string) => {
@@ -1517,13 +1529,23 @@ Always consider what happens when things go wrong.`,
       setThinkingAgents([jackMode.agentName]);
 
       // Write user message to DM JSONL (so it appears in chat history).
-      // Source MUST be 'jack' — router skips jack messages to prevent double dispatch.
-      // The say() call below handles the actual dispatch.
-      post(channel.id, messagesPath, {
+      // Uses raw appendMessage — post() dedup interferes with TUI rendering.
+      // Source MUST be 'jack' in metadata — router skips jack messages.
+      const userMsg: ChannelMessage = {
+        id: generateId(),
+        channelId: channel.id,
         senderId: members.find(m => m.rank === 'owner')?.id ?? 'system',
+        threadId: null,
         content: text,
-        source: 'jack',
-      });
+        kind: 'text',
+        mentions: [],
+        metadata: { source: 'jack' },
+        depth: 0,
+        originId: '',
+        timestamp: new Date().toISOString(),
+      };
+      userMsg.originId = userMsg.id;
+      appendMessage(messagesPath, userMsg);
       setTimeout(() => refreshMessages(), 50); // Force re-read after self-write
 
       // Send raw message — OpenClaw manages conversation history via persistent session key.
@@ -1534,10 +1556,7 @@ Always consider what happens when things go wrong.`,
         if (result.ok && result.response) {
           // Response is already written to JSONL by the say endpoint.
           // No TUI-side write needed — prevents double messages.
-          // Multiple refreshes to handle Windows fs.watch timing quirks.
-          refreshMessages();
           setTimeout(() => refreshMessages(), 100);
-          setTimeout(() => refreshMessages(), 500);
         } else {
           writeSystemMessage(`Jack dispatch failed: ${(result as any).error ?? 'No response'}`);
         }
