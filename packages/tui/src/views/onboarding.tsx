@@ -176,23 +176,13 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       setMessagesPath(join(root, dm.path, 'messages.jsonl'));
 
       // Send system message to trigger CEO onboarding interview
-      const { appendMessage: append, generateId: genId } = await import('@claudecorp/shared');
+      const { post: postMsg } = await import('@claudecorp/shared');
       const dmPath = join(root, dm.path, 'messages.jsonl');
-      const kickoff = {
-        id: genId(),
-        channelId: dm.id,
+      postMsg(dm.id, dmPath, {
         senderId: 'system',
-        threadId: null,
         content: `New corporation "${corpName}" created. The ${selectedTheme.ranks.owner} is here. Introduce yourself and begin the onboarding interview — ask what they want this corporation to accomplish.`,
-        kind: 'text' as const,
-        mentions: [],
-        metadata: null,
-        depth: 0,
-        originId: '',
-        timestamp: new Date().toISOString(),
-      };
-      kickoff.originId = kickoff.id;
-      append(dmPath, kickoff);
+        source: 'system',
+      });
 
       // Stop this daemon — ResumeView will create its own
       d.stop();
