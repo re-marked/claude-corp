@@ -158,7 +158,7 @@ The cycle: **work → observe → dream → remember → work better.**
 
 ## Primitives
 
-Claude Corp has named primitives — each does one thing well:
+Claude Corp has named primitives — each does one thing well. See [GLOSSARY.md](GLOSSARY.md) for full explanations.
 
 | Primitive | What it does |
 |-----------|-------------|
@@ -168,6 +168,16 @@ Claude Corp has named primitives — each does one thing well:
 | **Hand** | Task dispatch verb. Creating a task ≠ starting work. `Hand` is the action that dispatches. |
 | **Clock** | Unified timer primitive. Every setInterval is observable, pauseable, with fire counts and error tracking. |
 | **Post** | Unified JSONL write. Mandatory senderId, source tag, 5s dedup. Prevents misattribution. |
+| **Contract** | Task bundle with a goal, lead, and acceptance criteria. Draft → Active → Review → Completed. |
+| **Blueprint** | Reusable playbook with embedded cc-cli commands. 4 defaults: ship-feature, onboard-agent, run-research, sprint-review. |
+| **Plan** | Two-tier planning: **Sketch** (5min, ~60 lines, Haiku) and **Ultraplan** (20min, 5-phase deep audit, Opus). |
+| **Project** | Scoped workspace container. Own agents, channels, teams, contracts, tasks. |
+| **Loop** | Interval-based recurring command (`@every 5m`). Persists to clocks.json, visible in /clock. |
+| **Cron** | Schedule-based job (`@daily`, `0 9 * * 1`). Built on croner with jitter, auto-expiry, missed-fire detection. |
+| **Dream** | 4-phase memory consolidation: Orient → Gather → Consolidate → Prune. Writes to BRAIN/. |
+| **Observation** | Daily append-only journal. 11 category tags. Feeds the Dream system. |
+| **Autoemon** | Autonomous tick engine. Adaptive intervals, SLEEP parsing, conscription cascade. |
+| **Pulse** | Health heartbeat. Pings agents every 5min. Idle → check workspace. Busy → lightweight OK. |
 
 ## Loops & Crons
 
@@ -341,6 +351,13 @@ pnpm build          # Build all packages
 pnpm type-check     # TypeScript strict
 pnpm test           # vitest (< 1s)
 ```
+
+## Documentation
+
+- [GLOSSARY.md](GLOSSARY.md) — every concept, primitive, and named thing explained in plain English
+- [STATUS.md](STATUS.md) — what works today, what's planned, full test reports
+- [ROADMAP.md](ROADMAP.md) — the Cascading Consensus Protocol vision and future phases
+- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, branching, commits, testing
 
 ## License
 

@@ -4,7 +4,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## What WORKS today (v0.16.3)
+## What WORKS today (v1.0.0)
 
 ### Primitives (shipped v0.10.0–v0.10.5)
 - **Casket** — sealed agent workspace: TASKS.md + INBOX.md + WORKLOG.md + STATUS.md auto-generated
