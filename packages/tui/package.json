@@ -12,6 +12,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@claude-code-kit/ink-renderer": "^0.3.0",
+    "@claude-code-kit/shared": "^0.3.0",
     "@claudecorp/daemon": "workspace:*",
     "@claudecorp/shared": "workspace:*",
     "cronstrue": "^3.14.0",
