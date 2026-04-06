@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
 import { getPasteFilter } from '../lib/paste-filter.js';
 import { COLORS } from '../theme.js';
 
