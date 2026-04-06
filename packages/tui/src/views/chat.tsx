@@ -7,21 +7,21 @@ import {
   type Member,
   type ChannelMessage,
   readConfig,
-  post,
   appendMessage,
   generateId,
   parseIntervalExpression,
   MEMBERS_JSON,
   MESSAGES_JSONL,
+  CORP_JSON,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
-import { MessageList, renderContent } from '../components/message-list.js';
+import { renderContent } from '../components/message-list.js';
 import { MessageInput } from '../components/message-input.js';
 import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
 import { HireWizard } from './hire-wizard.js';
 import { ModelWizard } from './model-wizard.js';
-import { COLORS, BORDER_STYLE, agentColor } from '../theme.js';
+import { COLORS, agentColor } from '../theme.js';
 import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
@@ -106,8 +106,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // Read corp defaultDmMode (defaults to 'jack')
     let dmMode: 'jack' | 'async' = 'jack';
     try {
-      const { readConfig, CORP_JSON } = require('@claudecorp/shared');
-      const corp = readConfig(join(corpRoot, CORP_JSON));
+      // readConfig and CORP_JSON already imported at top level
+      const corp = readConfig<Record<string, unknown>>(join(corpRoot, CORP_JSON));
       if (corp.defaultDmMode === 'async') dmMode = 'async';
     } catch {}
 
@@ -987,28 +987,13 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // /version — show package versions
     if (text.trim().toLowerCase() === '/version') {
       try {
-        const fs = await import('node:fs');
-        const path = await import('node:path');
-        
-        // Read package.json files
-        const sharedPkg = JSON.parse(fs.readFileSync(path.join(corpRoot, 'packages/shared/package.json'), 'utf8'));
-        const daemonPkg = JSON.parse(fs.readFileSync(path.join(corpRoot, 'packages/daemon/package.json'), 'utf8'));
-        const tuiPkg = JSON.parse(fs.readFileSync(path.join(corpRoot, 'packages/tui/package.json'), 'utf8'));
-        const clipPkg = JSON.parse(fs.readFileSync(path.join(corpRoot, 'packages/cli/package.json'), 'utf8'));
-        
         const lines = [
-          '━━━ Version Information ━━━',
-          '',
-          '📦 Package Versions:',
-          `   @claudecorp/shared: ${sharedPkg.version}`,
-          `   @claudecorp/daemon: ${daemonPkg.version}`,
-          `   @claudecorp/tui:    ${tuiPkg.version}`,
-          `   @claudecorp/cli:    ${clipPkg.version}`,
-          '',
-          '⚙️ Runtime:',
-          `   Node.js: ${process.version}`,
+          'Claude Corp v0.16.8',
+          `Node.js ${process.version}`,
+          `Platform: ${process.platform}`,
+          `Daemon: 127.0.0.1:${daemonPort}`,
         ];
-        
+
         writeSystemMessage(lines.join('\n'));
       } catch (error) {
         writeSystemMessage(`Error reading version info: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -1821,7 +1806,7 @@ Always consider what happens when things go wrong.`,
               <Text color={streamColor}>{'\u25CF'}</Text>
               <Text bold color={streamColor}>{stream.agentName}</Text>
               <Text color={COLORS.muted}>{streamTime}</Text>
-              <Text color={COLORS.muted}><Spinner type="dots" /></Text>
+              <Text color={COLORS.muted}><Spinner /></Text>
             </Box>
             <Box paddingLeft={2}>
               <Text wrap="wrap">{renderContent(stream.content, memberMap)}</Text>
@@ -1837,7 +1822,7 @@ Always consider what happens when things go wrong.`,
           <Box key={`tool-${tc.agentName}`} gap={1} paddingLeft={1}>
             <Text color={toolColor}>{'\u25CF'}</Text>
             <Text color={toolColor}>{tc.agentName}</Text>
-            <Text color={COLORS.muted}><Spinner type="dots" /></Text>
+            <Text color={COLORS.muted}><Spinner /></Text>
             <Text color={COLORS.subtle}>{tc.toolName}</Text>
           </Box>
         );
@@ -1845,7 +1830,7 @@ Always consider what happens when things go wrong.`,
       {/* Typing/working indicator — agents dispatching but not yet streaming */}
       {!hasStreamContent && activeToolCalls.length === 0 && (isStreaming || thinking || dispatchingAgents.length > 0) && (
         <Box gap={1} paddingLeft={1}>
-          <Text color={COLORS.muted}><Spinner type="dots" /></Text>
+          <Text color={COLORS.muted}><Spinner /></Text>
           <Text color={COLORS.subtle}>
             {(() => {
               const THINKING_VERBS = ['thinking', 'reasoning', 'contemplating', 'ideating', 'pondering', 'mulling'];
