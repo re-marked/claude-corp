@@ -129,7 +129,36 @@ export async function dispatchViaWebSocket(
       }
     });
 
-    // Timeout after 15 minutes
+    // Two-tier timeout:
+    // - 30s with no output at all → model unreachable, fail fast
+    // - 15min total → hard cap for long-running responses (deep reasoning, tool chains)
+    let hasReceivedOutput = false;
+    const markOutput = () => { hasReceivedOutput = true; };
+
+    // Track output from both text deltas and tool events
+    const origOnToken = callbacks.onToken;
+    callbacks.onToken = (acc) => { markOutput(); origOnToken?.(acc); };
+    const origOnToolStart = callbacks.onToolStart;
+    callbacks.onToolStart = (tool) => { markOutput(); origOnToolStart?.(tool); };
+
+    // 15s warning — no output yet, something might be wrong
+    setTimeout(() => {
+      if (!resolved && !hasReceivedOutput) {
+        log(`[dispatch] ⚠ ${agent.displayName} — no output after 15s`);
+        callbacks.onLifecycle?.('slow');
+      }
+    }, 15_000);
+
+    // 30s — no output at all, model is unreachable
+    setTimeout(() => {
+      if (!resolved && !hasReceivedOutput) {
+        resolved = true;
+        cleanup();
+        reject(new Error(`Dispatch to ${agent.displayName} timed out — no response after 30s`));
+      }
+    }, 30_000);
+
+    // 15min — hard cap for active responses
     setTimeout(() => {
       if (!resolved) {
         resolved = true;
