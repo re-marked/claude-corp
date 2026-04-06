@@ -144,7 +144,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const [ready, setReady] = useState(false);
   const [showSwitcher, setShowSwitcher] = useState(false);
   const lastVisitedRef = React.useRef<Map<string, string>>(new Map());
-  const [, forceRender] = useState(0);
+  const [renderCount, forceRender] = useState(0);
   const [bootDone, setBootDone] = useState(false);
   const [slumberInfo, setSlumberInfo] = useState<import('./components/status-bar.js').SlumberInfo | null>(null);
 
@@ -498,7 +498,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       initialMembers={members}
       initialChannels={channels}
     >
-      <Box flexDirection="column" flexGrow={1}>
+      <Box key={`view-${renderCount}`} flexDirection="column" flexGrow={1}>
         {renderView()}
         {current.type !== 'chat' && (
           <StatusBar
