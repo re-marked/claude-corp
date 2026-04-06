@@ -137,7 +137,7 @@ export function TimeMachine({ onBack }: Props) {
 
       {loading ? (
         <Box paddingX={2} paddingY={1}>
-          <Spinner type="dots" />
+          <Spinner />
           <Text color={COLORS.subtle}> Loading timeline...</Text>
         </Box>
       ) : commits.length === 0 ? (
