@@ -18,6 +18,7 @@ import {
 } from '@claudecorp/shared';
 import { dispatchToAgent, type DispatchContext } from './dispatch.js';
 import type { Daemon } from './daemon.js';
+import { formatToolMessage } from './format-tool.js';
 import { log, logError } from './logger.js';
 
 export class MessageRouter {
@@ -443,7 +444,7 @@ export class MessageRouter {
 
             post(channel.id, msgPath, {
               senderId: targetId,
-              content: this.formatToolMessage(tool.name, args),
+              content: formatToolMessage(tool.name, args),
               source: 'router',
               kind: 'tool_event',
               threadId: msg.threadId,
@@ -640,59 +641,7 @@ export class MessageRouter {
     }
   }
 
-  /** Format a tool call into a human-readable message for the chat history. */
-  private formatToolMessage(toolName: string, args?: Record<string, unknown>): string {
-    const name = toolName.toLowerCase();
-
-    // File operations
-    if (name === 'write' || name === 'create' || name === 'write_file') {
-      const path = args?.path ?? args?.file_path ?? args?.filePath;
-      return path ? `wrote ${path}` : 'wrote a file';
-    }
-    if (name === 'edit' || name === 'edit_file' || name === 'patch') {
-      const path = args?.path ?? args?.file_path ?? args?.filePath;
-      return path ? `edited ${path}` : 'edited a file';
-    }
-    if (name === 'read' || name === 'read_file') {
-      const path = args?.path ?? args?.file_path ?? args?.filePath;
-      return path ? `read ${path}` : 'read a file';
-    }
-
-    // Commands / exec
-    if (name === 'bash' || name === 'execute' || name === 'exec' || name === 'shell' || name === 'run') {
-      const cmd = String(args?.command ?? args?.cmd ?? args?.input ?? '').trim();
-      if (cmd) {
-        const short = cmd.split('\n')[0]!.substring(0, 80);
-        return `ran \`${short}\``;
-      }
-      return 'ran a command';
-    }
-
-    // Search
-    if (name === 'glob' || name === 'search' || name === 'find') {
-      return `searched ${args?.pattern ?? args?.query ?? 'files'}`;
-    }
-    if (name === 'grep') {
-      return `searched for "${args?.pattern ?? args?.query ?? '...'}"`;
-    }
-
-    // Web
-    if (name === 'web_search' || name === 'websearch') {
-      return `searched web: "${args?.query ?? '...'}"`;
-    }
-    if (name === 'web_fetch' || name === 'fetch' || name === 'curl') {
-      return `fetched ${args?.url ?? 'a URL'}`;
-    }
-
-    // Fallback — try to extract something useful from args
-    const path = args?.path ?? args?.file_path ?? args?.filePath;
-    if (path) return `${name} ${path}`;
-    const cmd = args?.command ?? args?.cmd;
-    if (cmd) return `${name}: ${String(cmd).substring(0, 60)}`;
-
-    log(`[router] Unknown tool format: ${toolName} args=${JSON.stringify(args)}`);
-    return `used ${toolName}`;
-  }
+  // formatToolMessage extracted to format-tool.ts (shared with api.ts)
 
   /** Process the next queued message for an agent after their current dispatch finishes. */
   private drainQueue(agentId: string): void {
