@@ -11,9 +11,10 @@ interface TextInputProps {
   onChange: (value: string) => void;
   onSubmit?: (value: string) => void;
   placeholder?: string;
+  focus?: boolean;
 }
 
-export function TextInput({ value: originalValue, placeholder = '', onChange, onSubmit }: TextInputProps) {
+export function TextInput({ value: originalValue, placeholder = '', onChange, onSubmit, focus = true }: TextInputProps) {
   const [cursorOffset, setCursorOffset] = useState(originalValue.length);
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export function TextInput({ value: originalValue, placeholder = '', onChange, on
     if (nextValue !== originalValue) {
       onChange(nextValue);
     }
-  });
+  }, { isActive: focus });
 
   // Empty value — show placeholder with cursor
   if (originalValue.length === 0) {

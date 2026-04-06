@@ -1554,26 +1554,11 @@ Always consider what happens when things go wrong.`,
         const result = await daemonClient.say(jackMode.agentSlug, text, jackMode.sessionKey, channel.id);
 
         if (result.ok && result.response) {
-          // Write agent response to DM JSONL from TUI side.
-          // The say endpoint ALSO writes it, but the TUI's fs.watch doesn't
-          // reliably pick up remote writes on Windows. TUI-side write ensures
-          // the message appears immediately via refreshMessages().
-          const agentMsg: ChannelMessage = {
-            id: generateId(),
-            channelId: channel.id,
-            senderId: jackMode.agentId,
-            threadId: null,
-            content: result.response,
-            kind: 'text',
-            mentions: [],
-            metadata: { source: 'jack' },
-            depth: 0,
-            originId: '',
-            timestamp: new Date().toISOString(),
-          };
-          agentMsg.originId = agentMsg.id;
-          appendMessage(messagesPath, agentMsg);
+          // Response already written to JSONL by say endpoint via post().
+          // ScrollBox renders messages as normal React state — no Ink Static
+          // scrollback bug. Just refresh to pick up the persisted message.
           setTimeout(() => refreshMessages(), 50);
+          setTimeout(() => refreshMessages(), 300);
         } else {
           writeSystemMessage(`Jack dispatch failed: ${(result as any).error ?? 'No response'}`);
         }
