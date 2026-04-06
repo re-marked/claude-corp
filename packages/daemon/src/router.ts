@@ -478,6 +478,9 @@ export class MessageRouter {
         channelId: channel.id,
       });
 
+      // Clean retry counter on successful dispatch (prevents slow map leak)
+      this.retryCount.delete(`${msg.id}:${targetId}`);
+
       // Only the unflushed remainder goes into the final message
       const remainingContent = result.content.slice(lastFlushedLength).trim();
 
