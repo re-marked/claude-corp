@@ -1566,7 +1566,7 @@ Always consider what happens when things go wrong.`,
         setThinkingAgents(dispatchTargets);
       }
     } catch (err) {
-      // Message send failed
+      writeSystemMessage(`Failed to send: ${err instanceof Error ? err.message : String(err)}`);
     }
     setSending(false);
   }, [channel.id, daemonClient, jackMode, messagesPath, members]);
