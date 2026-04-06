@@ -132,7 +132,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const lastMsgCount = useRef(messages.length);
   // Update tab title when channel changes
   useEffect(() => {
-    process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name} [BUILD:v3]\x07`);
+    process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name}\x07`);
   }, [channel.id]);
 
   // Refresh members when new messages arrive (new agents may have been hired)
