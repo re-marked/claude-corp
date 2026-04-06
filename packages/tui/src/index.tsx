@@ -57,6 +57,30 @@ if (args[0] === 'help') {
   process.exit(0);
 }
 
+// --- Demo modes ---
+
+if (process.argv.includes('--sleep-banner-demo')) {
+  const React = await import('react');
+  const { render, Box } = await import('@claude-code-kit/ink-renderer');
+  const { SleepingBanner } = await import('./components/sleeping-banner.js');
+  const { COLORS } = await import('./theme.js');
+
+  const inst = await render(
+    React.createElement(Box, { flexDirection: 'column', flexGrow: 1 },
+      React.createElement(SleepingBanner, {
+        agentName: 'CEO',
+        sleepReason: 'Deep work — reviewing architecture docs',
+        remainingMs: 4 * 60 * 60 * 1000, // 4 hours
+        rank: 'master',
+      }),
+    ),
+  );
+
+  // Keep running for screenshot, Ctrl+C to exit
+  await inst.waitUntilExit();
+  process.exit(0);
+}
+
 // --- TUI launch ---
 
 ensureClaudeCorpHome();
