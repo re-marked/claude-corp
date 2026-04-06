@@ -103,18 +103,12 @@ importers:
       '@claude-code-kit/ink-renderer':
         specifier: ^0.3.0
         version: 0.3.0(react-reconciler@0.33.0(react@19.2.4))(react@19.2.4)
-      '@claude-code-kit/shared':
-        specifier: npm:@claude-code-kit/shared@*
-        version: 0.3.0
       '@claudecorp/daemon':
         specifier: workspace:*
         version: link:../daemon
       '@claudecorp/shared':
         specifier: workspace:*
         version: link:../shared
-      cronstrue:
-        specifier: ^3.14.0
-        version: 3.14.0
       react:
         specifier: ^19.2.4
         version: 19.2.4

@@ -13,10 +13,8 @@
   },
   "dependencies": {
     "@claude-code-kit/ink-renderer": "^0.3.0",
-    "@claude-code-kit/shared": "^0.3.0",
     "@claudecorp/daemon": "workspace:*",
     "@claudecorp/shared": "workspace:*",
-    "cronstrue": "^3.14.0",
     "react": "^19.2.4",
     "ws": "^8.19.0"
   },
