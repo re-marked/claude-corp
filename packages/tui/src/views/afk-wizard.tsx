@@ -9,8 +9,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
+import { TextInput } from '../components/text-input.js';
 import { parseIntervalExpression } from '@claudecorp/shared';
 import { COLORS } from '../theme.js';
 import { useCorp } from '../context/corp-context.js';

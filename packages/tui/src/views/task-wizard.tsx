@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
+import { TextInput } from '../components/text-input.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
 import type { Member } from '@claudecorp/shared';
 
