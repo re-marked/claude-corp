@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Member, type Channel, listTasks } from '@claudecorp/shared';

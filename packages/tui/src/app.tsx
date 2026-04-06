@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
 import {
   listCorps,
   deleteCorp,
