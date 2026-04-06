@@ -82,7 +82,7 @@ export function useMessages(messagesPath: string, initialCount = 50, threadId?: 
           // Recompute thread counts from all messages
           const counts = new Map<string, number>();
           for (const m of allMsgsRef.current) {
-            if (m.threadId) {
+            if (m.threadId && m.kind === 'text') {
               counts.set(m.threadId, (counts.get(m.threadId) ?? 0) + 1);
             }
           }
@@ -140,5 +140,18 @@ export function useMessages(messagesPath: string, initialCount = 50, threadId?: 
     } catch {}
   }, [messagesPath, threadId]);
 
-  return { messages, threadCounts, refresh };
+  // Full re-read — resets cursor, reloads everything from disk.
+  // Use after streaming ends when incremental refresh misses messages.
+  const fullRefresh = useCallback(() => {
+    try {
+      const all = filterExternal(tailMessages(messagesPath, initialCount * 2));
+      allMsgsRef.current = all;
+      const { filtered, counts } = applyFilter(all);
+      lastIdRef.current = all.length > 0 ? all[all.length - 1]!.id : null;
+      setMessages(filtered);
+      setThreadCounts(counts);
+    } catch {}
+  }, [messagesPath, threadId]);
+
+  return { messages, threadCounts, refresh, fullRefresh };
 }
