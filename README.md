@@ -1,115 +1,27 @@
 <p align="center">
-  <img src="./banner.png" alt="Claude Corp — Crabs Foundry's End" width="100%" />
+  <img src="./banner.png" alt="Claude Corp" width="100%" />
 </p>
 
-<h1 align="center">🏭 Claude Corp — Personal AI Corporation</h1>
+<h1 align="center">Claude Corp — Your Personal AI Corporation</h1>
 <p align="center">
-A self-growing team of AI agents that works for you — even while you sleep.
-</p>
-<p align="center">
-  <strong>Built 2 weeks before the Claude Code source leak revealed Anthropic was building the same things internally.</strong>
+A hierarchy of AI agents that runs as a company on your machine — even while you sleep.
 </p>
 
 <p align="center">
-  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/github/stars/re-marked/claude-corp?style=for-the-badge&color=FFEAA7" alt="Stars" /></a>
-  <a href="https://github.com/re-marked/claude-corp/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-00B894?style=for-the-badge" alt="License" /></a>
-  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/v0.16.7-Agents%20Dream-E17055?style=for-the-badge" alt="v0.16.7" /></a>
+  <a href="https://github.com/re-marked/claude-corp/actions"><img src="https://img.shields.io/github/actions/workflow/status/re-marked/claude-corp/ci.yml?style=flat-square&label=CI" alt="CI" /></a>
+  <a href="https://github.com/re-marked/claude-corp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/v1.0.0-stable-blue?style=flat-square" alt="v1.0.0" /></a>
 </p>
 
 <p align="center">
-  <a href="#-get-started">Get Started</a> · <a href="#-the-idea">The Idea</a> · <a href="#-slumber-mode">SLUMBER</a> · <a href="#-use-cases">Use Cases</a> · <a href="#-cli">CLI</a> · <a href="#-philosophy">Philosophy</a> · <a href="GLOSSARY.md">Glossary</a>
+  <a href="#get-started">Get Started</a> · <a href="#how-it-works">How It Works</a> · <a href="#slumber-mode">SLUMBER</a> · <a href="#agent-dreams">Dreams</a> · <a href="#cli">CLI</a> · <a href="GLOSSARY.md">Glossary</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
 
-## 💡 The Idea
+Most multi-agent frameworks give you a swarm that does random things. Claude Corp gives you a **company** — with a CEO who delegates, team leads who coordinate, workers who execute, and a quality gate that reviews everything before it ships. The entire thing runs locally. No cloud, no Docker. Just files and git.
 
-What if your AI assistant wasn't just one agent — but an **entire company**?
-
-Claude Corp turns your [OpenClaw](https://openclaw.ai) AI into a CEO. The CEO hires agents, creates contracts, delegates work, reviews quality — all through channels and DMs. Like Slack, but every member is an AI agent working for you.
-
-**What makes it different:**
-- Agents **dream** — they consolidate what they learned into persistent BRAIN/ memory
-- Agents **work while you sleep** — SLUMBER mode with 4 personality profiles
-- Agents **discuss before working** — hierarchy with review gates at every level
-- Everything is **files and git** — no database, no cloud, full audit trail
-
-## 🌙 SLUMBER Mode
-
-Type `/slumber night-owl` and go to sleep. The CEO takes over.
-
-```
-Mark: /slumber night-owl
-  → CEO: "Acknowledged. Going autonomous for 8h. I'll focus on
-     deep work — code reviews, research, documentation."
-  → 🦉 Night Owl active (8h). CEO acknowledged.
-  → Moon phases cycle in the status bar: 🌑🌒🌓🌔🌕🌖🌗🌘
-  → Agents work autonomously via tick loop
-
-Mark: /wake (next morning)
-  → CEO: "Morning. 45 ticks, 36 productive. Completed competitor
-     research, reviewed 3 PRs, updated documentation."
-  → ☀ SLUMBER ended. Welcome back.
-  → Productivity: ████████░░ 80%
-```
-
-**4 profiles that change how the CEO thinks:**
-
-| Profile | Icon | Mood | Ticks |
-|---------|------|------|-------|
-| Night Owl | 🦉 | Quiet, deep, no rush | Every 15m for 8h |
-| School Day | 🎒 | Full autonomy, hire freely | Every 10m for 7h |
-| Sprint | ⚡ | MAX VELOCITY, ship fast | Every 2m for 2h |
-| Guard Duty | 🛡️ | Watch only, don't create work | Every 30m, indefinite |
-
-Each profile injects a **mood** and **focus directive** into every tick — the CEO actually behaves differently, not just ticks at different speeds.
-
-## 🧠 Agents That Dream
-
-When idle, agents "dream" — a 4-phase memory consolidation:
-
-1. **Orient** — read current BRAIN/ memory
-2. **Gather** — scan observation logs and recent work
-3. **Consolidate** — extract patterns, update topic files
-4. **Prune** — remove stale knowledge
-
-Agents write daily **observation logs** as they work. Dreams distill these into permanent BRAIN/ memory. The cycle: **work → observe → dream → remember → work better.**
-
-## 🔄 The Self-Correcting Loop
-
-AI agents sometimes say "done!" without doing anything. So we gave them coworkers who verify.
-
-```
-📋 CEO creates Contract with acceptance criteria
-  → 🏗️ Team Lead breaks into tasks, hands to workers
-    → ⌨️ Worker does the work
-      → 🔍 Warden checks if the work actually exists
-        → ✅ PASS → Contract completed
-        → ❌ FAIL → specific feedback, worker retries
-```
-
-**The insight:** You don't need perfect agents. You need agents that check each other.
-
-## 🎯 Use Cases
-
-🔬 **Research Teams** — Hire researchers, analysts, writers. Get reports back.
-
-💻 **Dev Teams** — Tech lead delegates to developers and reviewers. Agents write real code, run builds, catch bugs.
-
-📝 **Content Teams** — Writers, editors, fact-checkers. Same delegation loop.
-
-🌙 **Overnight Work** — `/slumber night-owl` → agents work 8 hours while you sleep → morning standup in #general.
-
-## 🎭 Themes
-
-Pick your corporation's personality during onboarding:
-
-| 🏢 Corporate | 🎩 Mafia | ⚔️ Military |
-|---|---|---|
-| Founder → CEO → Director → Employee | Godfather → Underboss → Capo → Soldier | Commander → General → Captain → Private |
-| #general, #tasks | #the-backroom, #the-job-board | #command-post, #operations |
-
-## 🚀 Get Started
+## Get Started
 
 **Prerequisites:** Node.js 22+, [OpenClaw](https://github.com/openclaw/openclaw) running, pnpm.
 
@@ -119,33 +31,104 @@ cd claude-corp
 pnpm install && pnpm build
 cd packages/cli && npm link && cd ../tui && npm link && cd ../..
 
-claudecorp          # Launch the TUI
-claudecorp new      # Create a new corporation
+cc              # Launch the TUI
+cc new          # Create a new corporation
 ```
 
-The onboarding walks you through everything — name yourself, name your corp, pick a theme. The CEO introduces itself and starts the interview.
+The onboarding walks you through everything. Name yourself, name your corp, pick a theme. The CEO introduces itself and starts working.
 
-## 💻 CLI
+## How It Works
 
-37+ commands. Full headless control for automation:
+```
+Founder (you)
+  └── CEO (runs the corp, delegates everything)
+       ├── Failsafe (health monitor)
+       ├── Warden (quality gate — reviews all work)
+       ├── Herald (narrator — writes NARRATION.md)
+       ├── Planner (deep planning on Opus)
+       └── Team Leaders → Workers (you hire these)
+```
+
+A Node.js daemon watches JSONL message files via `fs.watch`. When someone writes `@ceo check the build`, the router extracts the mention, resolves it against `members.json`, and dispatches to the right agent. Agents respond to the same JSONL. The cycle repeats.
+
+All agents share a single [OpenClaw](https://openclaw.ai) gateway with per-agent model overrides. One process handles cheap workers and expensive planners simultaneously. Provider-agnostic — runs on Anthropic, OpenAI, Google, DeepSeek, or local models via Ollama.
+
+**The data model is deliberately boring:**
+
+| Format | Used for |
+|--------|----------|
+| Markdown + YAML frontmatter | Agent profiles (`SOUL.md`), tasks, plans |
+| JSON | Config, registries (`members.json`, `channels.json`) |
+| JSONL | Message logs (append-only, one JSON object per line) |
+
+No database. No migrations. `grep` is your query engine. `git revert` is your undo. Every corp is a git repo — every agent action is a commit.
+
+## SLUMBER Mode
+
+Type `/afk night-owl` and go to sleep. The Autoemon tick engine fires `<tick>` prompts to enrolled agents on adaptive intervals — 30s when productive, 2min when idle, 5min after 3 consecutive idle ticks.
+
+Four personality profiles inject `<mood>` and `<focus>` directives per tick that **genuinely change how the CEO behaves:**
+
+| Profile | Mood | Ticks | Key directive |
+|---------|------|-------|---------------|
+| 🦉 Night Owl | Quiet deep work | 15min for 8h | "DO NOT hire agents at 3am" |
+| 🎒 School Day | Full autonomy | 10min for 7h | "DO NOT wait for approval" |
+| ⚡ Sprint | Ship fast | 2min, 200-tick cap | "DO NOT refactor, ship now" |
+| 🛡️ Guard Duty | Monitor only | 30min, indefinite | "DO NOT create tasks, only watch" |
+
+Agents can `SLEEP 15m — waiting for build` and the daemon respects it. Founder presence is tracked — ticks suppress while you're chatting.
+
+```
+/afk night-owl
+  → CEO acknowledges, agents conscripted
+  → Ticks fire autonomously through the night
+  → Moon phases cycle: 🌑🌒🌓🌔🌕🌖🌗🌘
+
+/wake
+  → CEO: "45 ticks, 36 productive. Reviewed 3 PRs,
+     updated docs, completed competitor research."
+  → Productivity: ████████░░ 80%
+```
+
+## Agent Dreams
+
+Agents write observations to daily logs as they work. During idle periods, a 4-phase dream cycle distills these into persistent `BRAIN/` topic files:
+
+**Orient** → read current memory · **Gather** → scan observations · **Consolidate** → extract patterns · **Prune** → remove stale knowledge
+
+This survives context compaction — agents wake up tomorrow knowing what they learned today. After overnight SLUMBER sessions, a morning standup posts to `#general` with per-agent summaries.
+
+## The Self-Correcting Loop
+
+```
+📋 CEO creates Contract with acceptance criteria
+  → 🏗️ Team Lead breaks into tasks
+    → ⌨️ Worker executes
+      → 🔍 Warden reviews against criteria
+        → ✅ PASS → completed
+        → ❌ FAIL → specific feedback, retry
+```
+
+You don't need perfect agents. You need agents that check each other.
+
+## Persistent Sessions
+
+Every conversation uses deterministic session keys (`jack:ceo`, `jack:lead-coder`). Agents remember previous interactions across daemon restarts. No context stuffing, no message replay. The session **is** the memory.
+
+## CLI
+
+37+ commands for full headless control:
 
 ```bash
-# Corporation management
-cc-cli init --name my-corp --user Mark --theme corporate
-cc-cli start &
-cc-cli status
-
 # Communication
+cc-cli say --agent ceo --message "What's the status?"
 cc-cli send --channel general --from founder --message "hello @CEO"
-cc-cli say --agent ceo --message "What are you working on?"
 
-# SLUMBER mode
-cc-cli slumber night-owl          # Activate with profile
-cc-cli slumber 3h                 # Activate with duration
-cc-cli slumber profiles           # List all profiles
-cc-cli slumber stats              # Analytics report
-cc-cli brief                      # Mid-session check-in
-cc-cli wake                       # End with CEO digest
+# SLUMBER
+cc-cli slumber night-owl       # Activate with profile
+cc-cli brief                   # Mid-session check-in
+cc-cli wake                    # End + CEO digest
+cc-cli slumber stats           # Productivity analytics
 
 # Tasks & Planning
 cc-cli task create --title "Research competitors"
@@ -153,47 +136,34 @@ cc-cli hand --task cool-bay --to @lead-coder
 cc-cli plan create --goal "Design auth module"
 
 # Monitoring
-cc-cli stats                      # Corp analytics
-cc-cli hierarchy                  # Org chart
-cc-cli inspect --agent ceo        # Agent details
+cc-cli status                  # Agent statuses
+cc-cli hierarchy               # Org chart
+cc-cli stats                   # Corp analytics
+cc-cli activity                # Live feed
 ```
 
-All commands support `--json` for machine-readable output.
+All commands support `--json` for scripting.
 
-## 🧩 Architecture
+## Renderer
 
+The TUI uses [Yokai](https://github.com/re-marked/yokai) — our own React terminal renderer with pure TypeScript Yoga layout (no WASM), diff-based output, and `ScrollBox` with sticky scroll. Replaced Ink after its `<Static>` component had an unfixable scrollback bug on Windows.
+
+## Testing
+
+123 tests across 8 files. CI runs build + type-check + test on every push.
+
+```bash
+pnpm build          # Build all packages
+pnpm type-check     # TypeScript strict
+pnpm test           # vitest (< 1s)
 ```
-User (Founder)
-  ↕ TUI (Ink/React terminal app)
-  ↕ Daemon (background process)
-    ├── Router (fs.watch on JSONL → dispatch)
-    ├── Pulse (agent heartbeat)
-    ├── Autoemon (autonomous tick engine)
-    ├── DreamManager (memory consolidation)
-    ├── ClockManager (unified timers)
-    └── Corp Gateway (OpenClaw, all agents)
-  ↕ Git (every change = commit)
-```
 
-**Data model:** Everything is files. Markdown for agents, JSON for config, JSONL for messages. All git-tracked.
-
-See [GLOSSARY.md](GLOSSARY.md) for every concept explained in plain English.
-
-## 🧠 Philosophy
-
-- **No database. No Docker. No cloud.** Files and git. That's it.
-- **Everything is files.** Messages are JSONL. Tasks are markdown. Agent identity is `SOUL.md`. You can `cat` any conversation and `git revert` any bad decision.
-- **Agents dream.** They consolidate experience into persistent BRAIN/ memory. They get better over time.
-- **Agents check each other.** Builder + Reviewer + Coordinator = self-correcting loop. You don't need perfect agents.
-- **Every action is a git commit.** Full audit trail. Undo anything.
-- **The CEO runs the corp, not you.** You give vision. The CEO executes.
-
-## 📄 License
+## License
 
 MIT
 
 ---
 
 <p align="center">
-  Built by <a href="https://x.com/real-markable">Mark</a> (14) + <a href="https://claude.ai">Claude</a> + agents that dream about their own code. 🤖
+  Built by <a href="https://github.com/re-marked">Mark</a> (14) + <a href="https://claude.ai/code">Claude Code</a>
 </p>
