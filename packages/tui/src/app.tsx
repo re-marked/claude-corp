@@ -198,19 +198,40 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   const viewStack = useMemo(() => new ViewStack(), []);
 
   const navigate = useCallback((view: View) => {
-    process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
     if (view.type === 'corp-home') {
       viewStack.clear(view);
     } else {
       viewStack.push(view);
     }
     forceRender((n) => n + 1);
+    // Force cck full repaint: clear terminal, then fake a resize by
+    // nudging stdout.columns. cck detects dimension changes and
+    // invalidates its diff buffer, triggering a clean repaint.
+    setTimeout(() => {
+      process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+      const cols = process.stdout.columns;
+      (process.stdout as any).columns = cols - 1;
+      process.stdout.emit('resize');
+      setTimeout(() => {
+        (process.stdout as any).columns = cols;
+        process.stdout.emit('resize');
+      }, 16);
+    }, 16);
   }, [viewStack]);
 
   const goBack = useCallback(() => {
-    process.stdout.write('\x1b[3J\x1b[2J\x1b[H');
     viewStack.pop();
     forceRender((n) => n + 1);
+    setTimeout(() => {
+      process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+      const cols = process.stdout.columns;
+      (process.stdout as any).columns = cols - 1;
+      process.stdout.emit('resize');
+      setTimeout(() => {
+        (process.stdout as any).columns = cols;
+        process.stdout.emit('resize');
+      }, 16);
+    }, 16);
   }, [viewStack]);
 
   // Find CEO DM channel for Ctrl+D
