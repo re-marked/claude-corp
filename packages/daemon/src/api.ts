@@ -30,33 +30,7 @@ import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm } from './task-even
 import { log, logError } from './logger.js';
 
 /** Format tool call into a human-readable description for chat history. */
-function formatToolMsg(toolName: string, args?: Record<string, unknown>): string {
-  const name = toolName.toLowerCase();
-  if (name === 'write' || name === 'create' || name === 'write_file') {
-    return `wrote ${args?.path ?? args?.file_path ?? args?.filePath ?? 'a file'}`;
-  }
-  if (name === 'edit' || name === 'edit_file' || name === 'patch') {
-    return `edited ${args?.path ?? args?.file_path ?? args?.filePath ?? 'a file'}`;
-  }
-  if (name === 'read' || name === 'read_file') {
-    return `read ${args?.path ?? args?.file_path ?? args?.filePath ?? 'a file'}`;
-  }
-  if (name === 'bash' || name === 'execute' || name === 'exec' || name === 'shell' || name === 'run') {
-    const cmd = String(args?.command ?? args?.cmd ?? args?.input ?? '').trim();
-    return cmd ? `ran \`${cmd.split('\n')[0]!.substring(0, 80)}\`` : 'ran a command';
-  }
-  if (name === 'glob' || name === 'search' || name === 'find') {
-    return `searched ${args?.pattern ?? args?.query ?? 'files'}`;
-  }
-  if (name === 'grep') return `searched for "${args?.pattern ?? args?.query ?? '...'}"`;
-  if (name === 'web_search' || name === 'websearch') return `searched web: "${args?.query ?? '...'}"`;
-  if (name === 'web_fetch' || name === 'fetch' || name === 'curl') return `fetched ${args?.url ?? 'a URL'}`;
-  const path = args?.path ?? args?.file_path ?? args?.filePath;
-  if (path) return `${name} ${path}`;
-  const cmd = args?.command ?? args?.cmd;
-  if (cmd) return `${name}: ${String(cmd).substring(0, 60)}`;
-  return `used ${toolName}`;
-}
+import { formatToolMessage as formatToolMsg } from './format-tool.js';
 
 export function createApi(daemon: Daemon): Server {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {

@@ -64,7 +64,7 @@ interface Props {
 export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCalls = [], onNavigate }: Props) {
   const { corpRoot, daemonClient, daemonPort, members: ctxMembers } = useCorp();
   const [activeThread, setActiveThread] = useState<string | undefined>(undefined);
-  const { messages, threadCounts, refresh: refreshMessages, fullRefresh } = useMessages(messagesPath, 50, activeThread);
+  const { messages, threadCounts, refresh: refreshMessages } = useMessages(messagesPath, 50, activeThread);
   const [sending, setSending] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [thinkingAgents, setThinkingAgents] = useState<string[]>([]);
@@ -132,7 +132,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const lastMsgCount = useRef(messages.length);
   // Update tab title when channel changes
   useEffect(() => {
-    process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name} [BUILD:v3]\x07`);
+    process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name}\x07`);
   }, [channel.id]);
 
   // Refresh members when new messages arrive (new agents may have been hired)
@@ -1566,7 +1566,7 @@ Always consider what happens when things go wrong.`,
         setThinkingAgents(dispatchTargets);
       }
     } catch (err) {
-      // Message send failed
+      writeSystemMessage(`Failed to send: ${err instanceof Error ? err.message : String(err)}`);
     }
     setSending(false);
   }, [channel.id, daemonClient, jackMode, messagesPath, members]);
