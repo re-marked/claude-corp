@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { Box, Text, useInput, Static } from 'ink';
+import { Box, Text, useInput, ScrollBox } from '@claude-code-kit/ink-renderer';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 import {
@@ -64,7 +64,7 @@ interface Props {
 export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCalls = [], onNavigate }: Props) {
   const { corpRoot, daemonClient, daemonPort, members: ctxMembers } = useCorp();
   const [activeThread, setActiveThread] = useState<string | undefined>(undefined);
-  const { messages, threadCounts, refresh: refreshMessages } = useMessages(messagesPath, 50, activeThread);
+  const { messages, threadCounts, refresh: refreshMessages, fullRefresh } = useMessages(messagesPath, 50, activeThread);
   const [sending, setSending] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [thinkingAgents, setThinkingAgents] = useState<string[]>([]);
@@ -132,7 +132,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const lastMsgCount = useRef(messages.length);
   // Update tab title when channel changes
   useEffect(() => {
-    process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name}\x07`);
+    process.stdout.write(`\x1b]0;Claude Corp \u25C6 #${channel.name} [BUILD:v3]\x07`);
   }, [channel.id]);
 
   // Refresh members when new messages arrive (new agents may have been hired)
@@ -1554,9 +1554,26 @@ Always consider what happens when things go wrong.`,
         const result = await daemonClient.say(jackMode.agentSlug, text, jackMode.sessionKey, channel.id);
 
         if (result.ok && result.response) {
-          // Response is already written to JSONL by the say endpoint.
-          // No TUI-side write needed — prevents double messages.
-          setTimeout(() => refreshMessages(), 100);
+          // Write agent response to DM JSONL from TUI side.
+          // The say endpoint ALSO writes it, but the TUI's fs.watch doesn't
+          // reliably pick up remote writes on Windows. TUI-side write ensures
+          // the message appears immediately via refreshMessages().
+          const agentMsg: ChannelMessage = {
+            id: generateId(),
+            channelId: channel.id,
+            senderId: jackMode.agentId,
+            threadId: null,
+            content: result.response,
+            kind: 'text',
+            mentions: [],
+            metadata: { source: 'jack' },
+            depth: 0,
+            originId: '',
+            timestamp: new Date().toISOString(),
+          };
+          agentMsg.originId = agentMsg.id;
+          appendMessage(messagesPath, agentMsg);
+          setTimeout(() => refreshMessages(), 50);
         } else {
           writeSystemMessage(`Jack dispatch failed: ${(result as any).error ?? 'No response'}`);
         }
@@ -1804,10 +1821,10 @@ Always consider what happens when things go wrong.`,
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Messages — Static writes to terminal scrollback. Cap at 100 to prevent heap OOM. */}
-      <Static items={messages.slice(-100)}>
-        {(msg) => renderMsg(msg)}
-      </Static>
+      {/* Messages — ScrollBox with sticky scroll replaces Ink's broken Static */}
+      <ScrollBox stickyScroll flexGrow={1} flexDirection="column">
+        {messages.slice(-100).map((msg) => renderMsg(msg))}
+      </ScrollBox>
       {/* Streaming messages — each renders inline like a real message in the chat */}
       {channelStreams.filter(s => s.content).map(stream => {
         const streamAgent = members.find(m => m.displayName === stream.agentName);
