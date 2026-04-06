@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Box, Text, useInput, ScrollBox } from '@claude-code-kit/ink-renderer';
-import Spinner from 'ink-spinner';
-import TextInput from 'ink-text-input';
+import { Spinner } from '../components/spinner.js';
+import { TextInput } from '../components/text-input.js';
 import {
   type Channel,
   type Member,
