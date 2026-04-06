@@ -339,7 +339,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
         <Text color={COLORS.primary}>{asciiName(corpName)}</Text>
         <Box flexDirection="column" borderStyle={BORDER_STYLE} borderColor={COLORS.border} paddingX={3} paddingY={1} width={50} marginTop={1}>
           <Box gap={1}>
-            <Text color={COLORS.primary}><Spinner type="dots" /></Text>
+            <Text color={COLORS.primary}><Spinner /></Text>
             <Text color={COLORS.subtle}>{statusText}</Text>
           </Box>
           {error && <Box marginTop={1}><Text color={COLORS.danger}>{error}</Text></Box>}
