@@ -349,5 +349,5 @@ MIT
 ---
 
 <p align="center">
-  Built by <a href="https://github.com/re-marked">Mark</a> (14) + <a href="https://claude.ai/code">Claude Code</a>
+  Built by <a href="https://github.com/re-marked">Mark</a> (14 y.o.) + <a href="https://claude.ai/code">Claude Code</a>
 </p>
