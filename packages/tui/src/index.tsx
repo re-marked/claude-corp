@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import React from 'react';
-import { render } from 'ink';
+import { render } from '@claude-code-kit/ink-renderer';
 import { App } from './app.js';
 import { ensureClaudeCorpHome, listCorps, deleteCorp } from '@claudecorp/shared';
 import { getPasteFilter, enableBracketedPaste, disableBracketedPaste } from './lib/paste-filter.js';
@@ -69,15 +69,15 @@ const pasteStdin = getPasteFilter();
 // Pass 'new' flag to App so it forces onboarding even if corps exist
 const forceNew = args[0] === 'new';
 
-const { unmount, waitUntilExit } = render(<App forceNew={forceNew} />, {
-  stdin: pasteStdin as any,
-  exitOnCtrlC: true,
-  kittyKeyboard: { mode: 'auto', flags: ['disambiguateEscapeCodes'] },
-});
-
 function restoreTerminal() {
   disableBracketedPaste();
 }
+
+// cck render() is async — use top-level await (ESM + Node 22+)
+const { unmount, waitUntilExit } = await render(<App forceNew={forceNew} />, {
+  stdin: pasteStdin as any,
+  exitOnCtrlC: true,
+});
 
 waitUntilExit().then(async () => {
   restoreTerminal();
