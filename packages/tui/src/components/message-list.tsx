@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '@claude-code-kit/ink-renderer';
 import type { ChannelMessage, Member } from '@claudecorp/shared';
 import { COLORS, agentColor } from '../theme.js';
 

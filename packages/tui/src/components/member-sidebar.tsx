@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '@claude-code-kit/ink-renderer';
 import type { Member } from '@claudecorp/shared';
 import { COLORS, STATUS, BORDER_STYLE } from '../theme.js';
 import type { DaemonClient } from '../lib/daemon-client.js';

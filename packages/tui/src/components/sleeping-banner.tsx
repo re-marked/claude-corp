@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '@claude-code-kit/ink-renderer';
 import { COLORS } from '../theme.js';
 
 interface Props {
