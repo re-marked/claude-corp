@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
+import { Box, Text, useInput, TerminalSizeContext } from '@claude-code-kit/ink-renderer';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import {
@@ -201,8 +201,8 @@ export function CorpHome({ onNavigate }: Props) {
     // Ctrl+D, Ctrl+K, Ctrl+T, Ctrl+H, Escape handled globally in app.tsx
   });
 
-  const { stdout } = useStdout();
-  const termHeight = stdout?.rows ?? 40;
+  const termSize = useContext(TerminalSizeContext);
+  const termHeight = termSize?.rows ?? 40;
 
   const totalTasks = Object.values(taskCounts).reduce((a, b) => a + b, 0);
   const onlineCount = agents.filter((a) => a.processStatus === 'ready').length;

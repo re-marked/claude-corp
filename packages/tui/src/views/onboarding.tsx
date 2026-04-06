@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
-import TextInput from 'ink-text-input';
-import Spinner from 'ink-spinner';
+import React, { useState, useEffect, useContext } from 'react';
+import { Box, Text, useInput, TerminalSizeContext } from '@claude-code-kit/ink-renderer';
+import { TextInput } from '../components/text-input.js';
+import { Spinner } from '../components/spinner.js';
 import {
   scaffoldCorp,
   setupCeo,
@@ -49,8 +49,8 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [reconnecting, setReconnecting] = useState(false);
-  const { stdout } = useStdout();
-  const termHeight = stdout?.rows ?? 40;
+  const termSize = useContext(TerminalSizeContext);
+  const termHeight = termSize?.rows ?? 40;
 
   const handleUserNameSubmit = (name: string) => {
     const trimmed = name.trim();

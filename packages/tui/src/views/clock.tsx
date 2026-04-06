@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
+import React, { useState, useEffect, useContext } from 'react';
+import { Box, Text, useInput, TerminalSizeContext } from '@claude-code-kit/ink-renderer';
 import type { Clock } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import { useCorp } from '../context/corp-context.js';
@@ -37,8 +37,8 @@ export function ClockView({ onBack }: Props) {
   const [frame, setFrame] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [now, setNow] = useState(Date.now());
-  const { stdout } = useStdout();
-  const termHeight = stdout?.rows ?? 40;
+  const termSize = useContext(TerminalSizeContext);
+  const termHeight = termSize?.rows ?? 40;
 
   // Fetch clocks from daemon
   const fetchClocks = async () => {
