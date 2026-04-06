@@ -64,7 +64,7 @@ interface Props {
 export function ChatView({ channel, messagesPath, streamData, dispatchingAgents = [], activeToolCalls = [], onNavigate }: Props) {
   const { corpRoot, daemonClient, daemonPort, members: ctxMembers } = useCorp();
   const [activeThread, setActiveThread] = useState<string | undefined>(undefined);
-  const { messages, threadCounts, refresh: refreshMessages, fullRefresh } = useMessages(messagesPath, 50, activeThread);
+  const { messages, threadCounts, refresh: refreshMessages } = useMessages(messagesPath, 50, activeThread);
   const [sending, setSending] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [thinkingAgents, setThinkingAgents] = useState<string[]>([]);
