@@ -39,7 +39,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "@claude-code-kit/shared": "npm:@claude-code-kit/shared@*"
+    }
   },
   "files": [
     "packages/shared/dist",

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
 import { type Member, readTask, taskPath } from '@claudecorp/shared';
 import { COLORS, TASK_STATUS, PRIORITY, BORDER_STYLE } from '../theme.js';
 import { useCorp } from '../context/corp-context.js';

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
+import { TextInput } from '../components/text-input.js';
 import { join } from 'node:path';
 import { type Channel, tailMessages, MESSAGES_JSONL } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';

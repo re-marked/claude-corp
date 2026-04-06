@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
 import { type Member, type Channel, readConfig, buildHierarchy, type HierarchyNode, MEMBERS_JSON, CHANNELS_JSON } from '@claudecorp/shared';
 import { join } from 'node:path';
 import { COLORS, STATUS, BORDER_STYLE } from '../theme.js';

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
-import Spinner from 'ink-spinner';
+import React, { useState, useEffect, useContext } from 'react';
+import { Box, Text, useInput, TerminalSizeContext } from '@claude-code-kit/ink-renderer';
+import { Spinner } from '../components/spinner.js';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import { useCorp } from '../context/corp-context.js';
 
@@ -55,8 +55,8 @@ function humanize(msg: string): string {
 
 export function TimeMachine({ onBack }: Props) {
   const { daemonClient } = useCorp();
-  const { stdout } = useStdout();
-  const termHeight = stdout?.rows ?? 30;
+  const termSize = useContext(TerminalSizeContext);
+  const termHeight = termSize?.rows ?? 30;
 
   const [commits, setCommits] = useState<Commit[]>([]);
   const [cursor, setCursor] = useState(0);

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
 import { type Member, type TaskStatus, listTasks } from '@claudecorp/shared';
 import { COLORS, TASK_STATUS, PRIORITY, BORDER_STYLE } from '../theme.js';
 import type { View } from '../navigation.js';
