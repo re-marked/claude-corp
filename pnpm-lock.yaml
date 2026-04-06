@@ -104,7 +104,7 @@ importers:
         specifier: ^0.3.0
         version: 0.3.0(react-reconciler@0.33.0(react@19.2.4))(react@19.2.4)
       '@claude-code-kit/shared':
-        specifier: ^0.3.0
+        specifier: npm:@claude-code-kit/shared@*
         version: 0.3.0
       '@claudecorp/daemon':
         specifier: workspace:*
@@ -115,15 +115,6 @@ importers:
       cronstrue:
         specifier: ^3.14.0
         version: 3.14.0
-      ink:
-        specifier: ^6.8.0
-        version: 6.8.0(@types/react@19.2.14)(react@19.2.4)
-      ink-spinner:
-        specifier: ^5.0.0
-        version: 5.0.0(ink@6.8.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
-      ink-text-input:
-        specifier: ^6.0.0
-        version: 6.0.0(ink@6.8.0(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
       react:
         specifier: ^19.2.4
         version: 19.2.4
