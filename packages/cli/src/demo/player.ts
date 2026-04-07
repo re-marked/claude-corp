@@ -324,18 +324,25 @@ async function executeEvent(event: DemoEvent, opts: PlayerOptions): Promise<void
     }
 
     case 'slumber-start': {
-      // Broadcast autoemon_state event
-      await broadcastEvent(daemonUrl, {
-        type: 'autoemon_state',
-        state: 'active',
-        source: 'slumber',
-      });
+      // Call the REAL autoemon activate endpoint so the TUI's status bar
+      // (moon phases, profile name, countdown) actually updates. The TUI
+      // polls /autoemon/status periodically — fake broadcasts get overridden.
+      try {
+        await fetch(`${daemonUrl}/autoemon/activate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: 'slumber',
+            durationMs: event.durationMs ?? 8 * 60 * 60 * 1000,
+            profileId: event.profile,
+          }),
+        });
+      } catch {}
       return;
     }
 
     case 'slumber-tick': {
       // Broadcast a status update — visible in the autoemon status bar.
-      // Productive ticks pulse the indicator, idle ticks tick quietly.
       await broadcastEvent(daemonUrl, {
         type: 'autoemon_tick',
         agentName: event.agent,
@@ -345,10 +352,10 @@ async function executeEvent(event: DemoEvent, opts: PlayerOptions): Promise<void
     }
 
     case 'slumber-end': {
-      await broadcastEvent(daemonUrl, {
-        type: 'autoemon_state',
-        state: 'inactive',
-      });
+      // Call the real deactivate endpoint so the status bar clears
+      try {
+        await fetch(`${daemonUrl}/autoemon/deactivate`, { method: 'POST' });
+      } catch {}
       return;
     }
 
