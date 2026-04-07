@@ -141,6 +141,54 @@ export async function cmdDemo(opts: DemoOpts): Promise<void> {
     return;
   }
 
+  // cc-cli demo init [name] — create a demo corp with demo:true flag pre-set
+  if (sub === 'init') {
+    const corpName = opts.args[1] ?? 'demo-overview';
+    const corpRoot = join(homedir(), '.claudecorp', corpName);
+
+    if (existsSync(corpRoot)) {
+      console.log(`\nCorp "${corpName}" already exists at ${corpRoot}`);
+      console.log('Setting demo flag and skipping init.\n');
+    } else {
+      // Use scaffoldCorp + setupCeo from shared
+      const {
+        scaffoldCorp,
+        setupCeo,
+        ensureGlobalConfig,
+        readConfig,
+        writeConfig,
+      } = await import('@claudecorp/shared');
+      const globalConfig = ensureGlobalConfig();
+      const root = await scaffoldCorp(corpName, 'Mark', 'corporate' as any);
+      setupCeo(root, globalConfig, 'Mark');
+
+      // Set demo:true flag in corp.json
+      const corpPath = join(root, 'corp.json');
+      const corp = readConfig<Record<string, unknown>>(corpPath);
+      corp.demo = true;
+      writeConfig(corpPath, corp);
+      console.log(`\n✓ Created demo corp "${corpName}" with demo:true flag\n`);
+    }
+
+    // Always make sure the flag is set, even on existing corps
+    try {
+      const { readConfig, writeConfig } = await import('@claudecorp/shared');
+      const corpPath = join(corpRoot, 'corp.json');
+      const corp = readConfig<Record<string, unknown>>(corpPath);
+      if (!corp.demo) {
+        corp.demo = true;
+        writeConfig(corpPath, corp);
+        console.log(`✓ Set demo:true flag on existing corp\n`);
+      }
+    } catch {}
+
+    console.log(`Next steps:`);
+    console.log(`  cc-cli start --corp ${corpName}    # in terminal 1`);
+    console.log(`  cc --corp ${corpName}              # in terminal 2`);
+    console.log(`  cc-cli demo overview --reset       # in terminal 3\n`);
+    return;
+  }
+
   // cc-cli demo reset <corp>
   if (sub === 'reset') {
     const corpName = opts.args[1] ?? opts.corp;
