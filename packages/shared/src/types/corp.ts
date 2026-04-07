@@ -15,5 +15,13 @@ export interface Corporation {
    * working autonomously without being asked. Uses Guard Duty profile.
    */
   dangerouslyEnableAutoAfk?: boolean;
+  /**
+   * Demo mode: when true, the daemon runs in inert mode for video recording.
+   * - No real LLM dispatches (CEO heartbeats, Herald narration, Pulse pings, recovery clocks all skipped)
+   * - System agents stay listed but never dispatched to
+   * - The router still watches JSONL + the WebSocket bus still broadcasts events
+   * - Set this manually in corp.json: { "demo": true }
+   */
+  demo?: boolean;
   createdAt: string;
 }

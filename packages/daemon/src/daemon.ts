@@ -5,6 +5,7 @@ import {
   type Member,
   type Channel,
   type ChannelMessage,
+  type Corporation,
   type GlobalConfig,
   type AgentWorkStatus,
   readConfig,
@@ -179,16 +180,32 @@ export class Daemon {
     });
   }
 
+  /** Check if this corp is in demo mode (no real LLM dispatches). */
+  isDemoCorp(): boolean {
+    try {
+      const corp = readConfig<Corporation>(join(this.corpRoot, 'corp.json'));
+      return corp.demo === true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Start the router, git manager, heartbeat, and task watcher */
   async startRouter(): Promise<void> {
     // Connect WebSocket BEFORE router starts — so first dispatch uses WS not HTTP
     await this.connectOpenClawWS();
     this.router.start();
 
+    const demoMode = this.isDemoCorp();
+    if (demoMode) {
+      log(`[daemon] DEMO MODE — skipping all real LLM dispatches (heartbeats, narration, recovery, kickoff)`);
+    }
+
     // Dispatch CEO onboarding kickoff via say() (Jack session) if unresponded.
     // The kickoff was written before the daemon started, so the router never saw it.
     // Using say() gives: streaming + persistent Jack session (CEO remembers this).
-    setTimeout(async () => {
+    // SKIPPED in demo mode — no real LLM calls.
+    if (!demoMode) setTimeout(async () => {
       try {
         const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
         const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
@@ -228,57 +245,58 @@ export class Daemon {
     this.heartbeat.start();
     this.taskWatcher.start();
     this.hireWatcher.start();
-    this.pulse.start();
     this.contractWatcher.start();
-
     this.analytics.start();
 
-    // NOTE: Failsafe heartbeat removed — Pulse now handles ALL agent heartbeats
-    // directly (two-state: idle → check casket, busy → quick ping).
+    // Pulse and recovery/narration clocks are SKIPPED in demo mode —
+    // they all dispatch to real agents which costs tokens and pollutes recordings.
+    if (!demoMode) {
+      this.pulse.start();
 
-    // Register Herald narration as a Clock
-    this.clocks.register({
-      id: 'herald-narration',
-      name: 'Herald Narration',
-      type: 'heartbeat',
-      intervalMs: 5 * 60 * 1000,
-      target: 'Herald',
-      description: 'Herald summarizes corp activity → writes NARRATION.md',
-      callback: () => this.dispatchHeraldNarration(),
-    });
+      // Register Herald narration as a Clock
+      this.clocks.register({
+        id: 'herald-narration',
+        name: 'Herald Narration',
+        type: 'heartbeat',
+        intervalMs: 5 * 60 * 1000,
+        target: 'Herald',
+        description: 'Herald summarizes corp activity → writes NARRATION.md',
+        callback: () => this.dispatchHeraldNarration(),
+      });
 
-    // Register Agent Recovery as a Clock — self-healing for crashed agents
-    this.clocks.register({
-      id: 'agent-recovery',
-      name: 'Agent Recovery',
-      type: 'system',
-      intervalMs: 30 * 1000, // Every 30 seconds
-      target: 'Daemon',
-      description: 'Detects crashed agents and attempts respawn — self-healing at daemon level',
-      callback: () => recoverCrashedAgents(this),
-    });
+      // Register Agent Recovery as a Clock — self-healing for crashed agents
+      this.clocks.register({
+        id: 'agent-recovery',
+        name: 'Agent Recovery',
+        type: 'system',
+        intervalMs: 30 * 1000,
+        target: 'Daemon',
+        description: 'Detects crashed agents and attempts respawn',
+        callback: () => recoverCrashedAgents(this),
+      });
 
-    // CEO Gateway Recovery — monitors the CEO's OpenClaw connection
-    this.clocks.register({
-      id: 'ceo-gateway-recovery',
-      name: 'CEO Gateway',
-      type: 'system',
-      intervalMs: 30 * 1000,
-      target: 'CEO',
-      description: 'Monitors CEO gateway health, reconnects WebSocket, respawns on failure',
-      callback: () => recoverCeoGateway(this),
-    });
+      // CEO Gateway Recovery — monitors the CEO's OpenClaw connection
+      this.clocks.register({
+        id: 'ceo-gateway-recovery',
+        name: 'CEO Gateway',
+        type: 'system',
+        intervalMs: 30 * 1000,
+        target: 'CEO',
+        description: 'Monitors CEO gateway health, reconnects WebSocket, respawns on failure',
+        callback: () => recoverCeoGateway(this),
+      });
 
-    // Corp Gateway Recovery — picks up after autoRestart exhausts its 3 attempts
-    this.clocks.register({
-      id: 'corp-gateway-recovery',
-      name: 'Corp Gateway',
-      type: 'system',
-      intervalMs: 60 * 1000,
-      target: 'Workers',
-      description: 'Recovers corp gateway after auto-restart exhaustion, reconnects WebSocket',
-      callback: () => recoverCorpGateway(this),
-    });
+      // Corp Gateway Recovery — picks up after autoRestart exhausts its 3 attempts
+      this.clocks.register({
+        id: 'corp-gateway-recovery',
+        name: 'Corp Gateway',
+        type: 'system',
+        intervalMs: 60 * 1000,
+        target: 'Workers',
+        description: 'Recovers corp gateway after auto-restart exhaustion, reconnects WebSocket',
+        callback: () => recoverCorpGateway(this),
+      });
+    }
 
     // Rehydrate user-created loops and crons from clocks.json
     this.loops.rehydrate();
