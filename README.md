@@ -308,6 +308,29 @@ cc-cli inspect --agent ceo                 # Agent details
 
 All commands support `--json` for scripting.
 
+## Demo Mode
+
+For recording videos without burning model tokens, Claude Corp ships pre-scripted scenarios that replay through the daemon's WebSocket bus. Character-by-character streaming, tool calls, agent appearances — everything looks real because the TUI doesn't know it's fake.
+
+```bash
+cc-cli demo list                           # show available scenarios
+cc-cli demo overview                       # play the 4-min hero demo
+cc-cli demo dreams                         # 90s dreams cycle showcase
+cc-cli demo overview --speed 2x            # 2x speed for timelapses
+cc-cli demo overview --pause 30s           # pause at 30s for screenshots
+cc-cli demo overview --reset               # auto-reset corp before playback
+cc-cli demo reset demo-overview            # explicit reset (re-record clean)
+```
+
+**Recording workflow:**
+1. Create the demo corp: `cc-cli init --name demo-overview --user Mark`
+2. Start the daemon: `cc-cli start --corp demo-overview`
+3. Open the TUI: `cc --corp demo-overview` (separate terminal)
+4. Play the scenario: `cc-cli demo overview --reset`
+5. Recorded? Press Ctrl+C and `--reset` to re-record
+
+Scenarios live in `packages/cli/src/demo/scenarios/`. Each is a JSON file with timed events (`stream-end`, `tool-call`, `agent-appear`, `task-create`, `slumber-start`, `observation-write`, `brain-write`, etc.). See the player source for the full event schema.
+
 ## Architecture
 
 ```
