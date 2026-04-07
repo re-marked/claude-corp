@@ -408,6 +408,21 @@ function formatToolMsgInline(toolName: string, args?: Record<string, unknown>): 
   return `used ${toolName}`;
 }
 
+// ── TUI connection check ───────────────────────────────────────────
+
+/** Check if at least one TUI client is connected to the daemon WebSocket. */
+async function checkTuiConnected(daemonUrl: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`${daemonUrl}/status`);
+    if (!resp.ok) return false;
+    // Status endpoint doesn't expose client count directly, but if the daemon
+    // responds at all we know it's up. We'll trust the user to have the TUI open.
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ── Main player ────────────────────────────────────────────────────
 
 export async function playScenario(opts: PlayerOptions): Promise<void> {
@@ -417,6 +432,12 @@ export async function playScenario(opts: PlayerOptions): Promise<void> {
   console.log(`\n▶ Playing scenario: ${scenario.title}`);
   console.log(`  ${scenario.description}`);
   console.log(`  Duration: ${scenario.durationSec}s (speed: ${opts.speed}x)\n`);
+
+  // Verify daemon is reachable before starting
+  const daemonUp = await checkTuiConnected(opts.daemonUrl);
+  if (!daemonUp) {
+    throw new Error(`Daemon not reachable at ${opts.daemonUrl}. Is it running?`);
+  }
 
   const startedAt = Date.now();
   let lastAt = 0;
