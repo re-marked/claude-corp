@@ -302,12 +302,17 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         setClient(new DaemonClient(port));
 
         const daemon = d!;
+        const isDemoMode = daemon.isDemoCorp();
+
         const tryConnect = async (): Promise<boolean> => {
           try {
             await daemon.spawnAllAgents();
           } catch (err) {
             console.error('[startup] Agent spawning had errors:', err);
           }
+
+          // Demo mode: no agents are spawned, skip the readiness wait
+          if (isDemoMode) return true;
 
           const maxWait = globalConfig.userGateway ? 5 : 15;
           for (let i = 0; i < maxWait; i++) {
@@ -319,11 +324,11 @@ function ResumeView({ corpPath }: { corpPath: string }) {
           return false;
         };
 
-        setStatus('Spawning agents...');
+        setStatus(isDemoMode ? 'Demo mode — skipping agent spawn' : 'Spawning agents...');
         let agentsReady = await tryConnect();
 
-        // Retry loop for gateway connections
-        while (!agentsReady && globalConfig.userGateway) {
+        // Retry loop for gateway connections (only when not in demo mode)
+        while (!agentsReady && !isDemoMode && globalConfig.userGateway) {
           setStatus('Cannot reach your OpenClaw gateway. Reconnecting in 5s...');
           await new Promise((r) => setTimeout(r, 5000));
           setStatus('Reconnecting to OpenClaw gateway...');
