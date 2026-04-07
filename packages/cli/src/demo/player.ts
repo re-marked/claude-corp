@@ -298,13 +298,13 @@ async function executeEvent(event: DemoEvent, opts: PlayerOptions): Promise<void
     }
 
     case 'slumber-tick': {
-      // Tick events don't have a direct broadcast, just emit a message in #general
-      // for visual effect during the timelapse
-      const generalPath = resolveChannelPath(corpRoot, 'general');
-      const generalId = resolveChannelId(corpRoot, 'general');
-      const agentId = resolveAgentId(corpRoot, event.agent);
-      if (!generalPath || !generalId || !agentId) return;
-      // No-op for now — the visual effect comes from other events fired during timelapse
+      // Broadcast a status update — visible in the autoemon status bar.
+      // Productive ticks pulse the indicator, idle ticks tick quietly.
+      await broadcastEvent(daemonUrl, {
+        type: 'autoemon_tick',
+        agentName: event.agent,
+        productive: event.productive,
+      });
       return;
     }
 
