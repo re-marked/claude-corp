@@ -17,14 +17,21 @@ import type { Scenario, PlayerOptions } from '../demo/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** Resolve scenario directory — handles both src and dist paths. */
+/** Resolve scenario directory — handles src (npx tsx), dist (built), and chunked layouts. */
 function getScenariosDir(): string {
-  // Try src first (development), then dist (built)
-  const srcDir = join(__dirname, '..', 'demo', 'scenarios');
-  if (existsSync(srcDir)) return srcDir;
+  // Built layout: dist/demo-CHUNK.js + dist/demo/scenarios/
+  const builtSibling = join(__dirname, 'demo', 'scenarios');
+  if (existsSync(builtSibling)) return builtSibling;
+
+  // tsx layout: src/commands/demo.ts + src/demo/scenarios/
+  const tsxSibling = join(__dirname, '..', 'demo', 'scenarios');
+  if (existsSync(tsxSibling)) return tsxSibling;
+
+  // Last resort — walk up to find packages/cli/src/demo/scenarios
   const altDir = join(__dirname, '..', '..', 'src', 'demo', 'scenarios');
   if (existsSync(altDir)) return altDir;
-  return srcDir;
+
+  return tsxSibling;
 }
 
 function listScenarios(): Scenario[] {
