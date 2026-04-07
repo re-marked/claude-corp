@@ -46,6 +46,9 @@ const { values, positionals } = parseArgs({
     maxRuns: { type: 'string' },
     'spawn-task': { type: 'boolean', default: false },
     'task-title': { type: 'string' },
+    speed: { type: 'string' },
+    pause: { type: 'string' },
+    'no-cleanup': { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -296,6 +299,17 @@ async function run() {
     case 'slumber': {
       const { cmdSlumber } = await import('./commands/slumber.js');
       await cmdSlumber({ args: positionals.slice(1), json: !!values.json });
+      break;
+    }
+    case 'demo': {
+      const { cmdDemo } = await import('./commands/demo.js');
+      await cmdDemo({
+        args: positionals.slice(1),
+        speed: values.speed as string | undefined,
+        pause: values.pause as string | undefined,
+        corp: values.corp as string | undefined,
+        noCleanup: !!values['no-cleanup'],
+      });
       break;
     }
     case 'wake': {
