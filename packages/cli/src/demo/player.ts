@@ -228,8 +228,10 @@ async function executeEvent(event: DemoEvent, opts: PlayerOptions): Promise<void
     }
 
     case 'agent-appear': {
-      // Add agent to members.json
+      // Add agent to members.json + create their DM channel with the founder
       try {
+        const { mkdirSync, writeFileSync } = await import('node:fs');
+
         const membersPath = join(corpRoot, MEMBERS_JSON);
         const members = readConfig<Member[]>(membersPath);
         if (members.find(m => m.id === event.id)) return; // already exists
@@ -246,6 +248,40 @@ async function executeEvent(event: DemoEvent, opts: PlayerOptions): Promise<void
         } as unknown as Member;
         members.push(newMember);
         writeConfig(membersPath, members);
+
+        // Create the agent's directory + minimal SOUL.md so the corp doesn't break
+        const agentDir = join(corpRoot, 'agents', event.id);
+        mkdirSync(agentDir, { recursive: true });
+        const soulPath = join(agentDir, 'SOUL.md');
+        try {
+          writeFileSync(soulPath, `# ${event.displayName}\n\nDemo agent (${event.rank}).\n`, { flag: 'wx' });
+        } catch {} // already exists, fine
+
+        // Create the DM channel: dm-<founder>-<agent> (matches corp convention)
+        const founder = members.find(m => m.rank === 'owner');
+        if (founder) {
+          const channelsPath = join(corpRoot, CHANNELS_JSON);
+          const channels = readConfig<Channel[]>(channelsPath);
+          const dmName = `dm-${founder.displayName.toLowerCase()}-${event.id}`;
+          if (!channels.find(c => c.name === dmName)) {
+            const channelId = `ch-${event.id}-${Date.now().toString(36)}`;
+            const channelPath = `channels/${dmName}`;
+            const newChannel = {
+              id: channelId,
+              name: dmName,
+              kind: 'direct',
+              memberIds: [founder.id, event.id],
+              path: channelPath,
+              createdAt: new Date().toISOString(),
+            } as unknown as Channel;
+            channels.push(newChannel);
+            writeConfig(channelsPath, channels);
+
+            // Create the channel directory + empty messages.jsonl
+            mkdirSync(join(corpRoot, channelPath), { recursive: true });
+            writeFileSync(join(corpRoot, channelPath, 'messages.jsonl'), '', { flag: 'wx' });
+          }
+        }
       } catch {}
       return;
     }
