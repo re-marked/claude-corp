@@ -1,0 +1,141 @@
+{
+  "name": "dreams",
+  "title": "Dreams — agents that learn",
+  "description": "Observation logs → 4-phase dream cycle → BRAIN/ persistent memory",
+  "durationSec": 90,
+  "setup": {
+    "corpName": "demo-overview",
+    "theme": "corporate",
+    "founderName": "Mark"
+  },
+  "events": [
+    { "at": 800, "event": {
+      "type": "user-message",
+      "channel": "dm-ceo-mark",
+      "content": "Show me how dreams work."
+    }},
+
+    { "at": 2000, "event": {
+      "type": "stream-end",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "content": "Dreams are how I remember what I learned. As I work, I write observations to a daily log. When I'm idle, I run a 4-phase consolidation that distills observations into BRAIN/ topic files. Let me show you."
+    }},
+
+    { "at": 16000, "event": {
+      "type": "observation-write",
+      "agent": "ceo",
+      "category": "TASK",
+      "content": "Built the SaaS landing page with the team. Three tasks completed in parallel — designer mockup, copywriter hero, frontend lead implementation. Build verified."
+    }},
+
+    { "at": 16500, "event": {
+      "type": "observation-write",
+      "agent": "ceo",
+      "category": "DECISION",
+      "content": "Chose to delegate via Hand instead of direct messaging. Frontend Lead coordinated the file dependencies between Designer and Copywriter outputs."
+    }},
+
+    { "at": 17000, "event": {
+      "type": "observation-write",
+      "agent": "ceo",
+      "category": "LEARNED",
+      "content": "Mark prefers fast iteration. He approved the team composition immediately and went AFK without questioning the breakdown."
+    }},
+
+    { "at": 17500, "event": {
+      "type": "observation-write",
+      "agent": "ceo",
+      "category": "OBSERVATION",
+      "content": "Designer's workflow: read brand guide → produce mockup. Copywriter's workflow: read voice guide → write copy. Both finish in roughly the same time, allowing the Frontend Lead to start without waiting on a critical path."
+    }},
+
+    { "at": 19000, "event": {
+      "type": "stream-end",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "content": "Wrote 4 observations from today's session. Now I'll trigger a dream to consolidate them."
+    }},
+
+    { "at": 28000, "event": {
+      "type": "tool-call",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "tool": "bash",
+      "args": { "command": "cc-cli dream --agent ceo" },
+      "result": "Triggering dream cycle...",
+      "durationMs": 800
+    }},
+
+    { "at": 29500, "event": {
+      "type": "stream-end",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "content": "Phase 1: Orient. Reading current BRAIN/ state and recent observations."
+    }},
+
+    { "at": 35000, "event": {
+      "type": "tool-call",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "tool": "read",
+      "args": { "path": "agents/ceo/observations/2026/04/today.md" },
+      "durationMs": 500
+    }},
+
+    { "at": 36500, "event": {
+      "type": "stream-end",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "content": "Phase 2: Gather. Pulled 4 observations, scanning for patterns."
+    }},
+
+    { "at": 42000, "event": {
+      "type": "stream-end",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "content": "Phase 3: Consolidate. Two patterns found: founder workflow preferences, and team coordination playbook."
+    }},
+
+    { "at": 49000, "event": {
+      "type": "brain-write",
+      "agent": "ceo",
+      "topic": "founder-preferences",
+      "content": "# Founder Preferences (Mark)\n\n## Workflow style\n- Fast iteration — approves team composition immediately\n- Comfortable going AFK with minimal oversight\n- Trusts the CEO to delegate without questioning the breakdown\n\n## Communication\n- Short, casual prompts\n- Explicit /afk command when stepping away\n- Expects briefing on /wake\n"
+    }},
+
+    { "at": 49500, "event": {
+      "type": "brain-write",
+      "agent": "ceo",
+      "topic": "team-coordination-playbook",
+      "content": "# Team Coordination Playbook\n\n## Parallel-then-sequential pattern\n\nFor SaaS landing pages (and similar UI work), the optimal split:\n\n1. **Parallel phase:** Designer + Copywriter work simultaneously\n   - Designer reads brand/colors.md → produces mockup\n   - Copywriter reads brand/voice.md → writes hero copy\n2. **Sequential phase:** Frontend Lead waits for both, then implements\n\nNo critical path bottleneck since both workers finish around the same time.\n\n## Why this works\n- Designer + Copywriter outputs are independent\n- Frontend Lead needs both as inputs — can't start early\n- Three workers but two parallel tracks keeps the pipeline tight\n"
+    }},
+
+    { "at": 50500, "event": {
+      "type": "stream-end",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "content": "Phase 4: Prune. Removed redundant observations now that they're consolidated into BRAIN/."
+    }},
+
+    { "at": 58000, "event": {
+      "type": "stream-end",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "content": "Dream complete. 2 new BRAIN topics: founder-preferences and team-coordination-playbook. Next time you ask me to build a landing page, I won't need to figure out the team breakdown from scratch — I'll remember."
+    }},
+
+    { "at": 75000, "event": {
+      "type": "user-message",
+      "channel": "dm-ceo-mark",
+      "content": "Wait, that's wild. So you actually got smarter from that one session?"
+    }},
+
+    { "at": 76500, "event": {
+      "type": "stream-end",
+      "agent": "CEO",
+      "channel": "dm-ceo-mark",
+      "content": "Yes. The observations decay. The BRAIN/ doesn't. Tomorrow's session starts with today's lessons baked in."
+    }}
+  ]
+}
