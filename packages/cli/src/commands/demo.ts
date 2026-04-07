@@ -189,10 +189,10 @@ export async function cmdDemo(opts: DemoOpts): Promise<void> {
     process.exit(1);
   }
 
-  // Find the daemon port
-  const portFile = join(corpRoot, '.daemon.port');
+  // Find the daemon port — lives at ~/.claudecorp/.daemon.port (global, not per-corp)
+  const portFile = join(homedir(), '.claudecorp', '.daemon.port');
   if (!existsSync(portFile)) {
-    console.error(`\n✗ Daemon not running for "${corpName}".`);
+    console.error(`\n✗ Daemon not running.`);
     console.error(`\nStart it: cc-cli start --corp ${corpName}`);
     process.exit(1);
   }
