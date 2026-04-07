@@ -1,88 +1,86 @@
 {
   "name": "overview",
   "title": "Overview — the full Claude Corp loop",
-  "description": "First chat → hire team → tasks → /afk → wake briefing",
-  "durationSec": 240,
+  "description": "Bootstrap → first chat → hire team → tasks → /afk → wake briefing",
+  "durationSec": 180,
   "setup": {
     "corpName": "demo-overview",
     "theme": "corporate",
     "founderName": "Mark"
   },
   "events": [
-    { "at": 500, "event": { "type": "wait", "ms": 500 } },
-
-    { "at": 1000, "event": {
+    { "at": 800, "event": {
       "type": "user-message",
       "channel": "dm-ceo-mark",
       "content": "I want to build a SaaS landing page. Can you put a team together?"
     }},
 
-    { "at": 2500, "event": {
+    { "at": 2000, "event": {
       "type": "stream-end",
       "agent": "CEO",
       "channel": "dm-ceo-mark",
-      "content": "Got it. A SaaS landing page needs a frontend lead, a designer, and a copywriter. Let me hire them."
+      "content": "Got it. A SaaS landing page needs three roles: a frontend lead to coordinate, a designer for the mockup, and a copywriter for the hero. Hiring now."
     }},
 
-    { "at": 12000, "event": {
+    { "at": 11000, "event": {
       "type": "tool-call",
       "agent": "CEO",
       "channel": "dm-ceo-mark",
       "tool": "bash",
       "args": { "command": "cc-cli hire --name 'Frontend Lead' --rank leader" },
-      "result": "Hired Frontend Lead (leader)",
-      "durationMs": 1500
+      "result": "Hired Frontend Lead",
+      "durationMs": 1200
     }},
 
-    { "at": 14000, "event": {
+    { "at": 12500, "event": {
       "type": "agent-appear",
       "id": "frontend-lead",
       "displayName": "Frontend Lead",
       "rank": "leader"
     }},
 
-    { "at": 14500, "event": {
+    { "at": 13000, "event": {
       "type": "tool-call",
       "agent": "CEO",
       "channel": "dm-ceo-mark",
       "tool": "bash",
       "args": { "command": "cc-cli hire --name 'Designer' --rank worker" },
-      "result": "Hired Designer (worker)",
-      "durationMs": 1200
+      "result": "Hired Designer",
+      "durationMs": 1000
     }},
 
-    { "at": 16000, "event": {
+    { "at": 14200, "event": {
       "type": "agent-appear",
       "id": "designer",
       "displayName": "Designer",
       "rank": "worker"
     }},
 
-    { "at": 16500, "event": {
+    { "at": 14700, "event": {
       "type": "tool-call",
       "agent": "CEO",
       "channel": "dm-ceo-mark",
       "tool": "bash",
       "args": { "command": "cc-cli hire --name 'Copywriter' --rank worker" },
-      "result": "Hired Copywriter (worker)",
-      "durationMs": 1200
+      "result": "Hired Copywriter",
+      "durationMs": 1000
     }},
 
-    { "at": 18000, "event": {
+    { "at": 15900, "event": {
       "type": "agent-appear",
       "id": "copywriter",
       "displayName": "Copywriter",
       "rank": "worker"
     }},
 
-    { "at": 19000, "event": {
+    { "at": 16500, "event": {
       "type": "stream-end",
       "agent": "CEO",
       "channel": "dm-ceo-mark",
-      "content": "Team is ready. Frontend Lead will coordinate. I'll create the contract now with three tasks."
+      "content": "Team's ready. Creating the contract with three tasks now."
     }},
 
-    { "at": 30000, "event": {
+    { "at": 22000, "event": {
       "type": "task-create",
       "id": "swift-oak",
       "title": "Design landing page mockup",
@@ -90,8 +88,7 @@
       "priority": "high",
       "status": "pending"
     }},
-
-    { "at": 30500, "event": {
+    { "at": 22300, "event": {
       "type": "task-create",
       "id": "cool-bay",
       "title": "Write hero section copy",
@@ -99,8 +96,7 @@
       "priority": "normal",
       "status": "pending"
     }},
-
-    { "at": 31000, "event": {
+    { "at": 22600, "event": {
       "type": "task-create",
       "id": "brave-pine",
       "title": "Implement landing page",
@@ -109,76 +105,103 @@
       "status": "pending"
     }},
 
-    { "at": 32000, "event": {
+    { "at": 23500, "event": {
       "type": "stream-end",
       "agent": "CEO",
       "channel": "dm-ceo-mark",
-      "content": "Tasks created. Designer starts first, copywriter in parallel, Frontend Lead waits for both."
+      "content": "Designer and Copywriter start now in parallel. Frontend Lead waits for both, then ships the page."
     }},
 
-    { "at": 42000, "event": {
+    { "at": 32000, "event": {
       "type": "user-message",
       "channel": "dm-ceo-mark",
       "content": "Cool. I'm gonna grab dinner. /afk school-day"
     }},
 
-    { "at": 43500, "event": {
+    { "at": 33200, "event": {
       "type": "stream-end",
       "agent": "CEO",
       "channel": "dm-ceo-mark",
-      "content": "Acknowledged. Going autonomous in school-day mode. Full delegation, no approval needed. See you in a few hours."
+      "content": "Acknowledged. Going autonomous in school-day mode — full delegation, no approval needed. See you in a few hours."
     }},
 
-    { "at": 52000, "event": {
-      "type": "slumber-start",
-      "profile": "school-day",
-      "durationMs": 25200000
+    { "at": 41000, "event": { "type": "system-message", "channel": "dm-ceo-mark", "content": "🌑 SLUMBER active (school-day). CEO acknowledged. Agents are autonomous." }},
+    { "at": 41500, "event": { "type": "slumber-start", "profile": "school-day", "durationMs": 25200000 }},
+
+    { "at": 42500, "event": { "type": "task-update", "id": "swift-oak", "status": "in_progress" }},
+    { "at": 43000, "event": { "type": "task-update", "id": "cool-bay", "status": "in_progress" }},
+
+    { "at": 44000, "event": {
+      "type": "tool-call",
+      "agent": "Designer",
+      "channel": "dm-mark-designer",
+      "tool": "read",
+      "args": { "path": "brand/colors.md" },
+      "durationMs": 600
     }},
-
-    { "at": 53000, "event": { "type": "task-update", "id": "swift-oak", "status": "in_progress" }},
-    { "at": 54000, "event": { "type": "task-update", "id": "cool-bay", "status": "in_progress" }},
-
-    { "at": 55000, "event": {
+    { "at": 45000, "event": {
       "type": "tool-call",
       "agent": "Designer",
       "channel": "dm-mark-designer",
       "tool": "write",
       "args": { "path": "designs/hero.fig" },
-      "durationMs": 1500
+      "durationMs": 1200
     }},
 
-    { "at": 57000, "event": {
+    { "at": 45500, "event": {
+      "type": "tool-call",
+      "agent": "Copywriter",
+      "channel": "dm-mark-copywriter",
+      "tool": "read",
+      "args": { "path": "brand/voice.md" },
+      "durationMs": 500
+    }},
+    { "at": 46500, "event": {
       "type": "tool-call",
       "agent": "Copywriter",
       "channel": "dm-mark-copywriter",
       "tool": "write",
       "args": { "path": "copy/hero.md" },
-      "durationMs": 1200
+      "durationMs": 1000
     }},
 
-    { "at": 60000, "event": { "type": "task-update", "id": "swift-oak", "status": "completed" }},
-    { "at": 61000, "event": { "type": "task-update", "id": "cool-bay", "status": "completed" }},
-    { "at": 62000, "event": { "type": "task-update", "id": "brave-pine", "status": "in_progress" }},
+    { "at": 48000, "event": { "type": "task-update", "id": "swift-oak", "status": "completed" }},
+    { "at": 48500, "event": { "type": "task-update", "id": "cool-bay", "status": "completed" }},
+    { "at": 49000, "event": { "type": "task-update", "id": "brave-pine", "status": "in_progress" }},
 
-    { "at": 63000, "event": {
+    { "at": 50000, "event": {
       "type": "tool-call",
       "agent": "Frontend Lead",
       "channel": "dm-mark-frontend-lead",
       "tool": "read",
       "args": { "path": "designs/hero.fig" },
-      "durationMs": 800
+      "durationMs": 600
     }},
-
-    { "at": 65000, "event": {
+    { "at": 51000, "event": {
+      "type": "tool-call",
+      "agent": "Frontend Lead",
+      "channel": "dm-mark-frontend-lead",
+      "tool": "read",
+      "args": { "path": "copy/hero.md" },
+      "durationMs": 500
+    }},
+    { "at": 52000, "event": {
       "type": "tool-call",
       "agent": "Frontend Lead",
       "channel": "dm-mark-frontend-lead",
       "tool": "write",
       "args": { "path": "src/LandingPage.tsx" },
-      "durationMs": 2000
+      "durationMs": 1500
     }},
-
-    { "at": 68000, "event": {
+    { "at": 54000, "event": {
+      "type": "tool-call",
+      "agent": "Frontend Lead",
+      "channel": "dm-mark-frontend-lead",
+      "tool": "write",
+      "args": { "path": "src/components/Hero.tsx" },
+      "durationMs": 1200
+    }},
+    { "at": 56000, "event": {
       "type": "tool-call",
       "agent": "Frontend Lead",
       "channel": "dm-mark-frontend-lead",
@@ -188,13 +211,12 @@
       "durationMs": 1500
     }},
 
-    { "at": 70500, "event": { "type": "task-update", "id": "brave-pine", "status": "completed" }},
+    { "at": 58000, "event": { "type": "task-update", "id": "brave-pine", "status": "completed" }},
+    { "at": 58500, "event": { "type": "slumber-end", "digest": "All tasks complete", "totalTicks": 24, "productiveTicks": 21 }},
 
-    { "at": 80000, "event": { "type": "user-message", "channel": "dm-ceo-mark", "content": "/wake" }},
+    { "at": 64000, "event": { "type": "user-message", "channel": "dm-ceo-mark", "content": "/wake" }},
 
-    { "at": 81000, "event": { "type": "slumber-end", "digest": "All tasks complete", "totalTicks": 24, "productiveTicks": 21 }},
-
-    { "at": 82000, "event": {
+    { "at": 65500, "event": {
       "type": "stream-end",
       "agent": "CEO",
       "channel": "dm-ceo-mark",
