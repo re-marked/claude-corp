@@ -126,6 +126,22 @@ export interface ViewSwitchEvent {
   channel?: string;
 }
 
+/** Write an observation entry to an agent's daily log (for dreams demo). */
+export interface ObservationWriteEvent {
+  type: 'observation-write';
+  agent: string;            // agent id (e.g., 'ceo')
+  category: 'TASK' | 'RESEARCH' | 'DECISION' | 'BLOCKED' | 'LEARNED' | 'OBSERVATION';
+  content: string;
+}
+
+/** Create a BRAIN/ topic file (for dreams demo payoff). */
+export interface BrainWriteEvent {
+  type: 'brain-write';
+  agent: string;            // agent id
+  topic: string;            // filename without .md
+  content: string;          // markdown body
+}
+
 export type DemoEvent =
   | UserMessageEvent
   | DispatchStartEvent
@@ -140,7 +156,9 @@ export type DemoEvent =
   | SlumberEndEvent
   | SystemMessageEvent
   | WaitEvent
-  | ViewSwitchEvent;
+  | ViewSwitchEvent
+  | ObservationWriteEvent
+  | BrainWriteEvent;
 
 /** A timed event — `at` is ms from scenario start. */
 export interface TimedEvent {

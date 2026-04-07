@@ -321,6 +321,34 @@ async function executeEvent(event: DemoEvent, opts: PlayerOptions): Promise<void
       // The recorder should manually switch views when this event fires
       return;
     }
+
+    case 'observation-write': {
+      // Append to today's observation log: agents/<id>/observations/YYYY/MM/YYYY-MM-DD.md
+      try {
+        const { mkdirSync, appendFileSync } = await import('node:fs');
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const obsDir = join(corpRoot, 'agents', event.agent, 'observations', String(yyyy), mm);
+        mkdirSync(obsDir, { recursive: true });
+        const obsPath = join(obsDir, `${yyyy}-${mm}-${dd}.md`);
+        const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+        appendFileSync(obsPath, `\n## ${time} [${event.category}]\n\n${event.content}\n`);
+      } catch {}
+      return;
+    }
+
+    case 'brain-write': {
+      // Create/overwrite agents/<id>/BRAIN/<topic>.md
+      try {
+        const { mkdirSync, writeFileSync } = await import('node:fs');
+        const brainDir = join(corpRoot, 'agents', event.agent, 'BRAIN');
+        mkdirSync(brainDir, { recursive: true });
+        writeFileSync(join(brainDir, `${event.topic}.md`), event.content);
+      } catch {}
+      return;
+    }
   }
 }
 
