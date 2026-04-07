@@ -312,7 +312,10 @@ All commands support `--json` for scripting.
 
 For recording videos without burning model tokens, Claude Corp ships pre-scripted scenarios that replay through the daemon's WebSocket bus. Character-by-character streaming, tool calls, agent appearances — everything looks real because the TUI doesn't know it's fake.
 
+Demo corps have a `"demo": true` flag in `corp.json` that disables ALL real LLM dispatches: no CEO heartbeats, no Herald narration, no Pulse pings, no recovery clocks. The daemon runs but stays inert — perfect for clean recording without background activity polluting the footage.
+
 ```bash
+cc-cli demo init                           # create a demo corp (sets demo:true)
 cc-cli demo list                           # show available scenarios
 cc-cli demo overview                       # play the 4-min hero demo
 cc-cli demo dreams                         # 90s dreams cycle showcase
@@ -323,7 +326,7 @@ cc-cli demo reset demo-overview            # explicit reset (re-record clean)
 ```
 
 **Recording workflow:**
-1. Create the demo corp: `cc-cli init --name demo-overview --user Mark`
+1. Create the demo corp: `cc-cli demo init` (sets demo:true automatically)
 2. Start the daemon: `cc-cli start --corp demo-overview`
 3. Open the TUI: `cc --corp demo-overview` (separate terminal)
 4. Play the scenario: `cc-cli demo overview --reset`
