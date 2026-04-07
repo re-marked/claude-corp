@@ -443,6 +443,15 @@ export class Daemon {
   }
 
   async spawnAllAgents(): Promise<void> {
+    // Demo mode: skip everything. No gateway, no agent spawning, no system bootstrap.
+    // The daemon still runs the router/watchers/event bus, which is all the
+    // demo player needs. Saves ~10s of startup and prevents real OpenClaw connection.
+    if (this.isDemoCorp()) {
+      log(`[daemon] DEMO MODE — skipping agent spawning + gateway init`);
+      this.initAgentWorkStatuses();
+      return;
+    }
+
     // Initialize the shared corp gateway — if it fails, CEO may still work via remote
     try {
       await this.processManager.initCorpGateway();
