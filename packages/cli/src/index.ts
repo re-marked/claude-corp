@@ -48,6 +48,7 @@ const { values, positionals } = parseArgs({
     'task-title': { type: 'string' },
     speed: { type: 'string' },
     pause: { type: 'string' },
+    reset: { type: 'boolean', default: false },
     'no-cleanup': { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
@@ -309,6 +310,7 @@ async function run() {
         pause: values.pause as string | undefined,
         corp: values.corp as string | undefined,
         noCleanup: !!values['no-cleanup'],
+        reset: !!values.reset,
       });
       break;
     }

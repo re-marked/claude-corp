@@ -63,6 +63,55 @@ export interface DemoOpts {
   pause?: string;
   corp?: string;
   noCleanup?: boolean;
+  reset?: boolean;
+}
+
+/**
+ * Reset a demo corp to a clean state for re-recording.
+ * Wipes all channel JSONLs (preserves channels.json), all tasks, and any
+ * agents beyond the system bootstrap (CEO, Failsafe, Janitor, Warden, Herald, Planner).
+ */
+async function resetDemoCorp(corpRoot: string): Promise<void> {
+  const { writeFileSync, readdirSync, existsSync, rmSync } = await import('node:fs');
+  const { readConfig, writeConfig, MEMBERS_JSON, CHANNELS_JSON } = await import('@claudecorp/shared');
+
+  // 1. Wipe all message JSONLs
+  try {
+    const channels = readConfig<any[]>(join(corpRoot, CHANNELS_JSON));
+    for (const ch of channels) {
+      const msgPath = join(corpRoot, ch.path, 'messages.jsonl');
+      if (existsSync(msgPath)) writeFileSync(msgPath, '');
+    }
+  } catch {}
+
+  // 2. Wipe all tasks
+  try {
+    const tasksDir = join(corpRoot, 'tasks');
+    if (existsSync(tasksDir)) {
+      for (const f of readdirSync(tasksDir)) {
+        if (f.endsWith('.md')) rmSync(join(tasksDir, f));
+      }
+    }
+  } catch {}
+
+  // 3. Remove non-system agents from members.json
+  try {
+    const membersPath = join(corpRoot, MEMBERS_JSON);
+    const members = readConfig<any[]>(membersPath);
+    const SYSTEM = new Set(['ceo', 'failsafe', 'janitor', 'warden', 'herald', 'planner']);
+    const cleaned = members.filter(m => m.type !== 'agent' || SYSTEM.has(m.id));
+    writeConfig(membersPath, cleaned);
+  } catch {}
+
+  // 4. Wipe BRAIN/observations for system agents (so dreams demo starts fresh)
+  try {
+    for (const id of ['ceo', 'failsafe', 'janitor', 'warden', 'herald', 'planner']) {
+      const brainDir = join(corpRoot, 'agents', id, 'BRAIN');
+      const obsDir = join(corpRoot, 'agents', id, 'observations');
+      if (existsSync(brainDir)) rmSync(brainDir, { recursive: true });
+      if (existsSync(obsDir)) rmSync(obsDir, { recursive: true });
+    }
+  } catch {}
 }
 
 export async function cmdDemo(opts: DemoOpts): Promise<void> {
@@ -85,6 +134,24 @@ export async function cmdDemo(opts: DemoOpts): Promise<void> {
     return;
   }
 
+  // cc-cli demo reset <corp>
+  if (sub === 'reset') {
+    const corpName = opts.args[1] ?? opts.corp;
+    if (!corpName) {
+      console.error('Usage: cc-cli demo reset <corp-name>');
+      process.exit(1);
+    }
+    const corpRoot = join(homedir(), '.claudecorp', corpName);
+    if (!existsSync(corpRoot)) {
+      console.error(`Corp "${corpName}" not found.`);
+      process.exit(1);
+    }
+    console.log(`\n🧹 Resetting demo corp "${corpName}"...`);
+    await resetDemoCorp(corpRoot);
+    console.log(`✓ Reset complete. Channels, tasks, non-system agents, BRAIN, and observations cleared.\n`);
+    return;
+  }
+
   // cc-cli demo <scenario>
   const scenarios = listScenarios();
   const scenario = scenarios.find(s => s.name === sub);
@@ -97,6 +164,12 @@ export async function cmdDemo(opts: DemoOpts): Promise<void> {
   // Resolve corp root — use the scenario's setup.corpName
   const corpName = opts.corp ?? scenario.setup.corpName;
   const corpRoot = join(homedir(), '.claudecorp', corpName);
+
+  // Auto-reset before playback if --reset flag passed
+  if (opts.reset && existsSync(corpRoot)) {
+    console.log(`\n🧹 Resetting "${corpName}" before playback...`);
+    await resetDemoCorp(corpRoot);
+  }
 
   if (!existsSync(corpRoot)) {
     console.error(`\n✗ Demo corp "${corpName}" doesn't exist yet.`);
