@@ -223,7 +223,7 @@ export interface PlayerOptions {
 
 /** Realistic typing speeds (ms per character) for char-by-char streaming. */
 export const TYPING_SPEED = {
-  fast: 15,      // fast model, confident
-  normal: 30,    // typical
-  slow: 50,      // thoughtful
+  fast: 5,       // spaces — almost instant
+  normal: 12,    // letters — fast but visible
+  slow: 20,      // punctuation — slight pause
 } as const;
