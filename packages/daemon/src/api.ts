@@ -1301,6 +1301,17 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /demo/broadcast — inject a fake event into the WebSocket bus.
+      // Used by the demo player (cc-cli demo) to script TUI animations
+      // without burning model tokens. The event payload is broadcast as-is
+      // to all connected TUI clients via daemon.events.broadcast().
+      if (method === 'POST' && path === '/demo/broadcast') {
+        const event = await readBody(req) as Record<string, unknown>;
+        daemon.events.broadcast(event as any);
+        json(res, { ok: true });
+        return;
+      }
+
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
