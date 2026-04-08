@@ -69,7 +69,7 @@ export function App({ forceNew: forceNewProp }: { forceNew?: boolean } = {}) {
     <CorpSelector
       corps={corps}
       onSelect={(path) => setSelectedCorp(path)}
-      onNew={() => forceReload((n) => n + 1)}
+      onNew={() => setShowOnboarding(true)}
       onDelete={(name) => { deleteCorp(name); forceReload((n) => n + 1); }}
     />
   );
