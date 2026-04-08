@@ -45,7 +45,7 @@ export const CLAUDE_CORP_LOGO = [
   '   """""      """"    """" ""   """" ""    """ ""    """""               """""     """"     ""       ## """',
   '                                                                                                     ##',
   '',
-  '                           Your Personal Corporation — v0.1.0',
+  '                           Your Personal Corporation — v1.0.2',
 ].join('\n');
 
 /** Simple block letter generator for corp names */
