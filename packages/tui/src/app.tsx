@@ -37,6 +37,7 @@ export function App({ forceNew: forceNewProp }: { forceNew?: boolean } = {}) {
   const [, forceReload] = useState(0);
   const [selectedCorp, setSelectedCorp] = useState<string | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(!!forceNewProp);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     const onResize = () => setTermSize({ cols: process.stdout.columns ?? 80, rows: process.stdout.rows ?? 24 });
@@ -66,12 +67,25 @@ export function App({ forceNew: forceNewProp }: { forceNew?: boolean } = {}) {
   }
 
   return (
-    <CorpSelector
-      corps={corps}
-      onSelect={(path) => setSelectedCorp(path)}
-      onNew={() => setShowOnboarding(true)}
-      onDelete={(name) => { deleteCorp(name); forceReload((n) => n + 1); }}
-    />
+    <Box flexDirection="column" flexGrow={1}>
+      {deleteError && (
+        <Box borderStyle="round" borderColor={COLORS.danger} paddingX={2} paddingY={0} marginBottom={1}>
+          <Text color={COLORS.danger}>⚠ {deleteError}</Text>
+        </Box>
+      )}
+      <CorpSelector
+        corps={corps}
+        onSelect={(path) => setSelectedCorp(path)}
+        onNew={() => setShowOnboarding(true)}
+        onDelete={(name) => {
+          setDeleteError(null);
+          try { deleteCorp(name); } catch (err) {
+            setDeleteError(err instanceof Error ? err.message : String(err));
+          }
+          forceReload((n) => n + 1);
+        }}
+      />
+    </Box>
   );
 }
 
