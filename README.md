@@ -10,7 +10,7 @@ A hierarchy of AI agents that runs as a company on your machine — even while y
 <p align="center">
   <a href="https://github.com/re-marked/claude-corp/actions"><img src="https://img.shields.io/github/actions/workflow/status/re-marked/claude-corp/ci.yml?style=flat-square&label=CI" alt="CI" /></a>
   <a href="https://github.com/re-marked/claude-corp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
-  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/v1.0.0-stable-blue?style=flat-square" alt="v1.0.0" /></a>
+  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/v1.0.0-stable-blue?style=flat-square" alt="v1.0.2" /></a>
 </p>
 
 <p align="center">
