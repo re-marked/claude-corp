@@ -46,6 +46,9 @@ const { values, positionals } = parseArgs({
     maxRuns: { type: 'string' },
     'spawn-task': { type: 'boolean', default: false },
     'task-title': { type: 'string' },
+    tag: { type: 'string' },
+    source: { type: 'string' },
+    confidence: { type: 'string' },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -85,6 +88,23 @@ Commands:
   version    Show package versions
   logs       Show daemon logs
   dogfood    Set up dogfood project + dev team + task
+
+B.R.A.I.N. commands:
+  brain                                 Show usage + quick stats
+  brain list [--type <type>]            List memories (optionally filter by type)
+  brain show <name>                     Read a specific memory
+  brain search <query>                  Full-text search
+  brain search --tag <tag>              Search by tag
+  brain search --type <type>            Search by memory type
+  brain links <name>                    Show inbound + outbound wikilinks
+  brain stale                           Memories needing validation
+  brain orphans                         Unlinked memories
+  brain stats                           Detailed statistics
+  brain graph                           Link topology + clusters
+  brain tags                            All tags by frequency
+  brain create <name> --type <type>     Create a memory with frontmatter
+  brain validate <name>                 Mark a memory as still valid
+  brain delete <name>                   Delete a memory
 
 SLUMBER commands:
   slumber [duration|profile]          Activate SLUMBER (e.g., slumber 3h, slumber night-owl)
@@ -289,6 +309,19 @@ async function run() {
       const { cmdDream } = await import('./commands/dream.js');
       await cmdDream({
         agent: values.agent as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'brain': {
+      const { cmdBrain } = await import('./commands/brain.js');
+      await cmdBrain({
+        args: positionals.slice(1),
+        agent: values.agent as string | undefined,
+        tag: values.tag as string | undefined,
+        type: values.type as string | undefined,
+        source: values.source as string | undefined,
+        confidence: values.confidence as string | undefined,
         json: !!values.json,
       });
       break;
