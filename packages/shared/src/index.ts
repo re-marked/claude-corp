@@ -110,6 +110,9 @@ export type { AgentSetupOpts, AgentSetupResult } from './agent-setup.js';
 export { setupCeo } from './ceo.js';
 export type { CeoSetupResult } from './ceo.js';
 
+// Templates
+export { UNIVERSAL_SOUL } from './templates/soul.js';
+
 // Ranks
 export { canHire } from './ranks.js';
 
