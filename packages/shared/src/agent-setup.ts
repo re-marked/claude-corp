@@ -100,9 +100,20 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     try {
       sharedTags = getSharedTags(corpRoot).map(t => t.tag);
     } catch { /* culture data unavailable — fine, bootstrap works without it */ }
+
+    // Resolve hiring agent's display name from members.json
+    let hiringAgentName: string | undefined;
+    if (opts.spawnedBy) {
+      try {
+        const allMembers = readConfig<Array<{ id: string; displayName: string }>>(join(corpRoot, MEMBERS_JSON));
+        const spawner = allMembers.find(m => m.id === opts.spawnedBy);
+        if (spawner) hiringAgentName = spawner.displayName;
+      } catch { /* name resolution failed — fine, bootstrap works without it */ }
+    }
+
     bootstrapContent = buildAgentBootstrap({
       sharedTags: sharedTags.length > 0 ? sharedTags : undefined,
-      hiringAgentName: opts.spawnedBy ? undefined : undefined, // TODO: resolve spawner name
+      hiringAgentName,
     });
   }
   writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), bootstrapContent, 'utf-8');
