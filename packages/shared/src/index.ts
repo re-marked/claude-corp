@@ -112,6 +112,8 @@ export type { CeoSetupResult } from './ceo.js';
 
 // Templates
 export { UNIVERSAL_SOUL } from './templates/soul.js';
+export { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
+export { AGENT_BOOTSTRAP } from './templates/bootstrap-agent.js';
 
 // Ranks
 export { canHire } from './ranks.js';
