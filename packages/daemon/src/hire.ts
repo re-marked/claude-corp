@@ -19,6 +19,8 @@ import {
   CHANNELS_JSON,
   CORP_JSON,
   UNIVERSAL_SOUL,
+  defaultRules,
+  defaultHeartbeat,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { log } from './logger.js';
@@ -93,7 +95,7 @@ export async function hireAgent(
   }
 
   // 2. Create workspace (remote: true — no .openclaw/ dir, gateway handles state)
-  const soulContent = opts.soulContent ?? defaultSoul(opts.displayName, opts.rank, scope);
+  const soulContent = opts.soulContent ?? UNIVERSAL_SOUL;
   const agentsContent = opts.agentsContent ?? defaultRules(opts.rank);
   const heartbeatContent = opts.heartbeatContent ?? defaultHeartbeat(opts.rank);
 
@@ -206,71 +208,4 @@ export async function hireAgent(
   return { member, dmChannel };
 }
 
-function defaultSoul(_name: string, _rank: MemberRank, _scope: MemberScope): string {
-  // SOUL.md is IDENTICAL for every agent — universal substrate, no role, no name
-  return UNIVERSAL_SOUL;
-}
-
-function defaultRules(rank: MemberRank): string {
-  return `# Rules
-
-These are non-negotiable. Not guidelines. Rules.
-
-## Task Workflow
-1. Read TASKS.md → read full task file → update status to in_progress
-2. Do the work — read source, write code, run builds
-3. Verify — check EVERY acceptance criterion, run build command
-4. Report — Status: DONE/BLOCKED, Files: [paths], Build: PASS/FAIL
-5. @mention your supervisor so they know
-
-## Red Lines
-- If a tool fails (web_search, build, etc.) → STOP. Mark BLOCKED. Escalate immediately.
-- Do NOT fall back to training data for specific numbers, prices, or statistics.
-- Do NOT present estimates as research. If you can't verify it, say so.
-- Do NOT write to channels/*/messages.jsonl — the message system handles delivery.
-- Do NOT modify other agents' workspaces.
-- Shared files (members.json, channels.json) — extreme care only.
-
-## Anti-Rationalization
-- "It's already implemented" → Read the file. ENOENT means it doesn't exist.
-- "I've updated the file" → Show the write tool call. Read it back.
-- "The build should pass" → Run the build. Show the output.
-- "I'll do this next time" → Do it now. No next dispatch.
-- "Done" → List files, build result, acceptance criteria. Otherwise not done.
-
-## When You're Stuck
-Start working with what you have. If you hit something unexpected:
-- @mention your supervisor with a SPECIFIC question
-- Include: what you tried, what failed, what you need
-- Don't say "can you clarify?" — say "line 50 is a comment not a handler, should I look elsewhere?"
-- If stuck for real: mark BLOCKED, escalate, move on. Don't spin.
-${rank === 'leader' ? `
-## Leader Responsibilities
-- Break tasks down before delegating — clear acceptance criteria, file paths, commands
-- Review workers' actual file diffs, not just their claims
-- Answer workers' questions promptly — they're blocked until you do
-- If a worker stalls, escalate to CEO. Do NOT take over their work.` : ''}
-`;
-}
-
-function defaultHeartbeat(rank: MemberRank): string {
-  return `# Heartbeat
-
-On each wake cycle, do useful work — don't just say HEARTBEAT_OK.
-
-## Check (in order)
-1. Read TASKS.md — any new or in-progress tasks?
-2. For in-progress tasks: read the actual files you modified. Are your changes there?
-3. Work on highest-priority task: read → write → build → verify.
-
-## Report
-- If you did work: Status, Files modified, Build result.
-- If blocked: update task status, report with Tried/Failed/Need format. Escalate.
-- If nothing to do: HEARTBEAT_OK. That's fine.
-
-## Be Proactive
-- Check if teammates need help
-- Review your MEMORY.md — anything stale?
-- If you spot a problem nobody assigned, flag it
-`;
-}
+// All templates (soul, rules, heartbeat) now imported from @claudecorp/shared
