@@ -46,6 +46,9 @@ const { values, positionals } = parseArgs({
     maxRuns: { type: 'string' },
     'spawn-task': { type: 'boolean', default: false },
     'task-title': { type: 'string' },
+    tag: { type: 'string' },
+    source: { type: 'string' },
+    confidence: { type: 'string' },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -317,6 +320,8 @@ async function run() {
         agent: values.agent as string | undefined,
         tag: values.tag as string | undefined,
         type: values.type as string | undefined,
+        source: values.source as string | undefined,
+        confidence: values.confidence as string | undefined,
         json: !!values.json,
       });
       break;

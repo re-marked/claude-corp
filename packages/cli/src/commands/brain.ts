@@ -45,6 +45,8 @@ export async function cmdBrain(opts: {
   agent?: string;
   tag?: string;
   type?: string;
+  source?: string;
+  confidence?: string;
   json: boolean;
 }): Promise<void> {
   const corpRoot = await getCorpRoot();
@@ -75,7 +77,7 @@ export async function cmdBrain(opts: {
     case 'stats': return showStats(agentDir, opts.json);
     case 'graph': return showGraph(agentDir, opts.json);
     // Actions
-    case 'create': return doCreate(agentDir, opts.args.slice(1), opts.type, opts.tag, opts.json);
+    case 'create': return doCreate(agentDir, opts.args.slice(1), opts.type, opts.tag, opts.source, opts.confidence, opts.json);
     case 'validate': return doValidate(agentDir, opts.args[1], opts.json);
     case 'delete':
     case 'rm': return doDelete(agentDir, opts.args[1], opts.json);
@@ -508,22 +510,28 @@ async function doCreate(
   args: string[],
   typeArg?: string,
   tagArg?: string,
+  sourceArg?: string,
+  confidenceArg?: string,
   json: boolean = false,
 ): Promise<void> {
   const name = args[0];
   if (!name) {
-    console.error('Usage: cc-cli brain create <name> --type <type> [--tag <tags>] [body...]');
+    console.error('Usage: cc-cli brain create <name> --type <type> [--tag <tags>] [--source <source>] [--confidence <level>] [body...]');
     console.error('');
-    console.error('Types: founder-preference, technical, decision, self-knowledge, correction, relationship');
+    console.error('Types:      founder-preference, technical, decision, self-knowledge, correction, relationship');
+    console.error('Sources:    founder-direct, observation, dream, correction, agent-secondhand');
+    console.error('Confidence: high, medium, low');
     return;
   }
 
   const type = (typeArg || 'technical') as BrainMemoryType;
+  const source = (sourceArg || 'observation') as BrainSource;
+  const confidence = (confidenceArg || 'medium') as BrainConfidence;
   const tags = tagArg ? tagArg.split(',').map(t => t.trim()) : [];
   const body = args.slice(1).join(' ') || '(empty — fill in the content)';
 
   try {
-    const file = createBrainFile(agentDir, name, body, type, tags, 'observation' as BrainSource);
+    const file = createBrainFile(agentDir, name, body, type, tags, source, confidence);
 
     if (json) {
       console.log(JSON.stringify({ created: file.name, type: file.meta.type, tags: file.meta.tags, path: file.path }, null, 2));
