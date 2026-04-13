@@ -26,9 +26,11 @@ import { contextPersistenceFragment } from './context-persistence.js';
 import { scratchpadFragment } from './scratchpad.js';
 import { checkpointFragment } from './checkpoint.js';
 import { autoemonFragment } from './autoemon.js';
+import { brainFragment } from './brain.js';
 
 const FRAGMENTS: Fragment[] = [
   autoemonFragment,
+  brainFragment,
   workspaceFragment,
   toolResultManagementFragment,
   contextPersistenceFragment,
