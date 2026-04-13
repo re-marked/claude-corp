@@ -23,6 +23,13 @@ import {
   MEMBERS_JSON,
   CHANNELS_JSON,
   countRecentObservations,
+  buildBrainGraph,
+  getBrainStats,
+  getBrainDir,
+  listBrainFiles,
+  findStaleFiles,
+  findOrphans,
+  STALENESS_THRESHOLD_DAYS,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { buildDreamPrompt } from './dream-prompt.js';
@@ -416,6 +423,13 @@ export class DreamManager {
         state.lastSummary = isClean ? 'No changes needed' : response.slice(0, 500);
         this.writeDreamState(agentDir, state);
 
+        // Post-dream: rebuild the BRAIN link graph
+        try {
+          this.writeBrainGraph(agentDir, state.dreamCount);
+        } catch (graphErr) {
+          logError(`[dreams] ${agent.displayName} graph build failed: ${graphErr instanceof Error ? graphErr.message : String(graphErr)}`);
+        }
+
         log(`[dreams] ${agent.displayName} dream complete (dream #${state.dreamCount}) — ${isClean ? 'clean' : 'consolidated'}`);
       } else {
         logError(`[dreams] ${agent.displayName} dream dispatch failed: ${data.error ?? 'unknown'}`);
@@ -450,5 +464,46 @@ export class DreamManager {
     } catch (err) {
       logError(`[dreams] Failed to write dream state: ${err}`);
     }
+  }
+
+  // ── Post-Dream Graph Builder ──────────────────────────────────────
+
+  /**
+   * After each dream, rebuild the BRAIN link graph and write it to
+   * BRAIN/_graph.json. This is a snapshot of the memory topology that
+   * tracks how the agent's knowledge structure evolves over time.
+   */
+  private writeBrainGraph(agentDir: string, dreamCount: number): void {
+    const brainDir = getBrainDir(agentDir);
+    if (!existsSync(brainDir)) return;
+
+    const graph = buildBrainGraph(agentDir);
+    const stats = getBrainStats(agentDir);
+    const stale = findStaleFiles(agentDir);
+    const orphans = findOrphans(agentDir);
+
+    const snapshot = {
+      generated: new Date().toISOString(),
+      dreamCount,
+      nodes: graph.nodes,
+      edges: graph.edges,
+      clusters: graph.clusters,
+      stats: {
+        fileCount: stats.fileCount,
+        totalLinks: stats.totalLinks,
+        orphanCount: orphans.length,
+        staleCount: stale.length,
+        topTags: stats.topTags.slice(0, 10),
+        typeCounts: stats.typeCounts,
+      },
+    };
+
+    writeFileSync(
+      join(brainDir, '_graph.json'),
+      JSON.stringify(snapshot, null, 2) + '\n',
+      'utf-8',
+    );
+
+    log(`[dreams] BRAIN graph updated — ${graph.nodes.length} nodes, ${graph.edges.length} edges, ${graph.clusters.length} clusters`);
   }
 }
