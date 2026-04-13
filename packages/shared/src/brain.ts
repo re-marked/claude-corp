@@ -11,7 +11,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
-import { join, basename, extname } from 'node:path';
+import { join, basename } from 'node:path';
 import { parse as parseFrontmatter, stringify as stringifyFrontmatter } from './parsers/frontmatter.js';
 import type {
   BrainFrontmatter,
