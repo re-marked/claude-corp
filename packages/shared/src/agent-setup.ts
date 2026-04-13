@@ -10,7 +10,8 @@ import { CHANNELS_JSON, MEMBERS_JSON, MESSAGES_JSONL } from './constants.js';
 import { readConfig } from './parsers/config.js';
 import { syncSkillsToAgent } from './skills.js';
 import { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
-import { AGENT_BOOTSTRAP } from './templates/bootstrap-agent.js';
+import { buildAgentBootstrap } from './templates/bootstrap-agent.js';
+import { getSharedTags } from './brain-culture.js';
 import { defaultIdentity as identityTemplate } from './templates/identity.js';
 import { MEMORY_TEMPLATE } from './templates/memory.js';
 import { USER_TEMPLATE } from './templates/user.js';
@@ -91,7 +92,20 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? identityTemplate(displayName, rank), 'utf-8');
   writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? USER_TEMPLATE, 'utf-8');
   writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir, opts.projectName), 'utf-8');
-  writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), rank === 'master' ? CEO_BOOTSTRAP : AGENT_BOOTSTRAP, 'utf-8');
+  // CEO gets the founding conversation guide; hired agents get the absorption shield
+  // with culture vocabulary injected at hire time when available
+  let bootstrapContent = CEO_BOOTSTRAP;
+  if (rank !== 'master') {
+    let sharedTags: string[] = [];
+    try {
+      sharedTags = getSharedTags(corpRoot).map(t => t.tag);
+    } catch { /* culture data unavailable — fine, bootstrap works without it */ }
+    bootstrapContent = buildAgentBootstrap({
+      sharedTags: sharedTags.length > 0 ? sharedTags : undefined,
+      hiringAgentName: opts.spawnedBy ? undefined : undefined, // TODO: resolve spawner name
+    });
+  }
+  writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), bootstrapContent, 'utf-8');
 
   // Agent config
   const agentConfig: AgentConfig = {

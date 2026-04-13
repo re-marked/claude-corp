@@ -165,7 +165,7 @@ export type {
 // Templates
 export { UNIVERSAL_SOUL } from './templates/soul.js';
 export { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
-export { AGENT_BOOTSTRAP } from './templates/bootstrap-agent.js';
+export { AGENT_BOOTSTRAP, buildAgentBootstrap } from './templates/bootstrap-agent.js';
 export { defaultIdentity } from './templates/identity.js';
 export { MEMORY_TEMPLATE } from './templates/memory.js';
 export { USER_TEMPLATE } from './templates/user.js';
