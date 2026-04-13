@@ -35,3 +35,12 @@ export type { AgentConfig } from './agent-config.js';
 export type { Clock, ClockType, ClockStatus, ScheduledClock, ScheduledClockStatus, CronTaskTemplate } from './clock.js';
 export type { Contract, ContractStatus, ContractProgress } from './contract.js';
 export type { GlobalConfig } from './global-config.js';
+export type {
+  BrainMemoryType,
+  BrainSource,
+  BrainConfidence,
+  BrainFrontmatter,
+  BrainFile,
+  BrainStats,
+  BrainSearchResult,
+} from './brain.js';

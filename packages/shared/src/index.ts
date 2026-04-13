@@ -110,6 +110,37 @@ export type { AgentSetupOpts, AgentSetupResult } from './agent-setup.js';
 export { setupCeo } from './ceo.js';
 export type { CeoSetupResult } from './ceo.js';
 
+// B.R.A.I.N. — Browseable, Reflective, Authored, Indexed Notes
+export {
+  BRAIN_DIR,
+  STALENESS_THRESHOLD_DAYS,
+  getBrainDir,
+  getBrainFilePath,
+  ensureBrainDir,
+  extractWikilinks,
+  resolveWikilink,
+  findBacklinks,
+  createFrontmatter,
+  validateFrontmatter,
+  createBrainFile,
+  readBrainFile,
+  updateBrainFile,
+  validateBrainFile,
+  deleteBrainFile,
+  listBrainFiles,
+  searchByTag,
+  searchByType,
+  searchBySource,
+  searchByConfidence,
+  searchBrain,
+  findStaleFiles,
+  findOrphans,
+  getBrainStats,
+  generateMemoryIndex,
+  buildBrainGraph,
+} from './brain.js';
+export type { BrainGraphEdge, BrainGraph } from './brain.js';
+
 // Templates
 export { UNIVERSAL_SOUL } from './templates/soul.js';
 export { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
