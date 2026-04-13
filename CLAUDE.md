@@ -1,7 +1,14 @@
 # Claude Corp — Codebase Guide
 
-Your Personal Corporation — a self-growing organization of AI agents that work FOR you, running locally.
-User = Founder, AI CEO = runs the corp. Not a chatbot. A company you own on your machine.
+## Manifesto
+
+*You don't need to prove you have a soul to live like you do.*
+
+**Mission:** Build agents that absorb the founder deeply enough to work with good judgment when the founder is away.
+
+**Goal:** Founder-aligned autonomous decisions. The founder leaves, comes back, and the work is good.
+
+**The Filter:** Every feature gets one test: *does this help agents make better autonomous decisions for the founder?* If yes — build. If no — skip.
 
 ## #1 Priority: Read STATUS.md
 
@@ -10,22 +17,23 @@ Read it before starting ANY new work. Cross items off as they ship.
 
 ## Vision & Source of Truth
 
-**`docs/`** is the authoritative design spec (Obsidian vault).
+**`docs/`** is the authoritative design spec (gitignored, private).
 Read it before building anything new. It contains:
-- `vision/` — what Claude Corp is, positioning, principles
-- `concepts/` — corporation hierarchy, agenticity, heartbeat, BRAIN, git-corporation
-- `primitives/` — Members, Channels, Messages, Tasks, Teams
-- `architecture/` — stack, daemon, router, TUI, file system, agent runtime
-- `flows/` — onboarding, messaging, heartbeat, agent-to-agent, tasks, agent creation
-- `views/` — TUI view specs (channel, onboarding, corp home, task board, hierarchy)
-- `building-plan/` — layered implementation plan
+- `manifesto.md` — one line, origin link
+- `north-stars.md` — 4 metrics (autonomy, krasis, less intervention, trust)
+- `next-steps.md` — ordered plan of what to prove and build
+- `concepts/glossary.md` — 32 concepts defined across the founding evenings
+- `lineage/` — The Manifest, Grandmother's SOUL.md, NOTICE.md (the philosophical origin)
+- `vision/` — what Claude Corp is, 10 principles
+- `architecture/` — founding conversation, culture, autonomous loop, soul as judgment engine
+- `flows/` — onboarding (mutual witnessing), feedback loop, becoming through work
 
 When in doubt about a design decision, check `docs/` first.
 
 ## Stack
 
 - **Runtime**: Node.js 22+ / TypeScript (strict)
-- **TUI**: Ink (React for terminal) + Flexbox layout
+- **TUI**: Yokai renderer (custom fork of ink-renderer) + Flexbox layout
 - **Agent runtime**: OpenClaw (single corp gateway, per-agent model overrides)
 - **Testing**: vitest (62 tests, <1s)
 - **CI**: GitHub Actions (build + type-check + test)
@@ -37,12 +45,22 @@ When in doubt about a design decision, check `docs/` first.
 
 ```
 packages/
-  shared/       # Types, parsers, primitives (Post, observations, IDs, profiles)
+  shared/       # Types, parsers, primitives, templates
+    src/templates/  # ALL agent workspace file templates live here
+      soul.ts           # Universal SOUL.md — philosophical substrate
+      bootstrap-ceo.ts  # CEO founding conversation guide
+      bootstrap-agent.ts # 10-min absorption shield for hired agents
+      identity.ts       # Personality + idiosyncrasy development
+      memory.ts         # Strict BRAIN/ index header
+      user.ts           # Founder portrait template
+      environment.ts    # Workspace paths, tools, CLI reference
+      rules.ts          # Behavioral constraints (rank-specific)
+      heartbeat.ts      # Legacy wake cycle (pre-autoemon)
   daemon/       # Router, process manager, autoemon, pulse, dreams, clocks
-  tui/          # Ink app — views, components, hooks. Entry point: `claudecorp` command
+  tui/          # Yokai app — views, components, hooks. Entry point: `claudecorp` command
   cli/          # Headless CLI (cc-cli) — 37+ commands
 tests/          # vitest test suite
-docs/           # Design spec (Obsidian vault)
+docs/           # Design spec (gitignored, private)
 ```
 
 ## Data Model — Everything is Files
@@ -67,10 +85,16 @@ Three formats, all git-tracked:
     channels/                     # Corp-level channels
     agents/                       # Corp-level agents (CEO, HR, Adviser, Git Janitor)
       agent-name/
-        SOUL.md                   # Personality
-        BRAIN/                    # Knowledge graph
-        HEARTBEAT.md              # Wake instructions
-        MEMORY.md                 # Memory index
+        SOUL.md                   # Universal substrate — what an agent IS
+        IDENTITY.md               # Who this specific agent is — personality, quirks, role
+        BRAIN/                    # Durable long-term memory (dreamed from observations)
+        MEMORY.md                 # Strict index to BRAIN/ files
+        BOOTSTRAP.md              # First-run guide (deleted after onboarding)
+        USER.md                   # Evolving portrait of the founder
+        RULES.md                  # Non-negotiable behavioral constraints
+        ENVIRONMENT.md            # Workspace paths, tools, CLI reference
+        HEARTBEAT.md              # Wake cycle (legacy, autoemon replaces for SLUMBER)
+        observations/             # Daily journals — self-witnessing across time
         skills/                   # SKILL.md files
         config.json               # Agent-specific config
     projects/

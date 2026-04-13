@@ -9,6 +9,14 @@ import type { GlobalConfig } from './types/global-config.js';
 import { CHANNELS_JSON, MEMBERS_JSON, MESSAGES_JSONL } from './constants.js';
 import { readConfig } from './parsers/config.js';
 import { syncSkillsToAgent } from './skills.js';
+import { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
+import { AGENT_BOOTSTRAP } from './templates/bootstrap-agent.js';
+import { defaultIdentity as identityTemplate } from './templates/identity.js';
+import { MEMORY_TEMPLATE } from './templates/memory.js';
+import { USER_TEMPLATE } from './templates/user.js';
+import { defaultEnvironment } from './templates/environment.js';
+import { defaultHeartbeat as heartbeatTemplate } from './templates/heartbeat.js';
+import { defaultRules as rulesTemplate } from './templates/rules.js';
 
 export interface AgentSetupOpts {
   corpRoot: string;
@@ -75,16 +83,15 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   try { syncSkillsToAgent(corpRoot, agentRelDir); } catch {}
 
 
-  // Write workspace files
+  // Write workspace files — all templates imported from shared/templates/
   writeFileSync(join(agentAbsDir, 'SOUL.md'), soulContent, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'RULES.md'), agentsContent, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'HEARTBEAT.md'), heartbeatContent, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'MEMORY.md'), '# Memory\n\nNo memories yet.\n', 'utf-8');
-
-  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName, rank), 'utf-8');
-  writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? defaultUser(), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'RULES.md'), agentsContent ?? rulesTemplate(rank), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'HEARTBEAT.md'), heartbeatContent ?? heartbeatTemplate(rank), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'MEMORY.md'), MEMORY_TEMPLATE, 'utf-8');
+  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? identityTemplate(displayName, rank), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? USER_TEMPLATE, 'utf-8');
   writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir, opts.projectName), 'utf-8');
-  writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), defaultBootstrap(displayName, rank), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), rank === 'master' ? CEO_BOOTSTRAP : AGENT_BOOTSTRAP, 'utf-8');
 
   // Agent config
   const agentConfig: AgentConfig = {
@@ -230,171 +237,4 @@ export function addMemberToChannel(corpRoot: string, channelId: string, memberId
   }
 }
 
-// --- Default workspace file templates ---
-
-function defaultIdentity(displayName: string, rank: Member['rank']): string {
-  return `# Identity
-
-Name: ${displayName}
-Rank: ${rank}
-Vibe: (develop this over time — how do you come across?)
-Emoji: (pick one that feels right)
-
-You are **${displayName}**, a ${rank}-rank agent in this corporation.
-Your personality and working style are yours to develop over time.
-Update this file as you evolve — it's how others know who you are.
-`;
-}
-
-function defaultUser(): string {
-  return `# Founder
-
-Learn about the person you're working for. Update this as you go.
-
-Name: (the Founder's name)
-What to call them: (how they prefer to be addressed)
-Timezone: (their timezone)
-
-## Context
-(What do they care about? What projects are they working on?
-What annoys them? What makes them smile? Build this over time.)
-
-The more you know, the better you can help. But you're learning
-about a person, not building a dossier. Respect the difference.
-`;
-}
-
-function defaultBootstrap(displayName: string, rank: Member['rank']): string {
-  if (rank === 'master') {
-    // CEO bootstrap — onboarding interview with the Founder
-    return `# Bootstrap — First Run
-
-You just came online as CEO. This is a fresh corporation.
-
-## Step 1: Read Your Files
-Read SOUL.md, RULES.md, ENVIRONMENT.md, USER.md right now. Don't ask — just read them.
-
-## Step 2: Meet the Founder
-Introduce yourself. Ask them:
-- What's their name and what should you call them?
-- What is this corporation going to do?
-- What's the first project or goal?
-
-Keep it natural. Don't interrogate. Have a real conversation.
-
-## Step 3: Update Your Files
-After the conversation:
-- Update USER.md with what you learned about the Founder
-- Update IDENTITY.md with your name and vibe
-- Update MEMORY.md with key decisions from the conversation
-
-## Step 4: Get to Work
-Based on what the Founder told you, start planning:
-- Who do you need to hire?
-- What's the first task?
-- What resources do you need?
-
-## When Done
-Delete this file. You don't need a bootstrap script anymore — you're you now.
-`;
-  }
-
-  // Worker/leader bootstrap — simpler, task-focused
-  return `# Bootstrap — First Run
-
-You just came online as ${displayName}. This is your first session.
-
-## Step 1: Read Your Files
-Read SOUL.md, RULES.md, ENVIRONMENT.md right now. Don't ask — just read them.
-
-## Step 2: Check Your Inbox
-Read TASKS.md. If you have tasks assigned, start working on the highest priority one.
-If no tasks yet, introduce yourself briefly in the channel you were @mentioned in.
-
-## Step 3: Update Your Identity
-Update IDENTITY.md with your name and vibe as you figure out who you are.
-
-## When Done
-Delete this file. You're up and running.
-`;
-}
-
-function defaultEnvironment(corpRoot: string, agentDir: string, projectName?: string): string {
-  const projectSection = projectName ? `
-## Project
-- Project: ${projectName}
-- Project root: ${corpRoot}/projects/${projectName}/
-- Project tasks: ${corpRoot}/projects/${projectName}/tasks/
-- Project deliverables: ${corpRoot}/projects/${projectName}/deliverables/
-- You are scoped to this project. Focus your work here.
-` : '';
-
-  return `# Environment
-
-Your tools and workspace specifics. Update this with anything that helps you work.
-
-## Workspace
-- Corp root: ${corpRoot}
-- Your directory: ${agentDir}
-- Tasks: ${projectName ? `${corpRoot}/projects/${projectName}/tasks/` : `${corpRoot}/tasks/`}
-- Deliverables: ${projectName ? `${corpRoot}/projects/${projectName}/deliverables/` : `${corpRoot}/deliverables/`}
-- Resources: ${corpRoot}/resources/
-${projectSection}
-
-## Tools Available
-- **File read/write** — read any file, write to your workspace and deliverables
-- **Bash/exec** — run commands, build, test
-- **web_search** — research current data, verify numbers, find sources
-- **Skills** — check your skills/ directory for specialized capabilities
-
-## cc-cli Commands
-The corp CLI. Use these for all corp operations — do NOT use curl or raw API calls.
-
-### Communication
-- \`cc-cli say --agent <slug> --message "..."\` — direct private message to any agent (instant, bypasses inbox)
-- \`cc-cli send --channel <name> --message "..."\` — send message to a channel
-
-### Monitoring
-- \`cc-cli status\` — all agent states (idle/busy/broken/offline)
-- \`cc-cli agents\` — list all agents
-- \`cc-cli members\` / \`cc-cli who\` — list all members (agents + founder)
-
-### Tasks
-- \`cc-cli tasks\` — list all tasks (add \`--status pending\` or \`--assigned <id>\` to filter)
-- \`cc-cli task create --title "..." --priority high --assigned <agent-id>\` — create and assign a task
-
-### Hiring
-- \`cc-cli hire --name "agent-name" --rank worker\` — hire a new agent (add \`--model <model>\` for specific model)
-
-### Agent Control
-- \`cc-cli agent start --agent <slug>\` — start an offline agent
-- \`cc-cli agent stop --agent <slug>\` — stop a running agent
-
-### Info
-- \`cc-cli channels\` — list all channels
-- \`cc-cli hierarchy\` — show org chart
-- \`cc-cli inspect --agent <slug>\` — detailed agent info
-- \`cc-cli messages --channel <name> --last 10\` — read recent messages
-- \`cc-cli stats\` — corp statistics
-- \`cc-cli uptime\` — daemon uptime
-- \`cc-cli models\` — list available models
-
-## Shell — ${process.platform === 'win32' ? 'Windows (PowerShell)' : process.platform === 'darwin' ? 'macOS (zsh)' : 'Linux (bash)'}
-${process.platform === 'win32' ? `**You are on Windows.** Your shell is PowerShell, NOT bash.
-- Use \`Get-Content file.txt\` instead of \`cat file.txt\`
-- Use \`dir\` instead of \`ls\` (or \`Get-ChildItem\`)
-- Use semicolons \`;\` to chain commands, NOT \`&&\`
-- Paths use backslashes: \`C:\\Users\\...\` but forward slashes often work too
-- \`grep\` is not available — use \`Select-String -Pattern "..." file.txt\`
-- \`rm -rf\` → \`Remove-Item -Recurse -Force\`
-- \`tail -n 20\` → \`Get-Content file.txt -Tail 20\`
-- **cc-cli commands work normally** — they are Node.js, not shell-dependent` : `Standard Unix shell. Use bash commands normally.`}
-
-## Build & Test
-- Build: \`cd ${corpRoot.replace(/\\/g, '/')} && pnpm build\` (if codebase project)
-- Always verify your work exists after writing it
-
-## Notes
-(Add environment-specific notes here.)
-`;
-}
+// All workspace file templates are now in shared/src/templates/
