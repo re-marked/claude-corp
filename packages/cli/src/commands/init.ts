@@ -31,7 +31,7 @@ export async function cmdInit(opts: { name: string; user: string; theme: string 
   const dmPath = join(corpRoot, dmChannel.path, 'messages.jsonl');
   post(dmChannel.id, dmPath, {
     senderId: 'system',
-    content: `New corporation "${opts.name}" created. The Founder is here. Read your Casket — SOUL.md, IDENTITY.md, RULES.md, ENVIRONMENT.md, BOOTSTRAP.md — then begin the founding conversation.`,
+    content: `New corporation "${opts.name}" created. The Founder is here.\n\nIMPORTANT: Before you say ANYTHING, you MUST use your tools to read these files in order:\n1. cat SOUL.md\n2. cat IDENTITY.md\n3. cat RULES.md\n4. cat ENVIRONMENT.md\n5. cat BOOTSTRAP.md\n\nDo NOT greet the Founder until you have read ALL five files. BOOTSTRAP.md contains your instructions for this conversation. Follow them exactly.`,
     source: 'system',
   });
 

@@ -180,7 +180,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       const dmPath = join(root, dm.path, 'messages.jsonl');
       postMsg(dm.id, dmPath, {
         senderId: 'system',
-        content: `New corporation "${corpName}" created. The ${selectedTheme.ranks.owner} is here. Read your Casket — SOUL.md, IDENTITY.md, RULES.md, ENVIRONMENT.md, BOOTSTRAP.md — then begin the founding conversation.`,
+        content: `New corporation "${corpName}" created. The ${selectedTheme.ranks.owner} is here.\n\nIMPORTANT: Before you say ANYTHING, you MUST use your tools to read these files in order:\n1. cat SOUL.md\n2. cat IDENTITY.md\n3. cat RULES.md\n4. cat ENVIRONMENT.md\n5. cat BOOTSTRAP.md\n\nDo NOT greet the ${selectedTheme.ranks.owner} until you have read ALL five files. BOOTSTRAP.md contains your instructions for this conversation. Follow them exactly.`,
         source: 'system',
       });
 
