@@ -10,7 +10,7 @@
  * commands, dream consolidation, and the BRAIN system prompt fragment.
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join, basename, extname } from 'node:path';
 import { parse as parseFrontmatter, stringify as stringifyFrontmatter } from './parsers/frontmatter.js';
 import type {
@@ -304,7 +304,6 @@ export function deleteBrainFile(agentDir: string, name: string): boolean {
   const filePath = getBrainFilePath(agentDir, name);
   if (!existsSync(filePath)) return false;
 
-  const { unlinkSync } = require('node:fs');
   unlinkSync(filePath);
   return true;
 }
