@@ -115,6 +115,11 @@ export { UNIVERSAL_SOUL } from './templates/soul.js';
 export { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
 export { AGENT_BOOTSTRAP } from './templates/bootstrap-agent.js';
 export { defaultIdentity } from './templates/identity.js';
+export { MEMORY_TEMPLATE } from './templates/memory.js';
+export { USER_TEMPLATE } from './templates/user.js';
+export { defaultEnvironment } from './templates/environment.js';
+export { defaultRules } from './templates/rules.js';
+export { defaultHeartbeat } from './templates/heartbeat.js';
 
 // Ranks
 export { canHire } from './ranks.js';
