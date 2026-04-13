@@ -141,6 +141,27 @@ export {
 } from './brain.js';
 export type { BrainGraphEdge, BrainGraph } from './brain.js';
 
+// B.R.A.I.N. Culture — cross-agent tag intelligence
+export {
+  findAllAgentDirs,
+  getCorpTags,
+  getSharedTags,
+  getAgentTagSignature,
+  getAllAgentSignatures,
+  getAgentOverlaps,
+  suggestTagNormalization,
+  getCultureHealth,
+  getCorpCultureStats,
+} from './brain-culture.js';
+export type {
+  CorpTag,
+  AgentTagSignature,
+  AgentOverlap,
+  TagNormalizationSuggestion,
+  CultureHealth,
+  CorpCultureStats,
+} from './brain-culture.js';
+
 // Templates
 export { UNIVERSAL_SOUL } from './templates/soul.js';
 export { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
