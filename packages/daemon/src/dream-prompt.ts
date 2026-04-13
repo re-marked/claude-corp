@@ -11,6 +11,85 @@
  *   - Corp-specific context: STATUS.md, task completions, Herald narration
  */
 
+// ── BRAIN State Renderer ────────────────────────────────────────────
+
+function buildOrientSteps(opts: DreamPromptOpts): string {
+  const steps: string[] = [];
+  let n = 2;
+
+  if (opts.brainState) {
+    steps.push(`${n}. Review the BRAIN state above — you already know what's there`);
+    n++;
+    steps.push(`${n}. Read the 1-2 most relevant existing BRAIN/ files for context`);
+    n++;
+    if (opts.brainState.staleFiles.length > 0) {
+      steps.push(`${n}. **Read the stale files listed above** — are they still accurate? Validate or delete them.`);
+      n++;
+    }
+    if (opts.brainState.orphanFiles.length > 0) {
+      steps.push(`${n}. **Review the orphans** — should they be linked from related memories, or pruned?`);
+    }
+  } else {
+    steps.push(`${n}. List existing BRAIN files: ls "${opts.agentDir}/BRAIN/" 2>/dev/null`);
+    n++;
+    steps.push(`${n}. If any BRAIN/ files exist, read the 1-2 most relevant ones`);
+  }
+
+  return steps.join('\n');
+}
+
+function renderBrainState(state: NonNullable<DreamPromptOpts['brainState']>): string {
+  const lines: string[] = [];
+  lines.push('## Your Current B.R.A.I.N. State\n');
+
+  if (state.files.length === 0) {
+    lines.push('Your BRAIN/ is empty. This dream is your first consolidation.\n');
+    return '\n' + lines.join('\n') + '\n';
+  }
+
+  // File count by type
+  const byType = new Map<string, typeof state.files>();
+  for (const f of state.files) {
+    const arr = byType.get(f.type) || [];
+    arr.push(f);
+    byType.set(f.type, arr);
+  }
+
+  lines.push(`**${state.files.length} memor${state.files.length === 1 ? 'y' : 'ies'}:**`);
+  for (const [type, files] of byType) {
+    const tagSample = [...new Set(files.flatMap(f => f.tags))].slice(0, 5).join(', ');
+    lines.push(`- ${files.length} ${type}${tagSample ? ` (tags: ${tagSample})` : ''}`);
+  }
+  lines.push('');
+
+  // Stale files
+  if (state.staleFiles.length > 0) {
+    lines.push(`**⚠ Stale (not validated in 30+ days):** ${state.staleFiles.join(', ')}`);
+    lines.push('Re-read these during this dream. Validate if still true, delete if not.\n');
+  }
+
+  // Orphans
+  if (state.orphanFiles.length > 0) {
+    lines.push(`**Orphans (no inbound [[wikilinks]]):** ${state.orphanFiles.join(', ')}`);
+    lines.push('Consider linking these from related memories, or pruning if stale.\n');
+  }
+
+  // Clusters
+  if (state.clusters.length > 0) {
+    const multiClusters = state.clusters.filter(c => c.length > 1);
+    const isolated = state.clusters.filter(c => c.length === 1);
+    if (multiClusters.length > 0) {
+      lines.push(`**Knowledge clusters:** ${multiClusters.map(c => `{${c.join(', ')}}`).join('  ')}`);
+    }
+    if (isolated.length > 0) {
+      lines.push(`**Isolated:** ${isolated.map(c => c[0]).join(', ')}`);
+    }
+    lines.push('');
+  }
+
+  return '\n' + lines.join('\n') + '\n';
+}
+
 export interface DreamPromptOpts {
   agentName: string;
   agentDir: string;
@@ -25,6 +104,13 @@ export interface DreamPromptOpts {
   tasksChannelPath: string | null;
   /** Recent agent names + what they're working on */
   agentSummaries: string[];
+  /** Pre-populated BRAIN state — saves the agent from discovery tool calls */
+  brainState?: {
+    files: Array<{ name: string; type: string; tags: string[]; lastValidated: string }>;
+    staleFiles: string[];
+    orphanFiles: string[];
+    clusters: string[][];
+  };
 }
 
 export function buildDreamPrompt(opts: DreamPromptOpts): string {
@@ -104,13 +190,12 @@ It has been ${opts.hoursSinceLast.toFixed(0)} hours since your last consolidatio
 **CRITICAL: You MUST use tools.** Read actual files. Write actual BRAIN/ topic files. Run actual commands. Do NOT just describe what you would do or reply with a summary. Execute every phase below using tools. If there is nothing to consolidate, say DREAM_CLEAN.
 
 ---
-
+${opts.brainState ? renderBrainState(opts.brainState) : ''}
 ## Phase 1 — Orient
 
 Execute these commands NOW:
-1. \`cat "${opts.agentDir}/MEMORY.md"\` — read your current memory index
-2. \`ls "${opts.agentDir}/BRAIN/" 2>/dev/null\` — list existing topic files
-3. If any BRAIN/ files exist, read the 1-2 most relevant ones
+1. Read your MEMORY.md: \`cat "${opts.agentDir}/MEMORY.md"\`
+${buildOrientSteps(opts)}
 
 ## Phase 2 — Gather recent signal
 

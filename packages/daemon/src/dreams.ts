@@ -385,6 +385,29 @@ export class DreamManager {
         agentSummaries.push(`${m.displayName} (${m.rank}) — ${status ?? 'unknown'}`);
       }
 
+      // Gather BRAIN state to pre-populate the dream prompt
+      let brainState: NonNullable<Parameters<typeof buildDreamPrompt>[0]['brainState']> | undefined;
+      try {
+        const files = listBrainFiles(agentDir);
+        const stale = findStaleFiles(agentDir);
+        const orphans = findOrphans(agentDir);
+        const graph = buildBrainGraph(agentDir);
+
+        brainState = {
+          files: files.map(f => ({
+            name: f.name,
+            type: f.meta.type,
+            tags: f.meta.tags,
+            lastValidated: f.meta.last_validated,
+          })),
+          staleFiles: stale.map(f => f.name),
+          orphanFiles: orphans.map(f => f.name),
+          clusters: graph.clusters,
+        };
+      } catch {
+        // If BRAIN state gathering fails, dream proceeds without it
+      }
+
       const prompt = buildDreamPrompt({
         agentName: agent.displayName,
         agentDir: agentDir.replace(/\\/g, '/'),
@@ -395,6 +418,7 @@ export class DreamManager {
         generalChannelPath: generalChannel ? join(corpRootNorm, generalChannel.path) : null,
         tasksChannelPath: tasksChannel ? join(corpRootNorm, tasksChannel.path) : null,
         agentSummaries,
+        brainState,
       });
 
       const resp = await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
