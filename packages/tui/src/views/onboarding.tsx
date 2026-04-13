@@ -180,7 +180,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       const dmPath = join(root, dm.path, 'messages.jsonl');
       postMsg(dm.id, dmPath, {
         senderId: 'system',
-        content: `New corporation "${corpName}" created. The ${selectedTheme.ranks.owner} is here. Read your BOOTSTRAP.md and begin the founding conversation.`,
+        content: `New corporation "${corpName}" created. The ${selectedTheme.ranks.owner} is here. Read your Casket — SOUL.md, IDENTITY.md, RULES.md, ENVIRONMENT.md, BOOTSTRAP.md — then begin the founding conversation.`,
         source: 'system',
       });
 

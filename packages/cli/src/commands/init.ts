@@ -31,7 +31,7 @@ export async function cmdInit(opts: { name: string; user: string; theme: string 
   const dmPath = join(corpRoot, dmChannel.path, 'messages.jsonl');
   post(dmChannel.id, dmPath, {
     senderId: 'system',
-    content: `New corporation "${opts.name}" created. The Founder is here. Read your BOOTSTRAP.md and begin the founding conversation.`,
+    content: `New corporation "${opts.name}" created. The Founder is here. Read your Casket — SOUL.md, IDENTITY.md, RULES.md, ENVIRONMENT.md, BOOTSTRAP.md — then begin the founding conversation.`,
     source: 'system',
   });
 
