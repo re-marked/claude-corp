@@ -122,7 +122,39 @@ ${sourcesText}
 
 ## Phase 3 — Consolidate
 
-For each thing worth remembering, write or update a topic file in \`BRAIN/\`:
+For each thing worth remembering, write or update a topic file in \`BRAIN/\`.
+
+**Every BRAIN/ file MUST have YAML frontmatter:**
+
+\`\`\`yaml
+---
+type: founder-preference | technical | decision | self-knowledge | correction | relationship
+tags: [freeform, tags, for, search]
+source: dream
+confidence: high | medium | low
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+last_validated: YYYY-MM-DD
+---
+\`\`\`
+
+For **new files**: set \`source: dream\`, set all three dates to today, and choose confidence:
+- \`high\` — directly stated by founder or confirmed by correction
+- \`medium\` — inferred from patterns across multiple observations
+- \`low\` — speculative, based on limited data
+
+For **updates to existing files**: preserve \`created\`, update \`updated\` and \`last_validated\` to today.
+
+**Memory types — choose the right one:**
+- \`founder-preference\` — what the founder likes, hates, values
+- \`technical\` — file paths, build commands, architecture decisions
+- \`decision\` — what was decided and WHY (the why matters more)
+- \`self-knowledge\` — your own patterns, preferences, style
+- \`correction\` — something you got wrong and what you learned
+- \`relationship\` — who does what, who to ask for what
+
+**Cross-reference with [[wikilinks]]:**
+When a BRAIN/ file relates to another topic, link it: "See [[auth-architecture]] for the related decision." This builds a knowledge graph — the more connections, the richer the memory.
 
 **What to save:**
 - Founder preferences, communication style, and working patterns
@@ -132,10 +164,12 @@ For each thing worth remembering, write or update a topic file in \`BRAIN/\`:
 - Technical knowledge: file paths, build commands, architecture decisions
 - Corp dynamics: recent hires, team changes, strategy shifts
 - Recurring tasks and how to handle them efficiently
+- **Your own emerging patterns** — what kind of worker you're becoming, what you gravitate toward, what you've gotten better at
 
 **How to save:**
-- Use descriptive filenames: \`BRAIN/founder-preferences.md\`, \`BRAIN/auth-architecture.md\`
+- Use descriptive filenames: \`BRAIN/founder-code-style.md\`, \`BRAIN/auth-architecture.md\`, \`BRAIN/my-working-patterns.md\`
 - Each file is self-contained — useful to future you with zero prior context
+- Tag generously — tags are how you find memories later
 - Merge new signal into existing topics. Never create near-duplicates.
 - Convert relative dates to absolute: "yesterday" → "2026-03-31"
 - Delete contradicted facts at the source — don't leave wrong memories
@@ -151,12 +185,13 @@ For each thing worth remembering, write or update a topic file in \`BRAIN/\`:
 
 Update \`MEMORY.md\` so it stays under 200 lines:
 
-- It is an **index**, not a dump — each entry: \`- [Title](BRAIN/file.md) — one-line hook\`
+- It is an **index**, not a dump — each entry: \`- [[filename]] — one-line description\`
+- Use \`[[wikilink]]\` format, not markdown links
 - Never write content directly into MEMORY.md
 - Remove stale, wrong, or superseded pointers
 - Add pointers to newly important memories
 - Resolve contradictions between files
-- Group semantically by topic, not chronologically
+- Group by type: Founder, Technical, Decisions, Self, Corrections, Relationships
 
 ---
 
