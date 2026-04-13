@@ -33,18 +33,23 @@ if (args[0] === 'delete') {
     }
     process.exit(1);
   }
-  const ok = deleteCorp(name);
-  if (ok) {
-    console.log(`Deleted "${name}".`);
-  } else {
-    console.log(`Corp "${name}" not found.`);
-    const corps = listCorps();
-    if (corps.length > 0) {
-      console.log('\nAvailable corps:');
-      for (const c of corps) console.log(`  ${c.name}`);
+  try {
+    const ok = deleteCorp(name);
+    if (ok) {
+      console.log(`Deleted "${name}".`);
+    } else {
+      console.log(`Corp "${name}" not found.`);
+      const corps = listCorps();
+      if (corps.length > 0) {
+        console.log('\nAvailable corps:');
+        for (const c of corps) console.log(`  ${c.name}`);
+      }
     }
+    process.exit(0);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
   }
-  process.exit(0);
 }
 
 if (args[0] === 'help') {

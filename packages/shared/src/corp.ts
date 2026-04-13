@@ -215,9 +215,22 @@ export function deleteCorp(name: string): boolean {
   const entry = index.corps.find((c) => c.name === name);
   if (!entry) return false;
 
-  try { rmSync(entry.path, { recursive: true, force: true }); } catch {}
+  // Delete files FIRST. If this fails (daemon holding files, permission denied),
+  // throw so the caller knows — don't silently orphan the directory while
+  // removing the corp from the index.
+  try {
+    rmSync(entry.path, { recursive: true, force: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Failed to delete "${name}" at ${entry.path}: ${msg}\n\n` +
+      `The daemon may still be holding files. Stop it first:\n` +
+      `  cc-cli stop\n\n` +
+      `Then try again.`,
+    );
+  }
 
-  // Remove from index
+  // Only remove from index if the filesystem delete succeeded
   index.corps = index.corps.filter((c) => c.name !== name);
   writeConfig(CORPS_INDEX_PATH, index);
   return true;
