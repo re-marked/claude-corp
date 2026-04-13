@@ -1,0 +1,484 @@
+/**
+ * cc-cli brain — B.R.A.I.N. memory navigation from the CLI.
+ *
+ * Subcommands:
+ *   brain                         — show usage + quick stats
+ *   brain list [--type <type>]    — list all BRAIN files
+ *   brain show <name>             — read a specific BRAIN file
+ *   brain search <query>          — full-text search across body, tags, filename
+ *   brain search --tag <tag>      — search by tag
+ *   brain search --type <type>    — search by memory type
+ *   brain links <name>            — show inbound + outbound wikilinks for a file
+ *   brain stale                   — files not validated in 30+ days
+ *   brain orphans                 — files with no inbound wikilinks
+ *   brain stats                   — comprehensive stats
+ *   brain graph                   — link topology + clusters
+ *   brain tags                    — list all tags by frequency
+ */
+
+import { getCorpRoot, getMembers } from '../client.js';
+import {
+  listBrainFiles,
+  searchBrain,
+  searchByTag,
+  searchByType,
+  readBrainFile,
+  findBacklinks,
+  findStaleFiles,
+  findOrphans,
+  getBrainStats,
+  buildBrainGraph,
+  STALENESS_THRESHOLD_DAYS,
+  type BrainFile,
+  type BrainMemoryType,
+} from '@claudecorp/shared';
+import { join } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
+
+export async function cmdBrain(opts: {
+  args: string[];
+  agent?: string;
+  tag?: string;
+  type?: string;
+  json: boolean;
+}): Promise<void> {
+  const corpRoot = await getCorpRoot();
+  const agentDir = await resolveAgentDir(corpRoot, opts.agent);
+
+  if (!agentDir) {
+    console.error('Could not resolve agent. Use --agent <name> or specify in context.');
+    return;
+  }
+
+  const subcommand = opts.args[0]?.toLowerCase();
+
+  if (!subcommand) {
+    await showUsageAndStats(agentDir, opts.json);
+    return;
+  }
+
+  switch (subcommand) {
+    case 'list': return showList(agentDir, opts.type as BrainMemoryType | undefined, opts.json);
+    case 'show':
+    case 'read': return showFile(agentDir, opts.args[1], opts.json);
+    case 'search': return showSearch(agentDir, opts.args.slice(1), opts.tag, opts.type, opts.json);
+    case 'links': return showLinks(agentDir, opts.args[1], opts.json);
+    case 'stale': return showStale(agentDir, opts.json);
+    case 'orphans': return showOrphans(agentDir, opts.json);
+    case 'stats': return showStats(agentDir, opts.json);
+    case 'graph': return showGraph(agentDir, opts.json);
+    case 'tags': return showTags(agentDir, opts.json);
+    default:
+      console.error(`Unknown subcommand: ${subcommand}`);
+      console.log('Run cc-cli brain for usage.');
+  }
+}
+
+// ── Agent Resolution ────────────────────────────────────────────────
+
+async function resolveAgentDir(corpRoot: string, agentName?: string): Promise<string | null> {
+  // If agent name provided, use it
+  if (agentName) {
+    const dir = join(corpRoot, 'agents', agentName);
+    return existsSync(dir) ? dir : null;
+  }
+
+  // Default to CEO
+  const ceoDir = join(corpRoot, 'agents', 'ceo');
+  if (existsSync(ceoDir)) return ceoDir;
+
+  // Try first agent found
+  const agentsDir = join(corpRoot, 'agents');
+  if (!existsSync(agentsDir)) return null;
+  const agents = readdirSync(agentsDir, { withFileTypes: true }).filter(d => d.isDirectory());
+  return agents.length > 0 ? join(agentsDir, agents[0]!.name) : null;
+}
+
+// ── Subcommand Implementations ──────────────────────────────────────
+
+async function showUsageAndStats(agentDir: string, json: boolean): Promise<void> {
+  const stats = getBrainStats(agentDir);
+
+  if (json) {
+    console.log(JSON.stringify(stats, null, 2));
+    return;
+  }
+
+  const agentName = agentDir.split(/[/\\]/).pop();
+  console.log(`B.R.A.I.N. — ${agentName}`);
+  console.log('');
+
+  if (stats.fileCount === 0) {
+    console.log('  No memories yet.');
+    console.log('');
+  } else {
+    console.log(`  ${stats.fileCount} memor${stats.fileCount === 1 ? 'y' : 'ies'}, ${stats.totalLinks} link${stats.totalLinks === 1 ? '' : 's'}`);
+
+    // Type breakdown
+    for (const [type, count] of Object.entries(stats.typeCounts)) {
+      console.log(`  ${count} ${type}`);
+    }
+    console.log('');
+
+    // Stale warning
+    if (stats.staleFiles.length > 0) {
+      console.log(`  ⚠ ${stats.staleFiles.length} stale (not validated in ${STALENESS_THRESHOLD_DAYS}+ days)`);
+      console.log('');
+    }
+  }
+
+  console.log('Usage:');
+  console.log('  cc-cli brain list [--type <type>]     List memories');
+  console.log('  cc-cli brain show <name>              Read a memory');
+  console.log('  cc-cli brain search <query>           Full-text search');
+  console.log('  cc-cli brain search --tag <tag>       Search by tag');
+  console.log('  cc-cli brain search --type <type>     Search by type');
+  console.log('  cc-cli brain links <name>             Show wikilinks');
+  console.log('  cc-cli brain stale                    Memories needing validation');
+  console.log('  cc-cli brain orphans                  Unlinked memories');
+  console.log('  cc-cli brain stats                    Detailed statistics');
+  console.log('  cc-cli brain graph                    Link topology');
+  console.log('  cc-cli brain tags                     All tags by frequency');
+  console.log('');
+  console.log('Options:');
+  console.log('  --agent <name>    Target a specific agent (default: ceo)');
+  console.log('  --json            Machine-readable output');
+}
+
+async function showList(agentDir: string, typeFilter: BrainMemoryType | undefined, json: boolean): Promise<void> {
+  let files = listBrainFiles(agentDir);
+
+  if (typeFilter) {
+    files = files.filter(f => f.meta.type === typeFilter);
+  }
+
+  if (json) {
+    console.log(JSON.stringify(files.map(f => ({
+      name: f.name,
+      type: f.meta.type,
+      tags: f.meta.tags,
+      source: f.meta.source,
+      confidence: f.meta.confidence,
+      links: f.links.length,
+      created: f.meta.created,
+      updated: f.meta.updated,
+      last_validated: f.meta.last_validated,
+    })), null, 2));
+    return;
+  }
+
+  if (files.length === 0) {
+    console.log(typeFilter ? `No ${typeFilter} memories.` : 'No memories yet.');
+    return;
+  }
+
+  // Group by type
+  const byType = new Map<string, BrainFile[]>();
+  for (const file of files) {
+    const existing = byType.get(file.meta.type) || [];
+    existing.push(file);
+    byType.set(file.meta.type, existing);
+  }
+
+  for (const [type, typeFiles] of byType) {
+    console.log(`${type.toUpperCase()}`);
+    for (const file of typeFiles) {
+      const tags = file.meta.tags.length > 0 ? ` [${file.meta.tags.join(', ')}]` : '';
+      const links = file.links.length > 0 ? ` (${file.links.length} links)` : '';
+      const confidence = file.meta.confidence !== 'medium' ? ` {${file.meta.confidence}}` : '';
+      console.log(`  ${file.name}${tags}${links}${confidence}`);
+    }
+    console.log('');
+  }
+}
+
+async function showFile(agentDir: string, name: string | undefined, json: boolean): Promise<void> {
+  if (!name) {
+    console.error('Usage: cc-cli brain show <name>');
+    return;
+  }
+
+  const file = readBrainFile(agentDir, name);
+  if (!file) {
+    console.error(`Memory not found: ${name}`);
+    return;
+  }
+
+  if (json) {
+    console.log(JSON.stringify(file, null, 2));
+    return;
+  }
+
+  console.log(`${file.name}`);
+  console.log(`  type: ${file.meta.type}  source: ${file.meta.source}  confidence: ${file.meta.confidence}`);
+  console.log(`  tags: ${file.meta.tags.join(', ') || '(none)'}`);
+  console.log(`  created: ${file.meta.created}  updated: ${file.meta.updated}  validated: ${file.meta.last_validated}`);
+
+  if (file.links.length > 0) {
+    console.log(`  links: ${file.links.map(l => `[[${l}]]`).join(', ')}`);
+  }
+
+  const backlinks = findBacklinks(file.name, agentDir);
+  if (backlinks.length > 0) {
+    console.log(`  backlinks: ${backlinks.map(l => `[[${l}]]`).join(', ')}`);
+  }
+
+  console.log('');
+  console.log(file.body);
+}
+
+async function showSearch(
+  agentDir: string,
+  args: string[],
+  tagFilter?: string,
+  typeFilter?: string,
+  json: boolean = false,
+): Promise<void> {
+  let results;
+
+  if (tagFilter) {
+    const files = searchByTag(agentDir, tagFilter);
+    results = files.map(f => ({ file: f, matchReason: `tag: ${tagFilter}` }));
+  } else if (typeFilter) {
+    const files = searchByType(agentDir, typeFilter as BrainMemoryType);
+    results = files.map(f => ({ file: f, matchReason: `type: ${typeFilter}` }));
+  } else {
+    const query = args.join(' ');
+    if (!query) {
+      console.error('Usage: cc-cli brain search <query> or --tag <tag> or --type <type>');
+      return;
+    }
+    results = searchBrain(agentDir, query);
+  }
+
+  if (json) {
+    console.log(JSON.stringify(results.map(r => ({
+      name: r.file.name,
+      type: r.file.meta.type,
+      tags: r.file.meta.tags,
+      matchReason: r.matchReason,
+    })), null, 2));
+    return;
+  }
+
+  if (results.length === 0) {
+    console.log('No results.');
+    return;
+  }
+
+  console.log(`${results.length} result${results.length === 1 ? '' : 's'}:`);
+  console.log('');
+  for (const { file, matchReason } of results) {
+    const firstLine = file.body.split('\n')[0]?.slice(0, 60) || '';
+    console.log(`  ${file.name} (${file.meta.type})`);
+    console.log(`    ${firstLine}`);
+    console.log(`    matched: ${matchReason}`);
+    console.log('');
+  }
+}
+
+async function showLinks(agentDir: string, name: string | undefined, json: boolean): Promise<void> {
+  if (!name) {
+    console.error('Usage: cc-cli brain links <name>');
+    return;
+  }
+
+  const file = readBrainFile(agentDir, name);
+  if (!file) {
+    console.error(`Memory not found: ${name}`);
+    return;
+  }
+
+  const backlinks = findBacklinks(name, agentDir);
+
+  if (json) {
+    console.log(JSON.stringify({ outbound: file.links, inbound: backlinks }, null, 2));
+    return;
+  }
+
+  console.log(`Links for [[${name}]]:`);
+  console.log('');
+
+  if (file.links.length > 0) {
+    console.log('  Outbound (this file links to):');
+    for (const link of file.links) {
+      const target = readBrainFile(agentDir, link);
+      const status = target ? `${target.meta.type}` : 'missing';
+      console.log(`    → [[${link}]] (${status})`);
+    }
+  } else {
+    console.log('  Outbound: none');
+  }
+
+  console.log('');
+
+  if (backlinks.length > 0) {
+    console.log('  Inbound (linked TO by):');
+    for (const link of backlinks) {
+      const source = readBrainFile(agentDir, link);
+      const status = source ? `${source.meta.type}` : 'unknown';
+      console.log(`    ← [[${link}]] (${status})`);
+    }
+  } else {
+    console.log('  Inbound: none (orphan)');
+  }
+}
+
+async function showStale(agentDir: string, json: boolean): Promise<void> {
+  const stale = findStaleFiles(agentDir);
+
+  if (json) {
+    console.log(JSON.stringify(stale.map(f => ({
+      name: f.name,
+      type: f.meta.type,
+      last_validated: f.meta.last_validated,
+    })), null, 2));
+    return;
+  }
+
+  if (stale.length === 0) {
+    console.log(`No stale memories (all validated within ${STALENESS_THRESHOLD_DAYS} days).`);
+    return;
+  }
+
+  console.log(`${stale.length} stale memor${stale.length === 1 ? 'y' : 'ies'} (not validated in ${STALENESS_THRESHOLD_DAYS}+ days):`);
+  console.log('');
+  for (const file of stale) {
+    const daysSince = Math.floor((Date.now() - new Date(file.meta.last_validated).getTime()) / (1000 * 60 * 60 * 24));
+    console.log(`  ${file.name} — ${file.meta.type}, last validated ${file.meta.last_validated} (${daysSince}d ago)`);
+  }
+  console.log('');
+  console.log('Re-read these and either validate or delete them.');
+}
+
+async function showOrphans(agentDir: string, json: boolean): Promise<void> {
+  const orphans = findOrphans(agentDir);
+
+  if (json) {
+    console.log(JSON.stringify(orphans.map(f => ({
+      name: f.name,
+      type: f.meta.type,
+      tags: f.meta.tags,
+    })), null, 2));
+    return;
+  }
+
+  if (orphans.length === 0) {
+    console.log('No orphan memories — everything is linked.');
+    return;
+  }
+
+  console.log(`${orphans.length} orphan memor${orphans.length === 1 ? 'y' : 'ies'} (no inbound [[wikilinks]]):`);
+  console.log('');
+  for (const file of orphans) {
+    const tags = file.meta.tags.length > 0 ? ` [${file.meta.tags.join(', ')}]` : '';
+    console.log(`  ${file.name} — ${file.meta.type}${tags}`);
+  }
+  console.log('');
+  console.log('Consider linking these from related memories, or pruning if no longer needed.');
+}
+
+async function showStats(agentDir: string, json: boolean): Promise<void> {
+  const stats = getBrainStats(agentDir);
+
+  if (json) {
+    console.log(JSON.stringify(stats, null, 2));
+    return;
+  }
+
+  const agentName = agentDir.split(/[/\\]/).pop();
+  console.log(`B.R.A.I.N. STATS — ${agentName}`);
+  console.log('');
+
+  // Overview
+  console.log(`  Memories: ${stats.fileCount}`);
+  console.log(`  Links: ${stats.totalLinks}`);
+  console.log(`  Stale: ${stats.staleFiles.length}`);
+  console.log(`  Orphans: ${stats.orphanFiles.length}`);
+  console.log('');
+
+  // By type
+  if (Object.keys(stats.typeCounts).length > 0) {
+    console.log('  BY TYPE');
+    for (const [type, count] of Object.entries(stats.typeCounts)) {
+      const bar = '█'.repeat(count);
+      console.log(`    ${type.padEnd(20)} ${bar} ${count}`);
+    }
+    console.log('');
+  }
+
+  // Top tags
+  if (stats.topTags.length > 0) {
+    console.log('  TOP TAGS');
+    for (const { tag, count } of stats.topTags.slice(0, 10)) {
+      console.log(`    ${tag.padEnd(20)} ${count}`);
+    }
+    console.log('');
+  }
+
+  // Stale warnings
+  if (stats.staleFiles.length > 0) {
+    console.log(`  ⚠ STALE (${STALENESS_THRESHOLD_DAYS}+ days since validation)`);
+    for (const { name, daysSinceValidation } of stats.staleFiles) {
+      console.log(`    ${name} — ${daysSinceValidation}d ago`);
+    }
+    console.log('');
+  }
+}
+
+async function showGraph(agentDir: string, json: boolean): Promise<void> {
+  const graph = buildBrainGraph(agentDir);
+
+  if (json) {
+    console.log(JSON.stringify(graph, null, 2));
+    return;
+  }
+
+  if (graph.nodes.length === 0) {
+    console.log('No memories to graph.');
+    return;
+  }
+
+  console.log(`BRAIN GRAPH — ${graph.nodes.length} nodes, ${graph.edges.length} edges, ${graph.clusters.length} cluster${graph.clusters.length === 1 ? '' : 's'}`);
+  console.log('');
+
+  // Show clusters
+  for (let i = 0; i < graph.clusters.length; i++) {
+    const cluster = graph.clusters[i]!;
+    if (cluster.length === 1) {
+      console.log(`  ○ ${cluster[0]} (isolated)`);
+    } else {
+      console.log(`  Cluster ${i + 1} (${cluster.length} nodes):`);
+      for (const node of cluster) {
+        const outbound = graph.edges.filter(e => e.from === node).map(e => e.to);
+        if (outbound.length > 0) {
+          console.log(`    ${node} → ${outbound.join(', ')}`);
+        } else {
+          console.log(`    ${node}`);
+        }
+      }
+    }
+    console.log('');
+  }
+}
+
+async function showTags(agentDir: string, json: boolean): Promise<void> {
+  const stats = getBrainStats(agentDir);
+
+  if (json) {
+    console.log(JSON.stringify(stats.topTags, null, 2));
+    return;
+  }
+
+  if (stats.topTags.length === 0) {
+    console.log('No tags yet.');
+    return;
+  }
+
+  console.log(`${stats.topTags.length} unique tag${stats.topTags.length === 1 ? '' : 's'}:`);
+  console.log('');
+  for (const { tag, count } of stats.topTags) {
+    const bar = '█'.repeat(count);
+    console.log(`  ${tag.padEnd(25)} ${bar} ${count}`);
+  }
+}
