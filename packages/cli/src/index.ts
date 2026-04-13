@@ -105,6 +105,11 @@ B.R.A.I.N. commands:
   brain create <name> --type <type>     Create a memory with frontmatter
   brain validate <name>                 Mark a memory as still valid
   brain delete <name>                   Delete a memory
+  brain culture                         Corp-wide culture analysis
+  brain culture signature               Agent's unique vs shared tags
+  brain culture overlap                 Pairwise tag overlap between agents
+  brain culture health                  Is the culture alive?
+  brain culture normalize               Tag cleanup suggestions
 
 SLUMBER commands:
   slumber [duration|profile]          Activate SLUMBER (e.g., slumber 3h, slumber night-owl)

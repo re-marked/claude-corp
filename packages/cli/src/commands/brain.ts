@@ -32,6 +32,11 @@ import {
   getBrainStats,
   buildBrainGraph,
   STALENESS_THRESHOLD_DAYS,
+  getCorpCultureStats,
+  getAgentTagSignature,
+  getAgentOverlaps,
+  getCultureHealth,
+  suggestTagNormalization,
   type BrainFile,
   type BrainMemoryType,
   type BrainSource,
@@ -78,6 +83,8 @@ export async function cmdBrain(opts: {
     case 'graph': return showGraph(agentDir, opts.json);
     // Actions
     case 'create': return doCreate(agentDir, opts.args.slice(1), opts.type, opts.tag, opts.source, opts.confidence, opts.json);
+    // Culture
+    case 'culture': return showCulture(corpRoot, agentDir, opts.args.slice(1), opts.json);
     case 'validate': return doValidate(agentDir, opts.args[1], opts.json);
     case 'delete':
     case 'rm': return doDelete(agentDir, opts.args[1], opts.json);
@@ -159,6 +166,13 @@ async function showUsageAndStats(agentDir: string, json: boolean): Promise<void>
   console.log('                                        Create a memory with frontmatter');
   console.log('  cc-cli brain validate <name>          Mark a memory as still valid');
   console.log('  cc-cli brain delete <name>            Delete a memory');
+  console.log('');
+  console.log('Culture (cross-agent):');
+  console.log('  cc-cli brain culture                  Corp-wide culture overview');
+  console.log('  cc-cli brain culture signature        Your unique vs shared tags');
+  console.log('  cc-cli brain culture overlap          Pairwise agent tag overlap');
+  console.log('  cc-cli brain culture health           Is the culture alive?');
+  console.log('  cc-cli brain culture normalize        Tag cleanup suggestions');
   console.log('');
   console.log('Options:');
   console.log('  --agent <name>    Target a specific agent (default: ceo)');
@@ -587,4 +601,221 @@ async function doDelete(agentDir: string, name: string | undefined, json: boolea
   } else {
     console.error(`Memory not found: ${name}`);
   }
+}
+
+// ── Culture Commands ────────────────────────────────────────────────
+
+async function showCulture(corpRoot: string, agentDir: string, args: string[], json: boolean): Promise<void> {
+  const sub = args[0]?.toLowerCase();
+
+  switch (sub) {
+    case 'overlap': return showCultureOverlap(corpRoot, json);
+    case 'health': return showCultureHealth(corpRoot, json);
+    case 'normalize': return showCultureNormalize(corpRoot, json);
+    case 'signature': return showCultureSignature(corpRoot, agentDir, json);
+    default: return showCultureOverview(corpRoot, agentDir, json);
+  }
+}
+
+async function showCultureOverview(corpRoot: string, agentDir: string, json: boolean): Promise<void> {
+  const stats = getCorpCultureStats(corpRoot);
+
+  if (json) {
+    console.log(JSON.stringify(stats, null, 2));
+    return;
+  }
+
+  console.log('B.R.A.I.N. CULTURE ANALYSIS');
+  console.log('');
+
+  // Health badge
+  const healthBadge = {
+    thriving: '🟢 THRIVING',
+    healthy: '🟡 HEALTHY',
+    thin: '🟠 THIN',
+    absent: '🔴 ABSENT',
+  }[stats.health.status];
+  console.log(`  Status: ${healthBadge}`);
+  console.log(`  Agents analyzed: ${stats.agents.length}`);
+  console.log(`  Total unique tags: ${stats.health.totalUniqueTags}`);
+  console.log(`  Shared vocabulary: ${stats.health.sharedTagCount} tags`);
+  console.log(`  Average alignment: ${stats.health.averageAlignment}%`);
+  console.log(`  Tag diversity: ${stats.health.diversityRatio}`);
+  console.log('');
+
+  // Shared vocabulary
+  if (stats.sharedVocabulary.length > 0) {
+    console.log('  SHARED VOCABULARY (cultural tags)');
+    for (const tag of stats.sharedVocabulary.slice(0, 15)) {
+      const bar = '█'.repeat(tag.agentCount);
+      console.log(`    ${tag.tag.padEnd(25)} ${bar} ${tag.agentCount} agents, ${tag.totalUses} uses`);
+    }
+    console.log('');
+  }
+
+  // Agent signatures
+  if (stats.agents.length > 0) {
+    console.log('  AGENT SIGNATURES');
+    for (const agent of stats.agents) {
+      if (agent.fileCount === 0) {
+        console.log(`    ${agent.agentName.padEnd(20)} (no BRAIN files)`);
+        continue;
+      }
+      const uniqueStr = agent.uniqueTags.length > 0
+        ? ` unique: ${agent.uniqueTags.slice(0, 3).join(', ')}${agent.uniqueTags.length > 3 ? '...' : ''}`
+        : '';
+      console.log(`    ${agent.agentName.padEnd(20)} ${agent.fileCount} files, ${agent.alignmentScore}% aligned${uniqueStr}`);
+    }
+    console.log('');
+  }
+
+  // Warnings
+  if (stats.health.warnings.length > 0) {
+    console.log('  ⚠ WARNINGS');
+    for (const warning of stats.health.warnings) {
+      console.log(`    ${warning}`);
+    }
+    console.log('');
+  }
+
+  // Normalization suggestions
+  if (stats.normalizationSuggestions.length > 0) {
+    console.log('  TAG CLEANUP SUGGESTIONS');
+    for (const s of stats.normalizationSuggestions.slice(0, 5)) {
+      console.log(`    ${s.tags.join(' / ')} → ${s.suggestedCanonical} (${s.reason})`);
+    }
+    console.log('');
+  }
+
+  console.log('Subcommands:');
+  console.log('  brain culture                   This overview');
+  console.log('  brain culture signature          Your unique vs shared tags');
+  console.log('  brain culture overlap            Pairwise agent tag overlap');
+  console.log('  brain culture health             Detailed health assessment');
+  console.log('  brain culture normalize          Tag cleanup suggestions');
+}
+
+async function showCultureSignature(corpRoot: string, agentDir: string, json: boolean): Promise<void> {
+  const sig = getAgentTagSignature(corpRoot, agentDir);
+
+  if (json) {
+    console.log(JSON.stringify(sig, null, 2));
+    return;
+  }
+
+  console.log(`TAG SIGNATURE — ${sig.agentName}`);
+  console.log('');
+  console.log(`  Files: ${sig.fileCount}`);
+  console.log(`  Cultural alignment: ${sig.alignmentScore}%`);
+  console.log('');
+
+  if (sig.sharedTags.length > 0) {
+    console.log(`  SHARED TAGS (${sig.sharedTags.length}) — part of the corp's vocabulary`);
+    console.log(`    ${sig.sharedTags.join(', ')}`);
+    console.log('');
+  }
+
+  if (sig.uniqueTags.length > 0) {
+    console.log(`  UNIQUE TAGS (${sig.uniqueTags.length}) — your idiosyncrasy`);
+    console.log(`    ${sig.uniqueTags.join(', ')}`);
+    console.log('');
+  }
+
+  if (Object.keys(sig.tagsByType).length > 0) {
+    console.log('  TAGS BY MEMORY TYPE');
+    for (const [type, tags] of Object.entries(sig.tagsByType)) {
+      console.log(`    ${type.padEnd(22)} ${(tags as string[]).join(', ')}`);
+    }
+    console.log('');
+  }
+}
+
+async function showCultureOverlap(corpRoot: string, json: boolean): Promise<void> {
+  const overlaps = getAgentOverlaps(corpRoot);
+
+  if (json) {
+    console.log(JSON.stringify(overlaps, null, 2));
+    return;
+  }
+
+  if (overlaps.length === 0) {
+    console.log('No tag overlap between agents yet.');
+    return;
+  }
+
+  console.log('AGENT TAG OVERLAP');
+  console.log('');
+  for (const o of overlaps) {
+    const bar = '█'.repeat(Math.max(1, Math.round(o.overlapScore / 10)));
+    console.log(`  ${o.agentA} ↔ ${o.agentB}`);
+    console.log(`    ${bar} ${o.overlapScore}% Jaccard similarity`);
+    console.log(`    shared: ${o.sharedTags.join(', ')}`);
+    console.log('');
+  }
+}
+
+async function showCultureHealth(corpRoot: string, json: boolean): Promise<void> {
+  const health = getCultureHealth(corpRoot);
+
+  if (json) {
+    console.log(JSON.stringify(health, null, 2));
+    return;
+  }
+
+  const badge = {
+    thriving: '🟢 THRIVING — strong shared vocabulary, agents speak the same language',
+    healthy: '🟡 HEALTHY — some shared vocabulary forming, room to grow',
+    thin: '🟠 THIN — agents developing isolated vocabularies',
+    absent: '🔴 ABSENT — no cross-agent cultural signal yet',
+  }[health.status];
+
+  console.log('CULTURE HEALTH');
+  console.log('');
+  console.log(`  ${badge}`);
+  console.log('');
+  console.log(`  Shared tags:        ${health.sharedTagCount}`);
+  console.log(`  Total unique tags:  ${health.totalUniqueTags}`);
+  console.log(`  Average alignment:  ${health.averageAlignment}%`);
+  console.log(`  Diversity ratio:    ${health.diversityRatio}`);
+  console.log('');
+
+  if (health.leastAligned) {
+    console.log(`  Least aligned:      ${health.leastAligned.name} (${health.leastAligned.score}%)`);
+  }
+  if (health.mostIdiosyncratic) {
+    console.log(`  Most idiosyncratic: ${health.mostIdiosyncratic.name} (${health.mostIdiosyncratic.uniqueCount} unique tags)`);
+  }
+  console.log('');
+
+  if (health.warnings.length > 0) {
+    console.log('  WARNINGS');
+    for (const w of health.warnings) {
+      console.log(`    ⚠ ${w}`);
+    }
+  } else {
+    console.log('  No warnings.');
+  }
+}
+
+async function showCultureNormalize(corpRoot: string, json: boolean): Promise<void> {
+  const suggestions = suggestTagNormalization(corpRoot);
+
+  if (json) {
+    console.log(JSON.stringify(suggestions, null, 2));
+    return;
+  }
+
+  if (suggestions.length === 0) {
+    console.log('No tag normalization suggestions. Tags are clean.');
+    return;
+  }
+
+  console.log('TAG NORMALIZATION SUGGESTIONS');
+  console.log('');
+  for (const s of suggestions) {
+    console.log(`  ${s.tags.join(' / ')} → ${s.suggestedCanonical}`);
+    console.log(`    reason: ${s.reason}`);
+    console.log('');
+  }
+  console.log('To normalize, update tags in the affected BRAIN files manually or during the next dream cycle.');
 }
