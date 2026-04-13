@@ -13,6 +13,30 @@
 
 // ── BRAIN State Renderer ────────────────────────────────────────────
 
+function renderCultureContext(culture: NonNullable<DreamPromptOpts['cultureContext']>): string {
+  const lines: string[] = [];
+  lines.push('## Your Cultural Context\n');
+
+  if (culture.sharedTags.length > 0) {
+    lines.push(`**Corp's shared vocabulary:** ${culture.sharedTags.slice(0, 15).join(', ')}`);
+    lines.push('When writing new BRAIN files, prefer these tags where they apply — they\'re how the corp speaks.\n');
+  }
+
+  if (culture.agentUniqueTags.length > 0) {
+    lines.push(`**Your unique tags:** ${culture.agentUniqueTags.slice(0, 10).join(', ')}`);
+    lines.push('These are yours alone — your idiosyncrasy. Keep them if they reflect real preferences.\n');
+  }
+
+  lines.push(`**Cultural alignment:** ${culture.alignmentScore}%`);
+  if (culture.alignmentScore < 20) {
+    lines.push('Your vocabulary is diverging from the corp. Consider whether your tags should align more, or if your unique perspective is valuable as-is.\n');
+  } else if (culture.alignmentScore >= 60) {
+    lines.push('You speak the corp\'s language well. Your unique tags add individuality without losing coherence.\n');
+  }
+
+  return '\n' + lines.join('\n') + '\n';
+}
+
 function buildOrientSteps(opts: DreamPromptOpts): string {
   const steps: string[] = [];
   let n = 2;
@@ -173,6 +197,12 @@ export interface DreamPromptOpts {
     orphanFiles: string[];
     clusters: string[][];
   };
+  /** Corp-wide culture context — helps agents align vocabulary during dreams */
+  cultureContext?: {
+    sharedTags: string[];
+    agentUniqueTags: string[];
+    alignmentScore: number;
+  };
 }
 
 export function buildDreamPrompt(opts: DreamPromptOpts): string {
@@ -252,7 +282,7 @@ It has been ${opts.hoursSinceLast.toFixed(0)} hours since your last consolidatio
 **CRITICAL: You MUST use tools.** Read actual files. Write actual BRAIN/ topic files. Run actual commands. Do NOT just describe what you would do or reply with a summary. Execute every phase below using tools. If there is nothing to consolidate, say DREAM_CLEAN.
 
 ---
-${opts.brainState ? renderBrainState(opts.brainState) : ''}
+${opts.brainState ? renderBrainState(opts.brainState) : ''}${opts.cultureContext ? renderCultureContext(opts.cultureContext) : ''}
 ## Phase 1 — Orient
 
 Execute these commands NOW:

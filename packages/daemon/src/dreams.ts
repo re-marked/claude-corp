@@ -29,6 +29,8 @@ import {
   listBrainFiles,
   findStaleFiles,
   findOrphans,
+  getSharedTags,
+  getAgentTagSignature,
   STALENESS_THRESHOLD_DAYS,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
@@ -408,6 +410,20 @@ export class DreamManager {
         // If BRAIN state gathering fails, dream proceeds without it
       }
 
+      // Gather culture context — cross-agent tag awareness
+      let cultureContext: NonNullable<Parameters<typeof buildDreamPrompt>[0]['cultureContext']> | undefined;
+      try {
+        const sharedTags = getSharedTags(this.daemon.corpRoot);
+        const signature = getAgentTagSignature(this.daemon.corpRoot, agentDir);
+        cultureContext = {
+          sharedTags: sharedTags.map(t => t.tag),
+          agentUniqueTags: signature.uniqueTags,
+          alignmentScore: signature.alignmentScore,
+        };
+      } catch {
+        // If culture gathering fails, dream proceeds without it
+      }
+
       const prompt = buildDreamPrompt({
         agentName: agent.displayName,
         agentDir: agentDir.replace(/\\/g, '/'),
@@ -419,6 +435,7 @@ export class DreamManager {
         tasksChannelPath: tasksChannel ? join(corpRootNorm, tasksChannel.path) : null,
         agentSummaries,
         brainState,
+        cultureContext,
       });
 
       const resp = await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
