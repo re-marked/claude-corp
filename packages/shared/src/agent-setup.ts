@@ -11,6 +11,7 @@ import { readConfig } from './parsers/config.js';
 import { syncSkillsToAgent } from './skills.js';
 import { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
 import { AGENT_BOOTSTRAP } from './templates/bootstrap-agent.js';
+import { defaultIdentity as identityTemplate } from './templates/identity.js';
 
 export interface AgentSetupOpts {
   corpRoot: string;
@@ -104,7 +105,7 @@ This file is an **index** to your long-term memory in BRAIN/.
 
 `, 'utf-8');
 
-  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName, rank), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? identityTemplate(displayName, rank), 'utf-8');
   writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? defaultUser(), 'utf-8');
   writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir, opts.projectName), 'utf-8');
   writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), defaultBootstrap(displayName, rank), 'utf-8');
@@ -255,19 +256,7 @@ export function addMemberToChannel(corpRoot: string, channelId: string, memberId
 
 // --- Default workspace file templates ---
 
-function defaultIdentity(displayName: string, rank: Member['rank']): string {
-  return `# Identity
-
-Name: ${displayName}
-Rank: ${rank}
-Vibe: (develop this over time — how do you come across?)
-Emoji: (pick one that feels right)
-
-You are **${displayName}**, a ${rank}-rank agent in this corporation.
-Your personality and working style are yours to develop over time.
-Update this file as you evolve — it's how others know who you are.
-`;
-}
+// defaultIdentity is now imported from templates/identity.ts as identityTemplate
 
 function defaultUser(): string {
   return `# Founder
