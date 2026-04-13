@@ -175,12 +175,12 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       setChannel(dm);
       setMessagesPath(join(root, dm.path, 'messages.jsonl'));
 
-      // Send system message to trigger CEO onboarding interview
+      // Send system message to trigger CEO founding conversation
       const { post: postMsg } = await import('@claudecorp/shared');
       const dmPath = join(root, dm.path, 'messages.jsonl');
       postMsg(dm.id, dmPath, {
         senderId: 'system',
-        content: `New corporation "${corpName}" created. The ${selectedTheme.ranks.owner} is here. Introduce yourself and begin the onboarding interview — ask what they want this corporation to accomplish.`,
+        content: `New corporation "${corpName}" created. The ${selectedTheme.ranks.owner} is here. Read your BOOTSTRAP.md and begin the founding conversation.`,
         source: 'system',
       });
 
