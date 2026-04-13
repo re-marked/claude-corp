@@ -81,7 +81,28 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   writeFileSync(join(agentAbsDir, 'SOUL.md'), soulContent, 'utf-8');
   writeFileSync(join(agentAbsDir, 'RULES.md'), agentsContent, 'utf-8');
   writeFileSync(join(agentAbsDir, 'HEARTBEAT.md'), heartbeatContent, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'MEMORY.md'), '# Memory\n\nNo memories yet.\n', 'utf-8');
+  writeFileSync(join(agentAbsDir, 'MEMORY.md'), `# Memory Index
+
+This file is an **index** to your long-term memory in BRAIN/.
+
+## Rules
+
+- Each entry is one line: \`- [Title](BRAIN/file.md) — one-line description\`
+- Never write content directly here — write it to a BRAIN/ file, then index it here
+- Keep this file under 200 lines — if it's growing, you're indexing too much noise
+- Group entries by topic, not by date
+- Remove stale or superseded entries — a wrong pointer is worse than no pointer
+
+## This is NOT
+
+- **Not your diary** — daily observations go in \`observations/YYYY/MM/YYYY-MM-DD.md\`
+- **Not a knowledge dump** — write content to \`BRAIN/\` files, index them here
+- **Not a task list** — tasks live in \`TASKS.md\`
+- **Not a scratchpad** — temporary notes don't belong in long-term memory
+
+---
+
+`, 'utf-8');
 
   writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? defaultIdentity(displayName, rank), 'utf-8');
   writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? defaultUser(), 'utf-8');
