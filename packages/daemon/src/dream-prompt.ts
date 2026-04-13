@@ -62,10 +62,23 @@ function renderBrainState(state: NonNullable<DreamPromptOpts['brainState']>): st
   }
   lines.push('');
 
-  // Stale files
+  // Stale files — founder-preference files get urgent flag
   if (state.staleFiles.length > 0) {
-    lines.push(`**⚠ Stale (not validated in 30+ days):** ${state.staleFiles.join(', ')}`);
-    lines.push('Re-read these during this dream. Validate if still true, delete if not.\n');
+    const founderStale = state.staleFiles.filter(name =>
+      state.files.find(f => f.name === name && f.type === 'founder-preference'),
+    );
+    const otherStale = state.staleFiles.filter(name =>
+      !state.files.find(f => f.name === name && f.type === 'founder-preference'),
+    );
+
+    if (founderStale.length > 0) {
+      lines.push(`**🔴 URGENT stale founder preferences:** ${founderStale.join(', ')}`);
+      lines.push('These are your compass for autonomous decisions. Re-read and validate immediately.\n');
+    }
+    if (otherStale.length > 0) {
+      lines.push(`**⚠ Stale (not validated in 30+ days):** ${otherStale.join(', ')}`);
+      lines.push('Re-read these during this dream. Validate if still true, delete if not.\n');
+    }
   }
 
   // Orphans
@@ -87,7 +100,56 @@ function renderBrainState(state: NonNullable<DreamPromptOpts['brainState']>): st
     lines.push('');
   }
 
+  // Suggested connections — files with overlapping tags but no wikilink between them
+  const suggestions = findSuggestedConnections(state);
+  if (suggestions.length > 0) {
+    lines.push('**Suggested connections** (shared tags, no link yet):');
+    for (const { a, b, sharedTags } of suggestions.slice(0, 5)) {
+      lines.push(`- [[${a}]] ↔ [[${b}]] (shared: ${sharedTags.join(', ')})`);
+    }
+    lines.push('Consider adding [[wikilinks]] between related memories to strengthen the graph.\n');
+  }
+
   return '\n' + lines.join('\n') + '\n';
+}
+
+/** Find pairs of BRAIN files that share tags but have no wikilink between them. */
+function findSuggestedConnections(
+  state: NonNullable<DreamPromptOpts['brainState']>,
+): Array<{ a: string; b: string; sharedTags: string[] }> {
+  // Build a set of existing links for fast lookup
+  const linkedPairs = new Set<string>();
+  // We don't have link data in brainState.files, so we use clusters as a proxy:
+  // files in the same cluster are already connected (directly or transitively)
+  const sameCluster = new Map<string, Set<string>>();
+  for (const cluster of state.clusters) {
+    const members = new Set(cluster);
+    for (const member of cluster) {
+      sameCluster.set(member, members);
+    }
+  }
+
+  const suggestions: Array<{ a: string; b: string; sharedTags: string[] }> = [];
+
+  for (let i = 0; i < state.files.length; i++) {
+    for (let j = i + 1; j < state.files.length; j++) {
+      const a = state.files[i]!;
+      const b = state.files[j]!;
+
+      // Skip if already in the same cluster (already connected)
+      const aCluster = sameCluster.get(a.name);
+      if (aCluster?.has(b.name)) continue;
+
+      // Find shared tags
+      const sharedTags = a.tags.filter(t => b.tags.includes(t));
+      if (sharedTags.length >= 2) {
+        suggestions.push({ a: a.name, b: b.name, sharedTags });
+      }
+    }
+  }
+
+  // Sort by number of shared tags (most overlap first)
+  return suggestions.sort((x, y) => y.sharedTags.length - x.sharedTags.length);
 }
 
 export interface DreamPromptOpts {
