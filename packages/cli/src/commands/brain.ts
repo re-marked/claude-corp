@@ -23,6 +23,9 @@ import {
   searchByTag,
   searchByType,
   readBrainFile,
+  createBrainFile,
+  validateBrainFile,
+  deleteBrainFile,
   findBacklinks,
   findStaleFiles,
   findOrphans,
@@ -31,6 +34,8 @@ import {
   STALENESS_THRESHOLD_DAYS,
   type BrainFile,
   type BrainMemoryType,
+  type BrainSource,
+  type BrainConfidence,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
 import { existsSync, readdirSync } from 'node:fs';
@@ -58,15 +63,22 @@ export async function cmdBrain(opts: {
   }
 
   switch (subcommand) {
+    // Navigation
     case 'list': return showList(agentDir, opts.type as BrainMemoryType | undefined, opts.json);
     case 'show':
     case 'read': return showFile(agentDir, opts.args[1], opts.json);
     case 'search': return showSearch(agentDir, opts.args.slice(1), opts.tag, opts.type, opts.json);
     case 'links': return showLinks(agentDir, opts.args[1], opts.json);
+    // Diagnostics
     case 'stale': return showStale(agentDir, opts.json);
     case 'orphans': return showOrphans(agentDir, opts.json);
     case 'stats': return showStats(agentDir, opts.json);
     case 'graph': return showGraph(agentDir, opts.json);
+    // Actions
+    case 'create': return doCreate(agentDir, opts.args.slice(1), opts.type, opts.tag, opts.json);
+    case 'validate': return doValidate(agentDir, opts.args[1], opts.json);
+    case 'delete':
+    case 'rm': return doDelete(agentDir, opts.args[1], opts.json);
     case 'tags': return showTags(agentDir, opts.json);
     default:
       console.error(`Unknown subcommand: ${subcommand}`);
@@ -139,6 +151,12 @@ async function showUsageAndStats(agentDir: string, json: boolean): Promise<void>
   console.log('  cc-cli brain stats                    Detailed statistics');
   console.log('  cc-cli brain graph                    Link topology');
   console.log('  cc-cli brain tags                     All tags by frequency');
+  console.log('');
+  console.log('Actions:');
+  console.log('  cc-cli brain create <name> --type <type> --tag <tags> <body>');
+  console.log('                                        Create a memory with frontmatter');
+  console.log('  cc-cli brain validate <name>          Mark a memory as still valid');
+  console.log('  cc-cli brain delete <name>            Delete a memory');
   console.log('');
   console.log('Options:');
   console.log('  --agent <name>    Target a specific agent (default: ceo)');
@@ -480,5 +498,85 @@ async function showTags(agentDir: string, json: boolean): Promise<void> {
   for (const { tag, count } of stats.topTags) {
     const bar = '█'.repeat(count);
     console.log(`  ${tag.padEnd(25)} ${bar} ${count}`);
+  }
+}
+
+// ── Action Commands ─────────────────────────────────────────────────
+
+async function doCreate(
+  agentDir: string,
+  args: string[],
+  typeArg?: string,
+  tagArg?: string,
+  json: boolean = false,
+): Promise<void> {
+  const name = args[0];
+  if (!name) {
+    console.error('Usage: cc-cli brain create <name> --type <type> [--tag <tags>] [body...]');
+    console.error('');
+    console.error('Types: founder-preference, technical, decision, self-knowledge, correction, relationship');
+    return;
+  }
+
+  const type = (typeArg || 'technical') as BrainMemoryType;
+  const tags = tagArg ? tagArg.split(',').map(t => t.trim()) : [];
+  const body = args.slice(1).join(' ') || '(empty — fill in the content)';
+
+  try {
+    const file = createBrainFile(agentDir, name, body, type, tags, 'observation' as BrainSource);
+
+    if (json) {
+      console.log(JSON.stringify({ created: file.name, type: file.meta.type, tags: file.meta.tags, path: file.path }, null, 2));
+      return;
+    }
+
+    console.log(`Created: ${file.name}`);
+    console.log(`  type: ${file.meta.type}  tags: ${file.meta.tags.join(', ') || '(none)'}`);
+    console.log(`  path: ${file.path}`);
+  } catch (err: any) {
+    console.error(err.message);
+  }
+}
+
+async function doValidate(agentDir: string, name: string | undefined, json: boolean): Promise<void> {
+  if (!name) {
+    console.error('Usage: cc-cli brain validate <name>');
+    console.error('Marks a memory as still valid (updates last_validated to today).');
+    return;
+  }
+
+  try {
+    const file = validateBrainFile(agentDir, name);
+
+    if (json) {
+      console.log(JSON.stringify({ validated: file.name, last_validated: file.meta.last_validated }, null, 2));
+      return;
+    }
+
+    console.log(`Validated: ${file.name} — last_validated set to ${file.meta.last_validated}`);
+  } catch (err: any) {
+    console.error(err.message);
+  }
+}
+
+async function doDelete(agentDir: string, name: string | undefined, json: boolean): Promise<void> {
+  if (!name) {
+    console.error('Usage: cc-cli brain delete <name>');
+    console.error('Permanently deletes a BRAIN memory. Use for contradicted or stale memories.');
+    return;
+  }
+
+  const deleted = deleteBrainFile(agentDir, name);
+
+  if (json) {
+    console.log(JSON.stringify({ deleted: name, success: deleted }));
+    return;
+  }
+
+  if (deleted) {
+    console.log(`Deleted: ${name}`);
+    console.log('Remember to remove the entry from MEMORY.md if it was indexed.');
+  } else {
+    console.error(`Memory not found: ${name}`);
   }
 }

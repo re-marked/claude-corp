@@ -99,6 +99,9 @@ B.R.A.I.N. commands:
   brain stats                           Detailed statistics
   brain graph                           Link topology + clusters
   brain tags                            All tags by frequency
+  brain create <name> --type <type>     Create a memory with frontmatter
+  brain validate <name>                 Mark a memory as still valid
+  brain delete <name>                   Delete a memory
 
 SLUMBER commands:
   slumber [duration|profile]          Activate SLUMBER (e.g., slumber 3h, slumber night-owl)
