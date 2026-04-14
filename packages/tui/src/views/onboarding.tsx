@@ -23,8 +23,9 @@ import { DaemonClient } from '../lib/daemon-client.js';
 import { CorpProvider } from '../context/corp-context.js';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import { CLAUDE_CORP_LOGO, asciiName } from '../ascii.js';
+import { detectAvailableHarnesses, defaultHarness, type HarnessOption } from '../utils/harness-detect.js';
 
-type Step = 'your-name' | 'corp-name' | 'theme' | 'dm-mode' | 'spawning' | 'restart-warning' | 'ready';
+type Step = 'your-name' | 'corp-name' | 'theme' | 'harness' | 'dm-mode' | 'spawning' | 'restart-warning' | 'ready';
 
 const RECONNECT_INTERVAL = 5;
 
@@ -35,6 +36,10 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
   const [userName, setUserName] = useState('');
   const [corpName, setCorpName] = useState('');
   const [themeIndex, setThemeIndex] = useState(0);
+  // Harness options detected lazily on first entry to the 'harness' step
+  // so a slow `claude --version` call doesn't block name entry.
+  const [harnessOptions, setHarnessOptions] = useState<HarnessOption[]>([]);
+  const [harnessIndex, setHarnessIndex] = useState(0);
   const [dmModeIndex, setDmModeIndex] = useState(0); // 0 = jack (recommended), 1 = async
   const [error, setError] = useState('');
   const [statusText, setStatusText] = useState('');
@@ -83,6 +88,25 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
     if (step === 'theme') {
       if (key.upArrow) setThemeIndex((i) => Math.max(0, i - 1));
       if (key.downArrow) setThemeIndex((i) => Math.min(THEMES.length - 1, i + 1));
+      if (key.return) {
+        // Lazy-detect harnesses on first entry. Cheap to call again if we
+        // somehow return here — detection is pure + fast.
+        if (harnessOptions.length === 0) {
+          const globalConfig = ensureGlobalConfig();
+          const opts = detectAvailableHarnesses(globalConfig);
+          setHarnessOptions(opts);
+          const pick = defaultHarness(opts);
+          const idx = opts.findIndex(o => o.id === pick);
+          if (idx >= 0) setHarnessIndex(idx);
+        }
+        setStep('harness');
+        setError('');
+      }
+      return;
+    }
+    if (step === 'harness') {
+      if (key.upArrow) setHarnessIndex((i) => Math.max(0, i - 1));
+      if (key.downArrow) setHarnessIndex((i) => Math.min(harnessOptions.length - 1, i + 1));
       if (key.return) { setStep('dm-mode'); setError(''); }
       return;
     }
@@ -112,8 +136,9 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       const globalConfig = ensureGlobalConfig();
 
       const selectedDmMode = dmModeIndex === 0 ? 'jack' : 'async' as const;
+      const selectedHarness = harnessOptions[harnessIndex]?.id;
       setStatusText('Creating corporation...');
-      const root = await scaffoldCorp(corpName, userName, selectedTheme.id as ThemeId, selectedDmMode);
+      const root = await scaffoldCorp(corpName, userName, selectedTheme.id as ThemeId, selectedDmMode, selectedHarness);
       setCorpRoot(root);
 
       setStatusText(`${selectedTheme.ranks.master} is waking up...`);
@@ -281,6 +306,48 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
               </Box>
             );
           })}
+
+          <Box marginTop={1}>
+            <Text color={COLORS.muted}>↑↓ to select, Enter to confirm</Text>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (step === 'harness') {
+    const selectedTheme = THEMES[themeIndex]!;
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1} height={termHeight}>
+        <Box flexDirection="column" borderStyle={BORDER_STYLE} borderColor={COLORS.primary} paddingX={3} paddingY={1} width={64}>
+          <Box marginBottom={1} flexDirection="column">
+            <Text bold color={COLORS.primary}>Where should your {selectedTheme.ranks.master} think?</Text>
+            <Text color={COLORS.muted}>You can change this per agent later. This sets the corp default.</Text>
+          </Box>
+
+          {harnessOptions.map((opt, i) => {
+            const isSel = i === harnessIndex;
+            return (
+              <Box key={opt.id} flexDirection="column" marginBottom={1}>
+                <Box gap={1}>
+                  <Text color={isSel ? COLORS.primary : COLORS.muted}>{isSel ? '▸' : ' '}</Text>
+                  <Text bold={isSel} color={isSel ? COLORS.text : COLORS.subtle}>{opt.displayName}</Text>
+                  <Text color={opt.available ? COLORS.success : COLORS.warning}>{opt.note}</Text>
+                </Box>
+                {isSel && (
+                  <Box paddingLeft={3}>
+                    <Text color={COLORS.subtle}>{opt.tagline}</Text>
+                  </Box>
+                )}
+              </Box>
+            );
+          })}
+
+          {harnessOptions[harnessIndex] && !harnessOptions[harnessIndex]!.available && (
+            <Box marginTop={0} marginBottom={1}>
+              <Text color={COLORS.warning}>You can still pick this — you'll hit a clear error on first dispatch if it's not set up.</Text>
+            </Box>
+          )}
 
           <Box marginTop={1}>
             <Text color={COLORS.muted}>↑↓ to select, Enter to confirm</Text>
