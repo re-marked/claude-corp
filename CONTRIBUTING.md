@@ -10,14 +10,14 @@ pnpm build
 cd packages/cli && npm link && cd ../tui && npm link && cd ../..
 ```
 
-Requires: Node.js 22+, pnpm 10+, [OpenClaw](https://openclaw.ai) running.
+Requires: Node.js 22+, pnpm 10+, and at least one agent substrate — [OpenClaw](https://openclaw.ai) (token auth, provider-agnostic) or the [Claude Code CLI](https://claude.com/claude-code) (OAuth subscription). Picked per-agent at hire time via `--harness`.
 
 ## Commands
 
 ```bash
 pnpm build          # Build all packages
 pnpm type-check     # TypeScript strict check
-pnpm test           # Run vitest (62 tests, <1s)
+pnpm test           # Run vitest (~500 tests, ~2s)
 ```
 
 ## Monorepo Structure
@@ -58,6 +58,7 @@ Read [GLOSSARY.md](GLOSSARY.md) for the full list. The ones you'll touch most:
 - **Post** (`packages/shared/src/post.ts`) — all channel JSONL writes go through `post()`. Mandatory senderId, 5s dedup.
 - **Fragments** (`packages/daemon/src/fragments/`) — prompt chunks injected into agents. Each has `applies()`, `order`, and `render()`.
 - **Autoemon** (`packages/daemon/src/autoemon.ts`) — the autonomous tick engine. State machine + tick loop.
+- **AgentHarness** (`packages/daemon/src/harness/`) — the contract that lets Claude Corp dispatch to any substrate. Implement it + register with `HarnessRegistry` to add a new one. `OpenClawHarness` and `ClaudeCodeHarness` are the reference implementations.
 
 ## Testing
 
@@ -73,6 +74,6 @@ Tests live in `tests/`. Cover the primitives that actually broke — Post dedup,
 
 1. `pnpm build` passes
 2. `pnpm type-check` passes
-3. `pnpm test` passes (62/62)
+3. `pnpm test` passes (full suite green)
 4. Commits are granular with meaningful messages
 5. No `as any` casts unless absolutely necessary
