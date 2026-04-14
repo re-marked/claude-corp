@@ -150,6 +150,19 @@ export class HarnessRouter implements AgentHarness {
     this._dispatches += 1;
     this._lastDispatchAt = Date.now();
 
+    // Pre-check aborted signal at the router layer so abort errors surface
+    // with harnessName='router' (not whichever harness happened to be the
+    // target). This keeps "who cancelled this?" attribution stable across
+    // harness swaps and is the behavior the AgentHarness contract expects.
+    if (opts.signal?.aborted) {
+      this._errors += 1;
+      throw new HarnessError({
+        category: 'aborted',
+        harnessName: this.name,
+        message: 'Dispatch aborted before it started',
+      });
+    }
+
     const targetName = this.resolveTargetName(opts.agentId);
     const target = this.deps.harnesses.get(targetName);
     if (!target) {
