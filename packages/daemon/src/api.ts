@@ -24,7 +24,6 @@ import {
   type ChannelMessage,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
-import { dispatchToAgent } from './dispatch.js';
 import { hireAgent } from './hire.js';
 import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm } from './task-events.js';
 import { log, logError } from './logger.js';
@@ -544,7 +543,6 @@ export function createApi(daemon: Daemon): Server {
         const toolArgsCache = new Map<string, Record<string, unknown>>();
 
         try {
-          const wsClient = agentProc.mode === 'remote' ? daemon.openclawWS : daemon.corpGatewayWS;
           // Persistent sessions by default — ALL communication has memory.
           // Deterministic key per sender→target pair: OpenClaw accumulates conversation history.
           // Explicit sessionKey (from Jack/TUI) overrides. Otherwise: persistent per pair.
@@ -568,29 +566,28 @@ export function createApi(daemon: Daemon): Server {
             });
           }
 
-          const result = await dispatchToAgent(
-            agentProc,
+          const result = await daemon.harness.dispatch({
+            agentId: agentProc.memberId,
             message,
-            context,
             sessionKey,
-            // onToken — stream content to TUI
-            channelId ? (accumulated) => {
-              daemon.streaming.set(target.id, {
-                agentName: target.displayName,
-                content: accumulated,
-                channelId,
-              });
-              daemon.events.broadcast({
-                type: 'stream_token',
-                agentName: target.displayName,
-                channelId,
-                content: accumulated,
-              });
-            } : undefined,
-            wsClient,
-            // Tool callbacks — emit events + write tool_event messages to JSONL
-            channelId ? {
-              onToolStart: (tool) => {
+            context,
+            callbacks: {
+              // onToken — stream content to TUI
+              onToken: channelId ? (accumulated) => {
+                daemon.streaming.set(target.id, {
+                  agentName: target.displayName,
+                  content: accumulated,
+                  channelId,
+                });
+                daemon.events.broadcast({
+                  type: 'stream_token',
+                  agentName: target.displayName,
+                  channelId,
+                  content: accumulated,
+                });
+              } : undefined,
+              // Tool callbacks — emit events + write tool_event messages to JSONL
+              onToolStart: channelId ? (tool) => {
                 if (tool.toolCallId && tool.args) {
                   toolArgsCache.set(tool.toolCallId, tool.args);
                 }
@@ -601,8 +598,8 @@ export function createApi(daemon: Daemon): Server {
                   toolName: tool.name,
                   args: tool.args,
                 });
-              },
-              onToolEnd: (tool) => {
+              } : undefined,
+              onToolEnd: channelId ? (tool) => {
                 const args = tool.args ?? toolArgsCache.get(tool.toolCallId);
                 toolArgsCache.delete(tool.toolCallId);
 
@@ -631,9 +628,9 @@ export function createApi(daemon: Daemon): Server {
                     },
                   });
                 }
-              },
-            } : undefined,
-          );
+              } : undefined,
+            },
+          });
 
           // Write the agent's response to channel JSONL so it persists in chat history.
           // Without this, the response only exists in the streaming state (in-memory)
