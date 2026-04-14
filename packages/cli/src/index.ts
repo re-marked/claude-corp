@@ -143,6 +143,7 @@ Management commands:
   teams list | teams create --name "..." --project <id> --lead <id>
   agent start --agent <id> | agent stop --agent <id>
   agent set-harness --agent <id> --harness <name>   Change an agent's execution substrate
+  harness list                                      Show registered harnesses + health
 
 Common flags:
   --json     Output as JSON (machine-readable)
@@ -446,6 +447,12 @@ async function run() {
         agent: values.agent as string | undefined,
         json: !!values.json,
       });
+      break;
+    }
+    case 'harness':
+    case 'harnesses': {
+      const { cmdHarness } = await import('./commands/harness.js');
+      await cmdHarness({ args: positionals.slice(1), json: !!values.json });
       break;
     }
     case 'hand': {
