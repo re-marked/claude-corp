@@ -140,6 +140,14 @@ export {
   buildBrainGraph,
 } from './brain.js';
 export type { BrainGraphEdge, BrainGraph } from './brain.js';
+export type {
+  BrainFile,
+  BrainFrontmatter,
+  BrainMemoryType,
+  BrainSource,
+  BrainConfidence,
+  BrainStats,
+} from './types/brain.js';
 
 // B.R.A.I.N. Culture — cross-agent tag intelligence
 export {
