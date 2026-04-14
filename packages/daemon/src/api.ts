@@ -110,6 +110,7 @@ export function createApi(daemon: Daemon): Server {
           port: a.port,
           status: a.status,
           workStatus: daemon.getAgentWorkStatus(a.memberId),
+          harness: daemon.harness.getHarnessNameFor(a.memberId),
         })));
         return;
       }
