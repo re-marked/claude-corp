@@ -90,6 +90,12 @@ export {
   writeGlobalConfig,
 } from './global-config.js';
 
+// Workspace filename migration (legacy RULES.md/ENVIRONMENT.md → AGENTS.md/TOOLS.md)
+export {
+  migrateAgentWorkspaceFilenames,
+  type WorkspaceMigrationResult,
+} from './migrate-workspace-filenames.js';
+
 // Corp management
 export { scaffoldCorp, listCorps, findCorp, deleteCorp } from './corp.js';
 
