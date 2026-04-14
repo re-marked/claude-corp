@@ -8,6 +8,7 @@ export async function cmdHire(opts: {
   soul?: string;
   model?: string;
   project?: string;
+  harness?: string;
   json: boolean;
 }) {
   if (!opts.name) {
@@ -46,6 +47,8 @@ export async function cmdHire(opts: {
     scopeId = project.id;
   }
 
+  const harness = opts.harness?.trim();
+
   const result = await client.hireAgent({
     creatorId,
     agentName,
@@ -55,12 +58,14 @@ export async function cmdHire(opts: {
     model,
     scope,
     scopeId,
+    ...(harness ? { harness } : {}),
   } as any);
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
     const projectInfo = opts.project ? ` into project "${opts.project}"` : '';
-    console.log(`Hired ${opts.name} (${opts.rank}) as ${agentName}${model ? ` on ${model}` : ''}${projectInfo}.`);
+    const harnessInfo = harness ? ` on harness "${harness}"` : '';
+    console.log(`Hired ${opts.name} (${opts.rank}) as ${agentName}${model ? ` on ${model}` : ''}${harnessInfo}${projectInfo}.`);
   }
 }
