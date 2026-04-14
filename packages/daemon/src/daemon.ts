@@ -88,8 +88,12 @@ export class Daemon {
    * the right underlying AgentHarness. PR 2: only OpenClawHarness is
    * registered, so every agent still resolves to it. PR 3 adds
    * ClaudeCodeHarness alongside.
+   *
+   * Typed as the concrete HarnessRouter (not just AgentHarness) so callers
+   * can use router-specific helpers like `getHarnessNameFor(agentId)` and
+   * `registeredHarnessNames()` without casting.
    */
-  harness: AgentHarness;
+  harness: HarnessRouter;
   /** Track consecutive overloaded errors per agent for gateway restart logic */
   overloadCounts = new Map<string, number>();
   /** Founder presence tracking for autoemon — when was the last user interaction? */
