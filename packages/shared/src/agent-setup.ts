@@ -90,14 +90,25 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   try { syncSkillsToAgent(corpRoot, agentRelDir); } catch {}
 
 
-  // Write workspace files — all templates imported from shared/templates/
+  // Write workspace files. Filenames align with OpenClaw's recognized
+  // bootstrap basename set (AGENTS.md, TOOLS.md) so OpenClaw auto-loads
+  // them into the system prompt; Claude Code's CLAUDE.md @imports the
+  // same names. The internal variable/template names keep "rules" and
+  // "environment" for semantic clarity (these are rules + env info,
+  // regardless of the AGENTS.md / TOOLS.md filesystem handle).
+  const templateHarness = (opts.harness === 'claude-code' ? 'claude-code' : 'openclaw') as 'claude-code' | 'openclaw';
   writeFileSync(join(agentAbsDir, 'SOUL.md'), soulContent, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'RULES.md'), agentsContent ?? rulesTemplate(rank), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'AGENTS.md'), agentsContent ?? rulesTemplate({ rank, harness: templateHarness }), 'utf-8');
   writeFileSync(join(agentAbsDir, 'HEARTBEAT.md'), heartbeatContent ?? heartbeatTemplate(rank), 'utf-8');
   writeFileSync(join(agentAbsDir, 'MEMORY.md'), MEMORY_TEMPLATE, 'utf-8');
   writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? identityTemplate(displayName, rank), 'utf-8');
   writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? USER_TEMPLATE, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'ENVIRONMENT.md'), defaultEnvironment(corpRoot, agentAbsDir, opts.projectName), 'utf-8');
+  writeFileSync(join(agentAbsDir, 'TOOLS.md'), defaultEnvironment({
+    corpRoot,
+    agentDir: agentAbsDir,
+    projectName: opts.projectName,
+    harness: templateHarness,
+  }), 'utf-8');
   // CEO gets the founding conversation guide; hired agents get the absorption shield
   // with culture vocabulary injected at hire time when available
   let bootstrapContent = CEO_BOOTSTRAP;
