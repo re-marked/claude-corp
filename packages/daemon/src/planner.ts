@@ -1,11 +1,13 @@
 /**
- * Planner — dedicated Opus 4.6 agent for deep planning.
+ * Planner — dedicated deep-planning agent.
  *
  * Auto-hired on bootstrap like Failsafe, Warden, Herald.
  * Only activated for /plan (deep plans). /sketch uses whatever
  * agent you're talking to.
  *
- * Uses the most powerful model available for thorough analysis.
+ * Inherits the corp default model from OpenClaw. Route Planner to
+ * Opus (or any stronger model) by setting OpenClaw's default to it —
+ * Planner follows that choice instead of being hardcoded.
  */
 
 import type { Daemon } from './daemon.js';
@@ -50,7 +52,7 @@ When activated, follow your RULES.md protocol for deep planning.
 
 /**
  * Hire the Planner agent into a corp.
- * Uses Opus 4.6 for maximum reasoning depth.
+ * Inherits the corp default model from OpenClaw.
  */
 export async function hirePlanner(daemon: Daemon): Promise<void> {
   const members = (await import('@claudecorp/shared')).readConfig(
@@ -75,8 +77,7 @@ export async function hirePlanner(daemon: Daemon): Promise<void> {
     rank: 'leader',
     agentsContent: PLANNER_RULES,
     heartbeatContent: PLANNER_HEARTBEAT,
-    model: 'claude-opus-4-6',
   });
 
-  log('[planner] Planner agent hired (Opus 4.6)');
+  log(`[planner] Planner agent hired (${daemon.globalConfig.defaults.provider}/${daemon.globalConfig.defaults.model})`);
 }
