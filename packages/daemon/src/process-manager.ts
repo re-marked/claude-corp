@@ -3,13 +3,30 @@ import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import {
   type Member,
+  type Corporation,
   type GlobalConfig,
   readConfig,
   writeConfig,
   MEMBERS_JSON,
+  CORP_JSON,
 } from '@claudecorp/shared';
 import { CorpGateway } from './corp-gateway.js';
 import { log, logError } from './logger.js';
+
+/**
+ * Resolve the corp-wide default harness from corp.json. Returns the
+ * raw value (e.g. 'claude-code', 'openclaw') or undefined when the
+ * field isn't set or the file is unreadable. Callers combine this with
+ * per-member harness to decide routing.
+ */
+function readCorpDefaultHarness(corpRoot: string): string | undefined {
+  try {
+    const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
+    return corp.harness;
+  } catch {
+    return undefined;
+  }
+}
 
 export type AgentProcessStatus = 'starting' | 'ready' | 'stopped' | 'crashed';
 
@@ -29,9 +46,14 @@ export interface AgentProcess {
   status: AgentProcessStatus;
   gatewayToken: string;
   process: ResultPromise | null;
-  /** 'remote' = CEO on user's OpenClaw, 'gateway' = worker on shared corp gateway, 'local' = standalone process */
-  mode: 'local' | 'remote' | 'gateway';
-  /** Model identifier for dispatch (e.g. 'openclaw:main', 'openclaw:hr-manager') */
+  /**
+   * 'remote' = CEO on user's OpenClaw, 'gateway' = worker on shared corp
+   * gateway, 'local' = standalone process, 'harness' = dispatched
+   * directly through an AgentHarness (e.g., claude-code) with no
+   * persistent process or gateway port.
+   */
+  mode: 'local' | 'remote' | 'gateway' | 'harness';
+  /** Model identifier for dispatch (e.g. 'openclaw:main', 'openclaw:hr-manager', 'claude-code') */
   model: string;
 }
 
@@ -74,13 +96,26 @@ export class ProcessManager {
     // Reserve the gateway port from the allocation pool
     this.nextPort = gw.getPort() + 1;
 
-    // Populate agents.list from ALL agent members (including CEO)
+    // Resolve corp-level harness default once. Per-agent member.harness
+    // wins; the corp default is the fallback. Anything that isn't openclaw
+    // routes through its own harness (no gateway involvement) and is
+    // skipped here entirely.
+    const corpHarness = readCorpDefaultHarness(this.corpRoot);
+
     const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
     const workers = members.filter(
       (m) => m.type === 'agent' && m.status !== 'archived' && m.agentDir,
     );
 
+    let openclawCount = 0;
     for (const worker of workers) {
+      // Skip non-openclaw agents — they don't need a gateway slot. Spawning
+      // the OpenClaw process tree just to register a claude-code agent
+      // wastes a port + ~50MB RSS + adds startup latency, all for an
+      // entry the dispatch path will never read.
+      const harness = worker.harness ?? corpHarness;
+      if (harness && harness !== 'openclaw') continue;
+
       const agentName = extractAgentSlug(worker.agentDir!);
       const workspace = join(this.corpRoot, worker.agentDir!).replace(/\\/g, '/');
       const agentDir = join(this.corpRoot, '.gateway', 'agents', agentName, 'agent').replace(/\\/g, '/');
@@ -105,10 +140,13 @@ export class ProcessManager {
         agentDir,
         model: modelOverride,
       });
+      openclawCount++;
     }
 
-    // Start the gateway if there are already agents registered
-    if (gw.hasAgents()) {
+    // Only start the gateway if at least one agent actually needs it.
+    // Future hires of openclaw agents go through hire.ts which calls
+    // gw.start() lazily when status === 'stopped'.
+    if (openclawCount > 0 && gw.hasAgents()) {
       await gw.start();
     }
   }
@@ -128,10 +166,38 @@ export class ProcessManager {
     if (member.type !== 'agent') throw new Error(`Member ${memberId} is not an agent`);
     if (!member.agentDir) throw new Error(`Member ${memberId} has no agentDir`);
 
-    // ALL agents go on the corp gateway. Per-agent model overrides handle Opus
-    // (set in agents.list by hire.ts). No remote gateway routing needed.
-    // This prevents session key collisions with the user's personal OpenClaw.
+    // Resolve effective harness: per-member > corp default > 'openclaw'.
+    // Non-openclaw agents (claude-code, future harnesses) don't need a
+    // gateway slot — they dispatch through their own harness directly,
+    // so we register them in the agents map as 'harness' mode and skip
+    // the gateway registration path entirely.
+    const corpHarness = readCorpDefaultHarness(this.corpRoot);
+    const harness = member.harness ?? corpHarness ?? 'openclaw';
+    if (harness !== 'openclaw') {
+      return this.registerHarnessAgent(memberId, member, harness);
+    }
     return this.registerGatewayAgent(memberId, member);
+  }
+
+  /**
+   * Register an agent that runs through an AgentHarness directly (no
+   * gateway, no listening port, no spawned process). The dispatch path
+   * just looks up the agent by id, finds 'ready' status, and the
+   * HarnessRouter delegates to the configured harness.
+   */
+  registerHarnessAgent(memberId: string, member: Member, harness: string): AgentProcess {
+    const agentProc: AgentProcess = {
+      memberId,
+      displayName: member.displayName,
+      port: 0,
+      status: 'ready',
+      gatewayToken: '',
+      process: null,
+      mode: 'harness',
+      model: harness,
+    };
+    this.agents.set(memberId, agentProc);
+    return agentProc;
   }
 
   /** Register an agent that runs on the shared corp gateway. */
