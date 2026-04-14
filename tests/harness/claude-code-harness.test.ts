@@ -226,6 +226,27 @@ describe('ClaudeCodeHarness', () => {
       expect(calls).toHaveLength(2); // version + dispatch
     });
 
+    it('always passes --verbose (required when combining --print + stream-json)', async () => {
+      // Without --verbose, claude exits with:
+      //   "When using --print, --output-format=stream-json requires --verbose"
+      // This test guards against a regression where someone removes --verbose.
+      const { spawn, calls } = makeSpawner((proc, call) => {
+        if (call.args.includes('--version')) {
+          proc.stdout.write('2.1.107\n');
+          proc.exit(0);
+          return;
+        }
+        happyPathScenario('ok')(proc);
+      });
+      const harness = new ClaudeCodeHarness({ spawn });
+      await harness.init(BASE_CONFIG);
+      await harness.dispatch(BASE_OPTS());
+      const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+      expect(dispatchCall.args).toContain('--verbose');
+      expect(dispatchCall.args).toContain('--output-format');
+      expect(dispatchCall.args).toContain('stream-json');
+    });
+
     it('passes derived UUIDv5 session ID via --session-id', async () => {
       const expectedSessionId = sessionIdFor('say:ceo:mark');
       const { spawn, calls } = makeSpawner((proc, call) => {
