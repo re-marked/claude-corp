@@ -32,7 +32,7 @@
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { log, logError } from '../logger.js';
 import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stream.js';
@@ -220,7 +220,7 @@ export class ClaudeCodeHarness implements AgentHarness {
     // already exists ("Session ID X is already in use"). Detection is
     // filesystem-based so it survives daemon restarts: the session file
     // lives at ~/.claude/projects/<encoded-workspace>/<uuid>.jsonl.
-    const sessionHasHistory = claudeSessionFileExists(sessionId);
+    const sessionHasHistory = claudeSessionFileExists(sessionId, workspace);
     const continuationFlag = sessionHasHistory ? '--resume' : '--session-id';
 
     // Resolve the agent's configured model. Each hire writes
@@ -647,37 +647,48 @@ function resolveAnthropicModel(workspace: string): string | null {
 }
 
 /**
- * Does claude already have a session file for this UUID?
+ * Does claude already have a session file for this UUID IN THIS
+ * WORKSPACE?
  *
  * Session files live at `~/.claude/projects/<encoded-workspace>/<uuid>.jsonl`
- * where the encoding claude uses is implementation-defined (we've observed
- * colon/slash/backslash/dot → dash on Windows, but relying on that would
- * be brittle). Instead we scan every sibling directory under ~/.claude/
- * projects/ for the session filename — session UUIDs are globally unique
- * (uuidv5 from a fixed namespace + jackKey), so a match anywhere in the
- * tree is proof this specific session already exists.
+ * where claude's encoding replaces `:`, `\`, `/`, and `.` in the
+ * workspace path with `-`. Claude **scopes sessions per project dir**:
+ * `--resume <uuid>` looks up the session file under the encoding
+ * derived from cwd, not globally. Trying to resume a UUID that only
+ * exists in a *different* project dir fails with "No conversation
+ * found with session ID: <uuid>".
  *
- * Used to decide between `--session-id <uuid>` (first dispatch — creates)
- * and `--resume <uuid>` (subsequent dispatches — continues). Claude
- * rejects `--session-id` for an already-in-use UUID with "Session ID X
- * is already in use", which is exactly the bug this check prevents.
+ * Earlier versions of this helper scanned every sibling under
+ * `~/.claude/projects/` for the UUID — hoping "session UUIDs are
+ * globally unique so a match anywhere proves existence". Wrong
+ * hypothesis: UUIDs derived from the same jack key (e.g., `jack:ceo`)
+ * collide across corps because sessionIdFor() doesn't mix the
+ * workspace into the hash. The scan found a stale session from a
+ * *different* corp's CEO, reported "exists", and the harness used
+ * `--resume` for a UUID that wasn't valid in this workspace. claude
+ * then returned an error envelope with `errors: ["No conversation
+ * found..."]` that the TUI surfaced as the unhelpful generic
+ * "Claude Code returned an error result".
+ *
+ * Fix: compute the workspace-specific projects-dir path and check
+ * only that one directory.
  */
-function claudeSessionFileExists(sessionId: string): boolean {
-  const projectsDir = join(homedir(), '.claude', 'projects');
-  if (!existsSync(projectsDir)) return false;
-  try {
-    for (const entry of readdirSync(projectsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      if (existsSync(join(projectsDir, entry.name, `${sessionId}.jsonl`))) {
-        return true;
-      }
-    }
-  } catch {
-    // Permission error reading the projects dir — treat as not-exists so
-    // we default to --session-id. Worst case: a legitimate resume fails
-    // with "already in use" and the user sees a specific error.
-  }
-  return false;
+function claudeSessionFileExists(sessionId: string, workspace: string): boolean {
+  const encoded = encodeClaudeWorkspacePath(workspace);
+  const sessionFile = join(homedir(), '.claude', 'projects', encoded, `${sessionId}.jsonl`);
+  return existsSync(sessionFile);
+}
+
+/**
+ * Encode a workspace path the way claude stores its projects dir
+ * subdirectory: every `:`, `\`, `/`, or `.` becomes `-`. Derived from
+ * observing samples under `~/.claude/projects/` on Windows — the
+ * encoded name `C--Users-psyhik1769--claudecorp-hc-agents-ceo`
+ * round-trips cleanly from `C:\Users\psyhik1769\.claudecorp\hc\agents\ceo`
+ * under this rule.
+ */
+function encodeClaudeWorkspacePath(workspace: string): string {
+  return workspace.replace(/[:\\/.]/g, '-');
 }
 
 /**

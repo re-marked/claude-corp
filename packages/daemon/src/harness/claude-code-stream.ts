@@ -288,6 +288,18 @@ function extractText(message: unknown): string {
 }
 
 function pickErrorMessage(p: any): string {
+  // Claude's error envelope shape varies by failure mode. Most single-
+  // reason failures populate p.error or p.message. Session-not-found
+  // and similar runtime errors populate p.errors[] (an array of
+  // strings) — observed from `claude --resume <unknown-uuid>` which
+  // emits `{type:"result", is_error:true, errors:["No conversation
+  // found with session ID: ..."]}`. Without the array fallback the
+  // user would see the unhelpful default "Claude Code returned an
+  // error result" instead of the specific cause.
+  if (Array.isArray(p.errors) && p.errors.length > 0) {
+    const first = p.errors.find((e: unknown) => typeof e === 'string' && e.length > 0);
+    if (typeof first === 'string') return first;
+  }
   return (
     (typeof p.error === 'string' && p.error) ||
     (typeof p.message === 'string' && p.message) ||

@@ -323,6 +323,47 @@ describe('ClaudeCodeStreamParser', () => {
       ]);
       expect((events[0] as any).isOverloaded).toBe(true);
     });
+
+    it('picks the first string from p.errors[] when error/message/result are empty', () => {
+      // Claude's "session not found" failure (and similar runtime
+      // errors) populate an `errors` array, NOT `error`/`message`. The
+      // previous pickErrorMessage only checked scalar fields and
+      // defaulted to the unhelpful "Claude Code returned an error
+      // result". Regression test pins the array fallback.
+      const events = collect(parser, [
+        JSON.stringify({
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          session_id: 'abc',
+          errors: ['No conversation found with session ID: 108e2b08-14ff-58bf-8342-a391290d5fac'],
+        }),
+      ]);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'result_error',
+        message: 'No conversation found with session ID: 108e2b08-14ff-58bf-8342-a391290d5fac',
+      });
+    });
+
+    it('skips empty strings in p.errors[] when picking a message', () => {
+      const events = collect(parser, [
+        JSON.stringify({
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          errors: ['', 'second error', 'third'],
+        }),
+      ]);
+      expect((events[0] as any).message).toBe('second error');
+    });
+
+    it('falls back to the generic message when errors[] is empty or missing strings', () => {
+      const events = collect(parser, [
+        JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: [] }),
+      ]);
+      expect((events[0] as any).message).toBe('Claude Code returned an error result');
+    });
   });
 
   describe('assistant_message', () => {
