@@ -2,11 +2,16 @@ import { getClient } from '../client.js';
 
 /**
  * cc-cli harness list
+ * cc-cli harness health
  *
- * Reports which harnesses the running daemon has registered, the
- * fallback used when an agent declares nothing, and a one-line health
- * summary per harness. Useful before running `cc-cli agent set-harness`
- * so the user knows which names are actually routable.
+ * `list` is a one-line-per-harness summary table — useful before
+ * running `cc-cli agent set-harness` so the user knows which names are
+ * actually routable.
+ *
+ * `health` adds a per-harness diagnostic dump from the underlying
+ * harness's own health().info — typically binary version + login state
+ * + rate-limit status + cumulative cost for ClaudeCodeHarness, gateway
+ * connectivity for OpenClawHarness.
  */
 export async function cmdHarness(opts: { args: string[]; json: boolean }): Promise<void> {
   const action = opts.args[0] ?? 'list';
@@ -17,9 +22,17 @@ export async function cmdHarness(opts: { args: string[]; json: boolean }): Promi
 
   const client = getClient();
   const info = await client.listHarnesses();
+  const verbose = action === 'health';
 
   if (opts.json) {
-    console.log(JSON.stringify(info, null, 2));
+    if (verbose) {
+      // Health view also pulls the full router health (which carries the
+      // per-harness info objects nested inside info.harnesses).
+      const router = await fetch(`http://127.0.0.1:${(client as any).port ?? 0}/status`);
+      console.log(JSON.stringify({ ...info, full: await router.json().catch(() => null) }, null, 2));
+    } else {
+      console.log(JSON.stringify(info, null, 2));
+    }
     return;
   }
 
@@ -41,4 +54,38 @@ export async function cmdHarness(opts: { args: string[]; json: boolean }): Promi
     const marker = h.registeredAs === info.fallback ? ' (fallback)' : '';
     console.log(`  ${name(h.registeredAs)}  ${ok.padEnd(5)}  ${num(h.dispatches)}      ${num(h.errors)}${marker}`);
   }
+
+  if (!verbose) return;
+
+  // Health view adds per-harness diagnostic info pulled from the router's
+  // aggregated health (info.harnesses[i] only carries the rolled-up
+  // counters; the underlying harness-specific info lives on its own
+  // health() — surface it via the same /harnesses endpoint shape if the
+  // daemon includes it, falling back to a "(no extra info)" line.
+  console.log();
+  console.log('Per-harness diagnostics:');
+  for (const h of info.summary) {
+    console.log();
+    console.log(`  [${h.registeredAs}]`);
+    const extras = h as unknown as Record<string, unknown>;
+    const knownKeys = new Set(['name', 'registeredAs', 'ok', 'dispatches', 'errors']);
+    let anyExtra = false;
+    for (const [k, v] of Object.entries(extras)) {
+      if (knownKeys.has(k)) continue;
+      console.log(`    ${k}: ${formatValue(v)}`);
+      anyExtra = true;
+    }
+    if (!anyExtra) {
+      console.log('    (no extra diagnostic info exposed by this harness)');
+      console.log('    Tip: future harness versions surface binary version, login state,');
+      console.log('         rate-limit status, and cumulative cost here.');
+    }
+  }
+}
+
+function formatValue(v: unknown): string {
+  if (v === null) return 'null';
+  if (v === undefined) return '(unset)';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
 }

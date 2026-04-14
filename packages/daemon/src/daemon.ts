@@ -42,6 +42,7 @@ import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import {
   type AgentHarness,
+  ClaudeCodeHarness,
   HarnessRouter,
   OpenClawHarness,
   defaultHarnessRegistry,
@@ -121,23 +122,31 @@ export class Daemon {
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
 
     // Harness abstraction — every dispatch flows through this.
-    // PR 2: daemon.harness is a HarnessRouter that owns a Map of underlying
-    // harnesses keyed by registered name, delegating per-agent via the
-    // resolveHarnessForAgent lookup (Member.harness → Corporation.harness
-    // → fallback 'openclaw'). In this PR the only registered harness is
-    // OpenClawHarness, so every agent resolves to it and behavior is
-    // identical to PR 1. PR 3 adds ClaudeCodeHarness to the map.
+    // PR 2 introduced HarnessRouter; PR 3 adds ClaudeCodeHarness alongside
+    // OpenClawHarness so agents declared with `harness: 'claude-code'`
+    // route to the claude CLI. Both harnesses always register; the
+    // claude-code one degrades gracefully when the binary isn't installed
+    // (init reports not-ok, dispatch errors with HarnessError(auth)
+    // pointing at the install instructions).
     const makeOpenClawHarness = () => new OpenClawHarness({
       processManager: this.processManager,
       getUserGatewayWS: () => this.openclawWS,
       getCorpGatewayWS: () => this.corpGatewayWS,
     });
+    const makeClaudeCodeHarness = () => new ClaudeCodeHarness();
     if (!defaultHarnessRegistry.has('openclaw')) {
       defaultHarnessRegistry.register('openclaw', makeOpenClawHarness);
     }
+    if (!defaultHarnessRegistry.has('claude-code')) {
+      defaultHarnessRegistry.register('claude-code', makeClaudeCodeHarness);
+    }
     const openclaw = makeOpenClawHarness();
+    const claudeCode = makeClaudeCodeHarness();
     this.harness = new HarnessRouter({
-      harnesses: new Map<string, AgentHarness>([['openclaw', openclaw]]),
+      harnesses: new Map<string, AgentHarness>([
+        ['openclaw', openclaw],
+        ['claude-code', claudeCode],
+      ]),
       resolveHarness: (agentId) => this.resolveHarnessForAgent(agentId),
       fallbackHarness: 'openclaw',
     });
