@@ -157,9 +157,16 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       setDaemonPort(port);
       setDaemonClient(new DaemonClient(port));
 
-      setStatusText(globalConfig.userGateway
-        ? 'Connecting to your OpenClaw...'
-        : `Waking up your ${selectedTheme.ranks.master}...`);
+      // Copy reflects the substrate the user actually picked. Previously
+      // we keyed only on `globalConfig.userGateway` — the legacy
+      // CEO-always-remote-OpenClaw assumption — which misled anyone
+      // who picked claude-code but had an OpenClaw install lying around.
+      const isOpenClawHarness = !selectedHarness || selectedHarness === 'openclaw';
+      setStatusText(
+        isOpenClawHarness && globalConfig.userGateway
+          ? 'Connecting to your OpenClaw...'
+          : `Waking up your ${selectedTheme.ranks.master}...`
+      );
 
       logf('Spawning agents...');
       try {

@@ -503,9 +503,15 @@ export class Daemon {
 
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
   private async connectOpenClawWS(): Promise<void> {
-    // User's personal OpenClaw (CEO)
+    // User's personal OpenClaw (for tool events on agents dispatched
+    // through it). Only worth connecting if at least one agent in this
+    // corp actually resolves to the openclaw harness — otherwise we're
+    // spending up to 10s of connect timeout on a gateway no dispatch
+    // will ever hit. The timeout blocks daemon startup (startRouter
+    // awaits this), which is what the user sees as "Connecting to your
+    // OpenClaw..." hanging for 10s on a claude-code-only corp.
     const userGw = this.globalConfig.userGateway;
-    if (userGw) {
+    if (userGw && this.corpHasOpenClawAgent()) {
       try {
         this.openclawWS = new OpenClawWS(userGw.port, userGw.token);
         await this.openclawWS.connect();
@@ -516,7 +522,9 @@ export class Daemon {
       }
     }
 
-    // Corp gateway (worker agents)
+    // Corp gateway (worker agents). Already gated on getStatus() so a
+    // gateway that initCorpGateway skipped starting won't get a wasted
+    // connect attempt here either.
     const corpGw = this.processManager.corpGateway;
     if (corpGw && corpGw.getStatus() === 'ready') {
       try {
@@ -527,6 +535,31 @@ export class Daemon {
         logError(`[daemon] WebSocket to corp gateway failed (falling back to HTTP): ${err}`);
         this.corpGatewayWS = null;
       }
+    }
+  }
+
+  /**
+   * True when at least one agent in this corp resolves to the openclaw
+   * harness. Resolution mirrors resolveHarnessForAgent: member.harness
+   * > corp.harness > 'openclaw' (fallback). Used to decide whether
+   * attempting to connect to the user's OpenClaw WebSocket is worth the
+   * connect-timeout risk.
+   */
+  private corpHasOpenClawAgent(): boolean {
+    try {
+      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+      const corp = readConfig<Corporation>(join(this.corpRoot, CORP_JSON));
+      const corpHarness = corp.harness;
+      for (const member of members) {
+        if (member.type !== 'agent') continue;
+        const resolved = member.harness ?? corpHarness ?? 'openclaw';
+        if (resolved === 'openclaw') return true;
+      }
+      return false;
+    } catch {
+      // Malformed configs — err on the side of connecting, so we don't
+      // accidentally skip a legitimate openclaw connection.
+      return true;
     }
   }
 
