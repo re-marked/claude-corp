@@ -38,6 +38,11 @@ import { DreamManager } from './dreams.js';
 import { AutoemonManager } from './autoemon.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
+import {
+  type AgentHarness,
+  OpenClawHarness,
+  defaultHarnessRegistry,
+} from './harness/index.js';
 import { createApi } from './api.js';
 import { recoverCrashedAgents, recoverCeoGateway, recoverCorpGateway } from './daemon-recovery.js';
 import { killStaleProcesses } from './stale-cleanup.js';
@@ -75,6 +80,8 @@ export class Daemon {
   openclawWS: OpenClawWS | null = null;
   /** WebSocket to corp gateway (for worker dispatch with tool events). */
   corpGatewayWS: OpenClawWS | null = null;
+  /** Agent execution substrate. PR 1: only OpenClawHarness; later PRs add Claude Code + per-agent routing. */
+  harness: AgentHarness;
   /** Track consecutive overloaded errors per agent for gateway restart logic */
   overloadCounts = new Map<string, number>();
   /** Founder presence tracking for autoemon — when was the last user interaction? */
@@ -100,6 +107,21 @@ export class Daemon {
     this.autoemon = new AutoemonManager(this);
     this.analytics = new AnalyticsEngine(this);
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
+
+    // Harness abstraction — every dispatch flows through this.
+    // PR 1: construct OpenClawHarness directly; register a factory against
+    // the default registry so future PRs (and external callers) can pick
+    // harnesses by name. Guard against duplicate registration so multiple
+    // Daemon instances (tests) don't throw.
+    const makeOpenClawHarness = () => new OpenClawHarness({
+      processManager: this.processManager,
+      getUserGatewayWS: () => this.openclawWS,
+      getCorpGatewayWS: () => this.corpGatewayWS,
+    });
+    this.harness = makeOpenClawHarness();
+    if (!defaultHarnessRegistry.has('openclaw')) {
+      defaultHarnessRegistry.register('openclaw', makeOpenClawHarness);
+    }
   }
 
   // --- Agent Work Status Engine ---
@@ -155,6 +177,12 @@ export class Daemon {
       syncSkillsToAllAgents(this.corpRoot);
       log('[daemon] Skills synced to all agents');
     } catch {}
+
+    // Initialize the harness before the API server starts so dispatch
+    // call sites can assume it's ready. init() is cheap for OpenClawHarness
+    // (just records a start timestamp for telemetry); real connectivity
+    // happens later via connectOpenClawWS().
+    await this.harness.init({ corpRoot: this.corpRoot, globalConfig: this.globalConfig });
 
     // Start HTTP API + WebSocket event bus
     this.server = createApi(this);
@@ -595,6 +623,7 @@ export class Daemon {
     this.router.stop();
     await this.gitManager.stop();
     await this.processManager.stopAll();
+    await this.harness.shutdown();
     this.openclawWS?.close();
     this.corpGatewayWS?.close();
     this.events.close();

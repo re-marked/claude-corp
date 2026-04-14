@@ -14,7 +14,7 @@ import {
   MESSAGES_JSONL,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
-import { dispatchToAgent, type DispatchContext } from './dispatch.js';
+import { type DispatchContext } from './dispatch.js';
 import { dispatchTaskToDm } from './task-events.js';
 import { composeSystemMessage } from './fragments/index.js';
 import { log, logError } from './logger.js';
@@ -158,11 +158,15 @@ export class HeartbeatManager {
       // Mark busy during inbox dispatch
       this.daemon.setAgentWorkStatus(memberId, agent.displayName, 'busy');
 
-      const wsClient = agentProc.mode === 'remote' ? this.daemon.openclawWS : this.daemon.corpGatewayWS;
       const sessionKey = `inbox:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
 
       try {
-        const result = await dispatchToAgent(agentProc, summary, context, sessionKey, undefined, wsClient);
+        const result = await this.daemon.harness.dispatch({
+          agentId: agentProc.memberId,
+          message: summary,
+          sessionKey,
+          context,
+        });
         log(`[heartbeat] ${agent.displayName} inbox response: ${result.content.slice(0, 60)}`);
       } catch (err) {
         logError(`[heartbeat] ${agent.displayName} inbox dispatch failed: ${err}`);

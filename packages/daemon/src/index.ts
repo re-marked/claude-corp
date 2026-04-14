@@ -27,3 +27,31 @@ export { AnalyticsEngine } from './analytics.js';
 export type { CorpAnalytics, AgentMetrics } from './analytics.js';
 export { OpenClawWS } from './openclaw-ws.js';
 export type { AgentEvent, ChatEvent, ToolEvent } from './openclaw-ws.js';
+
+// Harness abstraction
+export type {
+  AgentHarness,
+  AgentSpec,
+  DispatchCallbacks,
+  DispatchOpts,
+  HarnessConfig,
+  HarnessErrorCategory,
+  HarnessFactory,
+  HarnessHealth,
+  ToolCallInfo,
+} from './harness/index.js';
+export {
+  HarnessError,
+  OpenClawHarness,
+  MockHarness,
+  HarnessRegistry,
+  defaultHarnessRegistry,
+} from './harness/index.js';
+export type {
+  OpenClawHarnessDeps,
+  MockHarnessOptions,
+  MockResponse,
+  MockResponseLike,
+  MockToolCall,
+  RecordedDispatch,
+} from './harness/index.js';
