@@ -29,6 +29,7 @@ export async function scaffoldCorp(
   userName: string,
   themeId: ThemeId = 'corporate',
   defaultDmMode: 'jack' | 'async' = 'jack',
+  harness?: string,
 ): Promise<string> {
   const corpRoot = join(CLAUDECORP_HOME, corpName);
 
@@ -82,6 +83,7 @@ export async function scaffoldCorp(
     theme: themeId,
     defaultDmMode,
     createdAt: now,
+    ...(harness ? { harness } : {}),
   };
   writeConfig(join(corpRoot, CORP_JSON), corp);
 
