@@ -308,13 +308,11 @@ describe('ClaudeCodeHarness', () => {
       expect(result.content).toBe("Let me check...Here's what I found...");
     });
 
-    it('onToken streams the CURRENT block only, resetting between text blocks', async () => {
-      // Per-block onToken semantics mean the streaming overlay shows
-      // the in-flight block, not an ever-growing concatenation. Fixes
-      // a UX corollary of the persistence bug: if a second text block
-      // started, the streaming overlay used to keep the first block's
-      // text visible too, then both got replaced by just the second
-      // block at dispatch end.
+    it('onToken stays cross-block accumulated; per-block boundaries are surfaced via onAssistantText', async () => {
+      // Contract: onToken's `accumulated` is the running cross-block
+      // total of every text delta. Callers that want per-block
+      // boundaries subscribe to onAssistantText. (Router uses
+      // cross-block + offset tracking; api /cc/say uses both.)
       const { spawn } = makeSpawner((proc, call) => {
         if (call.args.includes('--version')) {
           proc.stdout.write('2.1.107\n');
@@ -341,12 +339,13 @@ describe('ClaudeCodeHarness', () => {
         callbacks: { onToken: (acc) => tokens.push(acc) },
       }));
 
-      // After "first" block completes, the next onToken for "second"
-      // shows just "second" (the new block), not "firstsecond".
-      expect(tokens[tokens.length - 1]).toBe('second');
+      // Cross-block accumulation: final onToken includes both blocks.
+      // Per-block consumers should use onAssistantText (covered by the
+      // separate multi-block test above).
+      expect(tokens[tokens.length - 1]).toBe('firstsecond');
     });
 
-    it('always passes --dangerously-skip-permissions for autonomous tool use', async () => {
+it('always passes --dangerously-skip-permissions for autonomous tool use', async () => {
       // Without this flag, claude's default permission mode pauses every
       // Bash/Edit/Write tool call for interactive approval. There's no
       // human at the keyboard during dispatch, so agents hang. Most of

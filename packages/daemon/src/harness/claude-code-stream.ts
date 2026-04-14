@@ -39,31 +39,30 @@ interface BlockState {
   name?: string;
   toolUseId?: string;
   jsonBuffer: string;
-  /** Per-text-block accumulator. Resets between blocks. */
+  /** Per-text-block accumulator. Used by text_block_complete events. */
   textBuffer: string;
 }
 
 export class ClaudeCodeStreamParser {
   private blocks = new Map<number, BlockState>();
   /**
-   * Per-block running text. `currentBlockText` is what's actively
-   * streaming RIGHT NOW (resets when a text block ends so the next
-   * block streams fresh). `allText` is the running concatenation of
-   * every text block ever seen — kept for backwards-compat with
-   * callers that want the full content as one string.
+   * Cross-block running concatenation of every text delta. Drives the
+   * `accumulated` field on `token` events (kept cross-block for
+   * backwards-compat with callers like router.ts that use offset
+   * tracking to slice out new content). Per-block boundaries are
+   * surfaced separately via `text_block_complete` events.
    */
-  private currentBlockText = '';
-  private allText = '';
+  private accumulated = '';
   private finished = false;
 
   /**
-   * Concatenation of every text block observed so far, across all
-   * blocks in the message. Use this for "give me the whole response
-   * as one string" needs (defensive fallback when a result envelope
-   * is missing).
+   * Concatenation of every text block observed so far. Used as the
+   * defensive fallback for `result_success.content` so cross-block
+   * total is preserved even when claude's `result` envelope only
+   * carries the final block.
    */
   getAccumulatedText(): string {
-    return this.allText;
+    return this.accumulated;
   }
 
   /** Whether a result_success or result_error has been observed. */
@@ -78,8 +77,7 @@ export class ClaudeCodeStreamParser {
    */
   reset(): void {
     this.blocks.clear();
-    this.currentBlockText = '';
-    this.allText = '';
+    this.accumulated = '';
     this.finished = false;
   }
 
@@ -158,7 +156,7 @@ export class ClaudeCodeStreamParser {
           // persistence via `text_block_complete` is the primary
           // mechanism for preserving each block; this is a defensive
           // fallback for callers that only consult result_success.
-          const fallbackContent = this.allText || (typeof p.result === 'string' ? p.result : '');
+          const fallbackContent = this.accumulated || (typeof p.result === 'string' ? p.result : '');
           listener({
             type: 'result_success',
             content: fallbackContent,
@@ -203,12 +201,6 @@ export class ClaudeCodeStreamParser {
           jsonBuffer: '',
           textBuffer: '',
         });
-        // A new text block resets the per-block streaming accumulator
-        // so onToken emits fresh deltas for THIS block (not stale from
-        // the previous one). Cross-block totals stay in `allText`.
-        if (blockType === 'text') {
-          this.currentBlockText = '';
-        }
         listener({ type: 'lifecycle', phase: 'content_block_start' });
         break;
       }
@@ -218,14 +210,14 @@ export class ClaudeCodeStreamParser {
         const delta = (ev.delta ?? {}) as Record<string, unknown>;
 
         if (delta.type === 'text_delta' && typeof delta.text === 'string') {
-          this.allText += delta.text;
-          this.currentBlockText += delta.text;
+          this.accumulated += delta.text;
           const block = this.blocks.get(idx);
           if (block && block.type === 'text') block.textBuffer += delta.text;
-          // accumulated reflects the CURRENT block only — that's what
-          // the streaming overlay shows. Cross-block totals live in
-          // `getAccumulatedText()` for callers that want everything.
-          listener({ type: 'token', text: delta.text, accumulated: this.currentBlockText });
+          // accumulated stays cross-block — `text_block_complete`
+          // surfaces per-block boundaries separately. Existing callers
+          // (router) use cross-block + offset tracking; new callers
+          // (api /cc/say) can use either.
+          listener({ type: 'token', text: delta.text, accumulated: this.accumulated });
         } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
           const block = this.blocks.get(idx);
           if (block) block.jsonBuffer += delta.partial_json;

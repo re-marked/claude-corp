@@ -583,13 +583,14 @@ export function createApi(daemon: Daemon): Server {
             });
           }
 
-          // Track how many text blocks the harness reported via
-          // onAssistantText. When at least one block was persisted
-          // mid-dispatch, the final result_success.content has already
-          // been covered piecewise — no need for the tail-end "persist
-          // everything once" write below (which would double-post the
-          // last block as a separate message).
+          // Track how much of the cross-block accumulated stream has
+          // already been persisted as a JSONL message via
+          // onAssistantText. Same offset-tracking pattern router.ts
+          // uses — onToken still emits cross-block accumulated text,
+          // so we slice from the offset to know what's "still
+          // in-flight" for the streaming overlay.
           let persistedTextBlocks = 0;
+          let lastPersistedLength = 0;
 
           const result = await daemon.harness.dispatch({
             agentId: agentProc.memberId,
@@ -597,30 +598,34 @@ export function createApi(daemon: Daemon): Server {
             sessionKey,
             context,
             callbacks: {
-              // onToken — stream the CURRENT text block (per-block
-              // semantics post-bug-fix). Streaming overlay shows the
-              // in-flight block; previous blocks already persisted as
-              // real JSONL messages via onAssistantText.
+              // onToken — cross-block accumulated. Streaming overlay
+              // shows just the IN-FLIGHT remainder by slicing past
+              // anything onAssistantText has already persisted. Without
+              // the slice the overlay would visually duplicate every
+              // block: once in chat history (post-persistence), once
+              // in the still-streaming overlay.
               onToken: channelId ? (accumulated) => {
+                const inFlight = accumulated.slice(lastPersistedLength);
                 daemon.streaming.set(target.id, {
                   agentName: target.displayName,
-                  content: accumulated,
+                  content: inFlight,
                   channelId,
                 });
                 daemon.events.broadcast({
                   type: 'stream_token',
                   agentName: target.displayName,
                   channelId,
-                  content: accumulated,
+                  content: inFlight,
                 });
               } : undefined,
               // onAssistantText — fires once per completed text block
               // in a multi-block response (text → tool → text → tool
               // → text). Persist each block as its own JSONL message
               // so all of them survive in chat history, not just the
-              // final one. Also resets the streaming overlay so the
-              // next block streams fresh instead of appending to the
-              // already-persisted text.
+              // final one. Bump lastPersistedLength so onToken's slice
+              // moves past the just-persisted text — the overlay
+              // resets to showing only the next block's in-flight
+              // content.
               onAssistantText: channelId ? (text) => {
                 if (!channelMsgPath || !text.trim()) return;
                 post(channelId, channelMsgPath, {
@@ -631,6 +636,7 @@ export function createApi(daemon: Daemon): Server {
                   metadata: { sessionKey: (body.sessionKey as string) ?? null },
                 });
                 persistedTextBlocks++;
+                lastPersistedLength += text.length;
                 daemon.streaming.delete(target.id);
                 daemon.events.broadcast({
                   type: 'stream_token',
