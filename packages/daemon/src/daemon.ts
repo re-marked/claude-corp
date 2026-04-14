@@ -5,6 +5,7 @@ import {
   type Member,
   type Channel,
   type ChannelMessage,
+  type Corporation,
   type GlobalConfig,
   type AgentWorkStatus,
   readConfig,
@@ -12,6 +13,7 @@ import {
   resolveMentions,
   MEMBERS_JSON,
   CHANNELS_JSON,
+  CORP_JSON,
   MESSAGES_JSONL,
   DAEMON_PID_PATH,
   DAEMON_PORT_PATH,
@@ -40,6 +42,7 @@ import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import {
   type AgentHarness,
+  HarnessRouter,
   OpenClawHarness,
   defaultHarnessRegistry,
 } from './harness/index.js';
@@ -80,7 +83,12 @@ export class Daemon {
   openclawWS: OpenClawWS | null = null;
   /** WebSocket to corp gateway (for worker dispatch with tool events). */
   corpGatewayWS: OpenClawWS | null = null;
-  /** Agent execution substrate. PR 1: only OpenClawHarness; later PRs add Claude Code + per-agent routing. */
+  /**
+   * Agent execution substrate. A HarnessRouter that delegates per-agent to
+   * the right underlying AgentHarness. PR 2: only OpenClawHarness is
+   * registered, so every agent still resolves to it. PR 3 adds
+   * ClaudeCodeHarness alongside.
+   */
   harness: AgentHarness;
   /** Track consecutive overloaded errors per agent for gateway restart logic */
   overloadCounts = new Map<string, number>();
@@ -109,19 +117,48 @@ export class Daemon {
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
 
     // Harness abstraction — every dispatch flows through this.
-    // PR 1: construct OpenClawHarness directly; register a factory against
-    // the default registry so future PRs (and external callers) can pick
-    // harnesses by name. Guard against duplicate registration so multiple
-    // Daemon instances (tests) don't throw.
+    // PR 2: daemon.harness is a HarnessRouter that owns a Map of underlying
+    // harnesses keyed by registered name, delegating per-agent via the
+    // resolveHarnessForAgent lookup (Member.harness → Corporation.harness
+    // → fallback 'openclaw'). In this PR the only registered harness is
+    // OpenClawHarness, so every agent resolves to it and behavior is
+    // identical to PR 1. PR 3 adds ClaudeCodeHarness to the map.
     const makeOpenClawHarness = () => new OpenClawHarness({
       processManager: this.processManager,
       getUserGatewayWS: () => this.openclawWS,
       getCorpGatewayWS: () => this.corpGatewayWS,
     });
-    this.harness = makeOpenClawHarness();
     if (!defaultHarnessRegistry.has('openclaw')) {
       defaultHarnessRegistry.register('openclaw', makeOpenClawHarness);
     }
+    const openclaw = makeOpenClawHarness();
+    this.harness = new HarnessRouter({
+      harnesses: new Map<string, AgentHarness>([['openclaw', openclaw]]),
+      resolveHarness: (agentId) => this.resolveHarnessForAgent(agentId),
+      fallbackHarness: 'openclaw',
+    });
+  }
+
+  /**
+   * Look up which harness name should handle a given agent's turns.
+   * Resolution order: Member.harness → Corporation.harness → undefined.
+   * The HarnessRouter applies its fallback when we return undefined.
+   *
+   * Called on every dispatch — intentionally does small sync fs reads
+   * (members.json + corp.json) so the source of truth stays the on-disk
+   * config. Caching can come later if profiling warrants it.
+   */
+  private resolveHarnessForAgent(agentId: string): string | undefined {
+    try {
+      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
+      const member = members.find((m) => m.id === agentId);
+      if (member?.harness) return member.harness;
+      const corp = readConfig<Corporation>(join(this.corpRoot, CORP_JSON));
+      if (corp.harness) return corp.harness;
+    } catch {
+      // Malformed configs — fall through to router fallback.
+    }
+    return undefined;
   }
 
   // --- Agent Work Status Engine ---
