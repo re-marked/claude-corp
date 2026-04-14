@@ -240,6 +240,7 @@ function renderInput(
 const COMMANDS = [
   // Management
   { name: '/hire', syntax: '/hire', desc: 'Open agent hiring wizard' },
+  { name: '/harness', syntax: '/harness', desc: 'Switch an agent\'s execution engine' },
   { name: '/task', syntax: '/task', desc: 'Create a new task (planning)' },
   { name: '/hand', syntax: '/hand <task-id> @agent', desc: 'Hand a task to an agent (start work)' },
   { name: '/sketch', syntax: '/sketch <goal>', desc: 'Quick 5-min plan outline' },

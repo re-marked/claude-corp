@@ -4,6 +4,26 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.0 — Harness UX pass (MERGED, PRs #100–#102)
+
+v2.0.0 made Claude Corp harness-agnostic but only the CLI exposed the choice — the TUI pretended the feature didn't exist. v2.1.0 closes that gap across all three touch points so users configure harnesses without ever reading docs.
+
+- **Onboarding harness step (#100):** after theme picker, a "Where should your CEO think?" screen. Detects what's installed (claude binary + OAuth) and what's configured (provider API keys), shows each option with availability note + fix hint for unavailable ones, persists selection to `Corporation.harness` so the CEO lands on the right substrate at creation.
+- **Hire wizard harness step (#101):** new step between model and description. Defaults to "Use corp default (X)" reading fresh from corp.json, lets per-agent overrides pick claude-code or openclaw explicitly. Same detection + fix-hint UX as onboarding.
+- **`/harness` modal (#102):** three-screen interactive switcher. List shows every active agent with current harness + status. Select one → picker shows target options with live availability + preview of filesystem changes → confirm runs `reconcileAgentWorkspace` → result screen summarizes renamed / backed-up / written files. Registered as slash command + autocomplete + `/help` entry.
+
+**Shared primitives:**
+- `packages/tui/src/utils/harness-detect.ts` — Windows-safe binary resolution via `findExecutableInPath` (exported from `@claudecorp/daemon`), API-key-aware OpenClaw detection, honest fix-hints for unavailable harnesses.
+- `scaffoldCorp` accepts an optional `harness` param that persists to `corp.json`.
+- 12 new tests for the detection layer (full suite: 511/511 green).
+
+**Design constraints honored:**
+- Zero docs required to understand any screen.
+- Unavailable options stay selectable — user gets a clear error on first dispatch rather than silent fallback.
+- Detection runs lazily (at step entry, not TUI startup) so slow probes don't block name input.
+
+---
+
 ## v2.0.0 — Harness-Agnostic Corps (MERGED, PRs #87–#98)
 
 **The new chapter:** Claude Corp is no longer tied to any single agent runtime. Every agent picks a registered substrate at hire time (or later via `cc-cli agent set-harness`), and the daemon's `HarnessRouter` dispatches each message through the right plug. Same `AgentHarness` contract; any harness that implements it is a first-class citizen.
