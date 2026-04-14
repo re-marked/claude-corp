@@ -33,6 +33,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { log, logError } from '../logger.js';
 import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stream.js';
 import { sessionIdFor } from './session-id.js';
+import { quoteForWindowsCmd } from './spawn-utils.js';
 import {
   type AgentHarness,
   type AgentSpec,
@@ -510,12 +511,12 @@ export class ClaudeCodeHarness implements AgentHarness {
 
 function defaultSpawn(binary: string, args: string[], options: ClaudeSpawnOptions): ClaudeChildProcess {
   // Windows: shell:true so cmd.exe resolves the binary via PATH + PATHEXT
-  // (finds claude.exe / claude.cmd / claude.bat transparently). Args that
-  // contain whitespace or quotes get wrapped in cmd.exe-compatible quoting
-  // so paths with spaces (e.g. C:\Users\Jane Doe\...) tokenize correctly.
+  // (finds claude.exe / claude.cmd / claude.bat / npm-shim transparently).
+  // Args get wrapped through quoteForWindowsCmd (spawn-utils.ts) so paths
+  // with spaces and cmd.exe metacharacters (&|<>^%) tokenize correctly.
   //
-  // POSIX: no shell — spawn() resolves binaries via PATH natively and
-  // arg boundaries are preserved by the OS. Passing shell:true here would
+  // POSIX: no shell — spawn() resolves binaries via PATH natively and arg
+  // boundaries are preserved by the OS. Passing shell:true here would
   // require a different escaping scheme (sh vs cmd) and adds risk for
   // zero benefit.
   const isWindows = process.platform === 'win32';
@@ -531,17 +532,6 @@ function defaultSpawn(binary: string, args: string[], options: ClaudeSpawnOption
     throw new Error('node spawn returned a child without piped stdio');
   }
   return child as unknown as ClaudeChildProcess;
-}
-
-/**
- * Wrap an argument for safe passing through cmd.exe. Args without
- * whitespace or double-quotes return unchanged; others get double-quote
- * wrapped with inner quotes doubled per cmd.exe rules.
- */
-function quoteForWindowsCmd(arg: string): string {
-  if (arg === '') return '""';
-  if (!/[\s"]/.test(arg)) return arg;
-  return '"' + arg.replace(/"/g, '""') + '"';
 }
 
 /**
