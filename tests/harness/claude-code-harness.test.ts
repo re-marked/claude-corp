@@ -543,9 +543,15 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
       process.env.HOME = tmpHome;
       try {
         const expectedSessionId = sessionIdFor('say:ceo:mark');
-        // Plant a session file anywhere under ~/.claude/projects/ — the
-        // encoded-workspace subdir name is unimportant since we scan all.
-        const projectsDir = join(tmpHome, '.claude', 'projects', 'any-encoded-workspace');
+        // Plant a session file under THIS WORKSPACE's encoded dir.
+        // BASE_OPTS.context is { corpRoot: '/corps/test', agentDir: 'agents/ceo' }
+        // which resolveWorkspace turns into '/corps/test/agents/ceo'.
+        // Claude's encoding replaces `:`, `\`, `/`, `.` with `-`, so the
+        // session subdir is '-corps-test-agents-ceo'. A session file
+        // under ANY OTHER subdir would no longer satisfy --resume
+        // (claude scopes sessions per project dir), so this test must
+        // plant exactly where the harness will look.
+        const projectsDir = join(tmpHome, '.claude', 'projects', '-corps-test-agents-ceo');
         mkdirSync(projectsDir, { recursive: true });
         writeFileSync(join(projectsDir, `${expectedSessionId}.jsonl`), '', 'utf-8');
 
@@ -566,6 +572,55 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
         expect(resumeIdx).toBeGreaterThan(-1);
         expect(dispatchCall.args[resumeIdx + 1]).toBe(expectedSessionId);
         expect(dispatchCall.args).not.toContain('--session-id');
+      } finally {
+        if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+        else process.env.USERPROFILE = originalUserProfile;
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        rmSync(tmpHome, { recursive: true, force: true });
+      }
+    });
+
+    it('ignores session files under a DIFFERENT workspace\'s encoded dir (scoped check)', async () => {
+      // Regression test for the cross-workspace false-positive bug:
+      // claude scopes sessions per project dir. A session file under
+      // corp-A's encoded workspace does NOT entitle the harness to
+      // --resume that UUID from corp-B's workspace — claude errors
+      // with "No conversation found with session ID: <uuid>". Earlier
+      // versions of this helper scanned every sibling under ~/.claude/
+      // projects/, which incorrectly returned true for a foreign
+      // corp's session and sent the harness down the --resume path.
+      const tmpHome = mkdtempSync(join(tmpdir(), 'claude-home-'));
+      const originalUserProfile = process.env.USERPROFILE;
+      const originalHome = process.env.HOME;
+      process.env.USERPROFILE = tmpHome;
+      process.env.HOME = tmpHome;
+      try {
+        const expectedSessionId = sessionIdFor('say:ceo:mark');
+        // Plant a session file under a DIFFERENT workspace's encoded
+        // dir — simulating "the same UUID registered in another corp".
+        const foreignProjectsDir = join(tmpHome, '.claude', 'projects', '-some-other-corp-agents-ceo');
+        mkdirSync(foreignProjectsDir, { recursive: true });
+        writeFileSync(join(foreignProjectsDir, `${expectedSessionId}.jsonl`), '', 'utf-8');
+
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS());
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        // Because no session file exists under THIS workspace's encoded
+        // dir, the harness must go down the --session-id (create) path,
+        // not --resume (which would error with "No conversation found").
+        expect(dispatchCall.args).toContain('--session-id');
+        expect(dispatchCall.args).not.toContain('--resume');
       } finally {
         if (originalUserProfile === undefined) delete process.env.USERPROFILE;
         else process.env.USERPROFILE = originalUserProfile;
