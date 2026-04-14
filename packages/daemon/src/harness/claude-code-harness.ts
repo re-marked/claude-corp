@@ -222,6 +222,11 @@ export class ClaudeCodeHarness implements AgentHarness {
     // lives at ~/.claude/projects/<encoded-workspace>/<uuid>.jsonl.
     const sessionHasHistory = claudeSessionFileExists(sessionId, workspace);
     const continuationFlag = sessionHasHistory ? '--resume' : '--session-id';
+    // Log the decision for post-mortem debugging. If a cross-workspace
+    // UUID lookup or encoding mismatch ever causes another "No
+    // conversation found" surprise, grep the daemon log for this line
+    // + the sessionId to see exactly which flag fired.
+    log(`[harness:claude-code] dispatch agentId=${opts.agentId} session=${sessionId.slice(0, 8)} flag=${continuationFlag}`);
 
     // Resolve the agent's configured model. Each hire writes
     // { model, provider } to the agent's workspace config.json; if
