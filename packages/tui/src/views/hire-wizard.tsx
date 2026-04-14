@@ -5,7 +5,7 @@ import type { DaemonClient } from '../lib/daemon-client.js';
 import { KNOWN_MODELS, type ModelEntry } from '@claudecorp/shared';
 import { COLORS } from '../theme.js';
 
-type Step = 'name' | 'rank' | 'model' | 'description' | 'hiring' | 'done' | 'error';
+type Step = 'name' | 'rank' | 'model' | 'harness' | 'description' | 'hiring' | 'done' | 'error';
 
 const RANKS = ['worker', 'leader', 'subagent'] as const;
 
@@ -14,21 +14,45 @@ const MODEL_OPTIONS: { entry: ModelEntry | null; label: string }[] = [
   ...KNOWN_MODELS.map(m => ({ entry: m, label: m.displayName })),
 ];
 
+/**
+ * Harness options shown in the hire wizard. The first entry is always
+ * "Use corp default" — so most hires just hit Enter and inherit whatever
+ * the corp was set to at onboarding. Specific choices are offered for
+ * per-agent overrides (e.g., an Opus planner on openclaw in a mostly
+ * claude-code corp, or vice-versa).
+ */
+const HARNESS_DISPLAY: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  'openclaw': 'OpenClaw',
+};
+
 interface Props {
   daemonClient: DaemonClient;
   founderId: string;
+  /** Corp-wide harness default read from corp.json. "Use corp default" inherits this. */
+  corpDefaultHarness?: string;
   onClose: () => void;
   onHired: (agentName: string, displayName: string) => void;
 }
 
-export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props) {
+export function HireWizard({ daemonClient, founderId, corpDefaultHarness, onClose, onHired }: Props) {
   const [step, setStep] = useState<Step>('name');
   const [name, setName] = useState('');
   const [rankIndex, setRankIndex] = useState(0);
   const [modelIndex, setModelIndex] = useState(0);
+  const [harnessIndex, setHarnessIndex] = useState(0); // 0 = use corp default
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
   const [hiredName, setHiredName] = useState('');
+
+  const corpDefaultLabel = corpDefaultHarness
+    ? (HARNESS_DISPLAY[corpDefaultHarness] ?? corpDefaultHarness)
+    : 'openclaw';
+  const HARNESS_OPTIONS = [
+    { id: null, label: `Use corp default (${corpDefaultLabel})` },
+    { id: 'claude-code' as const, label: HARNESS_DISPLAY['claude-code']! },
+    { id: 'openclaw' as const, label: HARNESS_DISPLAY['openclaw']! },
+  ];
 
   useInput((input, key) => {
     if (key.escape) {
@@ -45,6 +69,12 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
     if (step === 'model') {
       if (key.upArrow) setModelIndex(i => Math.max(0, i - 1));
       else if (key.downArrow) setModelIndex(i => Math.min(MODEL_OPTIONS.length - 1, i + 1));
+      else if (key.return) setStep('harness');
+    }
+
+    if (step === 'harness') {
+      if (key.upArrow) setHarnessIndex(i => Math.max(0, i - 1));
+      else if (key.downArrow) setHarnessIndex(i => Math.min(HARNESS_OPTIONS.length - 1, i + 1));
       else if (key.return) setStep('description');
     }
   });
@@ -70,6 +100,12 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
       ? `# Identity\n\nYou are ${displayName}. ${desc}\n\n# Communication Style\n\nClear, professional, focused on results.`
       : `# Identity\n\nYou are ${displayName}, a ${rank}-rank agent.\n\n# Communication Style\n\nClear, professional, focused on results.`;
 
+    // harnessIndex 0 = use corp default (omit the field so the daemon's
+    // hireAgent resolves it from Corporation.harness). Indexes 1+ are
+    // explicit per-agent overrides.
+    const harnessChoice = HARNESS_OPTIONS[harnessIndex]!;
+    const harness = harnessChoice.id ?? undefined;
+
     try {
       await daemonClient.hireAgent({
         creatorId: founderId,
@@ -79,6 +115,7 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
         soulContent,
         model: selectedModel.entry?.id,
         provider: selectedModel.entry?.provider,
+        ...(harness ? { harness } : {}),
       });
       setHiredName(displayName);
       setStep('done');
@@ -90,6 +127,7 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
   };
 
   const selectedModelLabel = MODEL_OPTIONS[modelIndex]!.label;
+  const selectedHarnessLabel = HARNESS_OPTIONS[harnessIndex]!.label;
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="magenta" paddingX={2} paddingY={1} width={60}>
@@ -149,9 +187,25 @@ export function HireWizard({ daemonClient, founderId, onClose, onHired }: Props)
         </Box>
       )}
 
-      {step === 'description' && (
+      {step === 'harness' && (
         <Box flexDirection="column">
           <Text>Name: <Text bold>{name}</Text>  Rank: <Text bold>{RANKS[rankIndex]}</Text>  Model: <Text bold>{selectedModelLabel}</Text></Text>
+          <Box marginTop={1}><Text>Pick an engine for {name}:</Text></Box>
+          {HARNESS_OPTIONS.map((opt, i) => (
+            <Box key={opt.label} gap={1}>
+              <Text color={i === harnessIndex ? COLORS.primary : COLORS.muted} bold={i === harnessIndex}>
+                {i === harnessIndex ? '>' : ' '} {opt.label}
+              </Text>
+              {i === 0 && <Text dimColor>(most agents use this)</Text>}
+            </Box>
+          ))}
+          <Box marginTop={1}><Text dimColor>{'\u2191\u2193'} select  Enter confirm</Text></Box>
+        </Box>
+      )}
+
+      {step === 'description' && (
+        <Box flexDirection="column">
+          <Text>Name: <Text bold>{name}</Text>  Rank: <Text bold>{RANKS[rankIndex]}</Text>  Model: <Text bold>{selectedModelLabel}</Text>  Engine: <Text bold>{selectedHarnessLabel}</Text></Text>
           <Box marginTop={1}><Text>What does this agent do? (optional, Enter to skip)</Text></Box>
           <Box>
             <Text bold color="green">&gt; </Text>
