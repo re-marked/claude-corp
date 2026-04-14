@@ -4,6 +4,15 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.7 — Session scope + error surfacing (MERGED, PR #116)
+
+Fresh corp dispatched "hi" to the CEO → "Claude Code returned an error result", no specifics. Two related bugs:
+
+- **Cross-workspace session UUID collision:** v2.1.1's session check scanned every subdir under `~/.claude/projects/` for the UUID. Jack keys (`jack:ceo`) are identical across corps, so UUIDs collide; the scan found a foreign corp's session and triggered `--resume`, which claude rejects with "No conversation found" because it scopes sessions per project dir. Fix: check only the workspace-specific encoded dir.
+- **`pickErrorMessage` missed `errors[]`:** claude's runtime error envelope uses an array field, not the scalar `error`/`message`/`result` the parser checked. Added an array-aware branch so the real reason surfaces.
+
+Bonus: per-dispatch log line recording which continuation flag (`--session-id` or `--resume`) was chosen, so the next encoding surprise is grep-away.
+
 ## v2.1.6 — Per-agent model override on claude-code (MERGED, PR #114)
 
 Audit of `claude --help` against our dispatch code. The harness was ignoring `config.json.model` entirely — every claude-code dispatch ran on claude's global default (usually sonnet), regardless of what the agent was configured for at hire. A Planner set to `claude-opus-4-6` would still execute on sonnet, silently.
