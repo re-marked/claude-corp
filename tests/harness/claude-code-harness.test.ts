@@ -330,6 +330,67 @@ describe('ClaudeCodeHarness', () => {
       expect(result.toolCalls[0]!.args).toEqual({ path: '/foo' });
     });
 
+    it('tracks per-dispatch + cumulative cost from result_success.total_cost_usd', async () => {
+      let dispatchN = 0;
+      const { spawn } = makeSpawner((proc, call) => {
+        if (call.args.includes('--version')) {
+          proc.stdout.write('2.1.107\n');
+          proc.exit(0);
+          return;
+        }
+        const cost = dispatchN === 0 ? 0.0123 : 0.0077;
+        dispatchN += 1;
+        proc.emitEvent({ type: 'system', subtype: 'init', session_id: 's', model: 'm', tools: [] });
+        proc.emitEvent({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          duration_ms: 5,
+          result: 'ok',
+          session_id: 's',
+          total_cost_usd: cost,
+        });
+        proc.exit(0);
+      });
+      const harness = new ClaudeCodeHarness({ spawn });
+      await harness.init(BASE_CONFIG);
+      await harness.dispatch(BASE_OPTS());
+      let health = await harness.health();
+      expect(health.info?.lastDispatchCostUsd).toBeCloseTo(0.0123, 6);
+      expect(health.info?.totalCostUsd).toBeCloseTo(0.0123, 6);
+      await harness.dispatch(BASE_OPTS({ sessionKey: 'say:ceo:two' }));
+      health = await harness.health();
+      expect(health.info?.lastDispatchCostUsd).toBeCloseTo(0.0077, 6);
+      expect(health.info?.totalCostUsd).toBeCloseTo(0.0123 + 0.0077, 6);
+    });
+
+    it('cost tracking ignores non-finite + missing values without throwing', async () => {
+      const { spawn } = makeSpawner((proc, call) => {
+        if (call.args.includes('--version')) {
+          proc.stdout.write('2.1.107\n');
+          proc.exit(0);
+          return;
+        }
+        proc.emitEvent({ type: 'system', subtype: 'init', session_id: 's', model: 'm', tools: [] });
+        // result_success with no total_cost_usd at all
+        proc.emitEvent({
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          duration_ms: 5,
+          result: 'ok',
+          session_id: 's',
+        });
+        proc.exit(0);
+      });
+      const harness = new ClaudeCodeHarness({ spawn });
+      await harness.init(BASE_CONFIG);
+      await harness.dispatch(BASE_OPTS());
+      const health = await harness.health();
+      expect(health.info?.totalCostUsd).toBe(0);
+      expect(health.info?.lastDispatchCostUsd).toBeNull();
+    });
+
     it('captures rate_limit info into health.info.lastRateLimit', async () => {
       const rateInfo = { status: 'allowed', resetsAt: 1776171600 };
       const { spawn } = makeSpawner((proc, call) => {
