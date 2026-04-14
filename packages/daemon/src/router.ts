@@ -16,7 +16,7 @@ import {
   MAX_DEPTH,
   COOLDOWN_MS,
 } from '@claudecorp/shared';
-import { dispatchToAgent, type DispatchContext } from './dispatch.js';
+import { type DispatchContext } from './dispatch.js';
 import type { Daemon } from './daemon.js';
 import { formatToolMessage } from './format-tool.js';
 import { log, logError } from './logger.js';
@@ -374,37 +374,31 @@ export class MessageRouter {
         channelId: channel.id,
       });
 
-      // Pick WebSocket client based on agent mode (remote = user OpenClaw, gateway = corp gateway)
-      const wsClient = agentProc.mode === 'remote'
-        ? this.daemon.openclawWS
-        : this.daemon.corpGatewayWS;
-
       // Track text segments between tool calls — flush text before each tool event
       let lastFlushedLength = 0;
       const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
       // Cache tool args from start events — end events often lack args
       const toolArgsCache = new Map<string, Record<string, unknown>>();
 
-      const result = await dispatchToAgent(
-        agentProc,
-        messageContent,
+      const result = await this.daemon.harness.dispatch({
+        agentId: agentProc.memberId,
+        message: messageContent,
+        sessionKey: `agent:${agentProc.model.replace('openclaw:', '')}:channel-${channel.id}-${msg.id}`,
         context,
-        `agent:${agentProc.model.replace('openclaw:', '')}:channel-${channel.id}-${msg.id}`,
-        (accumulated) => {
-          this.daemon.streaming.set(targetId, {
-            agentName: target.displayName,
-            content: accumulated.slice(lastFlushedLength),
-            channelId: channel.id,
-          });
-          this.daemon.events.broadcast({
-            type: 'stream_token',
-            agentName: target.displayName,
-            channelId: channel.id,
-            content: accumulated.slice(lastFlushedLength),
-          });
-        },
-        wsClient,
-        {
+        callbacks: {
+          onToken: (accumulated) => {
+            this.daemon.streaming.set(targetId, {
+              agentName: target.displayName,
+              content: accumulated.slice(lastFlushedLength),
+              channelId: channel.id,
+            });
+            this.daemon.events.broadcast({
+              type: 'stream_token',
+              agentName: target.displayName,
+              channelId: channel.id,
+              content: accumulated.slice(lastFlushedLength),
+            });
+          },
           // Cache tool args from start events — end events often don't include them
           onToolStart: (tool) => {
             // Cache args by toolCallId so onToolEnd can use them
@@ -467,7 +461,7 @@ export class MessageRouter {
             });
           },
         },
-      );
+      });
 
       this.daemon.streaming.delete(targetId);
       this.activeDispatches.delete(target.displayName);
