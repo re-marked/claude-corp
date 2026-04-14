@@ -52,6 +52,8 @@ export {
   sessionIdFor,
   uuidv5,
   CLAUDE_CORP_SESSION_NAMESPACE,
+  findExecutableInPath,
+  quoteForWindowsCmd,
 } from './harness/index.js';
 export type {
   OpenClawHarnessDeps,

@@ -54,3 +54,4 @@ export {
   uuidv5,
   CLAUDE_CORP_SESSION_NAMESPACE,
 } from './session-id.js';
+export { findExecutableInPath, quoteForWindowsCmd } from './spawn-utils.js';
