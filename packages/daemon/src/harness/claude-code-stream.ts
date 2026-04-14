@@ -23,6 +23,7 @@
 export type ClaudeCodeEvent =
   | { type: 'init'; sessionId: string; model: string; tools: string[]; apiKeySource?: string }
   | { type: 'token'; text: string; accumulated: string }
+  | { type: 'text_block_complete'; text: string; blockIndex: number }
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'lifecycle'; phase: 'message_start' | 'message_stop' | 'content_block_start' | 'content_block_stop' | 'message_delta' }
   | { type: 'rate_limit'; info: Record<string, unknown> }
@@ -38,14 +39,28 @@ interface BlockState {
   name?: string;
   toolUseId?: string;
   jsonBuffer: string;
+  /** Per-text-block accumulator. Used by text_block_complete events. */
+  textBuffer: string;
 }
 
 export class ClaudeCodeStreamParser {
   private blocks = new Map<number, BlockState>();
+  /**
+   * Cross-block running concatenation of every text delta. Drives the
+   * `accumulated` field on `token` events (kept cross-block for
+   * backwards-compat with callers like router.ts that use offset
+   * tracking to slice out new content). Per-block boundaries are
+   * surfaced separately via `text_block_complete` events.
+   */
   private accumulated = '';
   private finished = false;
 
-  /** Returns the running concatenation of all text deltas observed so far. */
+  /**
+   * Concatenation of every text block observed so far. Used as the
+   * defensive fallback for `result_success.content` so cross-block
+   * total is preserved even when claude's `result` envelope only
+   * carries the final block.
+   */
   getAccumulatedText(): string {
     return this.accumulated;
   }
@@ -134,9 +149,17 @@ export class ClaudeCodeStreamParser {
         this.finished = true;
         const p = parsed as any;
         if (p.subtype === 'success' || p.is_error === false) {
+          // Prefer the cross-block accumulation over claude's `result`
+          // field — `result` only carries the LAST text block, so a
+          // multi-block response (text → tool → text) would lose the
+          // earlier text if we trusted `result` alone. Per-block
+          // persistence via `text_block_complete` is the primary
+          // mechanism for preserving each block; this is a defensive
+          // fallback for callers that only consult result_success.
+          const fallbackContent = this.accumulated || (typeof p.result === 'string' ? p.result : '');
           listener({
             type: 'result_success',
-            content: typeof p.result === 'string' ? p.result : this.accumulated,
+            content: fallbackContent,
             sessionId: typeof p.session_id === 'string' ? p.session_id : '',
             durationMs: typeof p.duration_ms === 'number' ? p.duration_ms : 0,
             cost: typeof p.total_cost_usd === 'number' ? p.total_cost_usd : undefined,
@@ -176,6 +199,7 @@ export class ClaudeCodeStreamParser {
           name: typeof block.name === 'string' ? block.name : undefined,
           toolUseId: typeof block.id === 'string' ? block.id : undefined,
           jsonBuffer: '',
+          textBuffer: '',
         });
         listener({ type: 'lifecycle', phase: 'content_block_start' });
         break;
@@ -187,6 +211,12 @@ export class ClaudeCodeStreamParser {
 
         if (delta.type === 'text_delta' && typeof delta.text === 'string') {
           this.accumulated += delta.text;
+          const block = this.blocks.get(idx);
+          if (block && block.type === 'text') block.textBuffer += delta.text;
+          // accumulated stays cross-block — `text_block_complete`
+          // surfaces per-block boundaries separately. Existing callers
+          // (router) use cross-block + offset tracking; new callers
+          // (api /cc/say) can use either.
           listener({ type: 'token', text: delta.text, accumulated: this.accumulated });
         } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
           const block = this.blocks.get(idx);
@@ -213,6 +243,17 @@ export class ClaudeCodeStreamParser {
             toolCallId: block.toolUseId ?? `unknown-${idx}`,
             name: block.name ?? 'unknown',
             args,
+          });
+        } else if (block && block.type === 'text' && block.textBuffer.length > 0) {
+          // Emit the whole text block as a single completion event so
+          // downstream can persist it before the next tool call /
+          // text block arrives. Without this the only chance to
+          // capture intermediate text was the final result envelope,
+          // which only carries the LAST block — earlier text was lost.
+          listener({
+            type: 'text_block_complete',
+            text: block.textBuffer,
+            blockIndex: idx,
           });
         }
         this.blocks.delete(idx);

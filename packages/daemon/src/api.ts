@@ -583,24 +583,66 @@ export function createApi(daemon: Daemon): Server {
             });
           }
 
+          // Track how much of the cross-block accumulated stream has
+          // already been persisted as a JSONL message via
+          // onAssistantText. Same offset-tracking pattern router.ts
+          // uses — onToken still emits cross-block accumulated text,
+          // so we slice from the offset to know what's "still
+          // in-flight" for the streaming overlay.
+          let persistedTextBlocks = 0;
+          let lastPersistedLength = 0;
+
           const result = await daemon.harness.dispatch({
             agentId: agentProc.memberId,
             message,
             sessionKey,
             context,
             callbacks: {
-              // onToken — stream content to TUI
+              // onToken — cross-block accumulated. Streaming overlay
+              // shows just the IN-FLIGHT remainder by slicing past
+              // anything onAssistantText has already persisted. Without
+              // the slice the overlay would visually duplicate every
+              // block: once in chat history (post-persistence), once
+              // in the still-streaming overlay.
               onToken: channelId ? (accumulated) => {
+                const inFlight = accumulated.slice(lastPersistedLength);
                 daemon.streaming.set(target.id, {
                   agentName: target.displayName,
-                  content: accumulated,
+                  content: inFlight,
                   channelId,
                 });
                 daemon.events.broadcast({
                   type: 'stream_token',
                   agentName: target.displayName,
                   channelId,
-                  content: accumulated,
+                  content: inFlight,
+                });
+              } : undefined,
+              // onAssistantText — fires once per completed text block
+              // in a multi-block response (text → tool → text → tool
+              // → text). Persist each block as its own JSONL message
+              // so all of them survive in chat history, not just the
+              // final one. Bump lastPersistedLength so onToken's slice
+              // moves past the just-persisted text — the overlay
+              // resets to showing only the next block's in-flight
+              // content.
+              onAssistantText: channelId ? (text) => {
+                if (!channelMsgPath || !text.trim()) return;
+                post(channelId, channelMsgPath, {
+                  senderId: target.id,
+                  content: text,
+                  source: 'jack',
+                  slumber: daemon.autoemon.isActive(),
+                  metadata: { sessionKey: (body.sessionKey as string) ?? null },
+                });
+                persistedTextBlocks++;
+                lastPersistedLength += text.length;
+                daemon.streaming.delete(target.id);
+                daemon.events.broadcast({
+                  type: 'stream_token',
+                  agentName: target.displayName,
+                  channelId,
+                  content: '',
                 });
               } : undefined,
               // Tool callbacks — emit events + write tool_event messages to JSONL
@@ -649,10 +691,15 @@ export function createApi(daemon: Daemon): Server {
             },
           });
 
-          // Write the agent's response to channel JSONL so it persists in chat history.
-          // Without this, the response only exists in the streaming state (in-memory)
-          // and vanishes when the stream ends or a re-render triggers.
-          if (channelMsgPath && result.content.trim()) {
+          // Write the agent's response to channel JSONL so it persists
+          // in chat history. Skip when text blocks were already
+          // persisted mid-dispatch via onAssistantText — for those the
+          // chat history is already complete and writing result.content
+          // would duplicate the last block as a separate message.
+          // Fallback path covers harnesses that don't implement
+          // onAssistantText (e.g., openclaw) which still rely on a
+          // single result.content write at the end.
+          if (channelMsgPath && persistedTextBlocks === 0 && result.content.trim()) {
             post(channelId, channelMsgPath, {
               senderId: target.id,
               content: result.content,

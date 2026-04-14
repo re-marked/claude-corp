@@ -446,6 +446,13 @@ export class ClaudeCodeHarness implements AgentHarness {
         callbacks?.onToken?.(event.accumulated);
         break;
 
+      case 'text_block_complete':
+        // Forward each completed text block so callers can persist
+        // them block-by-block. Without this, only the final block
+        // (via result_success.content) survives a multi-block dispatch.
+        callbacks?.onAssistantText?.(event.text);
+        break;
+
       case 'tool_call': {
         const info: ToolCallInfo = {
           name: event.name,
