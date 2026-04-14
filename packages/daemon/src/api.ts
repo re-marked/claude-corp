@@ -178,6 +178,7 @@ export function createApi(daemon: Daemon): Server {
           heartbeatContent: (body.heartbeatContent as string) ?? undefined,
           model: (body.model as string) ?? undefined,
           provider: (body.provider as string) ?? undefined,
+          harness: (body.harness as string) ?? undefined,
         });
         json(res, { ok: true, member: result.member, dmChannel: result.dmChannel });
         return;

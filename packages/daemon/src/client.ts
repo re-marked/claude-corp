@@ -65,6 +65,7 @@ export class DaemonClient {
     soulContent?: string;
     model?: string;
     provider?: string;
+    harness?: string;
   }): Promise<{ ok: boolean; member: unknown; dmChannel: unknown }> {
     const resp = await fetch(`${this.baseUrl}/agents/hire`, {
       method: 'POST',
