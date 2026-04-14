@@ -49,6 +49,7 @@ import {
 } from './harness/index.js';
 import { createApi } from './api.js';
 import { recoverCrashedAgents, recoverCeoGateway, recoverCorpGateway } from './daemon-recovery.js';
+import { corpHasOpenClawAgent } from './harness-resolve.js';
 import { killStaleProcesses } from './stale-cleanup.js';
 import { log, logError } from './logger.js';
 
@@ -511,7 +512,7 @@ export class Daemon {
     // awaits this), which is what the user sees as "Connecting to your
     // OpenClaw..." hanging for 10s on a claude-code-only corp.
     const userGw = this.globalConfig.userGateway;
-    if (userGw && this.corpHasOpenClawAgent()) {
+    if (userGw && corpHasOpenClawAgent(this.corpRoot)) {
       try {
         this.openclawWS = new OpenClawWS(userGw.port, userGw.token);
         await this.openclawWS.connect();
@@ -538,30 +539,6 @@ export class Daemon {
     }
   }
 
-  /**
-   * True when at least one agent in this corp resolves to the openclaw
-   * harness. Resolution mirrors resolveHarnessForAgent: member.harness
-   * > corp.harness > 'openclaw' (fallback). Used to decide whether
-   * attempting to connect to the user's OpenClaw WebSocket is worth the
-   * connect-timeout risk.
-   */
-  private corpHasOpenClawAgent(): boolean {
-    try {
-      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
-      const corp = readConfig<Corporation>(join(this.corpRoot, CORP_JSON));
-      const corpHarness = corp.harness;
-      for (const member of members) {
-        if (member.type !== 'agent') continue;
-        const resolved = member.harness ?? corpHarness ?? 'openclaw';
-        if (resolved === 'openclaw') return true;
-      }
-      return false;
-    } catch {
-      // Malformed configs — err on the side of connecting, so we don't
-      // accidentally skip a legitimate openclaw connection.
-      return true;
-    }
-  }
 
   async spawnAllAgents(): Promise<void> {
     // Initialize the shared corp gateway — if it fails, CEO may still work via remote
