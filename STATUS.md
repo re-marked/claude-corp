@@ -4,6 +4,14 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.6 — Per-agent model override on claude-code (MERGED, PR #114)
+
+Audit of `claude --help` against our dispatch code. The harness was ignoring `config.json.model` entirely — every claude-code dispatch ran on claude's global default (usually sonnet), regardless of what the agent was configured for at hire. A Planner set to `claude-opus-4-6` would still execute on sonnet, silently.
+
+Fix: before building spawn args, read the agent's workspace `config.json`. When the model is set and provider looks Anthropic (`anthropic`, `claude`, or model name starts with `claude-` / is `sonnet|opus|haiku`), pass `--model <value>` to claude. Non-Anthropic models (e.g., openclaw leftovers) are skipped — claude rejects them, silent fallback to default beats cryptic error.
+
+Third "audit the claude CLI assumptions" finding after v2.1.1 (--session-id vs --resume) and v2.1.2 (--dangerously-skip-permissions). Memory updated (`feedback_dont_guess.md`) so future-us reads `<binary> --help` *before* writing flag strings for new CLI integrations.
+
 ## v2.1.5 — Jack session keys deterministic (MERGED, PR #112)
 
 CEO re-introduced itself on every message. Looked like each turn started a fresh session — because it did. Three callers (TUI auto-jack effect, TUI /jack handler, `cc-cli jack`) baked `Date.now()` into the jack session key, so every channel entry / jack invocation derived a new claude UUID, which `claudeSessionFileExists()` couldn't find, which fell back to `--session-id` (creates) instead of `--resume` (continues). Every other dispatcher (autoemon, dreams, slumber, api, router) already used the deterministic `jack:${slug}` form — these three were the only outliers.
