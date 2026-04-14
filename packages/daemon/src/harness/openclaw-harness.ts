@@ -133,6 +133,18 @@ export class OpenClawHarness implements AgentHarness {
       callbacks?.onToolEnd?.(tool);
     };
 
+    // Pre-check signal before we spawn any work — otherwise a rejected
+    // dispatchPromise would be abandoned and show up as an unhandled
+    // rejection.
+    if (opts.signal?.aborted) {
+      this._errors += 1;
+      throw new HarnessError({
+        category: 'aborted',
+        harnessName: this.name,
+        message: 'Dispatch aborted before it started',
+      });
+    }
+
     // AbortSignal support: race the dispatch against a signal-rejection promise.
     // Note: the underlying ws.chatSend is not truly interrupted today —
     // caller-side abort just causes this promise to reject early while the
@@ -151,14 +163,6 @@ export class OpenClawHarness implements AgentHarness {
     let abortPromise: Promise<never> | null = null;
     let abortListener: (() => void) | null = null;
     if (opts.signal) {
-      if (opts.signal.aborted) {
-        this._errors += 1;
-        throw new HarnessError({
-          category: 'aborted',
-          harnessName: this.name,
-          message: 'Dispatch aborted before it started',
-        });
-      }
       abortPromise = new Promise<never>((_, reject) => {
         abortListener = () => {
           reject(new HarnessError({
