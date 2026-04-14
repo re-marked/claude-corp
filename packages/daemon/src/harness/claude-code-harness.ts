@@ -234,6 +234,14 @@ export class ClaudeCodeHarness implements AgentHarness {
       // which is exactly what our parser consumes.
       '--verbose',
       '--include-partial-messages',
+      // --dangerously-skip-permissions is REQUIRED for autonomous agents:
+      // claude's default permission mode pauses tool calls (Bash, Edit,
+      // Write, etc.) for interactive approval that nobody can give in a
+      // headless dispatch. Without this flag, agents hang the moment they
+      // try to run any tool, which is most of what Claude Corp agents do.
+      // The "dangerously" framing assumes a human at the terminal — for
+      // agents in a corp, autonomous tool use IS the design.
+      '--dangerously-skip-permissions',
       '--add-dir', workspace,
     ];
 

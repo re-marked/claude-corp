@@ -250,6 +250,27 @@ describe('ClaudeCodeHarness', () => {
       expect(dispatchCall.args).toContain('stream-json');
     });
 
+    it('always passes --dangerously-skip-permissions for autonomous tool use', async () => {
+      // Without this flag, claude's default permission mode pauses every
+      // Bash/Edit/Write tool call for interactive approval. There's no
+      // human at the keyboard during dispatch, so agents hang. Most of
+      // what Claude Corp agents do involves tools, so this is the
+      // single most load-bearing flag for actually-functional agents.
+      const { spawn, calls } = makeSpawner((proc, call) => {
+        if (call.args.includes('--version')) {
+          proc.stdout.write('2.1.107\n');
+          proc.exit(0);
+          return;
+        }
+        happyPathScenario('ok')(proc);
+      });
+      const harness = new ClaudeCodeHarness({ spawn });
+      await harness.init(BASE_CONFIG);
+      await harness.dispatch(BASE_OPTS());
+      const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+      expect(dispatchCall.args).toContain('--dangerously-skip-permissions');
+    });
+
     it('passes derived UUIDv5 session ID via --session-id on first dispatch (no session file on disk)', async () => {
       // Isolate HOME to a tmp dir so no accidental session file in the
       // real ~/.claude/projects/ flips us into --resume mode.
