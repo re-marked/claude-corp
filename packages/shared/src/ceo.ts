@@ -127,6 +127,11 @@ ${humanName} is the ${ownerTitle} of ${corp.displayName || corpName}. They creat
   // CEO is remote when user's OpenClaw gateway is available
   const isRemote = !!globalConfig.userGateway;
 
+  // Resolve harness: corp-level default beats the implicit 'openclaw'
+  // fallback. We persist the resolved value so inspection tools + future
+  // daemon routing don't re-derive it on every read.
+  const harness = corp.harness ?? 'openclaw';
+
   const { member: ceoMember } = setupAgentWorkspace({
     corpRoot,
     agentName: 'ceo',
@@ -144,6 +149,7 @@ ${humanName} is the ${ownerTitle} of ${corp.displayName || corpName}. They creat
     userContent,
     globalConfig,
     remote: isRemote,
+    harness,
   });
 
   // Add CEO to members registry
