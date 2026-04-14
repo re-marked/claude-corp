@@ -77,14 +77,15 @@ export async function cmdAgentControl(opts: {
 export async function cmdAgentSetHarness(opts: {
   agent?: string;
   harness?: string;
+  corp?: string;
   json: boolean;
 }): Promise<void> {
   if (!opts.agent || !opts.harness) {
-    console.error('Usage: cc-cli agent set-harness --agent <name-or-id> --harness <name>');
+    console.error('Usage: cc-cli agent set-harness --agent <name-or-id> --harness <name> [--corp <name>]');
     process.exit(1);
   }
 
-  const corpRoot = await getCorpRoot();
+  const corpRoot = await getCorpRoot(opts.corp);
   const membersPath = join(corpRoot, MEMBERS_JSON);
   const members = readConfigOr<Member[]>(membersPath, []);
 
