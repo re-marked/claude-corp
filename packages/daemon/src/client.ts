@@ -31,6 +31,11 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  async listHarnesses(): Promise<{ registered: string[]; fallback: string; summary: Array<{ name: string; registeredAs: string; ok: boolean; dispatches: number; errors: number }> }> {
+    const resp = await fetch(`${this.baseUrl}/harnesses`);
+    return resp.json() as Promise<any>;
+  }
+
   async startAgent(memberId: string): Promise<{ ok: boolean; port: number; status: string }> {
     const resp = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(memberId)}/start`, {
       method: 'POST',
