@@ -4,27 +4,30 @@
  *
  * Per dispatch:
  *   1. Derive a stable Claude Code session UUID from the Jack key
- *      (uuidv5 via session-id.ts) so resume always lands on the same
- *      on-disk session file.
- *   2. Spawn `claude -p --session-id <uuid> --output-format stream-json
- *      --include-partial-messages --add-dir <workspace>` with cwd =
- *      agent workspace.
- *   3. Pipe the dispatch message to subprocess stdin.
- *   4. Stream-json NDJSON lines from stdout get parsed by
+ *      (uuidv5 via session-id.ts) so the same pair of agents always
+ *      converges on the same on-disk session file.
+ *   2. Check whether `~/.claude/projects/*\/<uuid>.jsonl` already
+ *      exists. If yes → the session is established, pass
+ *      `--resume <uuid>` to continue it. If no → first dispatch, pass
+ *      `--session-id <uuid>` to create with that specific UUID. Claude
+ *      CLI rejects `--session-id` on an already-existing UUID with
+ *      "Session ID X is already in use", which is what this branching
+ *      prevents.
+ *   3. Spawn `claude -p <continuation-flag> <uuid> --output-format
+ *      stream-json --include-partial-messages --add-dir <workspace>`
+ *      with cwd = agent workspace.
+ *   4. Pipe the dispatch message to subprocess stdin.
+ *   5. Stream-json NDJSON lines from stdout get parsed by
  *      ClaudeCodeStreamParser and translated into Claude Corp's
  *      DispatchCallbacks (onToken, onToolStart, onToolEnd, onLifecycle).
- *   5. Resolve when result envelope arrives (or process exits with
+ *   6. Resolve when result envelope arrives (or process exits with
  *      0 + accumulated content). Reject with categorized HarnessError
  *      otherwise.
  *
- * Context loading (CLAUDE.md generation, system-prompt files, fragment
- * adaptation) is PR 4. PR 3 ships the dispatch plumbing only — agents
- * spawned through this harness today don't yet have their identity
- * loaded, but the substrate works.
- *
  * Subprocesses are ephemeral — spawned per dispatch, exit when done.
  * Session continuity is provided entirely by Claude Code's on-disk
- * session files (`~/.claude/projects/<slug>/<uuid>.jsonl`).
+ * session files (`~/.claude/projects/<slug>/<uuid>.jsonl`), plus the
+ * --session-id/--resume branching above.
  */
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';

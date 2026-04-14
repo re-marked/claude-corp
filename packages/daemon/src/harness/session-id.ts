@@ -1,20 +1,28 @@
 /**
  * Deterministic session ID derivation for Claude Code.
  *
- * Claude Code's `--session-id` flag requires a valid UUID. Claude Corp
- * uses Jack keys (strings like `say:ceo:mark`) as conversation identity.
- * We bridge the two by deriving a stable UUIDv5 from the Jack key using
- * a fixed namespace UUID.
+ * Claude Code's session flags (`--session-id`, `--resume`) require a
+ * valid UUID. Claude Corp uses Jack keys (strings like `say:ceo:mark`)
+ * as conversation identity. We bridge the two by deriving a stable
+ * UUIDv5 from the Jack key using a fixed namespace UUID.
  *
  * Same Jack key → same UUID across:
  *   - Process restarts (no state stored on disk)
  *   - Daemon restarts
  *   - Different installations of Claude Corp
  *
- * Which means `claude -p --session-id <uuid>` will always find the same
- * session file on disk and resume the conversation. This is the mechanism
- * Jack's per-pair conversation memory relies on when Claude Code is the
- * underlying substrate.
+ * The continuation mechanism has two distinct claude CLI flags and the
+ * harness picks between them based on whether a session file already
+ * exists for the UUID:
+ *   - `--session-id <uuid>` creates a new session with that UUID. Claude
+ *     rejects it if a session already exists ("Session ID X is already
+ *     in use"), so this flag is only safe for the first dispatch of a
+ *     given UUID.
+ *   - `--resume <uuid>` continues an existing session.
+ *
+ * ClaudeCodeHarness checks `~/.claude/projects/` for the session file
+ * before every dispatch and selects the right flag. Do NOT assume
+ * `--session-id <uuid>` "just resumes" — it doesn't.
  */
 
 import { createHash } from 'node:crypto';
