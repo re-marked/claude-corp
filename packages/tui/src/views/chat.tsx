@@ -20,6 +20,7 @@ import { MessageInput } from '../components/message-input.js';
 import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
 import { HireWizard } from './hire-wizard.js';
+import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
 import { COLORS, agentColor } from '../theme.js';
 import { TaskWizard } from './task-wizard.js';
@@ -72,6 +73,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showHireWizard, setShowHireWizard] = useState(false);
   const [showModelWizard, setShowModelWizard] = useState(false);
   const [showTaskWizard, setShowTaskWizard] = useState(false);
+  const [showHarnessModal, setShowHarnessModal] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
   const [showAfkWizard, setShowAfkWizard] = useState(false);
@@ -219,7 +221,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   }, [isDm, dmAgent?.id]);
 
   useInput((input, key) => {
-    if (showHireWizard || showModelWizard) return;
+    if (showHireWizard || showModelWizard || showHarnessModal) return;
     // Plan review mode keyboard handling
     if (planReview) {
       if (key.escape) { setPlanReview(null); return; }
@@ -341,6 +343,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // /hire opens the wizard
     if (text.trim().toLowerCase() === '/hire') {
       setShowHireWizard(true);
+      return;
+    }
+
+    // /harness opens the per-agent harness switcher
+    if (text.trim().toLowerCase() === '/harness') {
+      setShowHarnessModal(true);
       return;
     }
 
@@ -904,6 +912,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         '',
         '⚙️ Management:',
         '  /hire              Open agent hiring wizard',
+        '  /harness           Switch an agent\'s execution engine',
         '  /model             View and change AI models',
         '  /task              Create a task (planning)',
         '  /hand <id> @agent  Hand a task to an agent (action)',
@@ -1663,6 +1672,17 @@ Always consider what happens when things go wrong.`,
           members={members}
           onClose={() => setShowTaskWizard(false)}
           onCreated={handleTaskCreated}
+        />
+      </Box>
+    );
+  }
+
+  if (showHarnessModal) {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={10}>
+        <HarnessModal
+          corpRoot={corpRoot}
+          onClose={() => setShowHarnessModal(false)}
         />
       </Box>
     );
