@@ -16,7 +16,7 @@
  * user may have edited them separately.
  */
 
-import { existsSync, readdirSync, renameSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, type Dirent } from 'node:fs';
 import { join } from 'node:path';
 
 const LEGACY_RENAMES: ReadonlyArray<readonly [fromBasename: string, toBasename: string]> = [
@@ -54,7 +54,8 @@ export function migrateAgentWorkspaceFilenames(corpRoot: string): WorkspaceMigra
   const projectsDir = join(corpRoot, 'projects');
   if (existsSync(projectsDir)) {
     try {
-      for (const projectEntry of readdirSync(projectsDir, { withFileTypes: true })) {
+      const projectEntries = readdirSync(projectsDir, { withFileTypes: true }) as Dirent[];
+      for (const projectEntry of projectEntries) {
         if (!projectEntry.isDirectory()) continue;
         const projectAgentsDir = join(projectsDir, projectEntry.name, 'agents');
         if (existsSync(projectAgentsDir)) {
@@ -70,9 +71,9 @@ export function migrateAgentWorkspaceFilenames(corpRoot: string): WorkspaceMigra
 }
 
 function migrateAgentsDir(agentsParentDir: string, result: WorkspaceMigrationResult): void {
-  let entries: ReturnType<typeof readdirSync>;
+  let entries: Dirent[];
   try {
-    entries = readdirSync(agentsParentDir, { withFileTypes: true });
+    entries = readdirSync(agentsParentDir, { withFileTypes: true }) as Dirent[];
   } catch {
     return; // can't read this dir, move on
   }
