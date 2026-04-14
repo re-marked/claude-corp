@@ -345,6 +345,133 @@ describe('ClaudeCodeHarness', () => {
       expect(tokens[tokens.length - 1]).toBe('firstsecond');
     });
 
+    it('passes --model when agent config.json specifies an Anthropic model', async () => {
+      // Regression test for the silent model-override bug: the harness
+      // used to ignore config.json.model entirely, so every claude-code
+      // dispatch ran on claude's global default. An agent configured
+      // with claude-opus-4-6 would still hit sonnet. Fix: read
+      // config.json on dispatch, pass --model when provider is
+      // anthropic (or the model name looks anthropic).
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), 'cc-harness-model-'));
+      writeFileSync(
+        join(tmpWorkspace, 'config.json'),
+        JSON.stringify({ model: 'claude-opus-4-6', provider: 'anthropic' }),
+        'utf-8',
+      );
+      try {
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          context: { corpRoot: tmpWorkspace, agentDir: '' } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        const modelIdx = dispatchCall.args.indexOf('--model');
+        expect(modelIdx).toBeGreaterThan(-1);
+        expect(dispatchCall.args[modelIdx + 1]).toBe('claude-opus-4-6');
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
+    });
+
+    it('skips --model when agent config.json specifies a non-Anthropic model', async () => {
+      // Claude CLI rejects non-Anthropic model names. If an openclaw
+      // agent's openai-codex model leaks into a claude-code dispatch
+      // (e.g., config.json wasn't updated after set-harness), we'd
+      // rather silently use claude's default than crash the dispatch
+      // with a cryptic "model not found" error.
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), 'cc-harness-model-'));
+      writeFileSync(
+        join(tmpWorkspace, 'config.json'),
+        JSON.stringify({ model: 'gpt-5.3-codex', provider: 'openai-codex' }),
+        'utf-8',
+      );
+      try {
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          context: { corpRoot: tmpWorkspace, agentDir: '' } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        expect(dispatchCall.args).not.toContain('--model');
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
+    });
+
+    it('skips --model when config.json is missing — falls through to claude default', async () => {
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), 'cc-harness-model-'));
+      // No config.json written.
+      try {
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          context: { corpRoot: tmpWorkspace, agentDir: '' } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        expect(dispatchCall.args).not.toContain('--model');
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
+    });
+
+    it('accepts short aliases (sonnet/opus/haiku) as Anthropic models', async () => {
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), 'cc-harness-model-'));
+      writeFileSync(
+        join(tmpWorkspace, 'config.json'),
+        JSON.stringify({ model: 'opus', provider: 'anthropic' }),
+        'utf-8',
+      );
+      try {
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          context: { corpRoot: tmpWorkspace, agentDir: '' } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        const modelIdx = dispatchCall.args.indexOf('--model');
+        expect(modelIdx).toBeGreaterThan(-1);
+        expect(dispatchCall.args[modelIdx + 1]).toBe('opus');
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
+    });
+
 it('always passes --dangerously-skip-permissions for autonomous tool use', async () => {
       // Without this flag, claude's default permission mode pauses every
       // Bash/Edit/Write tool call for interactive approval. There's no

@@ -32,7 +32,7 @@
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { log, logError } from '../logger.js';
 import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stream.js';
@@ -223,9 +223,21 @@ export class ClaudeCodeHarness implements AgentHarness {
     const sessionHasHistory = claudeSessionFileExists(sessionId);
     const continuationFlag = sessionHasHistory ? '--resume' : '--session-id';
 
+    // Resolve the agent's configured model. Each hire writes
+    // { model, provider } to the agent's workspace config.json; if
+    // provider is Anthropic we pass --model to claude so per-agent
+    // overrides (e.g., Planner on opus, CEO on sonnet) actually take
+    // effect. Previously the harness ignored config.json.model entirely
+    // — every claude-code dispatch ran on claude's global default.
+    // Non-anthropic models are meaningless to the claude CLI (the
+    // harness is Anthropic-substrate by definition), so we skip the
+    // flag rather than pass something claude would reject.
+    const modelOverride = resolveAnthropicModel(workspace);
+
     const args = [
       '-p',
       continuationFlag, sessionId,
+      ...(modelOverride ? ['--model', modelOverride] : []),
       '--output-format', 'stream-json',
       // --verbose is REQUIRED when combining --print + --output-format=stream-json.
       // Without it, claude exits with stderr:
@@ -596,6 +608,42 @@ function resolveWorkspace(opts: DispatchOpts): string {
   const agentDir = ctx.agentDir;
   if (!agentDir) return corpRoot;
   return isAbsolute(agentDir) ? agentDir : join(corpRoot, agentDir);
+}
+
+/**
+ * Read the agent's config.json and return its model only when the
+ * configured provider resolves to Anthropic — the only family claude
+ * accepts for `--model`. Returns null when:
+ *   - config.json is missing / unreadable
+ *   - no model field is set
+ *   - provider is something other than anthropic/claude (e.g., an
+ *     openclaw agent's openai-codex leaking through; we'd rather
+ *     drop the flag than have claude reject it with a cryptic error)
+ *
+ * Model names pass through verbatim — claude accepts both aliases
+ * ('sonnet', 'opus', 'haiku') and full ids ('claude-sonnet-4-6').
+ */
+function resolveAnthropicModel(workspace: string): string | null {
+  const configPath = join(workspace, 'config.json');
+  if (!existsSync(configPath)) return null;
+  try {
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      model?: string;
+      provider?: string;
+    };
+    if (!raw.model || typeof raw.model !== 'string') return null;
+    const providerLooksAnthropic =
+      !raw.provider ||
+      raw.provider === 'anthropic' ||
+      raw.provider === 'claude' ||
+      raw.model.startsWith('claude-') ||
+      raw.model === 'sonnet' ||
+      raw.model === 'opus' ||
+      raw.model === 'haiku';
+    return providerLooksAnthropic ? raw.model : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
