@@ -4,6 +4,10 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.1 — ClaudeCodeHarness session resume (MERGED, PR #103)
+
+Every second-and-later message in a jack DM with a claude-code agent was failing with `Session ID X is already in use`. Root cause: the harness always passed `--session-id <uuid>` on every dispatch, but claude CLI's `--session-id` means *create* (rejects if UUID exists), not *resume*. Fix: scan `~/.claude/projects/*/` for the session file; use `--session-id` when absent (first dispatch) and `--resume` when present (continuation). Bonus doc alignment so future-us can't make the same false assumption.
+
 ## v2.1.0 — Harness UX pass (MERGED, PRs #100–#102)
 
 v2.0.0 made Claude Corp harness-agnostic but only the CLI exposed the choice — the TUI pretended the feature didn't exist. v2.1.0 closes that gap across all three touch points so users configure harnesses without ever reading docs.
