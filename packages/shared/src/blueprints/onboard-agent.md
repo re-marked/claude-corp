@@ -16,7 +16,7 @@ Or into a project:
 ```
 cc-cli hire --name "<agent-name>" --rank worker --project <project-name>
 ```
-The agent is created with default SOUL.md, RULES.md, HEARTBEAT.md.
+The agent is created with default SOUL.md, AGENTS.md, HEARTBEAT.md.
 
 ## Step 2: Assign a Mentor (optional but recommended)
 Pick an experienced agent to mentor the new hire:
@@ -42,7 +42,7 @@ Check their DM for progress narration. If stuck > 5 minutes, Failsafe flags it.
 After first task completes:
 - If quality is good → assign to a contract as a worker
 - If quality needs work → hand another practice task with specific feedback
-- If quality is poor → consider re-hiring with better SOUL.md/RULES.md
+- If quality is poor → consider re-hiring with better SOUL.md/AGENTS.md
 
 ## Tips
 - New agents read their Casket on first dispatch (BOOTSTRAP.md guides them)
