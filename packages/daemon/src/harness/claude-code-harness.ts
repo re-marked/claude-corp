@@ -4,32 +4,36 @@
  *
  * Per dispatch:
  *   1. Derive a stable Claude Code session UUID from the Jack key
- *      (uuidv5 via session-id.ts) so resume always lands on the same
- *      on-disk session file.
- *   2. Spawn `claude -p --session-id <uuid> --output-format stream-json
- *      --include-partial-messages --add-dir <workspace>` with cwd =
- *      agent workspace.
- *   3. Pipe the dispatch message to subprocess stdin.
- *   4. Stream-json NDJSON lines from stdout get parsed by
+ *      (uuidv5 via session-id.ts) so the same pair of agents always
+ *      converges on the same on-disk session file.
+ *   2. Check whether `~/.claude/projects/*\/<uuid>.jsonl` already
+ *      exists. If yes → the session is established, pass
+ *      `--resume <uuid>` to continue it. If no → first dispatch, pass
+ *      `--session-id <uuid>` to create with that specific UUID. Claude
+ *      CLI rejects `--session-id` on an already-existing UUID with
+ *      "Session ID X is already in use", which is what this branching
+ *      prevents.
+ *   3. Spawn `claude -p <continuation-flag> <uuid> --output-format
+ *      stream-json --include-partial-messages --add-dir <workspace>`
+ *      with cwd = agent workspace.
+ *   4. Pipe the dispatch message to subprocess stdin.
+ *   5. Stream-json NDJSON lines from stdout get parsed by
  *      ClaudeCodeStreamParser and translated into Claude Corp's
  *      DispatchCallbacks (onToken, onToolStart, onToolEnd, onLifecycle).
- *   5. Resolve when result envelope arrives (or process exits with
+ *   6. Resolve when result envelope arrives (or process exits with
  *      0 + accumulated content). Reject with categorized HarnessError
  *      otherwise.
  *
- * Context loading (CLAUDE.md generation, system-prompt files, fragment
- * adaptation) is PR 4. PR 3 ships the dispatch plumbing only — agents
- * spawned through this harness today don't yet have their identity
- * loaded, but the substrate works.
- *
  * Subprocesses are ephemeral — spawned per dispatch, exit when done.
  * Session continuity is provided entirely by Claude Code's on-disk
- * session files (`~/.claude/projects/<slug>/<uuid>.jsonl`).
+ * session files (`~/.claude/projects/<slug>/<uuid>.jsonl`), plus the
+ * --session-id/--resume branching above.
  */
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { log, logError } from '../logger.js';
 import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stream.js';
 import { sessionIdFor } from './session-id.js';
@@ -209,9 +213,19 @@ export class ClaudeCodeHarness implements AgentHarness {
     const sessionId = sessionIdFor(opts.sessionKey);
     const workspace = resolveWorkspace(opts);
 
+    // First dispatch for this sessionId must use --session-id (creates a
+    // new conversation with that specific UUID). Every subsequent dispatch
+    // with the same sessionId must use --resume (continues the existing
+    // one) — claude rejects --session-id when a session with that UUID
+    // already exists ("Session ID X is already in use"). Detection is
+    // filesystem-based so it survives daemon restarts: the session file
+    // lives at ~/.claude/projects/<encoded-workspace>/<uuid>.jsonl.
+    const sessionHasHistory = claudeSessionFileExists(sessionId);
+    const continuationFlag = sessionHasHistory ? '--resume' : '--session-id';
+
     const args = [
       '-p',
-      '--session-id', sessionId,
+      continuationFlag, sessionId,
       '--output-format', 'stream-json',
       // --verbose is REQUIRED when combining --print + --output-format=stream-json.
       // Without it, claude exits with stderr:
@@ -567,6 +581,40 @@ function resolveWorkspace(opts: DispatchOpts): string {
   const agentDir = ctx.agentDir;
   if (!agentDir) return corpRoot;
   return isAbsolute(agentDir) ? agentDir : join(corpRoot, agentDir);
+}
+
+/**
+ * Does claude already have a session file for this UUID?
+ *
+ * Session files live at `~/.claude/projects/<encoded-workspace>/<uuid>.jsonl`
+ * where the encoding claude uses is implementation-defined (we've observed
+ * colon/slash/backslash/dot → dash on Windows, but relying on that would
+ * be brittle). Instead we scan every sibling directory under ~/.claude/
+ * projects/ for the session filename — session UUIDs are globally unique
+ * (uuidv5 from a fixed namespace + jackKey), so a match anywhere in the
+ * tree is proof this specific session already exists.
+ *
+ * Used to decide between `--session-id <uuid>` (first dispatch — creates)
+ * and `--resume <uuid>` (subsequent dispatches — continues). Claude
+ * rejects `--session-id` for an already-in-use UUID with "Session ID X
+ * is already in use", which is exactly the bug this check prevents.
+ */
+function claudeSessionFileExists(sessionId: string): boolean {
+  const projectsDir = join(homedir(), '.claude', 'projects');
+  if (!existsSync(projectsDir)) return false;
+  try {
+    for (const entry of readdirSync(projectsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (existsSync(join(projectsDir, entry.name, `${sessionId}.jsonl`))) {
+        return true;
+      }
+    }
+  } catch {
+    // Permission error reading the projects dir — treat as not-exists so
+    // we default to --session-id. Worst case: a legitimate resume fails
+    // with "already in use" and the user sees a specific error.
+  }
+  return false;
 }
 
 /**
