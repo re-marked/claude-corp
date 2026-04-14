@@ -213,6 +213,12 @@ export class ClaudeCodeHarness implements AgentHarness {
       '-p',
       '--session-id', sessionId,
       '--output-format', 'stream-json',
+      // --verbose is REQUIRED when combining --print + --output-format=stream-json.
+      // Without it, claude exits with stderr:
+      //   "When using --print, --output-format=stream-json requires --verbose"
+      // The flag enables full event emission (init, lifecycle, deltas, result),
+      // which is exactly what our parser consumes.
+      '--verbose',
       '--include-partial-messages',
       '--add-dir', workspace,
     ];
