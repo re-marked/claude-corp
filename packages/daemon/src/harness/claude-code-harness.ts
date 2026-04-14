@@ -28,7 +28,7 @@
  */
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { log, logError } from '../logger.js';
 import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stream.js';
@@ -548,15 +548,25 @@ function defaultSpawn(binary: string, args: string[], options: ClaudeSpawnOption
 
 /**
  * Resolve an absolute workspace path for a dispatch. Reads the
- * FragmentContext that accompanies every dispatch — agentDir is
- * relative to corpRoot, so we join the two. Falls back to corpRoot if
- * agentDir is missing.
+ * FragmentContext.
+ *
+ * agentDir convention is loose across the codebase: api.ts /cc/say
+ * provides it as an ABSOLUTE path (already joined with corpRoot, with
+ * forward-slash normalization), while heartbeat.ts and router.ts
+ * provide it as the RELATIVE Member.agentDir. Handle both — when
+ * absolute, use as-is; when relative, join with corpRoot.
+ *
+ * Without this, joining an already-absolute agentDir with corpRoot
+ * produces an invalid path like `C:/.../corp/C:/.../corp/agents/ceo`,
+ * which Node spawn surfaces as a misleading ENOENT against the binary
+ * (it's actually the cwd that doesn't exist).
  */
 function resolveWorkspace(opts: DispatchOpts): string {
   const ctx = opts.context as { corpRoot?: string; agentDir?: string };
   const corpRoot = ctx.corpRoot ?? process.cwd();
-  const agentDir = ctx.agentDir ?? '';
-  return agentDir ? join(corpRoot, agentDir) : corpRoot;
+  const agentDir = ctx.agentDir;
+  if (!agentDir) return corpRoot;
+  return isAbsolute(agentDir) ? agentDir : join(corpRoot, agentDir);
 }
 
 /**
