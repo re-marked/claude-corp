@@ -1,10 +1,12 @@
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import {
   readConfigOr,
   readConfig,
   writeConfig,
+  reconcileAgentWorkspace,
   type Member,
   type AgentConfig,
+  type ReconcileAgentWorkspaceResult,
   MEMBERS_JSON,
 } from '@claudecorp/shared';
 import { isDaemonRunning, DaemonClient } from '@claudecorp/daemon';
@@ -143,6 +145,24 @@ export async function cmdAgentSetHarness(opts: {
     }
   }
 
+  // Reconcile the workspace to match the target harness: migrate legacy
+  // filenames + write/remove CLAUDE.md. Without this, switching to
+  // claude-code leaves an agent missing CLAUDE.md (so its workspace
+  // files never reach the system prompt), and switching back to openclaw
+  // leaves a stale CLAUDE.md that OpenClaw ignores but that clutters
+  // the workspace and confuses anyone inspecting it.
+  let reconcileResult: ReconcileAgentWorkspaceResult = {
+    renamed: [], conflicts: [], claudeMdWritten: false, claudeMdBackedUp: null,
+  };
+  if (member.agentDir) {
+    const agentAbs = isAbsolute(member.agentDir) ? member.agentDir : join(corpRoot, member.agentDir);
+    reconcileResult = reconcileAgentWorkspace({
+      agentDir: agentAbs,
+      displayName: member.displayName,
+      harness: opts.harness,
+    });
+  }
+
   const result = {
     ok: true,
     agent: member.displayName,
@@ -151,6 +171,7 @@ export async function cmdAgentSetHarness(opts: {
     membersUpdated: true,
     configUpdated,
     daemonRunning: running,
+    workspace: reconcileResult,
   };
 
   if (opts.json) {
@@ -161,6 +182,20 @@ export async function cmdAgentSetHarness(opts: {
   console.log(`Set ${member.displayName} harness → ${opts.harness}`);
   if (configUpdated) console.log('  Updated: members.json + config.json');
   else console.log('  Updated: members.json (no config.json found)');
+  if (reconcileResult.renamed.length > 0) {
+    for (const r of reconcileResult.renamed) {
+      console.log(`  Migrated: ${r.from} → ${r.to}`);
+    }
+  }
+  if (reconcileResult.conflicts.length > 0) {
+    for (const c of reconcileResult.conflicts) {
+      console.log(`  Resolved conflict: ${c.from} / ${c.to} — older copy backed up to ${c.backup}`);
+    }
+  }
+  if (reconcileResult.claudeMdWritten) console.log('  Wrote: CLAUDE.md');
+  if (reconcileResult.claudeMdBackedUp) {
+    console.log(`  Moved: CLAUDE.md → ${reconcileResult.claudeMdBackedUp} (not used by ${opts.harness})`);
+  }
   if (running) {
     console.log('  Daemon is running — change applies on next dispatch.');
   } else {

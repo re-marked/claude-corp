@@ -105,6 +105,7 @@ export class DaemonClient {
 
   async createProject(opts: {
     name: string;
+    displayName?: string;
     type: string;
     path?: string;
     lead?: string;

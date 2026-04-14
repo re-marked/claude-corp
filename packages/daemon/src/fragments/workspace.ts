@@ -7,7 +7,7 @@ const MAX_SKILLS_IN_PROMPT = 150;
 const MAX_SKILLS_PROMPT_CHARS = 30_000;
 // OpenClaw bootstrap file limits — 20KB per file, 150KB total
 const MAX_BOOTSTRAP_FILE_CHARS = 20_000;
-const WORKSPACE_FILES = ['SOUL.md', 'RULES.md', 'TASKS.md', 'HEARTBEAT.md', 'MEMORY.md', 'IDENTITY.md', 'USER.md', 'ENVIRONMENT.md', 'BOOTSTRAP.md', 'INBOX.md', 'WORKLOG.md'];
+const WORKSPACE_FILES = ['SOUL.md', 'AGENTS.md', 'TASKS.md', 'HEARTBEAT.md', 'MEMORY.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md', 'BOOTSTRAP.md', 'INBOX.md', 'WORKLOG.md'];
 
 /** Warn if any workspace file exceeds OpenClaw's 20K char limit. */
 function checkWorkspaceFileSizes(agentDir: string): void {
@@ -127,11 +127,11 @@ Your Casket is your sealed workspace — everything you need in one directory: $
 On session start, read these files in order:
 1. **BOOTSTRAP.md** — if it exists, follow it FIRST (one-time setup, delete when done)
 2. **SOUL.md** — who you are, your personality and values
-3. **RULES.md** — non-negotiable behavioral rules
+3. **AGENTS.md** — non-negotiable behavioral rules
 4. **TASKS.md** — your current tasks (auto-generated, always fresh)
 5. **INBOX.md** — pending messages, queued tasks with full details (auto-generated)
 6. **WORKLOG.md** — what you did recently, session recovery via Dredge (auto-generated)
-7. **ENVIRONMENT.md** — tools, paths, workspace specifics
+7. **TOOLS.md** — tools, paths, workspace specifics
 8. **MEMORY.md** — what you've learned (YOU maintain this)
 9. **USER.md** — who the Founder is and what they care about
 

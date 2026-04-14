@@ -47,7 +47,7 @@ A structured plan in markdown with: Goal, Context, Approach, Phases with tasks, 
 const PLANNER_HEARTBEAT = `# Heartbeat — Planner Agent
 
 You are idle until a /plan command activates you. When idle, respond HEARTBEAT_OK.
-When activated, follow your RULES.md protocol for deep planning.
+When activated, follow your AGENTS.md protocol for deep planning.
 `;
 
 /**

@@ -90,11 +90,21 @@ export {
   writeGlobalConfig,
 } from './global-config.js';
 
-// Workspace filename migration (legacy RULES.md/ENVIRONMENT.md → AGENTS.md/TOOLS.md)
+// Workspace filename migration (legacy RULES.md/ENVIRONMENT.md → AGENTS.md/TOOLS.md).
+// migrateAgentWorkspaceFilenames walks the whole corp at daemon startup and
+// flags-but-doesn't-resolve conflicts (safe, idempotent). reconcileAgentWorkspace
+// is the interactive per-agent version used by `cc-cli agent set-harness`:
+// resolves conflicts by keeping the newer file + backing up the older, and
+// writes/removes CLAUDE.md to match the target harness.
 export {
   migrateAgentWorkspaceFilenames,
   type WorkspaceMigrationResult,
 } from './migrate-workspace-filenames.js';
+export {
+  reconcileAgentWorkspace,
+  type ReconcileAgentWorkspaceOpts,
+  type ReconcileAgentWorkspaceResult,
+} from './reconcile-agent-workspace.js';
 
 // Corp management
 export { scaffoldCorp, listCorps, findCorp, deleteCorp } from './corp.js';

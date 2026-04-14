@@ -10,7 +10,7 @@ A hierarchy of AI agents that runs as a company on your machine — even while y
 <p align="center">
   <a href="https://github.com/re-marked/claude-corp/actions"><img src="https://img.shields.io/github/actions/workflow/status/re-marked/claude-corp/ci.yml?style=flat-square&label=CI" alt="CI" /></a>
   <a href="https://github.com/re-marked/claude-corp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
-  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/v1.0.0-stable-blue?style=flat-square" alt="v1.0.0" /></a>
+  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/v2.0.0-harness--agnostic-blue?style=flat-square" alt="v2.0.0" /></a>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@ Most multi-agent frameworks give you a swarm that does random things. Claude Cor
 
 ## Get Started
 
-**Prerequisites:** Node.js 22+, [OpenClaw](https://github.com/openclaw/openclaw) running, pnpm.
+**Prerequisites:** Node.js 22+, pnpm, and at least one agent substrate — either [OpenClaw](https://github.com/openclaw/openclaw) (provider-agnostic, token auth) or the [Claude Code CLI](https://claude.com/claude-code) (subscription OAuth). Pick per-agent at hire time with `--harness`.
 
 ```bash
 git clone https://github.com/re-marked/claude-corp.git
@@ -37,7 +37,7 @@ cc new          # Create a new corporation
 
 The onboarding walks you through everything. Name yourself, name your corp, pick a theme. The CEO introduces itself and starts working.
 
-Provider-agnostic through [OpenClaw](https://openclaw.ai) — runs on Anthropic, OpenAI, Google, DeepSeek, Mistral, or local models via Ollama. One config change to switch.
+**Harness-agnostic (v2.0.0).** Each agent runs on a registered substrate picked at hire time. OpenClaw gets you provider-agnostic token auth across Anthropic, OpenAI, Google, DeepSeek, Mistral, and Ollama. Claude Code gets you OAuth subscription auth (the Anthropic subscription that now bans OpenClaw subscription usage). Mix and match per-agent with `cc-cli hire --harness <claude-code|openclaw>` or switch later with `cc-cli agent set-harness`.
 
 ## How It Works
 
@@ -53,11 +53,11 @@ Founder (you)
             └── Workers (do the actual work)
 ```
 
-A Node.js daemon watches JSONL message files via `fs.watch`. When someone writes `@ceo check the build`, the router extracts the mention, resolves it against `members.json`, and dispatches to the right agent via the OpenClaw gateway. Agents respond to the same JSONL. The cycle repeats. Depth guards, cooldowns, and dedup prevent infinite loops.
+A Node.js daemon watches JSONL message files via `fs.watch`. When someone writes `@ceo check the build`, the router extracts the mention, resolves it against `members.json`, and dispatches to the agent through the `HarnessRouter` — which picks the registered substrate for that specific agent (OpenClaw gateway, Claude Code subprocess, or any future harness that implements the `AgentHarness` contract). Agents respond to the same JSONL. The cycle repeats. Depth guards, cooldowns, and dedup prevent infinite loops.
 
 **Rank-based hiring:** Any agent can hire at or below its rank. The CEO hires team leaders, team leaders hire workers. No central bottleneck.
 
-**All agents share a single OpenClaw gateway** with per-agent model overrides. One process handles cheap Haiku workers and expensive Opus planners simultaneously. 17 models across 7 providers in the registry, but unknown model strings pass through as-is.
+**OpenClaw-harness agents share a single gateway** with per-agent model overrides — one process handles cheap Haiku workers and expensive Opus planners simultaneously across 17 models / 7 providers. **Claude-code-harness agents spawn the `claude` CLI per dispatch** against the user's OAuth subscription — zero token cost, MAX plan limits apply. Both harnesses plug into the same dispatch seam, so agent-level code doesn't care which substrate is doing the work.
 
 ## The Data Model
 
@@ -83,11 +83,15 @@ No database. No migrations. `grep` is your query engine. `git revert` is your un
     agents/
       ceo/
         SOUL.md                # personality
+        IDENTITY.md            # agent-specific role + quirks
+        AGENTS.md              # non-negotiable behavioral rules (OpenClaw auto-loads)
+        TOOLS.md               # workspace paths, tools, cc-cli reference
+        CLAUDE.md              # Claude Code entry point + @./imports (claude-code harness only)
         BRAIN/                 # persistent knowledge (from dreams)
         HEARTBEAT.md           # wake instructions
         MEMORY.md              # memory index
         observations/          # daily work logs
-        config.json            # model, provider, scope
+        config.json            # model, provider, scope, harness
     tasks/                     # markdown files with frontmatter
     plans/                     # ultraplans and sketches
 ```

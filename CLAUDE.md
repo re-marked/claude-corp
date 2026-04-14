@@ -91,8 +91,9 @@ Three formats, all git-tracked:
         MEMORY.md                 # Strict index to BRAIN/ files
         BOOTSTRAP.md              # First-run guide (deleted after onboarding)
         USER.md                   # Evolving portrait of the founder
-        RULES.md                  # Non-negotiable behavioral constraints
-        ENVIRONMENT.md            # Workspace paths, tools, CLI reference
+        AGENTS.md                 # Non-negotiable behavioral constraints (OpenClaw-recognized basename)
+        TOOLS.md                  # Workspace paths, tools, CLI reference (OpenClaw-recognized basename)
+        CLAUDE.md                 # Claude Code entry point — SOUL preamble + @./imports (only for harness=claude-code agents)
         HEARTBEAT.md              # Wake cycle (legacy, autoemon replaces for SLUMBER)
         observations/             # Daily journals — self-witnessing across time
         skills/                   # SKILL.md files

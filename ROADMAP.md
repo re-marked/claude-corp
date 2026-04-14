@@ -3,6 +3,16 @@
 > Your Personal Corporation — a self-growing organization of AI agents that work FOR you, running locally.
 > Not a chatbot. Not a single agent with tools. A company you own on your machine.
 
+> **Status (v2.0.0 — harness-agnostic corps).**
+> Much of what this roadmap framed as v0.1x–v0.2x has already shipped.
+> The numbering here is **aspirational, not current** — check `STATUS.md`
+> for the actual ship log. The big v2.0.0 unlock: agents now run on any
+> substrate (OpenClaw *or* Claude Code subscription), picked per-agent
+> at hire time. The Cascading Consensus Protocol below is still the
+> north star; most primitives it depends on (Contracts, Hand, Plan,
+> Warden, Herald, Pulse, SLUMBER) have shipped — the discussion
+> channels + worker worktrees are the remaining frontier.
+
 ---
 
 ## The Vision — Cascading Consensus Protocol
