@@ -197,7 +197,10 @@ export function createApi(daemon: Daemon): Server {
           priority: (body.priority as any) ?? undefined,
           assignedTo: (body.assignedTo as string) ?? undefined,
           createdBy: body.createdBy as string,
+          projectId: (body.projectId as string) ?? undefined,
           parentTaskId: (body.parentTaskId as string) ?? undefined,
+          blockedBy: (body.blockedBy as string[]) ?? undefined,
+          acceptanceCriteria: (body.acceptanceCriteria as string[]) ?? undefined,
           dueAt: (body.dueAt as string) ?? undefined,
         });
 
