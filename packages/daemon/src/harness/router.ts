@@ -124,6 +124,11 @@ export class HarnessRouter implements AgentHarness {
           ok: e.health.ok,
           dispatches: e.health.dispatches,
           errors: e.health.errors,
+          // Pass through the underlying harness's diagnostic info so
+          // consumers (cc-cli harness health, TUI views) can render
+          // harness-specific fields like binaryVersion, lastRateLimit,
+          // totalCostUsd without the router having to know about them.
+          info: e.health.info ?? {},
         })),
       },
     };
