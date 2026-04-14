@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { readConfigOr, readConfig, type Member, type AgentConfig, MEMBERS_JSON } from '@claudecorp/shared';
+import { readConfigOr, readConfig, type Member, type Corporation, type AgentConfig, MEMBERS_JSON, CORP_JSON } from '@claudecorp/shared';
 import { getClient, getCorpRoot } from '../client.js';
 import { listTasks } from '@claudecorp/shared';
 
@@ -57,6 +57,13 @@ export async function cmdInspect(opts: { agent?: string; json: boolean }) {
   // Tasks assigned
   const allTasks = listTasks(corpRoot, { assignedTo: member.id });
 
+  // Resolve harness: config.json → Member → corp → 'openclaw'.
+  // Mirrors the daemon's resolveHarnessForAgent so inspection is truthful
+  // even when the daemon isn't running.
+  let corp: Corporation | null = null;
+  try { corp = readConfig<Corporation>(join(corpRoot, CORP_JSON)); } catch {}
+  const harness = config?.harness ?? member.harness ?? corp?.harness ?? 'openclaw';
+
   const data = {
     id: member.id,
     displayName: member.displayName,
@@ -68,6 +75,7 @@ export async function cmdInspect(opts: { agent?: string; json: boolean }) {
     createdAt: member.createdAt,
     model: config?.model ?? 'default',
     provider: config?.provider ?? 'default',
+    harness,
     soulExcerpt,
     brainFiles,
     tasks: allTasks.map(t => ({ id: t.task.id, title: t.task.title, status: t.task.status })),
@@ -83,6 +91,7 @@ export async function cmdInspect(opts: { agent?: string; json: boolean }) {
   console.log(`  Rank:       ${member.rank}`);
   console.log(`  Status:     ${member.status}`);
   console.log(`  Model:      ${config?.model ?? 'corp default'}`);
+  console.log(`  Harness:    ${harness}`);
   console.log(`  Scope:      ${member.scope}`);
   console.log(`  Hired by:   ${member.spawnedBy ?? '—'}`);
   console.log(`  Created:    ${member.createdAt}`);

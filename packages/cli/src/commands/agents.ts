@@ -16,6 +16,7 @@ export async function cmdAgents(opts: { json: boolean }) {
 
   for (const a of agents) {
     const icon = a.status === 'ready' ? '\u25C6' : '\u25C7';
-    console.log(`${icon} ${a.displayName.padEnd(16)} ${a.status.padEnd(10)} port:${a.port}`);
+    const harness = a.harness ?? 'openclaw';
+    console.log(`${icon} ${a.displayName.padEnd(16)} ${a.status.padEnd(10)} ${harness.padEnd(12)} port:${a.port}`);
   }
 }

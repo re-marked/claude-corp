@@ -39,6 +39,12 @@ export interface AgentSetupOpts {
   remote?: boolean;
   /** Project name (resolved from scopeId) for project-scoped agents. */
   projectName?: string;
+  /**
+   * Registered harness name that executes this agent's turns. Persisted
+   * in the agent's config.json and Member record. Optional; callers
+   * typically resolve it from corp-level defaults before calling.
+   */
+  harness?: string;
 }
 
 export interface AgentSetupResult {
@@ -127,6 +133,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     port: null,
     scope,
     scopeId,
+    ...(opts.harness ? { harness: opts.harness } : {}),
   };
   writeConfig(join(agentAbsDir, 'config.json'), agentConfig);
 
@@ -201,6 +208,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     port: null,
     spawnedBy,
     createdAt: now,
+    ...(opts.harness ? { harness: opts.harness } : {}),
   };
 
   return { member, agentDir: agentRelDir, config: agentConfig };

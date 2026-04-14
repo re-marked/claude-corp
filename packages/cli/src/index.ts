@@ -49,6 +49,7 @@ const { values, positionals } = parseArgs({
     tag: { type: 'string' },
     source: { type: 'string' },
     confidence: { type: 'string' },
+    harness: { type: 'string' },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -141,6 +142,8 @@ Management commands:
   projects list | projects create --name "..." [--type development]
   teams list | teams create --name "..." --project <id> --lead <id>
   agent start --agent <id> | agent stop --agent <id>
+  agent set-harness --agent <id> --harness <name>   Change an agent's execution substrate
+  harness list                                      Show registered harnesses + health
 
 Common flags:
   --json     Output as JSON (machine-readable)
@@ -420,12 +423,21 @@ async function run() {
       break;
     }
     case 'agent': {
-      const { cmdAgentControl } = await import('./commands/agent-control.js');
       const action = positionals[1];
+      if (action === 'set-harness') {
+        const { cmdAgentSetHarness } = await import('./commands/agent-control.js');
+        await cmdAgentSetHarness({
+          agent: values.agent as string | undefined,
+          harness: values.harness as string | undefined,
+          json: !!values.json,
+        });
+        break;
+      }
       if (action !== 'start' && action !== 'stop') {
-        console.error('Usage: cc-cli agent start|stop --agent <name>');
+        console.error('Usage: cc-cli agent start|stop|set-harness --agent <name> [--harness <name>]');
         process.exit(1);
       }
+      const { cmdAgentControl } = await import('./commands/agent-control.js');
       await cmdAgentControl({ action, agent: values.agent as string | undefined, json: !!values.json });
       break;
     }
@@ -435,6 +447,12 @@ async function run() {
         agent: values.agent as string | undefined,
         json: !!values.json,
       });
+      break;
+    }
+    case 'harness':
+    case 'harnesses': {
+      const { cmdHarness } = await import('./commands/harness.js');
+      await cmdHarness({ args: positionals.slice(1), json: !!values.json });
       break;
     }
     case 'hand': {

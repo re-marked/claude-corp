@@ -98,6 +98,13 @@ export interface AgentSpec {
   model?: string;
   /** Provider identifier (harness-specific semantics). */
   provider?: string;
+  /**
+   * Registered harness name that should handle this agent's lifecycle +
+   * dispatches. Used by the HarnessRouter to pick the right underlying
+   * harness. When unset, the router consults its resolveHarness callback
+   * (typically reading Member records or corp-level defaults).
+   */
+  harness?: string;
 }
 
 /** Input to `dispatch()`. */

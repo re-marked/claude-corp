@@ -37,6 +37,12 @@ export interface HireOpts {
   heartbeatContent?: string;
   model?: string;
   provider?: string;
+  /**
+   * Harness that will execute this agent's turns. When omitted, resolves
+   * to Corporation.harness (corp-level default) then 'openclaw' as the
+   * final fallback.
+   */
+  harness?: string;
 }
 
 export interface HireResult {
@@ -64,6 +70,12 @@ export async function hireAgent(
   const scopeId = opts.scopeId ?? '';
   const model = opts.model ?? globalConfig.defaults.model;
   const provider = opts.provider ?? globalConfig.defaults.provider;
+
+  // Resolve harness: caller-provided > corp-level default > 'openclaw'.
+  // We persist the resolved value so future lookups are cheap and the
+  // answer is inspectable from the filesystem without re-deriving.
+  const corpForHarness = readConfig<Corporation>(join(corpRoot, CORP_JSON));
+  const harness = opts.harness ?? corpForHarness.harness ?? 'openclaw';
 
   // Resolve project name for project-scoped agents
   let projectName: string | undefined;
@@ -115,6 +127,7 @@ export async function hireAgent(
     globalConfig,
     remote: true,
     projectName,
+    harness,
   });
 
   // FIXME(v0.10.1): Per-agent worktrees disabled — needs project-scoped repos first.

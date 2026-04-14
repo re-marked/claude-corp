@@ -110,7 +110,19 @@ export function createApi(daemon: Daemon): Server {
           port: a.port,
           status: a.status,
           workStatus: daemon.getAgentWorkStatus(a.memberId),
+          harness: daemon.harness.getHarnessNameFor(a.memberId),
         })));
+        return;
+      }
+
+      if (method === 'GET' && path === '/harnesses') {
+        const names = daemon.harness.registeredHarnessNames();
+        const health = await daemon.harness.health();
+        json(res, {
+          registered: names,
+          fallback: (health.info as any)?.fallback ?? 'openclaw',
+          summary: (health.info as any)?.harnesses ?? [],
+        });
         return;
       }
 

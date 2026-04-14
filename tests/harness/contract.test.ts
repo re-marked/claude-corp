@@ -7,6 +7,7 @@
 import {
   MockHarness,
   OpenClawHarness,
+  HarnessRouter,
   type OpenClawHarnessDeps,
 } from '../../packages/daemon/src/harness/index.js';
 import type { AgentProcess, ProcessManager } from '../../packages/daemon/src/process-manager.js';
@@ -70,4 +71,28 @@ runHarnessContract(
     // health shape against the same interface.
   },
   'OpenClawHarness',
+);
+
+// --- HarnessRouter (wrapping a single MockHarness) --------------------------
+
+runHarnessContract(
+  {
+    make: () => {
+      const inner = new MockHarness({ default: { content: 'router happy path', model: 'mock-v1' } });
+      return new HarnessRouter({
+        harnesses: new Map([['mock', inner]]),
+        resolveHarness: () => 'mock',
+        fallbackHarness: 'mock',
+      });
+    },
+    happyPath: {
+      opts: {
+        agentId: 'ceo',
+        message: 'hello',
+        sessionKey: 'say:ceo:mark',
+        context: {} as never,
+      },
+    },
+  },
+  'HarnessRouter',
 );
