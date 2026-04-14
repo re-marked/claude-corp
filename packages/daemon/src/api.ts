@@ -334,6 +334,7 @@ export function createApi(daemon: Daemon): Server {
         }
         const project = createProject(daemon.corpRoot, {
           name: body.name as string,
+          displayName: (body.displayName as string) ?? undefined,
           type: body.type as any,
           path: (body.path as string) ?? undefined,
           lead: (body.lead as string) ?? undefined,
