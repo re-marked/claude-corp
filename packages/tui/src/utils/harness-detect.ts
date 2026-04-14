@@ -20,6 +20,7 @@
 
 import { spawnSync } from 'node:child_process';
 import type { GlobalConfig } from '@claudecorp/shared';
+import { findExecutableInPath } from '@claudecorp/daemon';
 
 export type HarnessId = 'claude-code' | 'openclaw';
 
@@ -51,8 +52,17 @@ function detectClaudeCode(): HarnessOption {
   };
   const missingHint = 'Install: claude.com/claude-code, then `claude login` to authenticate.';
 
+  // Resolve to an absolute path first — spawnSync without shell doesn't
+  // search PATHEXT on Windows, so a bare 'claude' call would miss
+  // claude.exe / claude.cmd. findExecutableInPath walks PATH + PATHEXT
+  // manually, matching what ClaudeCodeHarness does at init time.
+  const resolved = findExecutableInPath('claude');
+  if (!resolved) {
+    return { ...base, available: false, note: '✗ `claude` binary not found on PATH', fixHint: missingHint };
+  }
+
   try {
-    const result = spawnSync('claude', ['--version'], {
+    const result = spawnSync(resolved, ['--version'], {
       encoding: 'utf8',
       timeout: 3_000,
       windowsHide: true,
@@ -62,9 +72,9 @@ function detectClaudeCode(): HarnessOption {
       const version = result.stdout.trim().split(/\s+/)[0] ?? '';
       return { ...base, available: true, note: `✓ Detected (claude ${version})`, fixHint: null };
     }
-    return { ...base, available: false, note: '✗ `claude` binary not found on PATH', fixHint: missingHint };
+    return { ...base, available: false, note: '✗ `claude --version` did not succeed', fixHint: missingHint };
   } catch {
-    return { ...base, available: false, note: '✗ `claude` binary not found on PATH', fixHint: missingHint };
+    return { ...base, available: false, note: '✗ `claude --version` failed to execute', fixHint: missingHint };
   }
 }
 
