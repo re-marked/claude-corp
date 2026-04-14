@@ -45,6 +45,7 @@ export {
   OpenClawHarness,
   MockHarness,
   HarnessRegistry,
+  HarnessRouter,
   defaultHarnessRegistry,
 } from './harness/index.js';
 export type {
@@ -54,4 +55,5 @@ export type {
   MockResponseLike,
   MockToolCall,
   RecordedDispatch,
+  HarnessRouterDeps,
 } from './harness/index.js';

@@ -36,3 +36,4 @@ export {
   type RecordedDispatch,
 } from './mock-harness.js';
 export { HarnessRegistry, defaultHarnessRegistry } from './registry.js';
+export { HarnessRouter, type HarnessRouterDeps } from './router.js';
