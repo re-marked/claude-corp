@@ -224,7 +224,13 @@ describe('ClaudeCodeHarness', () => {
 
       expect(tokens.length).toBeGreaterThan(0);
       expect(tokens[tokens.length - 1]).toContain('three');
-      expect(result.content).toBe('one two three');
+      // The fixture emits each delta as `word + ' '`, so the
+      // accumulated stream legitimately ends in a trailing space.
+      // result.content now reflects what was actually streamed
+      // (post-fix: cross-block accumulation wins over the result
+      // envelope's `result` field, which only carried the final block
+      // and lost intermediate text).
+      expect(result.content).toBe('one two three ');
       expect(result.toolCalls).toEqual([]);
       expect(calls).toHaveLength(2); // version + dispatch
     });
@@ -248,6 +254,96 @@ describe('ClaudeCodeHarness', () => {
       expect(dispatchCall.args).toContain('--verbose');
       expect(dispatchCall.args).toContain('--output-format');
       expect(dispatchCall.args).toContain('stream-json');
+    });
+
+    it('emits onAssistantText once per text block in a multi-block response', async () => {
+      // Regression test for the "intermediate text disappears" bug:
+      // a response shaped text → tool → text only persisted the final
+      // text because the harness only captured `result.content`.
+      // Now each text block fires onAssistantText so callers can
+      // persist them one-by-one before the next block arrives.
+      const { spawn } = makeSpawner((proc, call) => {
+        if (call.args.includes('--version')) {
+          proc.stdout.write('2.1.107\n');
+          proc.exit(0);
+          return;
+        }
+        proc.emitEvent({
+          type: 'system', subtype: 'init', session_id: 's1',
+          model: 'claude-opus-4-6', tools: ['Read'],
+        });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+        // Text block 0: "Let me check..."
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Let me check...' } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+        // Tool block 1: Read
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tool-1', name: 'Read', input: {} } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"path":"x"}' } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } });
+        // Text block 2: "Here's what I found..."
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_start', index: 2, content_block: { type: 'text', text: '' } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_delta', index: 2, delta: { type: 'text_delta', text: "Here's what I found..." } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_stop', index: 2 } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'message_stop' } });
+        proc.emitEvent({ type: 'result', subtype: 'success', is_error: false, duration_ms: 50, result: "Here's what I found...", session_id: 's1' });
+        proc.exit(0);
+      });
+      const harness = new ClaudeCodeHarness({ spawn });
+      await harness.init(BASE_CONFIG);
+
+      const blocks: string[] = [];
+      const result = await harness.dispatch(BASE_OPTS({
+        callbacks: { onAssistantText: (text) => blocks.push(text) },
+      }));
+
+      expect(blocks).toEqual([
+        'Let me check...',
+        "Here's what I found...",
+      ]);
+      // result.content reflects the cross-block accumulation, not just
+      // the result envelope's `result` field — so even callers that
+      // ignore onAssistantText still get all the text (no regression
+      // for openclaw-style consumers that single-shot persist).
+      expect(result.content).toBe("Let me check...Here's what I found...");
+    });
+
+    it('onToken streams the CURRENT block only, resetting between text blocks', async () => {
+      // Per-block onToken semantics mean the streaming overlay shows
+      // the in-flight block, not an ever-growing concatenation. Fixes
+      // a UX corollary of the persistence bug: if a second text block
+      // started, the streaming overlay used to keep the first block's
+      // text visible too, then both got replaced by just the second
+      // block at dispatch end.
+      const { spawn } = makeSpawner((proc, call) => {
+        if (call.args.includes('--version')) {
+          proc.stdout.write('2.1.107\n');
+          proc.exit(0);
+          return;
+        }
+        proc.emitEvent({ type: 'system', subtype: 'init', session_id: 's1', model: 'm', tools: [] });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'message_start', message: {} } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'first' } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'second' } } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'content_block_stop', index: 1 } });
+        proc.emitEvent({ type: 'stream_event', event: { type: 'message_stop' } });
+        proc.emitEvent({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1, result: 'second', session_id: 's1' });
+        proc.exit(0);
+      });
+      const harness = new ClaudeCodeHarness({ spawn });
+      await harness.init(BASE_CONFIG);
+
+      const tokens: string[] = [];
+      await harness.dispatch(BASE_OPTS({
+        callbacks: { onToken: (acc) => tokens.push(acc) },
+      }));
+
+      // After "first" block completes, the next onToken for "second"
+      // shows just "second" (the new block), not "firstsecond".
+      expect(tokens[tokens.length - 1]).toBe('second');
     });
 
     it('always passes --dangerously-skip-permissions for autonomous tool use', async () => {

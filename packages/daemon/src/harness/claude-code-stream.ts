@@ -23,6 +23,7 @@
 export type ClaudeCodeEvent =
   | { type: 'init'; sessionId: string; model: string; tools: string[]; apiKeySource?: string }
   | { type: 'token'; text: string; accumulated: string }
+  | { type: 'text_block_complete'; text: string; blockIndex: number }
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'lifecycle'; phase: 'message_start' | 'message_stop' | 'content_block_start' | 'content_block_stop' | 'message_delta' }
   | { type: 'rate_limit'; info: Record<string, unknown> }
@@ -38,16 +39,31 @@ interface BlockState {
   name?: string;
   toolUseId?: string;
   jsonBuffer: string;
+  /** Per-text-block accumulator. Resets between blocks. */
+  textBuffer: string;
 }
 
 export class ClaudeCodeStreamParser {
   private blocks = new Map<number, BlockState>();
-  private accumulated = '';
+  /**
+   * Per-block running text. `currentBlockText` is what's actively
+   * streaming RIGHT NOW (resets when a text block ends so the next
+   * block streams fresh). `allText` is the running concatenation of
+   * every text block ever seen — kept for backwards-compat with
+   * callers that want the full content as one string.
+   */
+  private currentBlockText = '';
+  private allText = '';
   private finished = false;
 
-  /** Returns the running concatenation of all text deltas observed so far. */
+  /**
+   * Concatenation of every text block observed so far, across all
+   * blocks in the message. Use this for "give me the whole response
+   * as one string" needs (defensive fallback when a result envelope
+   * is missing).
+   */
   getAccumulatedText(): string {
-    return this.accumulated;
+    return this.allText;
   }
 
   /** Whether a result_success or result_error has been observed. */
@@ -62,7 +78,8 @@ export class ClaudeCodeStreamParser {
    */
   reset(): void {
     this.blocks.clear();
-    this.accumulated = '';
+    this.currentBlockText = '';
+    this.allText = '';
     this.finished = false;
   }
 
@@ -134,9 +151,17 @@ export class ClaudeCodeStreamParser {
         this.finished = true;
         const p = parsed as any;
         if (p.subtype === 'success' || p.is_error === false) {
+          // Prefer the cross-block accumulation over claude's `result`
+          // field — `result` only carries the LAST text block, so a
+          // multi-block response (text → tool → text) would lose the
+          // earlier text if we trusted `result` alone. Per-block
+          // persistence via `text_block_complete` is the primary
+          // mechanism for preserving each block; this is a defensive
+          // fallback for callers that only consult result_success.
+          const fallbackContent = this.allText || (typeof p.result === 'string' ? p.result : '');
           listener({
             type: 'result_success',
-            content: typeof p.result === 'string' ? p.result : this.accumulated,
+            content: fallbackContent,
             sessionId: typeof p.session_id === 'string' ? p.session_id : '',
             durationMs: typeof p.duration_ms === 'number' ? p.duration_ms : 0,
             cost: typeof p.total_cost_usd === 'number' ? p.total_cost_usd : undefined,
@@ -176,7 +201,14 @@ export class ClaudeCodeStreamParser {
           name: typeof block.name === 'string' ? block.name : undefined,
           toolUseId: typeof block.id === 'string' ? block.id : undefined,
           jsonBuffer: '',
+          textBuffer: '',
         });
+        // A new text block resets the per-block streaming accumulator
+        // so onToken emits fresh deltas for THIS block (not stale from
+        // the previous one). Cross-block totals stay in `allText`.
+        if (blockType === 'text') {
+          this.currentBlockText = '';
+        }
         listener({ type: 'lifecycle', phase: 'content_block_start' });
         break;
       }
@@ -186,8 +218,14 @@ export class ClaudeCodeStreamParser {
         const delta = (ev.delta ?? {}) as Record<string, unknown>;
 
         if (delta.type === 'text_delta' && typeof delta.text === 'string') {
-          this.accumulated += delta.text;
-          listener({ type: 'token', text: delta.text, accumulated: this.accumulated });
+          this.allText += delta.text;
+          this.currentBlockText += delta.text;
+          const block = this.blocks.get(idx);
+          if (block && block.type === 'text') block.textBuffer += delta.text;
+          // accumulated reflects the CURRENT block only — that's what
+          // the streaming overlay shows. Cross-block totals live in
+          // `getAccumulatedText()` for callers that want everything.
+          listener({ type: 'token', text: delta.text, accumulated: this.currentBlockText });
         } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
           const block = this.blocks.get(idx);
           if (block) block.jsonBuffer += delta.partial_json;
@@ -213,6 +251,17 @@ export class ClaudeCodeStreamParser {
             toolCallId: block.toolUseId ?? `unknown-${idx}`,
             name: block.name ?? 'unknown',
             args,
+          });
+        } else if (block && block.type === 'text' && block.textBuffer.length > 0) {
+          // Emit the whole text block as a single completion event so
+          // downstream can persist it before the next tool call /
+          // text block arrives. Without this the only chance to
+          // capture intermediate text was the final result envelope,
+          // which only carries the LAST block — earlier text was lost.
+          listener({
+            type: 'text_block_complete',
+            text: block.textBuffer,
+            blockIndex: idx,
           });
         }
         this.blocks.delete(idx);

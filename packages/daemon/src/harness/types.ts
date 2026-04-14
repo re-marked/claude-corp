@@ -132,8 +132,22 @@ export interface DispatchOpts {
 
 /** Streaming callbacks invoked during a dispatch turn. */
 export interface DispatchCallbacks {
-  /** Fires on every token delta with the full accumulated response so far. */
+  /**
+   * Fires on every token delta with the in-flight accumulated text for
+   * the CURRENT text block. Resets between blocks (so a multi-block
+   * response — text → tool → text — produces two separate token streams,
+   * not one ever-growing one). Use for streaming overlays.
+   */
   onToken?: (accumulated: string) => void;
+  /**
+   * Fires when an assistant text block fully completes (i.e., the
+   * `content_block_stop` boundary on Claude's stream-json output).
+   * Receives the FULL text of that one block. A multi-block response
+   * fires this callback once per text block, in order. Use for
+   * persisting block-by-block to channel JSONL so all text survives,
+   * not just the final block.
+   */
+  onAssistantText?: (text: string) => void;
   /** Fires when a tool call begins. */
   onToolStart?: (tool: ToolCallInfo) => void;
   /** Fires when a tool call completes (result populated). */
