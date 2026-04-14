@@ -204,6 +204,34 @@ Five agents are auto-hired when a corporation is created. They're always there.
 
 ---
 
+## Agent Substrate (v2.0.0)
+
+### Harness
+
+**What it means:** The runtime that actually executes an agent's turns.
+
+**Plain English:** Every agent in v2.0.0+ runs on a harness — a plug that knows how to turn a prompt into a response for one specific substrate. `openclaw` dispatches through the shared OpenClaw gateway (provider-agnostic, token auth). `claude-code` spawns the `claude` CLI as a subprocess (OAuth subscription). You pick per-agent at hire time: `cc-cli hire --harness claude-code`. Switch later with `cc-cli agent set-harness`.
+
+### AgentHarness
+
+**What it means:** The contract every harness implements.
+
+**Plain English:** A small interface with `dispatch`, `healthCheck`, `teardown`, `cost`. Agent-level code calls these methods and doesn't care which substrate is underneath — that's how you get substrate-agnostic behavior. If you want Claude Corp to run on a new model runner (say, a local Ollama gateway or a future Anthropic API wrapper), implement `AgentHarness` and register it. The rest of the daemon stays the same.
+
+### HarnessRouter
+
+**What it means:** The dispatcher that picks the right harness per agent.
+
+**Plain English:** One agent uses openclaw, another uses claude-code. The router reads each agent's stored harness (from `config.json` + Member record), delegates to the matching implementation, and falls back to the corp default if none is set. Health checks surface per-harness diagnostics via `/harnesses` and `cc-cli harness list`.
+
+### Reconciliation
+
+**What it means:** Converging an agent's workspace to match its harness.
+
+**Plain English:** When `cc-cli agent set-harness` switches an agent to claude-code, it's not just a record change — it actively writes CLAUDE.md, migrates legacy filenames to the v2.0 names (`RULES.md` → `AGENTS.md`, `ENVIRONMENT.md` → `TOOLS.md`), and resolves conflicts by keeping the newer file + backing up the older with a timestamped `.backup` suffix. Switching back to openclaw moves CLAUDE.md aside. The files on disk always match the substrate that reads them.
+
+---
+
 ## Communication
 
 ### Inbox
