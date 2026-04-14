@@ -509,14 +509,39 @@ export class ClaudeCodeHarness implements AgentHarness {
 }
 
 function defaultSpawn(binary: string, args: string[], options: ClaudeSpawnOptions): ClaudeChildProcess {
-  const child: ChildProcess = nodeSpawn(binary, args, {
+  // Windows: shell:true so cmd.exe resolves the binary via PATH + PATHEXT
+  // (finds claude.exe / claude.cmd / claude.bat transparently). Args that
+  // contain whitespace or quotes get wrapped in cmd.exe-compatible quoting
+  // so paths with spaces (e.g. C:\Users\Jane Doe\...) tokenize correctly.
+  //
+  // POSIX: no shell — spawn() resolves binaries via PATH natively and
+  // arg boundaries are preserved by the OS. Passing shell:true here would
+  // require a different escaping scheme (sh vs cmd) and adds risk for
+  // zero benefit.
+  const isWindows = process.platform === 'win32';
+  const finalArgs = isWindows ? args.map(quoteForWindowsCmd) : args;
+
+  const child: ChildProcess = nodeSpawn(binary, finalArgs, {
     cwd: options.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
+    shell: isWindows,
+    windowsHide: true,
   });
   if (!child.stdin || !child.stdout || !child.stderr) {
     throw new Error('node spawn returned a child without piped stdio');
   }
   return child as unknown as ClaudeChildProcess;
+}
+
+/**
+ * Wrap an argument for safe passing through cmd.exe. Args without
+ * whitespace or double-quotes return unchanged; others get double-quote
+ * wrapped with inner quotes doubled per cmd.exe rules.
+ */
+function quoteForWindowsCmd(arg: string): string {
+  if (arg === '') return '""';
+  if (!/[\s"]/.test(arg)) return arg;
+  return '"' + arg.replace(/"/g, '""') + '"';
 }
 
 /**
