@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ClaudeCodeHarness,
   HarnessError,
@@ -247,24 +250,86 @@ describe('ClaudeCodeHarness', () => {
       expect(dispatchCall.args).toContain('stream-json');
     });
 
-    it('passes derived UUIDv5 session ID via --session-id', async () => {
-      const expectedSessionId = sessionIdFor('say:ceo:mark');
-      const { spawn, calls } = makeSpawner((proc, call) => {
-        if (call.args.includes('--version')) {
-          proc.stdout.write('2.1.107\n');
-          proc.exit(0);
-          return;
-        }
-        happyPathScenario('ok')(proc);
-      });
-      const harness = new ClaudeCodeHarness({ spawn });
-      await harness.init(BASE_CONFIG);
-      await harness.dispatch(BASE_OPTS());
+    it('passes derived UUIDv5 session ID via --session-id on first dispatch (no session file on disk)', async () => {
+      // Isolate HOME to a tmp dir so no accidental session file in the
+      // real ~/.claude/projects/ flips us into --resume mode.
+      const tmpHome = mkdtempSync(join(tmpdir(), 'claude-home-'));
+      const originalUserProfile = process.env.USERPROFILE;
+      const originalHome = process.env.HOME;
+      process.env.USERPROFILE = tmpHome;
+      process.env.HOME = tmpHome;
+      try {
+        const expectedSessionId = sessionIdFor('say:ceo:mark');
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS());
 
-      const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
-      const sessionIdIdx = dispatchCall.args.indexOf('--session-id');
-      expect(sessionIdIdx).toBeGreaterThan(-1);
-      expect(dispatchCall.args[sessionIdIdx + 1]).toBe(expectedSessionId);
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        const sessionIdIdx = dispatchCall.args.indexOf('--session-id');
+        expect(sessionIdIdx).toBeGreaterThan(-1);
+        expect(dispatchCall.args[sessionIdIdx + 1]).toBe(expectedSessionId);
+        expect(dispatchCall.args).not.toContain('--resume');
+      } finally {
+        if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+        else process.env.USERPROFILE = originalUserProfile;
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        rmSync(tmpHome, { recursive: true, force: true });
+      }
+    });
+
+    it('uses --resume (not --session-id) when a session file already exists for this UUID', async () => {
+      // Regression test for the "Session ID X is already in use" bug.
+      // Previously the harness always passed --session-id on every
+      // dispatch, using a deterministic UUID. Claude CLI rejects
+      // --session-id for UUIDs that already have a session file, so the
+      // second-and-later messages in any jack DM errored out. Fix: check
+      // the filesystem, use --resume when the session already exists.
+      const tmpHome = mkdtempSync(join(tmpdir(), 'claude-home-'));
+      const originalUserProfile = process.env.USERPROFILE;
+      const originalHome = process.env.HOME;
+      process.env.USERPROFILE = tmpHome;
+      process.env.HOME = tmpHome;
+      try {
+        const expectedSessionId = sessionIdFor('say:ceo:mark');
+        // Plant a session file anywhere under ~/.claude/projects/ — the
+        // encoded-workspace subdir name is unimportant since we scan all.
+        const projectsDir = join(tmpHome, '.claude', 'projects', 'any-encoded-workspace');
+        mkdirSync(projectsDir, { recursive: true });
+        writeFileSync(join(projectsDir, `${expectedSessionId}.jsonl`), '', 'utf-8');
+
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS());
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        const resumeIdx = dispatchCall.args.indexOf('--resume');
+        expect(resumeIdx).toBeGreaterThan(-1);
+        expect(dispatchCall.args[resumeIdx + 1]).toBe(expectedSessionId);
+        expect(dispatchCall.args).not.toContain('--session-id');
+      } finally {
+        if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+        else process.env.USERPROFILE = originalUserProfile;
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        rmSync(tmpHome, { recursive: true, force: true });
+      }
     });
 
     it('passes resolved workspace as cwd and via --add-dir (relative agentDir)', async () => {
