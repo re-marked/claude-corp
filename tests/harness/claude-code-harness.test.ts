@@ -267,7 +267,7 @@ describe('ClaudeCodeHarness', () => {
       expect(dispatchCall.args[sessionIdIdx + 1]).toBe(expectedSessionId);
     });
 
-    it('passes resolved workspace as cwd and via --add-dir', async () => {
+    it('passes resolved workspace as cwd and via --add-dir (relative agentDir)', async () => {
       const { spawn, calls } = makeSpawner((proc, call) => {
         if (call.args.includes('--version')) {
           proc.stdout.write('2.1.107\n');
@@ -281,11 +281,40 @@ describe('ClaudeCodeHarness', () => {
       await harness.dispatch(BASE_OPTS());
 
       const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
-      // resolveWorkspace joins corpRoot + agentDir
+      // BASE_OPTS provides relative agentDir = 'agents/ceo' → joined with corpRoot
       expect(dispatchCall.cwd).toMatch(/corps[\\/]+test[\\/]+agents[\\/]+ceo/);
       const addDirIdx = dispatchCall.args.indexOf('--add-dir');
       expect(addDirIdx).toBeGreaterThan(-1);
       expect(dispatchCall.args[addDirIdx + 1]).toBe(dispatchCall.cwd);
+    });
+
+    it('uses absolute agentDir as-is (no double-join with corpRoot)', async () => {
+      // api.ts /cc/say provides agentDir as an absolute path already joined
+      // with corpRoot. The harness must NOT join again — that would produce
+      // an invalid path like C:/.../corp/C:/.../corp/agents/ceo and Node
+      // spawn would surface a misleading ENOENT against the binary.
+      const absoluteWorkspace = process.platform === 'win32'
+        ? 'C:\\Users\\test\\.claudecorp\\my-corp\\agents\\ceo'
+        : '/home/test/.claudecorp/my-corp/agents/ceo';
+
+      const { spawn, calls } = makeSpawner((proc, call) => {
+        if (call.args.includes('--version')) {
+          proc.stdout.write('2.1.107\n');
+          proc.exit(0);
+          return;
+        }
+        happyPathScenario('ok')(proc);
+      });
+      const harness = new ClaudeCodeHarness({ spawn });
+      await harness.init(BASE_CONFIG);
+      await harness.dispatch(BASE_OPTS({
+        context: { corpRoot: '/different/path', agentDir: absoluteWorkspace } as never,
+      }));
+
+      const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+      expect(dispatchCall.cwd).toBe(absoluteWorkspace);
+      const addDirIdx = dispatchCall.args.indexOf('--add-dir');
+      expect(dispatchCall.args[addDirIdx + 1]).toBe(absoluteWorkspace);
     });
 
     it('writes the user message to stdin', async () => {
