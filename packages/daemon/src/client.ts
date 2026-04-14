@@ -26,7 +26,7 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
-  async listAgents(): Promise<{ memberId: string; displayName: string; port: number; status: string }[]> {
+  async listAgents(): Promise<{ memberId: string; displayName: string; port: number; status: string; workStatus?: string; harness?: string }[]> {
     const resp = await fetch(`${this.baseUrl}/agents`);
     return resp.json() as Promise<any>;
   }
