@@ -431,6 +431,7 @@ async function run() {
         await cmdAgentSetHarness({
           agent: values.agent as string | undefined,
           harness: values.harness as string | undefined,
+          corp: values.corp as string | undefined,
           json: !!values.json,
         });
         break;
