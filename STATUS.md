@@ -4,6 +4,34 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.0.0 — Harness-Agnostic Corps (MERGED, PRs #87–#98)
+
+**The new chapter:** Claude Corp is no longer tied to any single agent runtime. Every agent picks a registered substrate at hire time (or later via `cc-cli agent set-harness`), and the daemon's `HarnessRouter` dispatches each message through the right plug. Same `AgentHarness` contract; any harness that implements it is a first-class citizen.
+
+**Why it matters now:** Anthropic banned OpenClaw subscription auth. Without substrate-agnostic dispatch, users on Claude Max subscriptions (no API key) had no path to run Claude Corp. v2.0.0 makes that path first-class, without losing OpenClaw's provider-agnostic multi-provider support.
+
+### What shipped across the rollout (PRs #87–#98)
+
+| Area | Summary |
+|---|---|
+| **Harness abstraction** (#87) | `AgentHarness` interface, `OpenClawHarness` wrap (zero-behavior-change default), `HarnessRegistry`, `MockHarness`, lifecycle wiring |
+| **Per-agent routing** (#88) | `HarnessRouter`, harness persisted to `config.json` + Member, `/agents` + `/harnesses` APIs, `cc-cli agents` column, `cc-cli agent set-harness`, `cc-cli harness list/health`, `cc-cli inspect` |
+| **Claude Code harness** (#89–#93) | `ClaudeCodeHarness` over `claude --print --verbose --output-format stream-json` on OAuth subscription auth, cost tracking, 4 Windows spawn hotfixes (shell quoting, binary resolution, --verbose flag requirement, absolute-cwd handling) |
+| **Agent onboarding** (#94) | Harness-aware `defaultRules` + `defaultEnvironment` templates, files on disk renamed to OpenClaw-recognized `AGENTS.md` + `TOOLS.md` (so they finally reach both substrates' system prompts), `buildClaudeMd` template with SOUL preamble + `@./` imports, daemon-startup filename migration, `cc-cli hire --harness` |
+| **API bug fixes** (#96–#98) | Three instances of the same bug class — HTTP handlers silently dropping body fields. `/agents/hire` dropped `harness`, `/tasks/create` dropped `projectId`/`blockedBy`/`acceptanceCriteria`, `/projects/create` dropped `displayName`. All fixed + regression tests at the HTTP boundary |
+| **Set-harness reconciliation** (this PR) | `cc-cli agent set-harness` now actively re-scaffolds the workspace: migrates legacy filenames with newer-wins conflict resolution (older copy moved to `.backup.<ts>`), writes CLAUDE.md when switching to claude-code, moves CLAUDE.md aside when switching back. Switching harness is now a real migration, not a record-only lie |
+| **Doc alignment** | README badge bumped + harness-agnostic framing, ROADMAP top note, CLAUDE.md corp layout, SOUL + workspace fragment + onboard-agent blueprint + planner heartbeat + init/onboarding kickoff messages all updated to the v2.0 filenames |
+
+### Live-verified end-to-end
+
+Hired TestPilot2 with `--harness claude-code` in the hc-test corp, dispatched via `cc-cli say`. Response reflected IDENTITY.md content verbatim — the claude CLI auto-discovered CLAUDE.md, resolved all 11 `@./` imports, and the workspace files reached the system prompt. Proof the full loop works.
+
+### Test suite
+
+499/499 green. New coverage: 63 tests for PR #94, 5 each for the three HTTP-body fixes, 13 for the reconciler. Regression coverage now includes the HTTP boundary seam that was invisible to unit tests before.
+
+---
+
 ## What WORKS today (v1.0.0)
 
 ### Primitives (shipped v0.10.0–v0.10.5)
