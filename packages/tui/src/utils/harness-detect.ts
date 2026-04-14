@@ -31,8 +31,10 @@ export interface HarnessOption {
   tagline: string;
   /** Whether this harness looks usable right now. Selectable either way. */
   available: boolean;
-  /** Short detection note shown in dim color — "✓ Detected" / "⚠ ...". */
+  /** Short detection note shown next to the name — "✓ Detected" / "⚠ ...". */
   note: string;
+  /** Actionable fix hint shown when !available. Null when the option works. */
+  fixHint: string | null;
 }
 
 export function detectAvailableHarnesses(globalConfig: GlobalConfig): HarnessOption[] {
@@ -42,32 +44,32 @@ export function detectAvailableHarnesses(globalConfig: GlobalConfig): HarnessOpt
 }
 
 function detectClaudeCode(): HarnessOption {
-  const base: Omit<HarnessOption, 'available' | 'note'> = {
+  const base: Omit<HarnessOption, 'available' | 'note' | 'fixHint'> = {
     id: 'claude-code',
     displayName: 'Claude Code',
     tagline: 'Uses your Claude subscription via OAuth. Zero API token cost.',
   };
+  const missingHint = 'Install: claude.com/claude-code, then `claude login` to authenticate.';
 
   try {
     const result = spawnSync('claude', ['--version'], {
       encoding: 'utf8',
       timeout: 3_000,
       windowsHide: true,
-      // Swallow stderr — we only care about whether it produced a version.
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     if (result.status === 0 && typeof result.stdout === 'string' && result.stdout.trim().length > 0) {
       const version = result.stdout.trim().split(/\s+/)[0] ?? '';
-      return { ...base, available: true, note: `✓ Detected (claude ${version})` };
+      return { ...base, available: true, note: `✓ Detected (claude ${version})`, fixHint: null };
     }
-    return { ...base, available: false, note: '✗ `claude` binary not found on PATH' };
+    return { ...base, available: false, note: '✗ `claude` binary not found on PATH', fixHint: missingHint };
   } catch {
-    return { ...base, available: false, note: '✗ `claude` binary not found on PATH' };
+    return { ...base, available: false, note: '✗ `claude` binary not found on PATH', fixHint: missingHint };
   }
 }
 
 function detectOpenClaw(globalConfig: GlobalConfig): HarnessOption {
-  const base: Omit<HarnessOption, 'available' | 'note'> = {
+  const base: Omit<HarnessOption, 'available' | 'note' | 'fixHint'> = {
     id: 'openclaw',
     displayName: 'OpenClaw',
     tagline: 'Uses an API key. Any provider — Anthropic, OpenAI, Google, Ollama.',
@@ -85,9 +87,14 @@ function detectOpenClaw(globalConfig: GlobalConfig): HarnessOption {
       keys.openai ? 'openai' : null,
       keys.google ? 'google' : null,
     ].filter(Boolean);
-    return { ...base, available: true, note: `✓ API key set (${providers.join(', ')})` };
+    return { ...base, available: true, note: `✓ API key set (${providers.join(', ')})`, fixHint: null };
   }
-  return { ...base, available: false, note: '⚠ No API key configured yet' };
+  return {
+    ...base,
+    available: false,
+    note: '⚠ No API key configured yet',
+    fixHint: 'Add a key to ~/.claudecorp/global-config.json (anthropic/openai/google) or `cc-cli models`.',
+  };
 }
 
 /**

@@ -335,8 +335,11 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
                   <Text color={opt.available ? COLORS.success : COLORS.warning}>{opt.note}</Text>
                 </Box>
                 {isSel && (
-                  <Box paddingLeft={3}>
+                  <Box paddingLeft={3} flexDirection="column">
                     <Text color={COLORS.subtle}>{opt.tagline}</Text>
+                    {opt.fixHint && (
+                      <Text color={COLORS.warning}>→ {opt.fixHint}</Text>
+                    )}
                   </Box>
                 )}
               </Box>
@@ -345,7 +348,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
 
           {harnessOptions[harnessIndex] && !harnessOptions[harnessIndex]!.available && (
             <Box marginTop={0} marginBottom={1}>
-              <Text color={COLORS.warning}>You can still pick this — you'll hit a clear error on first dispatch if it's not set up.</Text>
+              <Text color={COLORS.muted}>You can still pick this and set it up later — you'll see a clear error on first dispatch.</Text>
             </Box>
           )}
 
