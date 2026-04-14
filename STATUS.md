@@ -262,6 +262,51 @@ Results: 6 responded, 1 missed
 - ✅ /slumber profiles, /slumber stats commands
 - ✅ Profile validation for custom profiles
 
+## v1.1.0 — Harness Abstraction (MERGED, PR #87)
+
+**Motivation:** Anthropic banned OpenClaw subscription auth; Claude Corp needs to run on Claude Code's OAuth auth. First step: abstract the dispatch layer so per-agent harness selection becomes possible.
+
+- ✅ `AgentHarness` interface — single contract (dispatch, healthCheck, teardown, cost) over any agent runtime
+- ✅ `OpenClawHarness` wraps existing dispatch (backward-compat default, zero behavior change)
+- ✅ `HarnessRegistry` — plugin-style registration keyed by harness name
+- ✅ `MockHarness` — deterministic in-process harness for testing
+- ✅ Daemon lifecycle integration: router @mention, heartbeat inbox, `/say` API all go through the harness
+- ✅ Optional `harness` field added to `Member` + `Corporation` + `AgentSpec` types
+- ✅ Parameterized AgentHarness contract test applied to both real + mock harnesses
+
+## v1.1.3 — Per-Agent Harness Routing (MERGED, PR #88)
+
+- ✅ `HarnessRouter` — delegates each dispatch to the agent's configured harness (fallback to default)
+- ✅ `hireAgent` + `setupAgentWorkspace` persist resolved harness to `config.json` + Member record
+- ✅ `/agents` API returns resolved harness per agent; `cc-cli agents` shows harness column
+- ✅ `/harnesses` API lists registered harnesses + their health
+- ✅ `cc-cli agent set-harness --agent <id> --harness <name>` — switch substrate on a live agent
+- ✅ `cc-cli harness list` / `cc-cli harness health` — per-harness diagnostics
+- ✅ `cc-cli inspect` shows resolved harness per agent
+
+## v1.1.4 — Claude Code Harness (MERGED, PRs #89-93)
+
+- ✅ `ClaudeCodeHarness` — AgentHarness over the `claude` CLI using OAuth subscription auth (not API key, since Anthropic banned OpenClaw subscription usage)
+- ✅ Streams JSON events from `claude --print --verbose --output-format stream-json` into Claude Corp's unified event stream
+- ✅ Per-dispatch + cumulative cost tracking
+- ✅ Registered alongside `openclaw` harness at daemon startup
+- ✅ 4 Windows spawn hotfixes:
+  - Shell quoting + `cmd.exe` metacharacter handling via `quoteForWindowsCmd`
+  - `claude` binary resolved to absolute path at init (PATH walk + PATHEXT honored), no shell mode
+  - `--verbose` flag added (required by claude when combining `--print` with stream-json output)
+  - `resolveWorkspace` handles absolute `agentDir` (matches api.ts convention)
+
+## v1.2.0 — Claude Code Agent Onboarding (MERGED, PR #94)
+
+**The unlock:** OpenClaw's workspace bootstrap loader auto-injects files only when the basename is in a hardcoded set (`AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, `BOOTSTRAP.md`, `MEMORY.md`). Claude Corp had been writing `RULES.md` + `ENVIRONMENT.md` — silently dropped. Fix: rename on disk so both OpenClaw auto-load + Claude Code `@import` converge on the same handles.
+
+- ✅ Harness-aware templates: `defaultRules` + `defaultEnvironment` branch on harness, name substrate-specific tool vocab (`Read`/`Write`/`Edit`/`Bash` vs `read`/`exec`/`process`)
+- ✅ OpenClaw-recognized basenames on disk: writes `AGENTS.md` + `TOOLS.md` (internal template names keep `rules`/`environment` for semantic clarity)
+- ✅ `migrateAgentWorkspaceFilenames` — idempotent rename of legacy `RULES.md` / `ENVIRONMENT.md` on corp + project-scoped agents, runs at daemon startup; flags conflicts, doesn't clobber
+- ✅ `CLAUDE.md` per Claude Code agent: SOUL embodiment preamble (verbatim OpenClaw phrasing so the agent embodies SOUL across substrates) + `@./` imports of always-on identity files + current state (STATUS/INBOX/TASKS) + read-on-demand footer for BRAIN/observations/WORKLOG
+- ✅ `cc-cli hire --harness <claude-code|openclaw>` — picks substrate at agent creation
+- ✅ 63 new tests across 5 files; full suite 472/472 passing
+
 ---
 
 ## Planned but NOT yet built
