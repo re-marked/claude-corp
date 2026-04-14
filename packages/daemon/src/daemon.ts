@@ -49,6 +49,7 @@ import {
 } from './harness/index.js';
 import { createApi } from './api.js';
 import { recoverCrashedAgents, recoverCeoGateway, recoverCorpGateway } from './daemon-recovery.js';
+import { corpHasOpenClawAgent } from './harness-resolve.js';
 import { killStaleProcesses } from './stale-cleanup.js';
 import { log, logError } from './logger.js';
 
@@ -503,9 +504,15 @@ export class Daemon {
 
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
   private async connectOpenClawWS(): Promise<void> {
-    // User's personal OpenClaw (CEO)
+    // User's personal OpenClaw (for tool events on agents dispatched
+    // through it). Only worth connecting if at least one agent in this
+    // corp actually resolves to the openclaw harness — otherwise we're
+    // spending up to 10s of connect timeout on a gateway no dispatch
+    // will ever hit. The timeout blocks daemon startup (startRouter
+    // awaits this), which is what the user sees as "Connecting to your
+    // OpenClaw..." hanging for 10s on a claude-code-only corp.
     const userGw = this.globalConfig.userGateway;
-    if (userGw) {
+    if (userGw && corpHasOpenClawAgent(this.corpRoot)) {
       try {
         this.openclawWS = new OpenClawWS(userGw.port, userGw.token);
         await this.openclawWS.connect();
@@ -516,7 +523,9 @@ export class Daemon {
       }
     }
 
-    // Corp gateway (worker agents)
+    // Corp gateway (worker agents). Already gated on getStatus() so a
+    // gateway that initCorpGateway skipped starting won't get a wasted
+    // connect attempt here either.
     const corpGw = this.processManager.corpGateway;
     if (corpGw && corpGw.getStatus() === 'ready') {
       try {
@@ -529,6 +538,7 @@ export class Daemon {
       }
     }
   }
+
 
   async spawnAllAgents(): Promise<void> {
     // Initialize the shared corp gateway — if it fails, CEO may still work via remote
