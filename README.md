@@ -47,7 +47,7 @@ Founder (you)
        ├── Failsafe (health monitor, pings every 5min)
        ├── Warden (quality gate — reviews all completed work)
        ├── Herald (narrator — writes NARRATION.md every 5min)
-       ├── Planner (deep planning on Opus, ultraplan + sketch)
+       ├── Planner (deep planning, ultraplan + sketch)
        └── Your agents
             ├── Team Leaders (coordinate workers)
             └── Workers (do the actual work)
