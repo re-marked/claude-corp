@@ -4,6 +4,15 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.2 — Claude-code agent reality check (MERGED, PRs #105–#106)
+
+Two bugs Mark hit the moment v2.1.0 met real use:
+
+- **PR #105 — `--dangerously-skip-permissions`:** claude-code agents hung the moment they tried any tool (Bash/Edit/Write) because claude's default permission mode pauses for interactive approval that nobody's there to give. ClaudeCodeHarness now passes the bypass flag on every dispatch — for autonomous corp agents, autonomous tool use IS the design.
+- **PR #106 — Skip OpenClaw gateway when nothing uses it:** a fresh `harness=claude-code` corp was spawning the full OpenClaw process tree at startup, binding a port + ~50MB RSS, for an empty audience. `initCorpGateway` now resolves each agent's harness (member > corp > 'openclaw'), only registers openclaw agents with the gateway, and only starts the gateway when at least one agent needs it. New `'harness'` value in `AgentProcess.mode` for agents dispatched directly through their `AgentHarness` with no gateway slot.
+
+8 new regression tests for the gateway-skip logic. Full suite: 530/530 green.
+
 ## v2.1.1 — ClaudeCodeHarness session resume (MERGED, PR #103)
 
 Every second-and-later message in a jack DM with a claude-code agent was failing with `Session ID X is already in use`. Root cause: the harness always passed `--session-id <uuid>` on every dispatch, but claude CLI's `--session-id` means *create* (rejects if UUID exists), not *resume*. Fix: scan `~/.claude/projects/*/` for the session file; use `--session-id` when absent (first dispatch) and `--resume` when present (continuation). Bonus doc alignment so future-us can't make the same false assumption.
