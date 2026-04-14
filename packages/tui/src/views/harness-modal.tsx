@@ -3,16 +3,14 @@ import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
 import { join } from 'node:path';
 import {
   readConfig,
-  writeConfig,
-  reconcileAgentWorkspace,
   ensureGlobalConfig,
   MEMBERS_JSON,
   type Member,
-  type AgentConfig,
   type ReconcileAgentWorkspaceResult,
 } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 import { detectAvailableHarnesses, type HarnessOption } from '../utils/harness-detect.js';
+import { applyHarnessSwitch } from '../utils/harness-switch.js';
 
 /**
  * /harness — interactive modal for switching an agent's execution
@@ -103,7 +101,11 @@ export function HarnessModal({ corpRoot, onClose }: Props) {
       else if (key.return && selectedAgent) {
         const targetHarness = HARNESS_CHOICES[targetIndex]!.id;
         try {
-          const result = applyHarnessSwitch(corpRoot, selectedAgent, targetHarness);
+          const result = applyHarnessSwitch({
+            corpRoot,
+            member: selectedAgent,
+            targetHarness,
+          });
           setReconcileResult(result);
           // Reload the member list so the picker reflects the new
           // harness next time the user enters the list screen.
@@ -299,36 +301,4 @@ function loadAgents(corpRoot: string): Member[] {
   } catch {
     return [];
   }
-}
-
-function applyHarnessSwitch(
-  corpRoot: string,
-  member: Member,
-  targetHarness: string,
-): ReconcileAgentWorkspaceResult {
-  // 1. Update members.json
-  const membersPath = join(corpRoot, MEMBERS_JSON);
-  const members = readConfig<Member[]>(membersPath);
-  const updated = members.map(m => m.id === member.id ? { ...m, harness: targetHarness } : m);
-  writeConfig(membersPath, updated);
-
-  // 2. Update agent's own config.json if present (silently skip if missing)
-  if (member.agentDir) {
-    const configPath = join(corpRoot, member.agentDir, 'config.json');
-    try {
-      const cfg = readConfig<AgentConfig>(configPath);
-      writeConfig(configPath, { ...cfg, harness: targetHarness });
-    } catch { /* agent has no config.json — fine */ }
-  }
-
-  // 3. Reconcile the workspace (migrate filenames, write/remove CLAUDE.md)
-  if (!member.agentDir) {
-    return { renamed: [], conflicts: [], claudeMdWritten: false, claudeMdBackedUp: null };
-  }
-  const agentAbs = join(corpRoot, member.agentDir);
-  return reconcileAgentWorkspace({
-    agentDir: agentAbs,
-    displayName: member.displayName,
-    harness: targetHarness,
-  });
 }
