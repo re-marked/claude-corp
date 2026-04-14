@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Box, Text, useInput } from '@claude-code-kit/ink-renderer';
 import { TextInput } from '../components/text-input.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
-import { KNOWN_MODELS, type ModelEntry } from '@claudecorp/shared';
+import { KNOWN_MODELS, ensureGlobalConfig, type ModelEntry } from '@claudecorp/shared';
 import { COLORS } from '../theme.js';
+import { detectAvailableHarnesses, type HarnessOption } from '../utils/harness-detect.js';
 
 type Step = 'name' | 'rank' | 'model' | 'harness' | 'description' | 'hiring' | 'done' | 'error';
 
@@ -48,10 +49,24 @@ export function HireWizard({ daemonClient, founderId, corpDefaultHarness, onClos
   const corpDefaultLabel = corpDefaultHarness
     ? (HARNESS_DISPLAY[corpDefaultHarness] ?? corpDefaultHarness)
     : 'openclaw';
+
+  // Run detection once per wizard mount. The 3s claude --version probe
+  // is behind a useMemo so picking through the wizard steps doesn't
+  // re-run it. Detection result is used to annotate each specific
+  // harness option + surface a fix hint when the selection is unavailable.
+  const detected = useMemo<HarnessOption[]>(() => {
+    try {
+      return detectAvailableHarnesses(ensureGlobalConfig());
+    } catch {
+      return [];
+    }
+  }, []);
+  const detectedById = (id: string) => detected.find(d => d.id === id) ?? null;
+
   const HARNESS_OPTIONS = [
-    { id: null, label: `Use corp default (${corpDefaultLabel})` },
-    { id: 'claude-code' as const, label: HARNESS_DISPLAY['claude-code']! },
-    { id: 'openclaw' as const, label: HARNESS_DISPLAY['openclaw']! },
+    { id: null, label: `Use corp default (${corpDefaultLabel})`, detail: null as HarnessOption | null },
+    { id: 'claude-code' as const, label: HARNESS_DISPLAY['claude-code']!, detail: detectedById('claude-code') },
+    { id: 'openclaw' as const, label: HARNESS_DISPLAY['openclaw']!, detail: detectedById('openclaw') },
   ];
 
   useInput((input, key) => {
@@ -187,21 +202,37 @@ export function HireWizard({ daemonClient, founderId, corpDefaultHarness, onClos
         </Box>
       )}
 
-      {step === 'harness' && (
-        <Box flexDirection="column">
-          <Text>Name: <Text bold>{name}</Text>  Rank: <Text bold>{RANKS[rankIndex]}</Text>  Model: <Text bold>{selectedModelLabel}</Text></Text>
-          <Box marginTop={1}><Text>Pick an engine for {name}:</Text></Box>
-          {HARNESS_OPTIONS.map((opt, i) => (
-            <Box key={opt.label} gap={1}>
-              <Text color={i === harnessIndex ? COLORS.primary : COLORS.muted} bold={i === harnessIndex}>
-                {i === harnessIndex ? '>' : ' '} {opt.label}
-              </Text>
-              {i === 0 && <Text dimColor>(most agents use this)</Text>}
-            </Box>
-          ))}
-          <Box marginTop={1}><Text dimColor>{'\u2191\u2193'} select  Enter confirm</Text></Box>
-        </Box>
-      )}
+      {step === 'harness' && (() => {
+        const selectedOpt = HARNESS_OPTIONS[harnessIndex]!;
+        const selectedFixHint = selectedOpt.detail && !selectedOpt.detail.available
+          ? selectedOpt.detail.fixHint
+          : null;
+        return (
+          <Box flexDirection="column">
+            <Text>Name: <Text bold>{name}</Text>  Rank: <Text bold>{RANKS[rankIndex]}</Text>  Model: <Text bold>{selectedModelLabel}</Text></Text>
+            <Box marginTop={1}><Text>Pick an engine for {name}:</Text></Box>
+            {HARNESS_OPTIONS.map((opt, i) => (
+              <Box key={opt.label} gap={1}>
+                <Text color={i === harnessIndex ? COLORS.primary : COLORS.muted} bold={i === harnessIndex}>
+                  {i === harnessIndex ? '>' : ' '} {opt.label}
+                </Text>
+                {i === 0 && <Text dimColor>(most agents use this)</Text>}
+                {opt.detail && (
+                  <Text color={opt.detail.available ? COLORS.success : COLORS.warning}>
+                    {opt.detail.note}
+                  </Text>
+                )}
+              </Box>
+            ))}
+            {selectedFixHint && (
+              <Box marginTop={1}>
+                <Text color={COLORS.warning}>→ {selectedFixHint}</Text>
+              </Box>
+            )}
+            <Box marginTop={1}><Text dimColor>{'\u2191\u2193'} select  Enter confirm</Text></Box>
+          </Box>
+        );
+      })()}
 
       {step === 'description' && (
         <Box flexDirection="column">
