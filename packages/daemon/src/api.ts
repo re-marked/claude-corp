@@ -115,6 +115,17 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      if (method === 'GET' && path === '/harnesses') {
+        const names = daemon.harness.registeredHarnessNames();
+        const health = await daemon.harness.health();
+        json(res, {
+          registered: names,
+          fallback: (health.info as any)?.fallback ?? 'openclaw',
+          summary: (health.info as any)?.harnesses ?? [],
+        });
+        return;
+      }
+
       // POST /agents/:id/start
       const startMatch = path.match(/^\/agents\/([^/]+)\/start$/);
       if (method === 'POST' && startMatch) {
