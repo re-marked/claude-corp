@@ -44,8 +44,13 @@ export async function cmdJack(opts: {
     process.exit(1);
   }
 
-  // Generate persistent session key
-  const sessionKey = `jack:${normalize(target.displayName)}:${Date.now()}`;
+  // Persistent session key — deterministic per agent so consecutive
+  // `cc-cli jack` invocations resume the same conversation rather than
+  // each one spawning a fresh claude-code session. Matches the format
+  // used by every daemon-side dispatcher (autoemon, dreams, slumber,
+  // api). The previous `:${Date.now()}` suffix made every jack call
+  // re-introduce the agent.
+  const sessionKey = `jack:${normalize(target.displayName)}`;
   const conversation: ConversationEntry[] = [];
   const jackStart = Date.now();
 

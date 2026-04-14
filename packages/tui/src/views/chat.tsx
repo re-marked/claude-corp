@@ -123,9 +123,16 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     if (!agent) return;
 
     const slug = agent.displayName.toLowerCase().replace(/\s+/g, '-');
+    // Deterministic key per agent — matches every other dispatcher in
+    // the daemon (autoemon, dreams, slumber, api). The previous
+    // `:${Date.now()}` suffix re-derived a new session UUID each time
+    // the user navigated into this DM, so claude-code agents lost all
+    // memory between channel switches and the CEO re-introduced
+    // itself on every fresh entry. Persistent jack memory only works
+    // when the key stays stable.
     setJackMode({
       active: true,
-      sessionKey: `jack:${slug}:${Date.now()}`,
+      sessionKey: `jack:${slug}`,
       agentSlug: slug,
       agentName: agent.displayName,
       agentId: agent.id,
@@ -318,9 +325,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         return;
       }
       const slug = agent.displayName.toLowerCase().replace(/\s+/g, '-');
+      // Deterministic key — see the auto-jack effect above for why the
+      // timestamp suffix was wrong. Same agent must always derive the
+      // same UUID so claude-code resumes the existing session.
       setJackMode({
         active: true,
-        sessionKey: `jack:${slug}:${Date.now()}`,
+        sessionKey: `jack:${slug}`,
         agentSlug: slug,
         agentName: agent.displayName,
         agentId: agent.id,
