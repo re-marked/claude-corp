@@ -1669,11 +1669,25 @@ Always consider what happens when things go wrong.`,
   }
 
   if (showHireWizard) {
+    // Read the corp-wide default harness fresh each time the wizard opens
+    // so a just-updated corp.json (e.g., via `cc-cli agent set-harness`) is
+    // reflected in the "Use corp default (X)" label. Missing/empty → undefined
+    // so the wizard falls back to its own "openclaw" label, matching the
+    // server-side resolution fallback chain.
+    let corpDefaultHarness: string | undefined;
+    try {
+      const corp = readConfig<Record<string, unknown>>(join(corpRoot, CORP_JSON));
+      if (typeof corp.harness === 'string' && corp.harness.length > 0) {
+        corpDefaultHarness = corp.harness;
+      }
+    } catch { /* missing corp.json is fine — wizard defaults label to 'openclaw' */ }
+
     return (
       <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={10}>
         <HireWizard
           daemonClient={daemonClient}
           founderId={founder?.id ?? ''}
+          corpDefaultHarness={corpDefaultHarness}
           onClose={() => setShowHireWizard(false)}
           onHired={handleHired}
         />
