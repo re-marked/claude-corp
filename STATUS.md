@@ -4,6 +4,15 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.3 — Onboarding hang fix (MERGED, PR #108)
+
+Creating a fresh corp with claude-code picked still showed `"Connecting to your OpenClaw..."` AND actually hung ~10s waiting on an OpenClaw WebSocket connection that would never be used. Two bugs, one fix:
+
+- `connectOpenClawWS` unconditionally attempted the user-gateway connect when `globalConfig.userGateway` was set, regardless of harness. Now gated on `corpHasOpenClawAgent(corpRoot)` — resolves each agent's effective harness (member > corp > 'openclaw') and only connects when at least one agent actually needs it.
+- Onboarding status text was keyed on `userGateway` presence only (legacy "CEO is always remote OpenClaw" assumption). Now branches on the selected harness first.
+
+Also extracted `resolveMemberHarness` + `corpHasOpenClawAgent` to `packages/daemon/src/harness-resolve.ts` with 12 regression tests locking the rule. Follow-up: migrate the other two inline harness-resolution sites (daemon.resolveHarnessForAgent + process-manager inline logic) to import from the new module.
+
 ## v2.1.2 — Claude-code agent reality check (MERGED, PRs #105–#106)
 
 Two bugs Mark hit the moment v2.1.0 met real use:
