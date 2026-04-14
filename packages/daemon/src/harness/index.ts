@@ -37,3 +37,20 @@ export {
 } from './mock-harness.js';
 export { HarnessRegistry, defaultHarnessRegistry } from './registry.js';
 export { HarnessRouter, type HarnessRouterDeps } from './router.js';
+export {
+  ClaudeCodeHarness,
+  type ClaudeCodeHarnessDeps,
+  type ClaudeChildProcess,
+  type ClaudeSpawnFn,
+  type ClaudeSpawnOptions,
+} from './claude-code-harness.js';
+export {
+  ClaudeCodeStreamParser,
+  type ClaudeCodeEvent,
+  type ClaudeCodeEventListener,
+} from './claude-code-stream.js';
+export {
+  sessionIdFor,
+  uuidv5,
+  CLAUDE_CORP_SESSION_NAMESPACE,
+} from './session-id.js';

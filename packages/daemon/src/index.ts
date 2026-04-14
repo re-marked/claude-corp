@@ -46,7 +46,12 @@ export {
   MockHarness,
   HarnessRegistry,
   HarnessRouter,
+  ClaudeCodeHarness,
+  ClaudeCodeStreamParser,
   defaultHarnessRegistry,
+  sessionIdFor,
+  uuidv5,
+  CLAUDE_CORP_SESSION_NAMESPACE,
 } from './harness/index.js';
 export type {
   OpenClawHarnessDeps,
@@ -56,4 +61,10 @@ export type {
   MockToolCall,
   RecordedDispatch,
   HarnessRouterDeps,
+  ClaudeCodeHarnessDeps,
+  ClaudeChildProcess,
+  ClaudeSpawnFn,
+  ClaudeSpawnOptions,
+  ClaudeCodeEvent,
+  ClaudeCodeEventListener,
 } from './harness/index.js';
