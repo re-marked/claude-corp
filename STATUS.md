@@ -4,6 +4,12 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.5 — Jack session keys deterministic (MERGED, PR #112)
+
+CEO re-introduced itself on every message. Looked like each turn started a fresh session — because it did. Three callers (TUI auto-jack effect, TUI /jack handler, `cc-cli jack`) baked `Date.now()` into the jack session key, so every channel entry / jack invocation derived a new claude UUID, which `claudeSessionFileExists()` couldn't find, which fell back to `--session-id` (creates) instead of `--resume` (continues). Every other dispatcher (autoemon, dreams, slumber, api, router) already used the deterministic `jack:${slug}` form — these three were the only outliers.
+
+Fix: drop the timestamp from all three. Repo-wide grep test pins the rule so a fourth caller can't sneak the pattern back in.
+
 ## v2.1.4 — Claude-code text blocks persist (MERGED, PR #110)
 
 A claude response with tool calls produces multiple text blocks (text → tool → text). Before this fix only the FINAL block survived — earlier text vanished after streaming and never came back on channel re-entry. Root cause: ClaudeCodeHarness reported `result.content` from claude's `result` envelope, which only carries the last block. Earlier blocks streamed live but never persisted as JSONL.
