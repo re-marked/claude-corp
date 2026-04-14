@@ -108,6 +108,8 @@ export class ClaudeCodeHarness implements AgentHarness {
   private _dispatches = 0;
   private _errors = 0;
   private _lastDispatchAt: number | null = null;
+  private _totalCostUsd = 0;
+  private _lastDispatchCostUsd: number | null = null;
 
   constructor(deps: ClaudeCodeHarnessDeps = {}) {
     this.binaryPath = deps.binaryPath ?? 'claude';
@@ -150,6 +152,8 @@ export class ClaudeCodeHarness implements AgentHarness {
         binaryVersion: this._binaryVersion,
         lastRateLimit: this._lastRateLimit,
         captureEnabled: !!this.captureDir,
+        totalCostUsd: round6(this._totalCostUsd),
+        lastDispatchCostUsd: this._lastDispatchCostUsd,
       },
     };
   }
@@ -435,6 +439,10 @@ export class ClaudeCodeHarness implements AgentHarness {
       case 'result_success':
         state.resolvedContent = event.content;
         if (event.sessionId) state.resolvedSessionId = event.sessionId;
+        if (typeof event.cost === 'number' && Number.isFinite(event.cost)) {
+          this._totalCostUsd += event.cost;
+          this._lastDispatchCostUsd = event.cost;
+        }
         break;
 
       case 'result_error':
@@ -543,6 +551,10 @@ function stderrToMessage(stderr: string): string {
   if (!trimmed) return '';
   const lines = trimmed.split('\n');
   return lines.slice(-3).join('\n').slice(0, 500);
+}
+
+function round6(n: number): number {
+  return Math.round(n * 1_000_000) / 1_000_000;
 }
 
 function openCaptureStream(dir: string, agentId: string, sessionId: string) {
