@@ -17,4 +17,10 @@ export interface Member {
   port: number | null;
   spawnedBy: string | null;
   createdAt: string;
+  /**
+   * Registered harness name that executes turns for this agent.
+   * Optional for backwards-compat; when missing, resolution falls back
+   * to the corp-level default then to 'openclaw'.
+   */
+  harness?: string;
 }

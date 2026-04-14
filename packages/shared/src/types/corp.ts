@@ -15,5 +15,11 @@ export interface Corporation {
    * working autonomously without being asked. Uses Guard Duty profile.
    */
   dangerouslyEnableAutoAfk?: boolean;
+  /**
+   * Corp-wide default harness for agents that don't specify one. Optional;
+   * falls back to 'openclaw' when missing so existing corps keep working
+   * with no migration.
+   */
+  harness?: string;
   createdAt: string;
 }
