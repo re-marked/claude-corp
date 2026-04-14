@@ -4,6 +4,14 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.4 — Claude-code text blocks persist (MERGED, PR #110)
+
+A claude response with tool calls produces multiple text blocks (text → tool → text). Before this fix only the FINAL block survived — earlier text vanished after streaming and never came back on channel re-entry. Root cause: ClaudeCodeHarness reported `result.content` from claude's `result` envelope, which only carries the last block. Earlier blocks streamed live but never persisted as JSONL.
+
+Fix: per-text-block persistence. New `text_block_complete` event in the parser fires on every text block boundary; new `onAssistantText` callback in `DispatchCallbacks` lets `/cc/say` persist each block as its own JSONL message via `post()`. Streaming overlay slices past `lastPersistedLength` so it shows only in-flight remainder, no visual duplication. `result.content` now uses cross-block accumulation so callers without per-block awareness (heartbeat, inbox writes) still get full text. Final result write skipped when blocks already covered it.
+
+2 new regression tests pin the contract: multi-block fires `onAssistantText` per block in order; `onToken` stays cross-block (router's offset-tracking still works).
+
 ## v2.1.3 — Onboarding hang fix (MERGED, PR #108)
 
 Creating a fresh corp with claude-code picked still showed `"Connecting to your OpenClaw..."` AND actually hung ~10s waiting on an OpenClaw WebSocket connection that would never be used. Two bugs, one fix:
