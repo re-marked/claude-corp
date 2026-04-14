@@ -18,6 +18,7 @@ import { USER_TEMPLATE } from './templates/user.js';
 import { defaultEnvironment } from './templates/environment.js';
 import { defaultHeartbeat as heartbeatTemplate } from './templates/heartbeat.js';
 import { defaultRules as rulesTemplate } from './templates/rules.js';
+import { buildClaudeMd } from './templates/claude-md.js';
 
 export interface AgentSetupOpts {
   corpRoot: string;
@@ -109,6 +110,19 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     projectName: opts.projectName,
     harness: templateHarness,
   }), 'utf-8');
+
+  // CLAUDE.md — only for agents on the claude-code harness. Claude Code
+  // auto-discovers this file in cwd and inlines its @path imports on
+  // every dispatch, so it's how the agent's identity + current state
+  // reach the system prompt. OpenClaw agents skip it — OpenClaw's own
+  // bootstrap loader reads the same workspace files natively.
+  if (templateHarness === 'claude-code') {
+    writeFileSync(
+      join(agentAbsDir, 'CLAUDE.md'),
+      buildClaudeMd({ displayName }),
+      'utf-8',
+    );
+  }
   // CEO gets the founding conversation guide; hired agents get the absorption shield
   // with culture vocabulary injected at hire time when available
   let bootstrapContent = CEO_BOOTSTRAP;
