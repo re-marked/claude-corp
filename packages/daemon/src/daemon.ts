@@ -221,6 +221,34 @@ export class Daemon {
     // Ensure .gateway/ is gitignored (older corps may lack this)
     this.ensureGatewayGitignored();
 
+    // Migrate legacy workspace filenames (RULES.md → AGENTS.md,
+    // ENVIRONMENT.md → TOOLS.md) so OpenClaw's bootstrap auto-loader
+    // can pick up rules + environment content. Idempotent — no-op on
+    // already-migrated corps. Only log when something actually changed
+    // or needs the user's attention.
+    try {
+      const { migrateAgentWorkspaceFilenames } = await import('@claudecorp/shared');
+      const migration = migrateAgentWorkspaceFilenames(this.corpRoot);
+      if (migration.renamed.length > 0) {
+        log(`[daemon] Migrated ${migration.renamed.length} legacy workspace file(s) to OpenClaw-compatible names`);
+        for (const r of migration.renamed) {
+          log(`[daemon]   ${r.agentDir}: ${r.from} → ${r.to}`);
+        }
+      }
+      if (migration.conflicts.length > 0) {
+        for (const c of migration.conflicts) {
+          logError(`[daemon] Workspace filename conflict in ${c.agentDir}: both ${c.from} and ${c.to} exist — left untouched, please reconcile manually`);
+        }
+      }
+      if (migration.errors.length > 0) {
+        for (const e of migration.errors) {
+          logError(`[daemon] Workspace filename migration failed for ${e.agentDir}: ${e.from} → ${e.to} — ${e.reason}`);
+        }
+      }
+    } catch (err) {
+      logError(`[daemon] Workspace filename migration threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Sync corp-level skills to all agent workspaces
     try {
       const { syncSkillsToAllAgents } = await import('@claudecorp/shared');

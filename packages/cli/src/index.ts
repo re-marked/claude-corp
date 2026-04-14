@@ -144,6 +144,7 @@ Management commands:
   agent start --agent <id> | agent stop --agent <id>
   agent set-harness --agent <id> --harness <name>   Change an agent's execution substrate
   harness list                                      Show registered harnesses + health
+  hire --name <n> --rank <r> [--harness claude-code|openclaw]  Pick substrate at creation
 
 Common flags:
   --json     Output as JSON (machine-readable)
@@ -224,6 +225,7 @@ async function run() {
         soul: values.soul as string | undefined,
         model: values.model as string | undefined,
         project: values.project as string | undefined,
+        harness: values.harness as string | undefined,
         json: !!values.json,
       });
       break;

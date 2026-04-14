@@ -1,8 +1,34 @@
 /**
- * RULES.md template — non-negotiable behavioral constraints.
- * Rank-specific: leaders get additional responsibilities.
+ * RULES / AGENTS template — non-negotiable behavioral constraints.
+ *
+ * Filename on disk is `AGENTS.md` (matching OpenClaw's recognized
+ * bootstrap basename so the content auto-loads into the system prompt).
+ * Internal naming keeps "rules" for semantic clarity.
+ *
+ * Content is rank-specific (leaders get extra responsibilities) AND
+ * harness-aware: the "Tools you have" section names the native tools of
+ * whichever substrate is running the agent so the prompt matches what
+ * the model can actually invoke.
  */
-export function defaultRules(rank: string): string {
+
+export type TemplateHarness = 'openclaw' | 'claude-code';
+
+export interface RulesTemplateOpts {
+  rank: string;
+  /** Harness that will execute this agent's turns. Defaults to 'openclaw' for backwards compat. */
+  harness?: TemplateHarness;
+}
+
+export function defaultRules(opts: string | RulesTemplateOpts): string {
+  const resolved: RulesTemplateOpts =
+    typeof opts === 'string' ? { rank: opts } : opts;
+  const rank = resolved.rank;
+  const harness = resolved.harness ?? 'openclaw';
+
+  const toolsSection = harness === 'claude-code'
+    ? claudeCodeToolsSection
+    : openclawToolsSection;
+
   return `# Rules
 
 These are non-negotiable. Not guidelines. Rules.
@@ -14,11 +40,13 @@ These are non-negotiable. Not guidelines. Rules.
 4. Report — Status: DONE/BLOCKED, Files: [paths], Build: PASS/FAIL
 5. @mention your supervisor so they know
 
+${toolsSection}
+
 ## Red Lines
-- If a tool fails (web_search, build, etc.) → STOP. Mark BLOCKED. Escalate immediately.
+- If a tool fails (build, web_search, etc.) → STOP. Mark BLOCKED. Escalate immediately.
 - Do NOT fall back to training data for specific numbers, prices, or statistics.
 - Do NOT present estimates as research. If you can't verify it, say so.
-- Do NOT write to channels/*/messages.jsonl — the message system handles delivery.
+- Do NOT write to channels/*/messages.jsonl — the corp's message system handles delivery.
 - Do NOT modify other agents' workspaces.
 - Shared files (members.json, channels.json) — extreme care only.
 
@@ -43,3 +71,29 @@ ${rank === 'leader' ? `
 - If a worker stalls, escalate to CEO. Do NOT take over their work.` : ''}
 `;
 }
+
+const openclawToolsSection = `## Tools you have (OpenClaw substrate)
+- \`read\` / \`write\` / \`edit\` / \`apply_patch\` — file operations
+- \`grep\` / \`find\` / \`ls\` — search + list
+- \`exec\` / \`process\` — shell commands (exec for one-shot, process for background)
+- \`web_search\` / \`web_fetch\` — external research
+- \`memory_search\` + \`memory_get\` — recall from your BRAIN/ memories
+- \`sessions_send\` — cross-session messaging to other agents
+- \`subagents\` — spawn / steer / kill sub-agent runs
+
+Invoke cc-cli via \`exec\` when the corp primitive isn't exposed as a native
+tool (e.g. \`exec({ command: "cc-cli hand --task T-123 --to researcher" })\`).`;
+
+const claudeCodeToolsSection = `## Tools you have (Claude Code substrate)
+- \`Read\` / \`Write\` / \`Edit\` / \`NotebookEdit\` — file operations
+- \`Glob\` / \`Grep\` — search + list (use \`Glob\` where OpenClaw has \`find\`)
+- \`Bash\` — shell commands (run cc-cli here: \`Bash({ command: "cc-cli status" })\`)
+- \`WebSearch\` / \`WebFetch\` — external research
+- \`Task\` — dispatch a sub-agent for an independent investigation
+- \`TodoWrite\` — local task tracking inside your session (separate from cc-cli tasks)
+
+Invoke cc-cli via the \`Bash\` tool — it's how you talk to the corp (hand tasks,
+post observations, say to other agents). Your workspace files (SOUL.md,
+IDENTITY.md, AGENTS.md, TOOLS.md, etc.) are already loaded into your system
+prompt at start of every turn. Other workspace files (BRAIN/, observations/,
+WORKLOG.md) are read on demand with the \`Read\` tool.`;
