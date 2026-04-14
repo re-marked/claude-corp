@@ -183,9 +183,10 @@ export { AGENT_BOOTSTRAP, buildAgentBootstrap } from './templates/bootstrap-agen
 export { defaultIdentity } from './templates/identity.js';
 export { MEMORY_TEMPLATE } from './templates/memory.js';
 export { USER_TEMPLATE } from './templates/user.js';
-export { defaultEnvironment } from './templates/environment.js';
-export { defaultRules } from './templates/rules.js';
+export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarness } from './templates/environment.js';
+export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
+export { buildClaudeMd, type ClaudeMdTemplateOpts } from './templates/claude-md.js';
 
 // Ranks
 export { canHire } from './ranks.js';
