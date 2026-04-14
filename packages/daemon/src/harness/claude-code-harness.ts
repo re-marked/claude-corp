@@ -33,6 +33,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { log, logError } from '../logger.js';
 import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stream.js';
 import { sessionIdFor } from './session-id.js';
+import { quoteForWindowsCmd } from './spawn-utils.js';
 import {
   type AgentHarness,
   type AgentSpec,
@@ -509,9 +510,23 @@ export class ClaudeCodeHarness implements AgentHarness {
 }
 
 function defaultSpawn(binary: string, args: string[], options: ClaudeSpawnOptions): ClaudeChildProcess {
-  const child: ChildProcess = nodeSpawn(binary, args, {
+  // Windows: shell:true so cmd.exe resolves the binary via PATH + PATHEXT
+  // (finds claude.exe / claude.cmd / claude.bat / npm-shim transparently).
+  // Args get wrapped through quoteForWindowsCmd (spawn-utils.ts) so paths
+  // with spaces and cmd.exe metacharacters (&|<>^%) tokenize correctly.
+  //
+  // POSIX: no shell — spawn() resolves binaries via PATH natively and arg
+  // boundaries are preserved by the OS. Passing shell:true here would
+  // require a different escaping scheme (sh vs cmd) and adds risk for
+  // zero benefit.
+  const isWindows = process.platform === 'win32';
+  const finalArgs = isWindows ? args.map(quoteForWindowsCmd) : args;
+
+  const child: ChildProcess = nodeSpawn(binary, finalArgs, {
     cwd: options.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
+    shell: isWindows,
+    windowsHide: true,
   });
   if (!child.stdin || !child.stdout || !child.stderr) {
     throw new Error('node spawn returned a child without piped stdio');
