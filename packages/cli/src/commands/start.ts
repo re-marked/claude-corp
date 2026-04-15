@@ -51,7 +51,12 @@ export async function cmdStart(opts: { corp?: string }) {
   console.log(`Ready. ${readyCount}/${agents.length} agents online.`);
   console.log(`\nDaemon running in foreground. Press Ctrl+C to stop.`);
 
-  // Keep alive + graceful shutdown
+  // Keep alive + graceful shutdown. The top-level run() chain in
+  // index.ts now calls process.exit(0) after resolution to avoid the
+  // undici keep-alive hang that other commands hit (cc-cli inspect,
+  // status, etc. would dangle for ~5s after printing). `start` is the
+  // one long-running command — block here so the auto-exit never fires
+  // and the daemon stays up until SIGINT/SIGTERM.
   const shutdown = async () => {
     console.log('\nShutting down...');
     await daemon.stop();
@@ -59,4 +64,6 @@ export async function cmdStart(opts: { corp?: string }) {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  await new Promise<void>(() => { /* hold forever — shutdown handlers exit */ });
 }
