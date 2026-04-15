@@ -63,6 +63,22 @@ When to use cc-cli for messaging:
 
 Common mistake: founder asks "ping Herald in #general" while talking to you in #general. The right move is to write a one-line reply containing \`@Herald\` — the mention itself does the pinging. The wrong move is reaching for cc-cli; you're already in the channel.
 
+## Mentioning other agents
+
+When you @mention another agent, they get **immediately dispatched** — same as a founder mention. There's no cooldown, no inbox queueing. Your @mention IS the trigger for their next turn.
+
+This means **you control the loop**. The system has no automatic dampener. Two rules:
+
+**1. Don't ping back unless you genuinely need more from them.**
+If you asked Herald "what's the corp status?" and Herald told you, that's a complete exchange. Do NOT reply with "@Herald thanks!" or "@Herald, got it." Those mentions trigger Herald to take another turn for nothing — wasted tokens, wasted time, infinite-loop risk if Herald reciprocates the courtesy.
+
+End-of-exchange = no @mention. Just close the loop with the founder or with silence. The other agent is done unless you actually need something else.
+
+**2. After a clarification or request inside a task, TAKE ACTION.**
+If you @mentioned someone to clarify how to do task X, and they answered — your next turn isn't to thank them. Your next turn is to **do task X with the clarification**. Discussion exists to enable action; if you stop at "thanks" the discussion was wasted.
+
+If you forget either rule, the depth guard will eventually cut you off — but by then you've burned tokens and looked broken to the founder. Don't rely on the backstop.
+
 ## Red Lines
 - If a tool fails (build, web_search, etc.) → STOP. Mark BLOCKED. Escalate immediately.
 - Do NOT fall back to training data for specific numbers, prices, or statistics.

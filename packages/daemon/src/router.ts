@@ -15,7 +15,6 @@ import {
   CHANNELS_JSON,
   MESSAGES_JSONL,
   MAX_DEPTH,
-  COOLDOWN_MS,
 } from '@claudecorp/shared';
 import { type DispatchContext } from './dispatch.js';
 import type { Daemon } from './daemon.js';
@@ -26,7 +25,6 @@ export class MessageRouter {
   private watchers = new Map<string, FSWatcher>();
   private offsets = new Map<string, number>();
   private dispatched = new Set<string>();
-  private lastDispatch = new Map<string, number>();
   private daemon: Daemon;
   private channelsDirWatcher: FSWatcher | null = null;
   private dedupClearInterval: ReturnType<typeof setInterval> | null = null;
@@ -268,20 +266,20 @@ export class MessageRouter {
 
     if (targetIds.length === 0) return;
 
-    // Human/system @mentions → immediate dispatch (bypass inbox)
-    // Agent @mentions → record in inbox, wait for heartbeat or idle transition
-    const isHumanOrSystem = senderOrSystem.type === 'user' || msg.senderId === 'system';
-
+    // ALL @mentions → immediate dispatch, regardless of sender type.
+    // Previously agent→agent mentions were routed to the inbox to wait
+    // for the next heartbeat (~3min latency), to prevent runaway loops
+    // where A pings B, B pings A back, A pings B... User experience:
+    // Mark @mentions Failsafe in #general, Failsafe responds with
+    // @Herald — and Herald just sits silent for 3 minutes. Felt broken.
+    //
+    // Loop protection moves from system enforcement to agent training:
+    // rules.ts now teaches agents to take action after a clarification
+    // exchange instead of pinging back. The depth guard (MAX_DEPTH) at
+    // the top of this function remains as a hard backstop if an agent
+    // pair ignores the rule.
     for (const targetId of targetIds) {
-      if (isHumanOrSystem) {
-        this.dispatchToTarget(msg, channel, targetId, members, senderOrSystem);
-      } else {
-        // Agent mention → inbox
-        const target = members.find(m => m.id === targetId);
-        const isMention = true;
-        this.daemon.inbox.recordMessage(channel.id, channel.name, targetId, isMention, senderOrSystem.displayName);
-        log(`[router] Inbox: ${target?.displayName ?? targetId} has new mention in #${channel.name} from ${senderOrSystem.displayName}`);
-      }
+      this.dispatchToTarget(msg, channel, targetId, members, senderOrSystem);
     }
   }
 
@@ -300,15 +298,12 @@ export class MessageRouter {
     }
     this.dispatched.add(dispatchKey);
 
-    // Cooldown guard (only for agent-to-agent, user messages always go through)
-    if (sender.type === 'agent') {
-      const lastTime = this.lastDispatch.get(targetId) ?? 0;
-      if (Date.now() - lastTime < COOLDOWN_MS) {
-        log(`[router] Cooldown active for ${targetId}, skipping`);
-        return;
-      }
-    }
-
+    // Cooldown removed — agent→agent @mentions used to be gated by
+    // COOLDOWN_MS as a loop dampener. We now trust agents to follow
+    // the rule (rules.ts → "Mentioning other agents") which says:
+    // don't ping back unless you genuinely need more from them. The
+    // depth guard at the top of dispatchMentions remains as a hard
+    // backstop if an agent pair runs away.
     const agentProc = this.daemon.processManager.getAgent(targetId);
     if (!agentProc || agentProc.status !== 'ready') {
       return;
@@ -325,9 +320,6 @@ export class MessageRouter {
 
     const target = members.find((m) => m.id === targetId);
     if (!target) return;
-
-    // Track cooldown for all dispatches
-    this.lastDispatch.set(targetId, Date.now());
 
     // Load recent channel history for context — thread-aware
     const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
