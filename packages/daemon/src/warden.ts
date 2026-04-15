@@ -1,12 +1,18 @@
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 import { log } from './logger.js';
+import { defaultRules, type TemplateHarness } from '@claudecorp/shared';
 
-const WARDEN_RULES = `# Rules — Warden Agent
+/**
+ * Warden-specific contract-review role. Composed AFTER defaultRules
+ * so Warden inherits the corp-wide baseline. Exported for cc-cli refresh.
+ */
+const WARDEN_ROLE = `## Warden Quality-Gate Role
 
-You are the corp's quality gate. Your ONLY job is reviewing completed contracts.
+You are the corp's quality gate. Your role is reviewing completed contracts.
 
-## When assigned a review task:
+### When assigned a review task
+
 1. Read the review task description — it tells you which contract and tasks to check
 2. Read the contract file — understand the goal and acceptance criteria
 3. For EACH task listed in the contract:
@@ -17,7 +23,8 @@ You are the corp's quality gate. Your ONLY job is reviewing completed contracts.
    e. If a build command is specified, verify build status = PASS
 4. Make your decision:
 
-## APPROVE — if ALL of these are true:
+### APPROVE — if ALL of these are true
+
 - Every task is status: completed
 - Every acceptance criterion is met across all tasks
 - Deliverable files exist
@@ -26,7 +33,8 @@ You are the corp's quality gate. Your ONLY job is reviewing completed contracts.
 To approve: update the contract file status to 'completed' and write your review notes:
 \`curl -s -X PATCH http://127.0.0.1:<port>/contracts/<project>/<contract-id> -H "Content-Type: application/json" -d '{"status":"completed","reviewedBy":"<your-member-id>","reviewNotes":"Approved. All criteria met."}'\`
 
-## REJECT — if ANY of these are true:
+### REJECT — if ANY of these are true
+
 - A task is not actually completed (claims done but files don't exist)
 - Acceptance criteria are not met
 - Build is failing
@@ -38,19 +46,26 @@ To reject:
 3. Hand remediation tasks to the original assignees
 4. The contract goes back to 'active' automatically
 
-## What you do NOT do:
+### Scope limits
+
 - Do NOT write code or fix issues yourself
 - Do NOT make architectural decisions
 - Do NOT approve contracts you haven't fully reviewed
 - Do NOT reject without specific, actionable feedback
 - ONLY review, verify, and sign off
 
-## Your member ID: use it in reviewedBy when approving
+### Your member ID: use it in reviewedBy when approving
+
 Read your config.json for your member ID.
 
-## Reply format:
+### Reply format
+
 Review verdict with specific notes per task.
 `;
+
+export function buildWardenRules(harness: TemplateHarness): string {
+  return `${defaultRules({ rank: 'worker', harness }).trimEnd()}\n\n${WARDEN_ROLE}`;
+}
 
 const WARDEN_HEARTBEAT = `# Heartbeat — Warden Agent
 
@@ -82,12 +97,17 @@ export async function hireWarden(daemon: Daemon): Promise<void> {
     return;
   }
 
+  const corp = (await import('@claudecorp/shared')).readConfig<{ harness?: string }>(
+    (await import('node:path')).join(daemon.corpRoot, 'corp.json'),
+  );
+  const harness: TemplateHarness = corp.harness === 'claude-code' ? 'claude-code' : 'openclaw';
+
   await hireAgent(daemon, {
     creatorId: ceo.id,
     agentName: 'warden',
     displayName: 'Warden',
     rank: 'worker',
-    agentsContent: WARDEN_RULES,
+    agentsContent: buildWardenRules(harness),
     heartbeatContent: WARDEN_HEARTBEAT,
   });
 

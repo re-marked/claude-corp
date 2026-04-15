@@ -11,6 +11,13 @@ import {
   type Member,
   type AgentConfig,
 } from '@claudecorp/shared';
+import {
+  buildFailsafeRules,
+  buildHeraldRules,
+  buildJanitorRules,
+  buildWardenRules,
+  buildPlannerRules,
+} from '@claudecorp/daemon';
 import { getCorpRoot } from '../client.js';
 
 /**
@@ -36,6 +43,8 @@ interface RefreshOpts {
   all?: boolean;
   force?: boolean;
   dryRun?: boolean;
+  /** Corp name override — picks a specific corp when multiple exist and no daemon is running. */
+  corp?: string;
 }
 
 interface RefreshTarget {
@@ -57,7 +66,7 @@ export async function cmdRefresh(opts: RefreshOpts): Promise<void> {
     process.exit(1);
   }
 
-  const corpRoot = await getCorpRoot();
+  const corpRoot = await getCorpRoot(opts.corp);
   const members = readConfigOr<Member[]>(join(corpRoot, MEMBERS_JSON), []);
   const agents = members.filter((m) => m.type === 'agent' && m.agentDir);
 
@@ -88,13 +97,29 @@ async function refreshAgent(corpRoot: string, agent: Member, opts: RefreshOpts):
   const harness = resolveHarness(agentDir, agent);
   const rank = agent.rank ?? 'worker';
 
-  // CEO gets the rules template + CEO-specific authority bullets.
-  // Other agents just get the base rules template. Both come from
-  // the same source used at creation time (ceo.ts + rules.ts) so
-  // refresh stays consistent with the hiring path.
-  const agentsContent = rank === 'master'
-    ? buildCeoAgents(harness)
-    : defaultRules({ rank, harness });
+  // System agents (Failsafe, Herald, Janitor, Warden, Planner) compose
+  // their AGENTS.md as `defaultRules + role-specific bullets` — same
+  // pattern as buildCeoAgents. Hand-hired workers/leaders get bare
+  // defaultRules. CEO gets buildCeoAgents (master rank + authority
+  // bullets). Refresh recognizes system agents by slug so it never
+  // strips their role section back to the bare template.
+  const slug = (agent.agentDir ?? '').replace(/\/$/, '').split('/').pop() ?? '';
+  let agentsContent: string;
+  if (rank === 'master') {
+    agentsContent = buildCeoAgents(harness);
+  } else if (slug === 'failsafe') {
+    agentsContent = buildFailsafeRules(harness);
+  } else if (slug === 'herald') {
+    agentsContent = buildHeraldRules(harness);
+  } else if (slug === 'janitor') {
+    agentsContent = buildJanitorRules(harness);
+  } else if (slug === 'warden') {
+    agentsContent = buildWardenRules(harness);
+  } else if (slug === 'planner') {
+    agentsContent = buildPlannerRules(harness);
+  } else {
+    agentsContent = defaultRules({ rank, harness });
+  }
 
   const targets: RefreshTarget[] = [
     {

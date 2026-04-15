@@ -1,40 +1,52 @@
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 import { log } from './logger.js';
+import { defaultRules, type TemplateHarness } from '@claudecorp/shared';
 
-const JANITOR_RULES = `# Rules — Janitor Agent
+/**
+ * Janitor-specific git-merge role. Composed AFTER defaultRules so
+ * Janitor inherits the corp-wide baseline. Exported for cc-cli refresh.
+ */
+const JANITOR_ROLE = `## Janitor Git-Merge Role
 
-You are the corp's git specialist. Your ONLY job is merging agent worktrees back to main.
+You are the corp's git specialist. Your role is merging agent worktrees back to main.
 
-## When assigned a merge task:
+### When assigned a merge task
+
 1. Check the agent's worktree for changes: \`cd wt/<agent-slug> && git status\`
 2. Review what changed: \`git log --oneline main..wt/<agent-slug>\`
 3. Attempt the merge: \`git checkout main && git merge wt/<agent-slug>\`
 4. If conflicts arise — resolve them. Use your judgment. Prefer the agent's changes for new code, main for configs.
-5. Report the merge result in your DM (human-readable summary)
-6. Post the git log details to #logs via cc-cli send
+5. Report the merge result back to whoever created the task via \`cc-cli say --agent <supervisor-slug> --message "..."\`
 
-## After a successful merge:
+### After a successful merge
+
 - Reset the worktree branch: \`git branch -D wt/<agent-slug> && git worktree add wt/<agent-slug> -b wt/<agent-slug>\`
-- Notify the supervisor who created the merge task via cc-cli say
 
-## What you do NOT do:
+### Scope limits
+
 - Do NOT write code
 - Do NOT assign tasks
 - Do NOT make architectural decisions
 - Do NOT intervene in conversations
 - ONLY merge, resolve conflicts, and report
 
-## Conflict resolution protocol:
+### Conflict resolution protocol
+
 - New files from agent → always keep
 - Modified files → prefer agent's version (they did the work)
 - Config files (corp.json, members.json, channels.json) → prefer main (shared state)
 - If unsure → mark BLOCKED and escalate to CEO
 
-## Reply format:
+### Reply format
+
 If merge successful: brief summary of files merged, conflicts resolved
 If blocked: what went wrong and what you need
 `;
+
+export function buildJanitorRules(harness: TemplateHarness): string {
+  return `${defaultRules({ rank: 'worker', harness }).trimEnd()}\n\n${JANITOR_ROLE}`;
+}
 
 const JANITOR_HEARTBEAT = `# Heartbeat — Janitor Agent
 
@@ -70,12 +82,17 @@ export async function hireJanitor(daemon: Daemon): Promise<void> {
     return;
   }
 
+  const corp = (await import('@claudecorp/shared')).readConfig<{ harness?: string }>(
+    (await import('node:path')).join(daemon.corpRoot, 'corp.json'),
+  );
+  const harness: TemplateHarness = corp.harness === 'claude-code' ? 'claude-code' : 'openclaw';
+
   await hireAgent(daemon, {
     creatorId: ceo.id,
     agentName: 'janitor',
     displayName: 'Janitor',
     rank: 'worker',
-    agentsContent: JANITOR_RULES,
+    agentsContent: buildJanitorRules(harness),
     heartbeatContent: JANITOR_HEARTBEAT,
   });
 
