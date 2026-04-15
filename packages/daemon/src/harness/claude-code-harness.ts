@@ -691,9 +691,21 @@ function claudeSessionFileExists(sessionId: string, workspace: string): boolean 
  * encoded name `C--Users-psyhik1769--claudecorp-hc-agents-ceo`
  * round-trips cleanly from `C:\Users\psyhik1769\.claudecorp\hc\agents\ceo`
  * under this rule.
+ *
+ * Trailing separators matter. members.json stores agentDir with a
+ * trailing slash (e.g. `agents/ceo/`), and `api.ts`'s /cc/say handler
+ * builds the context's agentDir by joining + normalising slashes but
+ * preserves that trailing slash. Without stripping it here, a raw
+ * `.../ceo/` becomes `...-ceo-` — which is NOT what claude wrote for
+ * `.../ceo` (no trailing slash), so existsSync would return false on
+ * a session file that actually exists. The resulting harness fallback
+ * to `--session-id` on a UUID claude already created surfaces as
+ * "Session ID X is already in use" — exactly the bug Mark hit in a
+ * fresh-corp second dispatch at v2.1.7.
  */
 function encodeClaudeWorkspacePath(workspace: string): string {
-  return workspace.replace(/[:\\/.]/g, '-');
+  const trimmed = workspace.replace(/[\\/]+$/, '');
+  return trimmed.replace(/[:\\/.]/g, '-');
 }
 
 /**

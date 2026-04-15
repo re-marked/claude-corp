@@ -630,6 +630,56 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
       }
     });
 
+    it('strips trailing separators before encoding the workspace path', async () => {
+      // Regression test for v2.1.7's encoding miss: members.json stores
+      // agentDir with a trailing slash (e.g. "agents/ceo/"), and api.ts
+      // propagates that into context.agentDir. Previously the encoder
+      // turned the trailing `/` into a trailing `-`, producing
+      // `...-ceo-` where claude had written `...-ceo` (no dash). The
+      // session-file check missed, the harness fell back to
+      // --session-id, and claude rejected it as "already in use".
+      const tmpHome = mkdtempSync(join(tmpdir(), 'claude-home-'));
+      const originalUserProfile = process.env.USERPROFILE;
+      const originalHome = process.env.HOME;
+      process.env.USERPROFILE = tmpHome;
+      process.env.HOME = tmpHome;
+      try {
+        const expectedSessionId = sessionIdFor('say:ceo:mark');
+        // Plant a session file at the encoding claude would actually
+        // write (no trailing dash). If the harness over-encodes the
+        // trailing slash, existsSync misses and --resume never fires.
+        const projectsDir = join(tmpHome, '.claude', 'projects', '-corps-test-agents-ceo');
+        mkdirSync(projectsDir, { recursive: true });
+        writeFileSync(join(projectsDir, `${expectedSessionId}.jsonl`), '', 'utf-8');
+
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        // Context with agentDir that carries a trailing slash — exactly
+        // what members.json + api.ts produce in production.
+        await harness.dispatch(BASE_OPTS({
+          context: { corpRoot: '/corps/test', agentDir: 'agents/ceo/' } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        expect(dispatchCall.args).toContain('--resume');
+        expect(dispatchCall.args).not.toContain('--session-id');
+      } finally {
+        if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+        else process.env.USERPROFILE = originalUserProfile;
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        rmSync(tmpHome, { recursive: true, force: true });
+      }
+    });
+
     it('passes resolved workspace as cwd and via --add-dir (relative agentDir)', async () => {
       const { spawn, calls } = makeSpawner((proc, call) => {
         if (call.args.includes('--version')) {
