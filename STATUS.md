@@ -4,7 +4,27 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.18 — cc-cli no longer hangs 5 seconds after every command (IN PROGRESS)
+## v2.1.19 — Agent @mentions dispatch immediately, not via inbox (IN PROGRESS)
+
+Mark caught the design at 18:38: Failsafe @mentioned Herald in #general — the v2.1.17 Speaking-in-channels rule WORKED, Failsafe wrote `@Herald — run your narration cycle` directly in chat. But Herald sat silent for minutes. UX read as "the system is broken — Mark @-pinged in chat and got nothing."
+
+Root cause: `router.ts:271-285` routed agent→agent @mentions to the inbox to wait for the next pulse heartbeat (~3min latency). User/system @mentions got immediate dispatch; agent @mentions got queued. Designed as a loop dampener (prevent A→B→A→B runaway), experienced as "ping doesn't work between agents."
+
+Fix per Mark's call: drop the agent/human branching. **ALL @mentions → immediate dispatch**, regardless of sender type. Also dropped `COOLDOWN_MS` (was the dampener of last resort for agent→agent specifically). Loop protection moves from system enforcement to agent training.
+
+Companion rule in `rules.ts` → "Mentioning other agents":
+1. **Don't ping back unless you genuinely need more from them.** "@Herald thanks!" triggers Herald's next turn for nothing — wasted tokens, wasted time, infinite-loop risk if Herald reciprocates the courtesy. End-of-exchange = no @mention.
+2. **After a clarification inside a task, TAKE ACTION.** Don't reply with thanks; do the actual task with the new info. Discussion exists to enable action.
+
+Backstop: `MAX_DEPTH` guard at the top of `dispatchMentions` is unchanged. If two agents ignore the rule and ping back-and-forth, they cap out at MAX_DEPTH instead of running forever.
+
+Cleaner code as side effect: removed unused `COOLDOWN_MS` import + the `lastDispatch` Map (was write-only after the cooldown gate disappeared).
+
+For Mark's existing corp: `cc-cli refresh --all --corp final-test-2` to pick up the new rule across all agents. The router behavior change activates on next daemon restart automatically.
+
+Also marked v2.1.18 as MERGED in STATUS.
+
+## v2.1.18 — cc-cli no longer hangs 5 seconds after every command (MERGED, PR #129)
 
 Mark observed: "most cc-cli commands, when they finish, just hang. even when i use them." Verified live: `cc-cli status --corp final-test-2` took 5+ seconds to exit AFTER printing the agent list. Same for `cc-cli inspect`, `cc-cli refresh`, etc.
 
