@@ -4,6 +4,17 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.10 — Multi-block turn rendering (MERGED, PR #121)
+
+A single claude turn (one user prompt → text + tool + text + tool + text response) was rendering as N timestamped chat bubbles in the TUI, making the agent look like it "wakes up fresh" between blocks. Reality: it was one continuous response with tool calls in between.
+
+Fix: stamp every persisted message (text segments + tool events + final result) within a dispatch with the same `metadata.turnId` (generated once per harness dispatch). MessageList groups consecutive same-sender messages with the same turnId into one visual bubble — single header at the top, then text rows + tool rows interleaved inline. Tool events render as compact `│ tool` rows when inside a group.
+
+Stamped in: api.ts `/cc/say` (onAssistantText, onToolEnd, final result.content) + router.ts (segment flush, tool_event, main response, thread response). Messages predating the stamping or from dispatchers that don't set it fall back to per-message bubbles (graceful degradation).
+
+Bonus session-key audit findings (NOT fixed in this PR — separate decision needed):
+- `pulse-recovery:<ts>`, `pulse-escalation:<ts>`, `herald-narration:<ts>`, `failsafe-heartbeat:<ts>`, `agent:<...>:channel-<id>-<msgid>` all bake timestamps/per-message ids into the session key, creating a fresh claude session every fire (same anti-pattern as the v2.1.5 jack-key-with-timestamp bug). Worth unifying many of these into the agent's main `jack:<slug>` thread so escalations/mentions land in the conversational context. Pinged Mark for the call.
+
 ## v2.1.9 — CEO Gateway Recovery skips harness-mode (MERGED, PR #120)
 
 After a couple of minutes in a fresh claude-code corp, the next dispatch failed with `Agent "CEO" is not online`. Root cause: the CEO Gateway Recovery clock (every 30s) was pinging `http://127.0.0.1:${agentProc.port}/v1/chat/completions` for ALL CEOs, but harness-mode agents have `port: 0` (they dispatch through subprocess, no listening gateway). After 3 failed pings (~90s), the clock marked a perfectly healthy CEO as `crashed`, and the next `/cc/say` rejected the dispatch with "not online".

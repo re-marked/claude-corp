@@ -10,6 +10,7 @@ import {
   tailMessages,
   post,
   resolveMentions,
+  generateId,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -379,6 +380,12 @@ export class MessageRouter {
       const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
       // Cache tool args from start events — end events often lack args
       const toolArgsCache = new Map<string, Record<string, unknown>>();
+      // Per-dispatch turn id stamped on every text segment + tool event.
+      // The TUI groups consecutive same-sender messages with the same
+      // turnId into a single bubble (one header, multiple inline rows)
+      // so a multi-segment claude turn doesn't render as N disjoint
+      // timestamped messages.
+      const turnId = generateId();
 
       const result = await this.daemon.harness.dispatch({
         agentId: agentProc.memberId,
@@ -419,7 +426,7 @@ export class MessageRouter {
                 mentions: resolveMentions(segText, members),
                 depth: msg.depth + 1,
                 originId: msg.originId,
-                metadata: { segment: true },
+                metadata: { segment: true, turnId },
               });
               this.daemon.streaming.delete(targetId);
             }
@@ -451,6 +458,7 @@ export class MessageRouter {
                 toolResult: tool.result
                   ? (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result)).slice(0, 300)
                   : undefined,
+                turnId,
               },
             });
             this.daemon.events.broadcast({
@@ -567,6 +575,7 @@ export class MessageRouter {
           mentions: resolveMentions(threadContent, members),
           depth: msg.depth + 1,
           originId: msg.originId,
+          metadata: { turnId },
         });
 
         log(`[router] ${target.displayName} responded in thread in #${channel.name}`);
@@ -589,6 +598,7 @@ export class MessageRouter {
         mentions: resolveMentions(mainContent, members),
         depth: msg.depth + 1,
         originId: msg.originId,
+        metadata: { turnId },
       });
 
       // Write thread portion as a separate message if it exists
@@ -601,6 +611,7 @@ export class MessageRouter {
           mentions: resolveMentions(threadContent, members),
           depth: msg.depth + 1,
           originId: msg.originId,
+          metadata: { turnId },
         });
         log(`[router] WRITING ${target.displayName}'s thread reply (${threadContent.length} chars)`);
       }
