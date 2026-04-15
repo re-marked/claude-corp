@@ -592,6 +592,14 @@ export function createApi(daemon: Daemon): Server {
           let persistedTextBlocks = 0;
           let lastPersistedLength = 0;
 
+          // Per-dispatch turn id. Stamped on every text block + tool
+          // event written during this dispatch so the TUI can group
+          // them into a single visual bubble (one header, multiple
+          // text + tool rows). Without this, a multi-block claude
+          // response renders as N timestamped messages — looks like
+          // the agent "wakes up fresh" each block.
+          const turnId = generateId();
+
           const result = await daemon.harness.dispatch({
             agentId: agentProc.memberId,
             message,
@@ -633,7 +641,7 @@ export function createApi(daemon: Daemon): Server {
                   content: text,
                   source: 'jack',
                   slumber: daemon.autoemon.isActive(),
-                  metadata: { sessionKey: (body.sessionKey as string) ?? null },
+                  metadata: { sessionKey: (body.sessionKey as string) ?? null, turnId },
                 });
                 persistedTextBlocks++;
                 lastPersistedLength += text.length;
@@ -684,6 +692,7 @@ export function createApi(daemon: Daemon): Server {
                       toolResult: tool.result
                         ? (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result)).slice(0, 300)
                         : undefined,
+                      turnId,
                     },
                   });
                 }
@@ -705,7 +714,7 @@ export function createApi(daemon: Daemon): Server {
               content: result.content,
               source: 'jack',
               slumber: daemon.autoemon.isActive(),
-              metadata: { sessionKey: (body.sessionKey as string) ?? null },
+              metadata: { sessionKey: (body.sessionKey as string) ?? null, turnId },
             });
           }
 
