@@ -4,7 +4,7 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.11 — Unify CEO-thread session keys (IN PROGRESS)
+## v2.1.11 — Unify CEO-thread session keys (MERGED, PR #122)
 
 Follow-up on the v2.1.10 audit. Three dispatchers were still minting fresh claude sessions every fire — same anti-pattern as v2.1.5's jack-key bug — so every escalation, recovery, and channel @mention reached the target agent as a stranger with zero memory of what came before:
 
