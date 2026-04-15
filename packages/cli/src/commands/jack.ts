@@ -220,29 +220,37 @@ export async function cmdJack(opts: {
     handleLine(line);
   });
 
-  rl.on('close', () => {
-    const duration = Math.round((Date.now() - jackStart) / 1000);
-    const minutes = Math.floor(duration / 60);
-    const seconds = duration % 60;
-    const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-
-    console.log('');
-    console.log(`  Unjacked. Session: ${messageCount} messages, ${timeStr}.`);
-
-    // Auto-save if there was any conversation
-    if (conversation.length > 0) {
-      saveConversation(corpRoot, target.displayName, conversation, jackStart);
-    }
-
-    process.exit(0);
-  });
-
   // Ctrl+C handler
   process.on('SIGINT', () => {
     rl.close();
   });
 
   rl.prompt();
+
+  // Block until the readline closes (user types /unjack, hits Ctrl+C,
+  // or stdin ends). Without this await, the function returned synchronously
+  // and v2.1.18's top-level `run().then(() => process.exit(0))` would kill
+  // the interactive session immediately after prompting. Previously the
+  // active readline interface was the only thing holding the event loop
+  // open — implicit, fragile, and broken by the auto-exit fix.
+  await new Promise<void>((resolve) => {
+    rl.on('close', () => {
+      const duration = Math.round((Date.now() - jackStart) / 1000);
+      const minutes = Math.floor(duration / 60);
+      const seconds = duration % 60;
+      const timeStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+
+      console.log('');
+      console.log(`  Unjacked. Session: ${messageCount} messages, ${timeStr}.`);
+
+      // Auto-save if there was any conversation
+      if (conversation.length > 0) {
+        saveConversation(corpRoot, target.displayName, conversation, jackStart);
+      }
+
+      resolve();
+    });
+  });
 }
 
 /** Save conversation transcript to corp root. */
