@@ -232,6 +232,31 @@ describe('cmdRefresh', () => {
     expect(readFileSync(join(tmpCorpRoot, 'agents/worker-one/AGENTS.md'), 'utf-8')).toBe(defaultRules({ rank: 'worker', harness: 'openclaw' }));
   });
 
+  it('resolves harness from config.json when Member.harness is unset', async () => {
+    const ceo = createAgent(tmpCorpRoot, {
+      id: 'ceo',
+      displayName: 'CEO',
+      rank: 'master',
+      agentDir: 'agents/ceo/',
+      // NOTE: no `harness` on the Member — must fall through to config.json
+      soulContent: UNIVERSAL_SOUL,
+      agentsContent: '# Stale\n',
+    });
+    writeMembers(tmpCorpRoot, [ceo]);
+    // Drop a config.json that says claude-code
+    writeFileSync(
+      join(tmpCorpRoot, 'agents/ceo/config.json'),
+      JSON.stringify({ harness: 'claude-code', model: 'sonnet', provider: 'anthropic' }),
+      'utf-8',
+    );
+
+    await cmdRefresh({ agent: 'ceo', force: true });
+
+    const written = readFileSync(join(tmpCorpRoot, 'agents/ceo/AGENTS.md'), 'utf-8');
+    expect(written).toContain('(Claude Code substrate)');
+    expect(written).not.toContain('(OpenClaw substrate)');
+  });
+
   it('writes missing files from the template', async () => {
     // Agent dir exists but SOUL.md / AGENTS.md do NOT
     const ceo = createAgent(tmpCorpRoot, {
