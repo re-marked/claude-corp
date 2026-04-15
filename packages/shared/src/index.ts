@@ -123,7 +123,7 @@ export {
 export type { AgentSetupOpts, AgentSetupResult } from './agent-setup.js';
 
 // CEO
-export { setupCeo } from './ceo.js';
+export { setupCeo, buildCeoAgents } from './ceo.js';
 export type { CeoSetupResult } from './ceo.js';
 
 // B.R.A.I.N. — Browseable, Reflective, Authored, Indexed Notes

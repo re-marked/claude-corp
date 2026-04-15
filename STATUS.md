@@ -4,7 +4,27 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.14 — SOUL voice rule: act, then close (IN PROGRESS)
+## v2.1.15 — Move 'act, then close' to rules + ship template migrations (IN PROGRESS)
+
+Two corrections bundled, both caught by Mark in v2.1.14:
+
+**1. Category error.** I added "act, then close" to SOUL.md — but Mark correctly flagged it as a RULE, not a soul principle. SOUL is for what an agent IS (existential posture, character). RULES is for what an agent DOES (tactical constraints, tool-use patterns). "Don't narrate before a tool call then narrate after" is clearly the second. Reverted from `soul.ts`, added to `rules.ts` in a new "Speaking with tool calls" section, rewritten in second-person imperative to match that file's voice.
+
+**2. The real hole: no migration story.** Mark's actual complaint: "im a bit tired of having to re-create new corps every time there is a slightly breaking change... i aint doing founding conversations every time there is a SOUL.md change." He's right. Up to v2.1.14 every template change required delete-corp-and-re-onboard, because the templates are only read at agent-hire time and never again — the agent's CLAUDE.md imports `@./SOUL.md` (the file on disk), not `UNIVERSAL_SOUL` (the template in code).
+
+Fix: `cc-cli refresh <agent-slug>` + `cc-cli refresh --all`. Reads SOUL.md + AGENTS.md on disk, diffs against the current templates, prompts before overwriting. `--force` skips the prompt, `--dry-run` shows the diff and exits. Harness resolved per-agent so AGENTS.md gets the correct tools listing (openclaw vs claude-code).
+
+Scope is SOUL.md + AGENTS.md only — the two substrate files that actually track templates. IDENTITY/USER/MEMORY/BOOTSTRAP/observations/BRAIN are agent-authored or stateful and never regenerate.
+
+**Mark's test path:** after relink, in his existing `final-test-2` corp, run `cc-cli refresh ceo` to pick up the new "Speaking with tool calls" rule without re-onboarding. This is the workflow every future template change should use.
+
+**Known limitation:** assumes SOUL.md isn't yet agent-authored. The template says "this file is mine", so eventually agents will edit their own SOUL. When that reality shows up, switch to structured markers (`<!-- SOUL:BASE:START --> ... <!-- SOUL:BASE:END -->`) so template-managed content refreshes without clobbering agent-authored additions. Not now — YAGNI.
+
+Commits split: revert SOUL, add rule to rules.ts, add refresh command, v2.1.15 bumps.
+
+Also marked v2.1.14 as MERGED.
+
+## v2.1.14 — SOUL voice rule: act, then close (MERGED, PR #125)
 
 v2.1.13 fixed the visual symptom (N bubbles per turn became one). Mark caught that it was a pure UI fix and didn't address the actual behavior — the CEO was still writing a reaction before a tool call AND a reaction after, so even collapsed into one bubble the agent sounded like it learned the same insight twice.
 

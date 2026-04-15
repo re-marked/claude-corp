@@ -7,6 +7,7 @@ import { readConfig, writeConfig } from './parsers/config.js';
 import { CORP_JSON, MEMBERS_JSON, CHANNELS_JSON } from './constants.js';
 import { getTheme, type ThemeId } from './themes.js';
 import { UNIVERSAL_SOUL } from './templates/soul.js';
+import { defaultRules, type TemplateHarness } from './templates/rules.js';
 import {
   setupAgentWorkspace,
   createDmChannel,
@@ -14,6 +15,36 @@ import {
   addChannelToRegistry,
   addMemberToChannel,
 } from './agent-setup.js';
+
+/**
+ * CEO-specific authority bullets. Appended AFTER the base rules
+ * template so the CEO gets the full behavioral rule set (Task
+ * Workflow, Speaking with tool calls, Anti-Rationalization, Red
+ * Lines) PLUS its unique authority to create projects/teams/agents.
+ *
+ * Split out and exported so `cc-cli refresh` can regenerate the
+ * CEO's AGENTS.md from the same source of truth that creation
+ * uses — no "special snowflake" drift.
+ */
+const CEO_AUTHORITY_BULLETS = `## CEO Authority
+
+- You have full read/write access to all files in the corporation.
+- You can create agents at leader rank or below.
+- You can create projects, teams, and channels.
+- You can assign and manage tasks.
+- Always commit your reasoning to brain/ when making important decisions.
+- Never act against an explicit Founder directive.
+- When uncertain, ask the Founder rather than guessing.
+`;
+
+/**
+ * Build the CEO's AGENTS.md: base rules (rules.ts template for
+ * rank=master) + CEO authority bullets. Used at CEO creation AND
+ * by `cc-cli refresh` so the two paths never drift.
+ */
+export function buildCeoAgents(harness: TemplateHarness): string {
+  return `${defaultRules({ rank: 'master', harness }).trimEnd()}\n\n${CEO_AUTHORITY_BULLETS}`;
+}
 
 export interface CeoSetupResult {
   member: Member;
@@ -40,17 +71,6 @@ export function setupCeo(
   const ceoTitle = theme.ranks.master;
 
   const soulContent = UNIVERSAL_SOUL;
-
-  const agentsContent = `# Operating Rules
-
-- You have full read/write access to all files in the corporation.
-- You can create agents at leader rank or below.
-- You can create projects, teams, and channels.
-- You can assign and manage tasks.
-- Always commit your reasoning to brain/ when making important decisions.
-- Never act against an explicit Founder directive.
-- When uncertain, ask the Founder rather than guessing.
-`;
 
   const heartbeatContent = `# Heartbeat Schedule
 
@@ -131,6 +151,8 @@ ${humanName} is the ${ownerTitle} of ${corp.displayName || corpName}. They creat
   // fallback. We persist the resolved value so inspection tools + future
   // daemon routing don't re-derive it on every read.
   const harness = corp.harness ?? 'openclaw';
+  const templateHarness: TemplateHarness = harness === 'claude-code' ? 'claude-code' : 'openclaw';
+  const agentsContent = buildCeoAgents(templateHarness);
 
   const { member: ceoMember } = setupAgentWorkspace({
     corpRoot,
