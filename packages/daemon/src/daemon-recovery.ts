@@ -100,6 +100,15 @@ export async function recoverCrashedAgents(daemon: Daemon): Promise<void> {
  * Verify the CEO's OpenClaw gateway is reachable.
  * If unreachable 3 times: mark crashed so agent-recovery handles respawn.
  * If reachable but WebSocket disconnected: reconnect.
+ *
+ * Skips harness-mode CEOs entirely — a claude-code CEO has no listening
+ * gateway port (port=0, gatewayToken=''), so the HTTP ping below would
+ * always fail and after 3 ticks (~90s) we'd mark a perfectly healthy
+ * CEO as crashed. The next dispatch then errors with "Agent CEO is
+ * not online" — which is exactly what Mark hit on a fresh claude-code
+ * corp once the recovery clock fired enough times. Recovery for
+ * harness-mode agents is the harness's own job: each dispatch spawns
+ * a fresh subprocess, so there's nothing to keep alive between ticks.
  */
 export async function recoverCeoGateway(daemon: Daemon): Promise<void> {
   try {
@@ -109,6 +118,7 @@ export async function recoverCeoGateway(daemon: Daemon): Promise<void> {
 
     const agentProc = daemon.processManager.getAgent(ceo.id);
     if (!agentProc) return;
+    if (agentProc.mode === 'harness') return;
     if (agentProc.status === 'crashed' || agentProc.status === 'stopped') return;
 
     try {

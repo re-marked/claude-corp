@@ -4,6 +4,14 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.9 — CEO Gateway Recovery skips harness-mode (MERGED, PR #120)
+
+After a couple of minutes in a fresh claude-code corp, the next dispatch failed with `Agent "CEO" is not online`. Root cause: the CEO Gateway Recovery clock (every 30s) was pinging `http://127.0.0.1:${agentProc.port}/v1/chat/completions` for ALL CEOs, but harness-mode agents have `port: 0` (they dispatch through subprocess, no listening gateway). After 3 failed pings (~90s), the clock marked a perfectly healthy CEO as `crashed`, and the next `/cc/say` rejected the dispatch with "not online".
+
+Fix: early-return from `recoverCeoGateway` when `agentProc.mode === 'harness'`. There's nothing to keep alive between ticks — every dispatch spawns a fresh subprocess. Recovery is the harness's own job.
+
+2 regression tests pin the behavior: no fetch is issued on harness CEO, status stays `ready` after 5 ticks. Without the guard, fetch fires and crash-mark fires.
+
 ## v2.1.8 — Trailing-slash encoding fix (MERGED, PR #118)
 
 v2.1.7 still hit "Session ID X is already in use" on cold-boot fresh corps. Root cause: `members.json` stores `agentDir` with a trailing slash (`"agents/ceo/"`), and `api.ts` preserves it through normalisation. `encodeClaudeWorkspacePath` turned the trailing `/` into a trailing `-`, so the encoded dir name didn't match what claude actually wrote — `existsSync` missed, harness fell back to `--session-id` on a UUID claude already owned, claude rejected.
