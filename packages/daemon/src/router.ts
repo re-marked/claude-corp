@@ -387,10 +387,19 @@ export class MessageRouter {
       // timestamped messages.
       const turnId = generateId();
 
+      // Session key is deterministic per agent + channel so consecutive
+      // @mentions in the same channel accumulate into ONE continuing
+      // conversation — the agent remembers prior mentions in that
+      // channel, tools it already ran, what it was working on. The
+      // previous `channel-${id}-${msg.id}` key minted a brand-new
+      // claude session for every single mention, so each @mention
+      // started from zero. Channel-scoped (not agent-global) so the
+      // agent's channel persona stays distinct from its DM thread.
+      const routerSessionKey = `agent:${targetId}:channel-${channel.id}`;
       const result = await this.daemon.harness.dispatch({
         agentId: agentProc.memberId,
         message: messageContent,
-        sessionKey: `agent:${agentProc.model.replace('openclaw:', '')}:channel-${channel.id}-${msg.id}`,
+        sessionKey: routerSessionKey,
         context,
         callbacks: {
           onToken: (accumulated) => {
