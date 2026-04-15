@@ -558,7 +558,19 @@ async function run() {
   }
 }
 
-run().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+run().then(
+  () => {
+    // Force-exit on success so cc-cli doesn't hang ~5s while undici's
+    // keep-alive connection pool to the daemon ages out. Affects every
+    // command — without this, agents calling `cc-cli inspect`,
+    // `cc-cli status`, etc. via Bash see the subprocess dangle after
+    // the output prints, blocking the agent's next step.
+    // `start` holds the process via an unresolving Promise so this
+    // never fires for the long-running daemon path.
+    process.exit(0);
+  },
+  (err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  },
+);
