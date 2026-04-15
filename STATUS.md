@@ -4,7 +4,21 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.17 — Teach agents that their reply IS the channel post (IN PROGRESS)
+## v2.1.18 — cc-cli no longer hangs 5 seconds after every command (IN PROGRESS)
+
+Mark observed: "most cc-cli commands, when they finish, just hang. even when i use them." Verified live: `cc-cli status --corp final-test-2` took 5+ seconds to exit AFTER printing the agent list. Same for `cc-cli inspect`, `cc-cli refresh`, etc.
+
+Root cause: `index.ts`'s top-level `run().catch(...)` had no success exit. After a command function resolved, Node kept the event loop alive while undici's HTTP connection pool to the daemon (localhost) waited out its keep-alive window (~5s). The actual work finished in 50ms but the process dangled until sockets aged out.
+
+Why this matters more than annoyance: when an agent calls cc-cli via the Bash tool, the subprocess hang stretches every tool call by 5s. Failsafe's `cc-cli inspect --agent herald` + `cc-cli status` chain at 18:27 burned 10+ seconds of agent thinking time, blocking its next text block. The "Failsafe is mulling..." spinner Mark watched was largely undici waiting to close sockets, not the model thinking.
+
+Fix: explicit `process.exit(0)` on resolve in the run() promise chain. `start.ts` is the long-running daemon command — it now blocks on `await new Promise<void>(() => {})` after registering SIGINT/SIGTERM handlers, so the auto-exit never fires for the daemon path.
+
+Verified live against final-test-2: `cc-cli status` went from ~5.0s to **0.3s** wall clock. ~17x speedup on every command. Every agent tool call gets the same speedup transitively.
+
+Also marked v2.1.17 as MERGED in STATUS.
+
+## v2.1.17 — Teach agents that their reply IS the channel post (MERGED, PR #128)
 
 Mark caught Failsafe stuck in a loop at 14:38 today: founder @mentioned Failsafe in #general asking it to ping Herald. Failsafe reached for `cc-cli send` (failed — needs `--from`), then `cc-cli say --agent herald` (DM to Herald, not what Mark wanted), then `cc-cli say` again after Mark explicitly said "post in general not DM". Eventually hung waiting on offline Herald.
 
