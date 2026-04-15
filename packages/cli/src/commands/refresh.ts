@@ -6,6 +6,7 @@ import {
   readConfig,
   UNIVERSAL_SOUL,
   defaultRules,
+  buildCeoAgents,
   MEMBERS_JSON,
   type Member,
   type AgentConfig,
@@ -87,6 +88,14 @@ async function refreshAgent(corpRoot: string, agent: Member, opts: RefreshOpts):
   const harness = resolveHarness(agentDir, agent);
   const rank = agent.rank ?? 'worker';
 
+  // CEO gets the rules template + CEO-specific authority bullets.
+  // Other agents just get the base rules template. Both come from
+  // the same source used at creation time (ceo.ts + rules.ts) so
+  // refresh stays consistent with the hiring path.
+  const agentsContent = rank === 'master'
+    ? buildCeoAgents(harness)
+    : defaultRules({ rank, harness });
+
   const targets: RefreshTarget[] = [
     {
       name: 'SOUL.md',
@@ -96,7 +105,7 @@ async function refreshAgent(corpRoot: string, agent: Member, opts: RefreshOpts):
     {
       name: 'AGENTS.md',
       path: join(agentDir, 'AGENTS.md'),
-      content: defaultRules({ rank, harness }),
+      content: agentsContent,
     },
   ];
 
