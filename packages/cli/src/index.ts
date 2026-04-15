@@ -50,6 +50,9 @@ const { values, positionals } = parseArgs({
     source: { type: 'string' },
     confidence: { type: 'string' },
     harness: { type: 'string' },
+    all: { type: 'boolean', default: false },
+    force: { type: 'boolean', default: false },
+    'dry-run': { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
@@ -88,6 +91,7 @@ Commands:
   uptime     Show daemon uptime and message count
   version    Show package versions
   logs       Show daemon logs
+  refresh    Refresh SOUL.md + AGENTS.md from current templates (--all, --force, --dry-run)
   dogfood    Set up dogfood project + dev team + task
 
 B.R.A.I.N. commands:
@@ -320,6 +324,16 @@ async function run() {
       await cmdDream({
         agent: values.agent as string | undefined,
         json: !!values.json,
+      });
+      break;
+    }
+    case 'refresh': {
+      const { cmdRefresh } = await import('./commands/refresh.js');
+      await cmdRefresh({
+        agent: positionals[1] ?? (values.agent as string | undefined),
+        all: !!values.all,
+        force: !!values.force,
+        dryRun: !!values['dry-run'],
       });
       break;
     }
