@@ -4,7 +4,28 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.15 — Move 'act, then close' to rules + ship template migrations (IN PROGRESS)
+## v2.1.16 — System agents go offline in claude-code corps (IN PROGRESS)
+
+Mark hit this at 15:06: jacking into Failsafe in his claude-code corp errored "Agent Failsafe is not online" — even though Failsafe had responded to its heartbeat 30 minutes earlier. Same pattern affected Herald and the other system agents. Only the CEO stayed online.
+
+Root cause: `hireAgent` in `packages/daemon/src/hire.ts:217` always called `processManager.registerGatewayAgent`, regardless of harness. In a claude-code corp, every agent hired AFTER daemon startup (Failsafe, Janitor, Warden, Herald, Planner — all bootstrapped via `bootstrapSystemAgents` after the founder's CEO finishes onboarding) was registered as `mode='gateway'`, pinned to the OpenClaw corp gateway. That gateway is for openclaw agents — in a corp with NONE of those, it never reaches a stable `ready` status, so the registered AgentProcess sits at `status='starting'` or `'stopped'`. The next dispatch hits the `api.ts` gate (`agentProc.status !== 'ready'`) and returns 503.
+
+CEO worked because it goes through `processManager.spawnAgent` on daemon startup, which DOES branch on harness:
+
+```ts
+if (harness !== 'openclaw') return registerHarnessAgent(...)
+else return registerGatewayAgent(...)
+```
+
+`hireAgent`'s registration path didn't mirror that branching. It does now. claude-code agents register as `mode='harness'`, `status='ready'`, `port=0` — dispatch flows through HarnessRouter (which spawns the claude subprocess per turn) and never touches the OpenClaw gateway. Side benefit: openclaw-only agents in claude-code corps don't even need the corp gateway started, so we skip the `gw.start()` block too when harness !== 'openclaw' — fewer phantom processes idling around.
+
+For Mark's existing corp: Failsafe is already in members.json with the wrong process registration. On next daemon restart, `spawnAllAgents` iterates members and calls `spawnAgent` — which DOES branch correctly — so the wrong registration self-corrects without needing manual cleanup. Just stop + restart the TUI.
+
+Regression test `tests/hire-agent-harness.test.ts` (3 cases) pins the contract: claude-code corp default → registerHarnessAgent, per-agent harness override → registerHarnessAgent, openclaw fallback → registerGatewayAgent. Future refactors can't silently regress system agents back to gateway-mode.
+
+Also marked v2.1.15 as MERGED in STATUS.
+
+## v2.1.15 — Move 'act, then close' to rules + ship template migrations (MERGED, PR #126)
 
 Two corrections bundled, both caught by Mark in v2.1.14:
 
