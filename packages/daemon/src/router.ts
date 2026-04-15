@@ -306,6 +306,16 @@ export class MessageRouter {
     // backstop if an agent pair runs away.
     const agentProc = this.daemon.processManager.getAgent(targetId);
     if (!agentProc || agentProc.status !== 'ready') {
+      // Target offline / starting / crashed — can't dispatch right now.
+      // Fall back to inbox so the mention isn't silently lost: the
+      // agent will pick it up on its next pulse heartbeat once it's
+      // back online. Only do this for non-self mentions to avoid
+      // recording an agent's own outgoing chatter into its own inbox.
+      if (targetId !== msg.senderId) {
+        const target = members.find(m => m.id === targetId);
+        this.daemon.inbox.recordMessage(channel.id, channel.name, targetId, true, sender.displayName);
+        log(`[router] ${target?.displayName ?? targetId} offline — mention queued in inbox`);
+      }
       return;
     }
 
