@@ -79,6 +79,8 @@ export class Daemon {
   inbox = new InboxManager();
   /** Callbacks for busy→idle transition (Phase 3: inbox system will use this) */
   private onIdleCallbacks: ((memberId: string, displayName: string) => void)[] = [];
+  /** Callbacks for idle→busy transition (Dreams uses this to reset idle timer) */
+  private onBusyCallbacks: ((memberId: string, displayName: string) => void)[] = [];
   /** WebSocket event bus for real-time TUI updates. */
   events = new EventBus();
   /** WebSocket to user's personal OpenClaw (for CEO dispatch with tool events). */
@@ -182,6 +184,11 @@ export class Daemon {
     this.onIdleCallbacks.push(cb);
   }
 
+  /** Register a callback for when an agent transitions idle→busy */
+  onAgentBusy(cb: (memberId: string, displayName: string) => void): void {
+    this.onBusyCallbacks.push(cb);
+  }
+
   /** Update agent work status + broadcast event + fire transition callbacks + analytics */
   setAgentWorkStatus(memberId: string, displayName: string, status: AgentWorkStatus): void {
     const prev = this.agentWorkStatus.get(memberId);
@@ -196,6 +203,9 @@ export class Daemon {
 
     if (prev === 'busy' && status === 'idle') {
       for (const cb of this.onIdleCallbacks) cb(memberId, displayName);
+    }
+    if (prev !== 'busy' && status === 'busy') {
+      for (const cb of this.onBusyCallbacks) cb(memberId, displayName);
     }
   }
 
