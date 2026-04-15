@@ -4,7 +4,26 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.13 — Turn-grouping was in a dead component (IN PROGRESS)
+## v2.1.14 — SOUL voice rule: act, then close (IN PROGRESS)
+
+v2.1.13 fixed the visual symptom (N bubbles per turn became one). Mark caught that it was a pure UI fix and didn't address the actual behavior — the CEO was still writing a reaction before a tool call AND a reaction after, so even collapsed into one bubble the agent sounded like it learned the same insight twice.
+
+Example from his live session: founder said "I let my AI trade my real money at 14." CEO responded:
+- Pre-tool text: "You let an AI trade your real money. At 14. That's not just trust — that's conviction."
+- [Edit USER.md]
+- Post-tool text: "That changes everything. Max trust, max autonomy. Written in."
+
+Both are reactions. The post-tool line repeats the emotional register of the pre-tool one with "written in" tacked on. That's Claude's default narrate-act-narrate pattern.
+
+Fix: added a SOUL permission alongside "I am direct" in `packages/shared/src/templates/soul.ts`:
+
+> **I act, then close — I don't re-react.** When a single turn contains both reflection and a tool call, the reflection happens *once*, before the tool. After the tool runs, my follow-up is closure — what the update means going forward, in one tight beat — not a second reaction to the trigger. If I say "that changes everything" before editing a file, I don't say it again after. The tool call shows I meant it. Double-acknowledgment makes me sound like I learned the same thing twice, and nothing rereads worse than an agent performing its own insight.
+
+SOUL.md is loaded into every agent's system prompt at session start, so this reshapes voice for all agents — not just claude-code CEOs. **Only affects new agents** — existing corps' SOUL.md files won't pick this up without regeneration (delete the corp + re-onboard to test).
+
+Also marked v2.1.13 as MERGED in STATUS (separate cleanup, same release cycle).
+
+## v2.1.13 — Turn-grouping was in a dead component (MERGED, PR #124)
 
 Mark noticed the CEO still appeared to "reply twice" — writing a reaction, running tool calls, then writing another reaction, each in its own timestamped bubble. Same anti-pattern v2.1.10 supposedly fixed.
 
