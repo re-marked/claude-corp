@@ -4,6 +4,18 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.12 — Dreams respect the 5-min idle threshold (IN PROGRESS)
+
+Mark noticed: "why did it start dreaming in literally 3 minutes? yes i unfocused the tab but it shouldnt be THAT fast." He was right — it shouldn't.
+
+Root cause: DreamManager's idle tracker was polling-only. Every 2 minutes the dream cycle sampled `getAgentWorkStatus`; if it saw `busy`, it cleared `idleSince`. A claude-code dispatch is often 30–60s — entirely inside the 2-min gap between polls. So when an agent answered a message and went back to idle, the poll never *saw* the busy spike, `idleSince` never got reset, and it kept pointing at a much earlier idle moment from before the conversation ever started. Next poll ≥5 min after that stale timestamp → dream fires, even though the agent was actively talking 30 seconds ago.
+
+Fix: event-driven idle tracking. Added `onAgentBusy` / `onAgentIdle` hooks in `Daemon.setAgentWorkStatus` (analogous to the existing `onAgentIdle`). DreamManager's constructor now registers both — any `idle→busy` transition immediately clears `idleSince`, any `busy→idle` transition stamps it with `Date.now()`. The 2-min polling fallback still sets `idleSince` for agents that were idle on daemon startup (no transition fires for them).
+
+Now the 5-min idle gate actually measures 5 minutes since the *last* bit of work — not 5 minutes since some forgotten earlier moment.
+
+Regression test `tests/dreams-idle-reset.test.ts` pins the wiring: DreamManager constructor registers both callbacks, `onAgentIdle` stamps `idleSince`, `onAgentBusy` clears it, and repeated busy→idle→busy→idle sequences keep resetting the clock.
+
 ## v2.1.11 — Unify CEO-thread session keys (MERGED, PR #122)
 
 Follow-up on the v2.1.10 audit. Three dispatchers were still minting fresh claude sessions every fire — same anti-pattern as v2.1.5's jack-key bug — so every escalation, recovery, and channel @mention reached the target agent as a stranger with zero memory of what came before:

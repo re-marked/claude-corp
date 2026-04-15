@@ -73,6 +73,20 @@ export class DreamManager {
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
+
+    // Event-driven idle tracking. The polling loop below samples work
+    // status every 2 min — if an agent's busy window (claude-code
+    // dispatch is often 30-60s) falls BETWEEN two polls, the poll
+    // never sees 'busy' and `idleSince` is never reset. Result: a
+    // dream can fire 3 min after a fresh message because the timer
+    // started from a much earlier idle moment. Wire the transitions
+    // directly so any work — however brief — resets the clock.
+    this.daemon.onAgentBusy((memberId) => {
+      this.idleSince.delete(memberId);
+    });
+    this.daemon.onAgentIdle((memberId) => {
+      this.idleSince.set(memberId, Date.now());
+    });
   }
 
   /**
