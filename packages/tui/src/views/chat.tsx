@@ -158,13 +158,20 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     }
   }, [messages.length]);
 
-  // When a new message arrives from someone else, stop thinking
+  // When a new message arrives from someone else, stop thinking.
+  // Clear thinkingAgents too — otherwise the indicator at the bottom
+  // of the channel keeps showing the original send target's name even
+  // after their reply lands. Concrete failure mode: Mark @CEO, ceo
+  // responds with "@Failsafe ...", router dispatches Failsafe, but
+  // the spinner still says "CEO is mulling..." because thinkingAgents
+  // outranks dispatchingAgents in the render predicate.
   useEffect(() => {
     if (messages.length > lastMsgCount.current) {
       const newMsg = messages[messages.length - 1];
       const founder = members.find((m) => m.rank === 'owner');
       if (newMsg && founder && newMsg.senderId !== founder.id && newMsg.kind === 'text') {
         setThinking(false);
+        setThinkingAgents([]);
         process.stdout.write('\x07'); // Terminal bell
       }
     }
