@@ -630,6 +630,56 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
       }
     });
 
+    it.each([
+      { label: 'trailing forward slash', agentDir: 'agents/ceo/' },
+      { label: 'trailing backslash', agentDir: 'agents/ceo\\' },
+      { label: 'multiple trailing slashes', agentDir: 'agents/ceo///' },
+      { label: 'mixed trailing separators', agentDir: 'agents/ceo/\\/' },
+    ])('strips $label before encoding the workspace path', async ({ agentDir }) => {
+      // Regression test for v2.1.7's encoding miss — trailing
+      // separators on agentDir (members.json stores them, api.ts
+      // preserves them) previously turned into trailing dashes in
+      // the encoded dir name, missing claude's actual session-file
+      // location. Table covers every variant of "trailing separator"
+      // to guard against a well-meaning future simplification that
+      // drops the trim step.
+      const tmpHome = mkdtempSync(join(tmpdir(), 'claude-home-'));
+      const originalUserProfile = process.env.USERPROFILE;
+      const originalHome = process.env.HOME;
+      process.env.USERPROFILE = tmpHome;
+      process.env.HOME = tmpHome;
+      try {
+        const expectedSessionId = sessionIdFor('say:ceo:mark');
+        const projectsDir = join(tmpHome, '.claude', 'projects', '-corps-test-agents-ceo');
+        mkdirSync(projectsDir, { recursive: true });
+        writeFileSync(join(projectsDir, `${expectedSessionId}.jsonl`), '', 'utf-8');
+
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          context: { corpRoot: '/corps/test', agentDir } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        expect(dispatchCall.args).toContain('--resume');
+        expect(dispatchCall.args).not.toContain('--session-id');
+      } finally {
+        if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+        else process.env.USERPROFILE = originalUserProfile;
+        if (originalHome === undefined) delete process.env.HOME;
+        else process.env.HOME = originalHome;
+        rmSync(tmpHome, { recursive: true, force: true });
+      }
+    });
+
     it('passes resolved workspace as cwd and via --add-dir (relative agentDir)', async () => {
       const { spawn, calls } = makeSpawner((proc, call) => {
         if (call.args.includes('--version')) {
