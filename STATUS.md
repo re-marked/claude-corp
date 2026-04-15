@@ -4,7 +4,25 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.19 — Agent @mentions dispatch immediately, not via inbox (IN PROGRESS)
+## v2.1.20 — Spinner indicator follows the actual dispatch chain (IN PROGRESS)
+
+Mark observed at 18:51: when agent A @-mentions agent B mid-response, the "is working" indicator at the bottom of the channel keeps showing A's name instead of B's. Purely visual but reads as broken — the spinner points at the wrong agent for the duration of B's actual work.
+
+Root cause: `chat.tsx`'s "stop thinking when a non-founder message arrives" effect cleared `thinking` but not `thinkingAgents`. So after CEO's reply landed, `thinkingAgents` was still `['CEO']` (stale). Then CEO's text contained `@Failsafe`, the router dispatched Failsafe, `dispatchingAgents` added Failsafe — but the render predicate at line 1898 prefers `thinkingAgents` over `dispatchingAgents`:
+
+```ts
+thinkingAgents.length > 0
+  ? thinkingAgents.join(', ')
+  : [...dispatchingAgents].join(', ')
+```
+
+Stale `['CEO']` won; fresh `['Failsafe']` was hidden. Result: spinner said "CEO is mulling..." while Failsafe was the one actually working.
+
+Fix: `setThinkingAgents([])` alongside `setThinking(false)` in the non-founder-message effect. The predicate then falls through to `dispatchingAgents` (which has the live data from the dispatch_start WebSocket event), and the indicator correctly tracks the agent who's mid-turn.
+
+Also marked v2.1.19 as MERGED in STATUS.
+
+## v2.1.19 — Agent @mentions dispatch immediately, not via inbox (MERGED, PR #130)
 
 Mark caught the design at 18:38: Failsafe @mentioned Herald in #general — the v2.1.17 Speaking-in-channels rule WORKED, Failsafe wrote `@Herald — run your narration cycle` directly in chat. But Herald sat silent for minutes. UX read as "the system is broken — Mark @-pinged in chat and got nothing."
 
