@@ -188,33 +188,43 @@ export async function hireAgent(
     log(`[hire] Added ${opts.displayName} to ${projectChannels.length} project channel(s)`);
   }
 
-  // 6. ALL agents go on the corp gateway. Per-agent model overrides handle Opus.
-  const gw = daemon.processManager.corpGateway;
-  if (gw) {
-    const workspace = join(corpRoot, agentDir).replace(/\\/g, '/');
-    const gwAgentDir = join(corpRoot, '.gateway', 'agents', opts.agentName, 'agent').replace(/\\/g, '/');
+  // 6. Register in process manager. Branch on harness so non-openclaw
+  // agents (claude-code, future harnesses) don't get pinned to the
+  // OpenClaw corp gateway — they dispatch through HarnessRouter
+  // directly (no gateway slot, no listening port). Mirrors the same
+  // branching `spawnAgent` does for daemon-startup paths; without it,
+  // hired-post-startup agents (Failsafe, Janitor, Warden, Herald,
+  // Planner) in a claude-code corp got mode='gateway' status='starting'
+  // and the next dispatch errored "Agent X is not online" — which is
+  // exactly what Mark hit on Failsafe at 15:06 today.
+  if (harness === 'openclaw') {
+    const gw = daemon.processManager.corpGateway;
+    if (gw) {
+      const workspace = join(corpRoot, agentDir).replace(/\\/g, '/');
+      const gwAgentDir = join(corpRoot, '.gateway', 'agents', opts.agentName, 'agent').replace(/\\/g, '/');
 
-    gw.addAgent({
-      id: opts.agentName,
-      name: opts.displayName,
-      workspace,
-      agentDir: gwAgentDir,
-      model: model !== globalConfig.defaults.model
-        ? { primary: `${provider}/${model}` }
-        : undefined,
-    });
+      gw.addAgent({
+        id: opts.agentName,
+        name: opts.displayName,
+        workspace,
+        agentDir: gwAgentDir,
+        model: model !== globalConfig.defaults.model
+          ? { primary: `${provider}/${model}` }
+          : undefined,
+      });
 
-    // Start gateway if this is the first agent, otherwise let OpenClaw hot-reload
-    const gwStatus = gw.getStatus();
-    if (gwStatus === 'stopped') {
-      await gw.start();
-    } else {
-      await new Promise((r) => setTimeout(r, 1500));
+      // Start gateway if this is the first agent, otherwise let OpenClaw hot-reload
+      const gwStatus = gw.getStatus();
+      if (gwStatus === 'stopped') {
+        await gw.start();
+      } else {
+        await new Promise((r) => setTimeout(r, 1500));
+      }
     }
+    daemon.processManager.registerGatewayAgent(member.id, member);
+  } else {
+    daemon.processManager.registerHarnessAgent(member.id, member, harness);
   }
-
-  // Register in process manager
-  daemon.processManager.registerGatewayAgent(member.id, member);
 
   log(`[daemon] Hired ${opts.displayName} (${opts.rank}) as ${opts.agentName}`);
 
