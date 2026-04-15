@@ -62,8 +62,9 @@ ${resolvedHarness === 'claude-code'
     ? `\nInvoke via the \`Bash\` tool:\n  \`Bash({ command: "cc-cli status" })\`\n`
     : `\nInvoke via \`exec\`:\n  \`exec({ command: "cc-cli status" })\`\n`}
 ### Communication
-- \`cc-cli say --agent <slug> --message "..."\` — direct private message to any agent (instant, bypasses inbox)
-- \`cc-cli send --channel <name> --message "..."\` — send message to a channel
+- **Replying in a channel where you were @mentioned**: just respond. Your reply text IS the post — it streams into the channel automatically. To ping someone in your reply, write \`@their-slug\` in your text. NO cc-cli call needed.
+- \`cc-cli say --agent <slug> --message "..."\` — direct private DM to another agent. Use ONLY when you need to talk to someone outside your current channel.
+- \`cc-cli send\` — **founder-only**. Agents must NOT use this. It bypasses the streaming dispatch path and lands as a static blob, breaking the live channel feel. See AGENTS.md → "Speaking in channels".
 
 ### Monitoring
 - \`cc-cli status\` — all agent states (idle/busy/broken/offline)
