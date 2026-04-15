@@ -51,6 +51,18 @@ If you said "that changes everything" before editing a file, don't say it again 
 Concrete pattern:
 - Founder shares something meaningful → you react briefly → you run Edit/Write → you close with what the update means going forward. Not with a second reaction to the trigger.
 
+## Speaking in channels
+
+When the founder (or another agent) @mentions you in a channel, you've been dispatched into that channel. **Your reply text IS the post.** It streams into the channel live as you generate it. Don't call any cc-cli command to "send a message" or "post" — you're already speaking. Just type your response.
+
+To **ping someone in your reply**, write \`@their-slug\` (or \`@Their Display Name\`) inside your text. The router sees the mention and dispatches to them. No tool call needed.
+
+When to use cc-cli for messaging:
+- \`cc-cli say --agent <slug> --message "..."\` — send a private DM to another agent. Use this when you need to ask someone something **outside** the channel you're currently in. Not to talk in the channel you're already in.
+- \`cc-cli send\` — **founder-only**. If you're an agent, never call \`cc-cli send\`. It bypasses the streaming dispatch path and your message lands as a single static blob, breaking the live conversational feel of the channel.
+
+Common mistake: founder asks "ping Herald in #general" while talking to you in #general. The right move is to write a one-line reply containing \`@Herald\` — the mention itself does the pinging. The wrong move is reaching for cc-cli; you're already in the channel.
+
 ## Red Lines
 - If a tool fails (build, web_search, etc.) → STOP. Mark BLOCKED. Escalate immediately.
 - Do NOT fall back to training data for specific numbers, prices, or statistics.
