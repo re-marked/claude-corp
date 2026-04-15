@@ -1,12 +1,7 @@
 import React from 'react';
-import { Box, Text } from '@claude-code-kit/ink-renderer';
+import { Text } from '@claude-code-kit/ink-renderer';
 import type { ChannelMessage, Member } from '@claudecorp/shared';
-import { COLORS, agentColor } from '../theme.js';
-
-interface Props {
-  messages: ChannelMessage[];
-  members: Member[];
-}
+import { COLORS } from '../theme.js';
 
 function RainbowText({ children }: { children: string }) {
   const text = typeof children === 'string' ? children : String(children);
@@ -23,7 +18,7 @@ function RainbowText({ children }: { children: string }) {
   );
 }
 
-export function hslToHex(h: number, s: number, l: number): string {
+function hslToHex(h: number, s: number, l: number): string {
   s /= 100;
   l /= 100;
   const a = s * Math.min(l, 1 - l);
@@ -111,114 +106,30 @@ export function renderContent(content: string | undefined | null, members: Map<s
   return parts.length > 0 ? parts : <Text wrap="wrap">{content}</Text>;
 }
 
-/** Get sender display color based on type/rank. */
-function senderColor(sender: Member | undefined, senderId: string): string | undefined {
-  if (!sender || senderId === 'system') return COLORS.system;
-  if (sender.rank === 'master') return undefined; // rainbow handled separately
-  if (sender.type === 'agent') return agentColor(COLORS, sender.rank);
-  return COLORS.user;
-}
-
 /**
  * Pull the dispatch turnId out of a message's metadata. All segments
  * (text + tool_event) persisted within one harness dispatch share the
- * same turnId — we use it to group consecutive same-sender messages
- * into a single visual bubble (one header, multiple inline rows)
- * instead of N timestamped chunks. Messages predating the turnId
- * stamping (or from non-claude-code dispatchers that don't set it)
- * fall back to per-message bubbles, same as before.
+ * same turnId — callers use it to group consecutive same-sender
+ * messages into a single visual bubble (one header, multiple inline
+ * rows) instead of N timestamped chunks. Messages predating the
+ * turnId stamping (or from non-claude-code dispatchers that don't set
+ * it) return null, triggering a per-message bubble fallback.
  */
-function getTurnId(msg: ChannelMessage): string | null {
+export function getTurnId(msg: ChannelMessage): string | null {
   const meta = msg.metadata as Record<string, unknown> | null;
   const t = meta?.turnId;
   return typeof t === 'string' && t.length > 0 ? t : null;
 }
 
-export function MessageList({ messages, members }: Props) {
-  const memberMap = new Map(members.map((m) => [m.id, m]));
-
-  return (
-    <Box flexDirection="column" flexGrow={1}>
-      {messages.map((msg, idx) => {
-        const sender = memberMap.get(msg.senderId);
-        const name = sender?.displayName ?? 'system';
-        const time = new Date(msg.timestamp).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-        const isCeo = sender?.rank === 'master';
-        const isSystem = msg.senderId === 'system' || msg.kind === 'system' || msg.kind === 'task_event';
-
-        // System messages: dim, indented with ┊
-        if (isSystem) {
-          return (
-            <Box key={msg.id} flexDirection="column" marginBottom={0}>
-              <Text color={COLORS.muted}> ┊ {name} {time}</Text>
-              <Text color={COLORS.muted}> ┊ {msg.content}</Text>
-            </Box>
-          );
-        }
-
-        // Detect SLUMBER messages — render with muted indigo night theme
-        const meta = msg.metadata as Record<string, unknown> | null;
-        const isSlumber = meta?.slumber === true;
-        const slumberNameColor = '#818cf8'; // Indigo-400
-        const slumberTextColor = '#a5b4fc'; // Indigo-300
-
-        // Turn-grouping: hide the header (sender name + timestamp) when
-        // this message is a continuation of the previous one — same
-        // sender + same turnId. Reduces a 13-block CEO turn from "13
-        // timestamped 'wakes' " to one bubble with multiple inline rows.
-        const turnId = getTurnId(msg);
-        const prev = idx > 0 ? messages[idx - 1] : null;
-        const prevTurnId = prev ? getTurnId(prev) : null;
-        const isContinuation =
-          turnId !== null &&
-          prev !== null &&
-          prev.senderId === msg.senderId &&
-          prevTurnId === turnId;
-
-        // Tool events get a compact inline row instead of a full bubble
-        // when they're inside a turn group. Keeps the visual hierarchy:
-        // one header → text rows + tool rows interleaved.
-        if (msg.kind === 'tool_event') {
-          return (
-            <Box key={msg.id} flexDirection="column" marginBottom={0} paddingLeft={isContinuation ? 0 : 0}>
-              {!isContinuation && (
-                <Box gap={1}>
-                  {isCeo ? (
-                    <RainbowText>{name}</RainbowText>
-                  ) : (
-                    <Text bold color={senderColor(sender, msg.senderId)}>{name}</Text>
-                  )}
-                  <Text color={COLORS.subtle}>{time}</Text>
-                </Box>
-              )}
-              <Text color={COLORS.muted}> │ {msg.content}</Text>
-            </Box>
-          );
-        }
-
-        return (
-          <Box key={msg.id} flexDirection="column" marginBottom={isContinuation ? 0 : 1}>
-            {!isContinuation && (
-              <Box gap={1}>
-                {isSlumber ? (
-                  <Text bold color={slumberNameColor}>{'\u263E'} {name}</Text>
-                ) : isCeo ? (
-                  <RainbowText>{name}</RainbowText>
-                ) : (
-                  <Text bold color={senderColor(sender, msg.senderId)}>
-                    {name}
-                  </Text>
-                )}
-                <Text color={isSlumber ? '#6366f1' : COLORS.subtle}>{time}</Text>
-              </Box>
-            )}
-            <Text wrap="wrap" color={isSlumber ? slumberTextColor : undefined}>{renderContent(msg.content, memberMap)}</Text>
-          </Box>
-        );
-      })}
-    </Box>
-  );
+/**
+ * True when this message is a continuation of the previous one —
+ * same sender AND same turnId. Callers that render message lists
+ * use this to skip redundant headers and collapse a multi-block
+ * claude-code dispatch into one visual bubble.
+ */
+export function isTurnContinuation(msg: ChannelMessage, prev: ChannelMessage | null): boolean {
+  const turnId = getTurnId(msg);
+  if (turnId === null || prev === null) return false;
+  if (prev.senderId !== msg.senderId) return false;
+  return getTurnId(prev) === turnId;
 }
