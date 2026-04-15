@@ -4,6 +4,14 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.8 — Trailing-slash encoding fix (MERGED, PR #118)
+
+v2.1.7 still hit "Session ID X is already in use" on cold-boot fresh corps. Root cause: `members.json` stores `agentDir` with a trailing slash (`"agents/ceo/"`), and `api.ts` preserves it through normalisation. `encodeClaudeWorkspacePath` turned the trailing `/` into a trailing `-`, so the encoded dir name didn't match what claude actually wrote — `existsSync` missed, harness fell back to `--session-id` on a UUID claude already owned, claude rejected.
+
+Fix: strip trailing `\`/`/` before applying the char-class substitution. Test table covers all four trailing-separator variants (forward, backslash, multi, mixed) so a future "simplification" of the trim step trips immediately.
+
+Also a personal lesson: when Mark says "you're guessing", verify against the actual built artifact + actual filesystem, not the diff in your head. Took two cycles to land here.
+
 ## v2.1.7 — Session scope + error surfacing (MERGED, PR #116)
 
 Fresh corp dispatched "hi" to the CEO → "Claude Code returned an error result", no specifics. Two related bugs:
