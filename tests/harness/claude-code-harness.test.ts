@@ -630,14 +630,19 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
       }
     });
 
-    it('strips trailing separators before encoding the workspace path', async () => {
-      // Regression test for v2.1.7's encoding miss: members.json stores
-      // agentDir with a trailing slash (e.g. "agents/ceo/"), and api.ts
-      // propagates that into context.agentDir. Previously the encoder
-      // turned the trailing `/` into a trailing `-`, producing
-      // `...-ceo-` where claude had written `...-ceo` (no dash). The
-      // session-file check missed, the harness fell back to
-      // --session-id, and claude rejected it as "already in use".
+    it.each([
+      { label: 'trailing forward slash', agentDir: 'agents/ceo/' },
+      { label: 'trailing backslash', agentDir: 'agents/ceo\\' },
+      { label: 'multiple trailing slashes', agentDir: 'agents/ceo///' },
+      { label: 'mixed trailing separators', agentDir: 'agents/ceo/\\/' },
+    ])('strips $label before encoding the workspace path', async ({ agentDir }) => {
+      // Regression test for v2.1.7's encoding miss — trailing
+      // separators on agentDir (members.json stores them, api.ts
+      // preserves them) previously turned into trailing dashes in
+      // the encoded dir name, missing claude's actual session-file
+      // location. Table covers every variant of "trailing separator"
+      // to guard against a well-meaning future simplification that
+      // drops the trim step.
       const tmpHome = mkdtempSync(join(tmpdir(), 'claude-home-'));
       const originalUserProfile = process.env.USERPROFILE;
       const originalHome = process.env.HOME;
@@ -645,9 +650,6 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
       process.env.HOME = tmpHome;
       try {
         const expectedSessionId = sessionIdFor('say:ceo:mark');
-        // Plant a session file at the encoding claude would actually
-        // write (no trailing dash). If the harness over-encodes the
-        // trailing slash, existsSync misses and --resume never fires.
         const projectsDir = join(tmpHome, '.claude', 'projects', '-corps-test-agents-ceo');
         mkdirSync(projectsDir, { recursive: true });
         writeFileSync(join(projectsDir, `${expectedSessionId}.jsonl`), '', 'utf-8');
@@ -662,10 +664,8 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
         });
         const harness = new ClaudeCodeHarness({ spawn });
         await harness.init(BASE_CONFIG);
-        // Context with agentDir that carries a trailing slash — exactly
-        // what members.json + api.ts produce in production.
         await harness.dispatch(BASE_OPTS({
-          context: { corpRoot: '/corps/test', agentDir: 'agents/ceo/' } as never,
+          context: { corpRoot: '/corps/test', agentDir } as never,
         }));
 
         const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
