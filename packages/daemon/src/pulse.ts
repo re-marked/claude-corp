@@ -174,7 +174,14 @@ export class Pulse {
 
         log(`[pulse] ${displayName} ${isBusy ? '(busy)' : '(idle)'} — responded OK`);
 
-        // Recovery notification — tell CEO the agent is back
+        // Recovery notification — tell CEO the agent is back. Routed
+        // into the CEO's main jack:<slug> thread so the recovery lands
+        // in the same conversation where the escalation arrived —
+        // the CEO sees "Herald crashed" and "Herald recovered" as two
+        // messages in one coherent thread, with full memory of what
+        // was happening in between. Previous `pulse-recovery:${ts}`
+        // key minted a fresh claude session every fire, so each
+        // recovery was context-free.
         if (wasEscalated) {
           log(`[pulse] ${displayName} RECOVERED after escalation`);
           try {
@@ -184,7 +191,7 @@ export class Pulse {
               body: JSON.stringify({
                 target: 'ceo',
                 message: `RECOVERY: Agent "${displayName}" is back online and responding to heartbeats. Previous escalation resolved.`,
-                sessionKey: `pulse-recovery:${Date.now()}`,
+                sessionKey: `jack:ceo`,
               }),
               signal: AbortSignal.timeout(30_000),
             });
@@ -249,7 +256,13 @@ export class Pulse {
       logError(`[pulse] ESCALATING: ${agent.displayName} — ${reason}`);
       state.escalated = true;
 
-      // Escalate to CEO
+      // Escalate to CEO, landing in its main jack:ceo thread so the
+      // escalation arrives with full conversational context (CEO knows
+      // what the corp was doing when Herald stopped responding) and
+      // the recovery notification below lands in the same thread.
+      // Previous `pulse-escalation:${ts}` key minted a fresh session
+      // for every escalation — each time the CEO saw an escalation it
+      // was from a stranger persona that didn't remember the chat.
       if (ceo) {
         try {
           await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
@@ -258,7 +271,7 @@ export class Pulse {
             body: JSON.stringify({
               target: 'ceo',
               message: `ESCALATION from Pulse: Agent "${agent.displayName}" is unresponsive. Reason: ${reason}. Missed ${state.missedCount} consecutive heartbeats. Please investigate — the agent may need to be restarted or the issue may need founder attention.`,
-              sessionKey: `pulse-escalation:${Date.now()}`,
+              sessionKey: `jack:ceo`,
             }),
             signal: AbortSignal.timeout(60_000),
           });

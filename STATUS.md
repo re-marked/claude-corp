@@ -4,6 +4,20 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.1.11 — Unify CEO-thread session keys (IN PROGRESS)
+
+Follow-up on the v2.1.10 audit. Three dispatchers were still minting fresh claude sessions every fire — same anti-pattern as v2.1.5's jack-key bug — so every escalation, recovery, and channel @mention reached the target agent as a stranger with zero memory of what came before:
+
+- **`pulse-escalation:${Date.now()}`** → Pulse escalates to the CEO when an agent misses 2 heartbeats. Every escalation minted a new session, so the CEO saw "Herald is unresponsive" but had zero context for what Herald was doing when it died.
+- **`pulse-recovery:${Date.now()}`** → Pulse tells the CEO when an escalated agent recovers. Fresh session every time → "Herald is back" arrived in a different thread from "Herald crashed", so the pair read as two disconnected blips.
+- **`agent:${model}:channel-${channel.id}-${msg.id}`** → Router @mention. `msg.id` changes per message, so every `@CEO` was session-zero: tools already run, plans mid-flight, prior decisions — all invisible to the very next mention in the same channel.
+
+Fix: pulse escalation + recovery both route into `jack:ceo` (CEO's main thread, where the founder's own conversation lives — the CEO now sees "Herald crashed" and "Herald recovered" as two messages in the same coherent chat, with full memory of the corp's state between them). Router @mention uses `agent:${targetId}:channel-${channel.id}` — scoped per agent + channel so the agent's #general persona builds continuity distinct from its DM thread.
+
+Intentionally left timestamped: `herald-narration:${ts}` and `failsafe-heartbeat:${ts}` — noisy one-off pings that would clog the CEO thread.
+
+Regression test `tests/deterministic-thread-keys.test.ts` pins both rules so a future refactor can't sneak the timestamped form back in. v2.1.11 version bumps bundled into this PR per the post-v2.1.8 bundle-bumps rule.
+
 ## v2.1.10 — Multi-block turn rendering (MERGED, PR #121)
 
 A single claude turn (one user prompt → text + tool + text + tool + text response) was rendering as N timestamped chat bubbles in the TUI, making the agent look like it "wakes up fresh" between blocks. Reality: it was one continuous response with tool calls in between.
