@@ -4,7 +4,25 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.12 — Dreams respect the 5-min idle threshold (IN PROGRESS)
+## v2.1.13 — Turn-grouping was in a dead component (IN PROGRESS)
+
+Mark noticed the CEO still appeared to "reply twice" — writing a reaction, running tool calls, then writing another reaction, each in its own timestamped bubble. Same anti-pattern v2.1.10 supposedly fixed.
+
+Investigation revealed v2.1.10 was a phantom fix. I'd added the turnId-grouping logic to `packages/tui/src/components/message-list.tsx`'s `MessageList` component — but `MessageList` was **never imported anywhere**. `grep -rn "<MessageList"` returns zero hits. The real chat render loop lives in `views/chat.tsx:renderMsg`, and it had no awareness of turnId or continuation at all.
+
+Two things happened in this fix:
+
+1. **Extracted the grouping predicate.** Moved `getTurnId` + new `isTurnContinuation` helper out of the dead component, exported them from `message-list.tsx`. Deleted the `MessageList` component itself + the now-unused `senderColor` helper + the `export` on `hslToHex` (the component was the only external caller). `renderContent` is untouched and still exported — it IS used by chat.tsx.
+
+2. **Wired it into the real render loop.** `chat.tsx:renderMsg` now takes `(msg, prev)`, computes `isContinuation = isTurnContinuation(msg, prev)`, and suppresses the `● CEO 14:26` header + bottom margin when a message continues the previous turn. Tool events inside a group also drop the agent name, rendering as a bare ` │ content` row. The map callsite passes `arr[idx-1]` so prev is the actual previous rendered message.
+
+Result: a single claude dispatch with interleaved text + tool calls renders as ONE bubble with one timestamp, text and tool rows flowing vertically inside it. No more "CEO wakes up fresh" illusion.
+
+Regression test `tests/turn-continuation.test.ts` (8 cases) pins `getTurnId` + `isTurnContinuation`: null prev, different sender, different turnId, missing turnId, full 4-segment turn group. A future refactor of the render loop can't silently revert the grouping without the regex-boundary cases failing.
+
+Meta-lesson I'm writing into my own process: when fixing a UI bug, **verify the file I'm editing is the one actually rendered**. `grep -rn "<ComponentName"` before assuming a component is live.
+
+## v2.1.12 — Dreams respect the 5-min idle threshold (MERGED, PR #123)
 
 Mark noticed: "why did it start dreaming in literally 3 minutes? yes i unfocused the tab but it shouldnt be THAT fast." He was right — it shouldn't.
 

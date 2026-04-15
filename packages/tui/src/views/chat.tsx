@@ -15,7 +15,7 @@ import {
   CORP_JSON,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
-import { renderContent } from '../components/message-list.js';
+import { renderContent, isTurnContinuation } from '../components/message-list.js';
 import { MessageInput } from '../components/message-input.js';
 import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
@@ -1745,7 +1745,7 @@ Always consider what happens when things go wrong.`,
   const isStreaming = channelStreams.length > 0;
   const hasStreamContent = channelStreams.some(s => s.content);
 
-  const renderMsg = (msg: ChannelMessage) => {
+  const renderMsg = (msg: ChannelMessage, prev: ChannelMessage | null) => {
     const sender = members.find((m) => m.id === msg.senderId);
     const name = sender?.displayName ?? 'system';
     const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1758,6 +1758,14 @@ Always consider what happens when things go wrong.`,
         </Box>
       );
     }
+
+    // Turn-grouping: a claude-code dispatch with tool calls produces
+    // text → tool → text → tool → text, all stamped with the same
+    // metadata.turnId. Without grouping each block gets its own
+    // ● header + timestamp, making the agent look like it "wakes up
+    // fresh" after every tool. Hide the header on continuation
+    // messages so the whole turn reads as one bubble.
+    const isContinuation = isTurnContinuation(msg, prev);
 
     // Tool events — compact inline display with result tree
     if (msg.kind === 'tool_event') {
@@ -1793,11 +1801,14 @@ Always consider what happens when things go wrong.`,
         resultPreview = firstLine.length > 100 ? firstLine.slice(0, 97) + '...' : firstLine;
       }
 
+      // Continuation tool events inside a turn group skip the agent
+      // name — just show the ` │ content` row so the grouped bubble
+      // reads as "one header, then N indented rows".
       return (
         <Box key={msg.id} flexDirection="column" paddingLeft={1}>
           <Box gap={1}>
             <Text color={COLORS.muted}> {'\u2502'}</Text>
-            <Text color={toolColor}>{name}</Text>
+            {!isContinuation && <Text color={toolColor}>{name}</Text>}
             <Text color={COLORS.subtle}> {msg.content}</Text>
           </Box>
           {resultPreview && (
@@ -1814,12 +1825,14 @@ Always consider what happens when things go wrong.`,
     const isUser = sender?.type === 'user';
     const nameColor = isUser ? COLORS.user : agentColor(COLORS, sender?.rank);
     return (
-      <Box key={msg.id} flexDirection="column" marginBottom={1}>
-        <Box gap={1}>
-          <Text color={nameColor}>{'\u25CF'}</Text>
-          <Text bold color={nameColor}>{name}</Text>
-          <Text color={COLORS.muted}>{time}</Text>
-        </Box>
+      <Box key={msg.id} flexDirection="column" marginBottom={isContinuation ? 0 : 1}>
+        {!isContinuation && (
+          <Box gap={1}>
+            <Text color={nameColor}>{'\u25CF'}</Text>
+            <Text bold color={nameColor}>{name}</Text>
+            <Text color={COLORS.muted}>{time}</Text>
+          </Box>
+        )}
         <Box paddingLeft={2}>
           <Text wrap="wrap">{renderContent(msg.content, memberMap)}</Text>
         </Box>
@@ -1837,7 +1850,7 @@ Always consider what happens when things go wrong.`,
     <Box flexDirection="column" flexGrow={1}>
       {/* Messages — ScrollBox with sticky scroll replaces Ink's broken Static */}
       <ScrollBox stickyScroll flexGrow={1} flexDirection="column">
-        {messages.slice(-100).map((msg) => renderMsg(msg))}
+        {messages.slice(-100).map((msg, idx, arr) => renderMsg(msg, idx > 0 ? arr[idx - 1] ?? null : null))}
       </ScrollBox>
       {/* Streaming messages — each renders inline like a real message in the chat */}
       {channelStreams.filter(s => s.content).map(stream => {
