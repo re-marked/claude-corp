@@ -334,6 +334,7 @@ async function run() {
         all: !!values.all,
         force: !!values.force,
         dryRun: !!values['dry-run'],
+        corp: values.corp as string | undefined,
       });
       break;
     }

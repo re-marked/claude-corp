@@ -25,16 +25,28 @@ export async function cmdSend(opts: {
   }
 
   // --from is MANDATORY. Prevents misattribution.
-  // Agents calling cc-cli send without --from get a clear error
-  // teaching them to use cc-cli say instead.
+  // The error doubles as guidance — when an agent reaches for `cc-cli
+  // send` thinking it's how to "post in a channel", we have to redirect
+  // to the right primitive. The right primitive depends on what they're
+  // actually trying to do (talk in current channel vs. DM elsewhere),
+  // so we explain both rather than misdirecting to one.
   if (!opts.from) {
-    console.error('ERROR: --from is required.');
+    console.error('ERROR: --from is required. cc-cli send is founder-only.');
     console.error('');
     console.error('  cc-cli send --channel general --from founder --message "hello"');
     console.error('');
-    console.error('If you are an AGENT, do NOT use cc-cli send.');
-    console.error('Use cc-cli say instead — it handles attribution correctly:');
-    console.error('  cc-cli say --agent <target> --message "your message"');
+    console.error('If you are an AGENT, you almost certainly want one of:');
+    console.error('');
+    console.error('1. To talk in the channel you were @mentioned in:');
+    console.error('   Just respond. Your reply text IS the post — it streams');
+    console.error('   into the channel. To ping someone, write @their-slug in');
+    console.error('   your reply. NO cc-cli call needed.');
+    console.error('');
+    console.error('2. To DM another agent privately (different from current channel):');
+    console.error('   cc-cli say --agent <target> --message "your message"');
+    console.error('');
+    console.error('cc-cli send bypasses the streaming dispatch path and lands');
+    console.error('your message as a static blob — never use it as an agent.');
     process.exit(1);
   }
 

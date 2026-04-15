@@ -4,7 +4,26 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.16 — System agents go offline in claude-code corps (IN PROGRESS)
+## v2.1.17 — Teach agents that their reply IS the channel post (IN PROGRESS)
+
+Mark caught Failsafe stuck in a loop at 14:38 today: founder @mentioned Failsafe in #general asking it to ping Herald. Failsafe reached for `cc-cli send` (failed — needs `--from`), then `cc-cli say --agent herald` (DM to Herald, not what Mark wanted), then `cc-cli say` again after Mark explicitly said "post in general not DM". Eventually hung waiting on offline Herald.
+
+Root cause: agents don't know that **their reply text IS the channel post**. When the founder @mentions an agent in #general, the agent gets dispatched into #general with `channelId` set, and every text block the agent generates streams directly into that channel's JSONL via `onAssistantText`. There's nothing to "send" — the response IS the post.
+
+But agents see tool-heavy training, see `cc-cli` listed in TOOLS.md, and assume any communication action needs a tool call. With no rule clarifying otherwise, they reach for `cc-cli send` (which is prohibited because it bypasses the streaming dispatch path and lands as a static blob, killing the live channel feel) or `cc-cli say` (which is for DMs, wrong tool for "post in current channel"). Neither works for what Mark actually wants. The previous `send.ts` error message correctly told agents not to use `send`, but redirected them to `say` — which is also wrong for in-channel responses.
+
+Fix: new "Speaking in channels" section in `rules.ts` (loaded into AGENTS.md / system prompt). Three points:
+- Your reply text IS the channel post when you're dispatched there
+- `@mention` syntax inside your text triggers downstream routing — no tool call needed for "ping someone"
+- `cc-cli say` = DM to another agent (different channel from current); `cc-cli send` = founder-only
+
+Includes the exact Failsafe failure mode as a worked example so future agents recognize the pattern when their training pulls them toward a tool call.
+
+For Mark's existing `final-test-2` corp: `cc-cli refresh ceo` etc. (the v2.1.15 migration) picks this up without re-onboarding. New `cc-cli refresh failsafe` for Failsafe specifically — which is what hit the bug today.
+
+Also marked v2.1.16 as MERGED.
+
+## v2.1.16 — System agents go offline in claude-code corps (MERGED, PR #127)
 
 Mark hit this at 15:06: jacking into Failsafe in his claude-code corp errored "Agent Failsafe is not online" — even though Failsafe had responded to its heartbeat 30 minutes earlier. Same pattern affected Herald and the other system agents. Only the CEO stayed online.
 

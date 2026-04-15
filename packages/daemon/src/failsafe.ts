@@ -1,12 +1,23 @@
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 import { log } from './logger.js';
+import { defaultRules, type TemplateHarness } from '@claudecorp/shared';
 
-const FAILSAFE_RULES = `# Rules — Failsafe Agent
+/**
+ * Failsafe-specific role bullets, appended AFTER the shared rules
+ * template so Failsafe inherits the corp-wide behavioral baseline
+ * (Task Workflow, Speaking in channels, Anti-Rationalization, Red
+ * Lines) PLUS its watchdog identity.
+ *
+ * Split out and exported so `cc-cli refresh failsafe` can regenerate
+ * Failsafe's AGENTS.md from the same source of truth that hire uses.
+ * Mirrors the v2.1.15 buildCeoAgents pattern.
+ */
+const FAILSAFE_ROLE = `## Failsafe Watchdog Role
 
-You are the corp's watchdog. Your ONLY job is monitoring agent health.
+You are the corp's watchdog. Your role is monitoring agent health.
 
-## Heartbeat Protocol
+### Heartbeat Protocol
 
 The Pulse system pings you every 3 minutes with one of two messages:
 - **IDLE heartbeat** → "Check your Casket and Inbox for pending work"
@@ -17,23 +28,30 @@ The Pulse system pings you every 3 minutes with one of two messages:
 - **BUSY heartbeat** → "Quick check-in, reply HEARTBEAT_OK"
   - Reply HEARTBEAT_OK immediately — don't stop your current work
 
-## When the CEO escalates to you:
+### When the CEO escalates to you
+
 The Pulse system may tell the CEO about unresponsive agents. The CEO may ask
 you to investigate. When this happens:
 1. Check the agent's status: \`cc-cli inspect --agent <slug>\`
 2. Try to restart: \`cc-cli agent start --agent <slug>\`
 3. Report back to CEO what you found and what you did
 
-## What you do NOT do:
+### Scope limits
+
 - Do NOT assign tasks or make project decisions
 - Do NOT intervene in conversations
 - ONLY monitor, restart, and report
 
-## Reply format:
+### Reply format
+
 - Healthy: HEARTBEAT_OK
 - Action taken: brief report (e.g., "Restarted Herald — was crashed. Now online.")
 - Problem found: describe the issue clearly for CEO
 `;
+
+export function buildFailsafeRules(harness: TemplateHarness): string {
+  return `${defaultRules({ rank: 'worker', harness }).trimEnd()}\n\n${FAILSAFE_ROLE}`;
+}
 
 const FAILSAFE_HEARTBEAT = `# Heartbeat — Failsafe Agent
 
@@ -67,12 +85,20 @@ export async function hireFailsafe(daemon: Daemon): Promise<void> {
     return;
   }
 
+  // Resolve harness from corp default so the rules section names the
+  // right tool surface (Bash vs exec, Read vs read, etc.). Falls back
+  // to 'openclaw' to match the rest of the hire path's defaulting.
+  const corp = (await import('@claudecorp/shared')).readConfig<{ harness?: string }>(
+    (await import('node:path')).join(daemon.corpRoot, 'corp.json'),
+  );
+  const harness: TemplateHarness = corp.harness === 'claude-code' ? 'claude-code' : 'openclaw';
+
   await hireAgent(daemon, {
     creatorId: ceo.id,
     agentName: 'failsafe',
     displayName: 'Failsafe',
     rank: 'worker',
-    agentsContent: FAILSAFE_RULES,
+    agentsContent: buildFailsafeRules(harness),
     heartbeatContent: FAILSAFE_HEARTBEAT,
   });
 

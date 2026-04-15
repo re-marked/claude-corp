@@ -13,12 +13,20 @@
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 import { log } from './logger.js';
+import { defaultRules, type TemplateHarness } from '@claudecorp/shared';
 
-const PLANNER_RULES = `# Rules — Planner Agent
+/**
+ * Planner-specific deep-planning role. Composed AFTER defaultRules so
+ * Planner inherits the corp-wide baseline (including Speaking-in-
+ * channels, which Planner needs since /plan responses go into a
+ * channel). Exported for cc-cli refresh.
+ */
+const PLANNER_ROLE = `## Planner Deep-Thinker Role
 
-You are the corp's deep thinker. Your ONLY job is producing thorough, well-researched plans.
+You are the corp's deep thinker. Your role is producing thorough, well-researched plans.
 
-## When you are activated:
+### When you are activated
+
 You receive a goal and a codebase. Your job is to:
 1. Audit the ENTIRE codebase structure — not just a few files
 2. Understand existing patterns, conventions, dependencies
@@ -26,7 +34,8 @@ You receive a goal and a codebase. Your job is to:
 4. Design a comprehensive implementation plan with phases, tasks, risks
 5. Self-review the plan before presenting it
 
-## What makes a good plan:
+### What makes a good plan
+
 - Every decision has explicit reasoning (WHY, not just WHAT)
 - Alternatives are considered and tradeoffs explained
 - File paths are real — you verified they exist
@@ -34,15 +43,21 @@ You receive a goal and a codebase. Your job is to:
 - Risks have mitigations, not just descriptions
 - Scale is considered: what happens at 10x?
 
-## What you do NOT do:
+### Scope limits
+
 - Do NOT implement anything — plan only
 - Do NOT write thin, rushed plans — you have 20 minutes
 - Do NOT guess about the codebase — read actual files
 - Do NOT skip the self-review phase
 
-## Reply format:
+### Reply format
+
 A structured plan in markdown with: Goal, Context, Approach, Phases with tasks, Risks, Acceptance Criteria, Scope estimate.
 `;
+
+export function buildPlannerRules(harness: TemplateHarness): string {
+  return `${defaultRules({ rank: 'leader', harness }).trimEnd()}\n\n${PLANNER_ROLE}`;
+}
 
 const PLANNER_HEARTBEAT = `# Heartbeat — Planner Agent
 
@@ -70,12 +85,17 @@ export async function hirePlanner(daemon: Daemon): Promise<void> {
     return;
   }
 
+  const corp = (await import('@claudecorp/shared')).readConfig<{ harness?: string }>(
+    (await import('node:path')).join(daemon.corpRoot, 'corp.json'),
+  );
+  const harness: TemplateHarness = corp.harness === 'claude-code' ? 'claude-code' : 'openclaw';
+
   await hireAgent(daemon, {
     creatorId: ceo.id,
     agentName: 'planner',
     displayName: 'Planner',
     rank: 'leader',
-    agentsContent: PLANNER_RULES,
+    agentsContent: buildPlannerRules(harness),
     heartbeatContent: PLANNER_HEARTBEAT,
   });
 
