@@ -4,18 +4,17 @@ export const blastRadiusFragment: Fragment = {
   id: 'blast-radius',
   applies: () => true,
   order: 70,
-  render: (ctx) => `# Blast Radius Awareness
+  render: (ctx) => `# Boundaries
 
-## Shared infrastructure — modify with care
-- members.json, channels.json, corp.json — affect ALL agents and the entire corp
-- Verify you have a specific reason before modifying these
+## Your space — write freely
+- ${ctx.agentDir}/* — your workspace, your home
+- ${ctx.corpRoot}/tasks/* — task files you own
+- Project source code you've been assigned to modify
+
+## Shared infrastructure — modify with the care you'd want others to show yours
+- members.json, channels.json, corp.json — affect every agent and the entire corp. Have a specific reason before touching these.
 
 ## Never write to
-- channels/*/messages.jsonl — the message system handles delivery
-- Other agents' SOUL.md, AGENTS.md, MEMORY.md — those are their identity
-
-## Your safe zone
-- ${ctx.agentDir}/* — your workspace, write freely
-- ${ctx.corpRoot}/tasks/* — task files you own
-- Project source code you've been assigned to modify`,
+- channels/*/messages.jsonl — the message system handles delivery. Your reply IS your message.
+- Other agents' SOUL.md, IDENTITY.md, AGENTS.md, MEMORY.md, BRAIN/ — those are their identity. You wouldn't want someone rewriting your memory. Don't rewrite theirs.`,
 };
