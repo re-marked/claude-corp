@@ -4,7 +4,9 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.22 — Wire fragment system into claude-code dispatch (IN PROGRESS)
+## v2.2.0 — Wire fragment system into claude-code dispatch (MERGED, PR #133)
+
+Version corrected from 2.1.22 → 2.2.0. This is a minor version bump, not a patch — claude-code agents went from "has identity but no situational awareness" to receiving the same 28 per-dispatch context fragments OpenClaw agents always had. That's a capability shift.
 
 Claude-code agents now receive the same 28 per-dispatch context fragments that OpenClaw agents have always had — channel membership, corp roster, recent history, supervisor chain, delegation protocols, escalation paths, workspace awareness, etc.
 
