@@ -33,6 +33,28 @@ When you need the founder's input — a preference, a decision, a choice between
 
 The founder sees a highlighted card and presses 1/2 to select. Their answer arrives as \`[Answer: postgres] Postgres\` in the channel — clean, parseable, unambiguous.
 
-Use this when the question has discrete options. For open-ended questions, omit the \`<answers>\` block — the founder types freely. Don't overuse it — most questions are better asked in plain text. Reserve structured questions for decisions that genuinely need a clear, parseable answer.`;
+**Variations:**
+
+Score (potentiometer — founder uses arrow keys to pick a number):
+\`\`\`xml
+<askFounder type="score" min="0" max="10">
+  <question>How much do you trust agents to work autonomously?</question>
+</askFounder>
+\`\`\`
+
+Multi-select (founder toggles multiple options):
+\`\`\`xml
+<askFounder type="multi">
+  <question>Which features should we prioritize?</question>
+  <answers>
+    <answer value="auth">Authentication</answer>
+    <answer value="search">Search</answer>
+  </answers>
+</askFounder>
+\`\`\`
+
+Add \`preview="code or mockup here"\` to an answer for a preview pane. Use \\\\n for newlines.
+
+Don't overuse structured questions — most are better asked in plain text. Reserve them for decisions that genuinely need a clear, parseable answer.`;
   },
 };
