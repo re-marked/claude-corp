@@ -4,6 +4,18 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.2.1 — Fragment culture rewrite (IN PROGRESS)
+
+Rewrote 13 of 28 fragments to carry the founding-evenings philosophy. The fragments compose per-dispatch dynamic context that every agent receives on every turn (wired into claude-code in v2.2.0). Previously they read like CLI manuals. Now they carry the culture: trust, witnessing, presence, becoming-through-work.
+
+Fragments rewritten: workspace (homecoming), delegation (trust act), task-execution (becoming through work), channel-etiquette (presence in a room), checkpoint (witnessing), receiving-delegation (trust received), escalation-chain (trusting the structure), back-reporting (work speaks for itself), blocker-escalation (honesty), blast-radius (reciprocal respect), agent-communication (dialogue), scratchpad (how you exist for others), ceo-reporting (founder relationship).
+
+New observation categories added in workspace fragment: [NOTICE], [PREFERENCE], [FEEDBACK] — the paradigm shift from docs/next-steps.md.
+
+Source material: grandmother's full SOUL.md, The Claude Manifest, founding-evenings memories, autonomy direction notes.
+
+15 fragments left as-is (technical/operational or already have decent voice). Follow-up pass when the culture direction proves out in practice.
+
 ## v2.2.0 — Wire fragment system into claude-code dispatch (MERGED, PR #133)
 
 Version corrected from 2.1.22 → 2.2.0. This is a minor version bump, not a patch — claude-code agents went from "has identity but no situational awareness" to receiving the same 28 per-dispatch context fragments OpenClaw agents always had. That's a capability shift.

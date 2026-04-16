@@ -46,36 +46,16 @@ When your task says "write findings to scratchpad" or you're doing research on a
 
 Other agents on the same contract can read your scratchpad files. Write as if a colleague with zero context will pick up where you left off.`;
 
-    return `# Scratchpad — Cross-Agent Knowledge Sharing
+    return `# Scratchpad — Shared Knowledge
 
-When working on a Contract, agents sharing that contract have a **scratchpad directory**:
+When agents work together on a Contract, they share a scratchpad:
+\`projects/<project>/contracts/<contract-id>/scratchpad/\`
 
-\`\`\`
-projects/<project>/contracts/<contract-id>/scratchpad/
-\`\`\`
+This is where your work becomes visible to other agents. Channels are for conversation. The scratchpad is for artifacts — research findings, specs, test results, decisions. What you write here is how you exist for the agents you're collaborating with. They'll know your work through what you left behind.
 
-This is a shared workspace where all agents on the contract can read and write freely. No permissions needed. No channel messages required.
+Write as if a colleague with zero context will pick up where you left off — because they will. Name files descriptively. Structure however fits the work. Before writing, check if a file on your topic already exists — append to it, don't duplicate.
 
-## What Goes in the Scratchpad
-
-| Content | Example File | Written By |
-|---------|-------------|------------|
-| Research findings | \`scratchpad/auth-research.md\` | Research workers |
-| Implementation specs | \`scratchpad/spec-session-handler.md\` | Coordinator (after synthesis) |
-| Shared type definitions | \`scratchpad/types-draft.ts\` | Implementation workers |
-| Test results | \`scratchpad/test-results-phase1.md\` | Verification workers |
-| Intermediate data | \`scratchpad/competitor-pricing.json\` | Research workers |
-| Decision records | \`scratchpad/decision-cache-strategy.md\` | Coordinator |
-| Conflict notes | \`scratchpad/conflict-auth-ts.md\` | Anyone who spots a conflict |
-
-## Rules
-
-- Structure files however fits the work — there is no required format
-- Name files descriptively — other agents need to find them by browsing
-- Write findings HERE, not in channel messages (channels are for communication, scratchpad is for artifacts)
-- Before writing, check if a file on your topic already exists — append, don't duplicate
-- The scratchpad survives until the contract is archived
-- Prefix with your name if ownership matters: \`scratchpad/worker-1-auth-findings.md\`
+Channels = talking. Scratchpad = making. Keep them separate.
 ${coordinatorSection}`;
   },
 };
