@@ -4,7 +4,21 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.21 — Spinner clears when turn ends on tool call (IN PROGRESS)
+## v2.1.22 — Wire fragment system into claude-code dispatch (IN PROGRESS)
+
+Claude-code agents now receive the same 28 per-dispatch context fragments that OpenClaw agents have always had — channel membership, corp roster, recent history, supervisor chain, delegation protocols, escalation paths, workspace awareness, etc.
+
+Previously claude-code agents had identity (SOUL/IDENTITY/AGENTS/TOOLS via CLAUDE.md @imports) but zero situational awareness. They didn't know which channel they were in, who else was there, what was said recently, or who their supervisor was. The fragments add per-dispatch dynamic context that static template files can't provide.
+
+Wiring: import `composeSystemMessage`, call it with `opts.context` (which the router and /cc/say already build and pass), wrap in `<system-context>` tags and prepend to the message going to the claude subprocess stdin. Defensive: guarded by `opts.context?.channelName` (sparse contexts skip), wrapped in try/catch (fragment crash → log, never crash the dispatch).
+
+Known overlap: the workspace fragment instructs agents to "read SOUL.md, AGENTS.md..." which claude-code agents already have via @imports. Redundant tokens, not wrong. The upcoming fragment rewrite will clean this up — either skip for claude-code or rewrite to complement.
+
+This is the prerequisite for the fragment rewrite — no point rewriting content agents can't read.
+
+Also marked v2.1.21 as MERGED in STATUS.
+
+## v2.1.21 — Spinner clears when turn ends on tool call (MERGED, PR #132)
 
 Mark observed at 19:08: Herald hung the spinner ("Herald is reasoning...") after its turn ended on a USER.md edit. The daemon correctly emitted dispatch_end, but the TUI never let go of the `thinking` flag. Companion bug to v2.1.20 — same class (state cleanup miss) on a different transition.
 
