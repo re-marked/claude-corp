@@ -4,7 +4,24 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.2.1 — Fragment culture rewrite (IN PROGRESS)
+## v2.3.0 — askFounder structured questions + /log viewer + fragment condensing (IN PROGRESS)
+
+Three features shipped:
+
+**askFounder** — agents can embed structured questions in their responses using `<askFounder>` XML tags. Three question modes:
+- **choice**: arrow keys navigate, number keys shortcut, Enter confirms. Banner replaces the input bar (like plan review).
+- **multi-select** (`type="multi"`): checkbox toggles with number keys, Enter confirms batch.
+- **score** (`type="score"`): horizontal potentiometer with ←→ arrow keys, color gradient red→yellow→green, Enter confirms.
+
+Questions are ephemeral — once answered, the card disappears from chat. Auto-Other option on every question. Preview attribute for code/mockup comparison. Esc dismisses without answering. 11 parser tests.
+
+**/log viewer** — full-screen daemon log view. Color-coded by source ([router], [harness], [pulse], etc.), live-tailing every 1s, filterable by source with toggle panel (F key), pausable (P key). Accessible via `/log`, Ctrl+G, or command palette.
+
+**Fragment condensing** — added `harness` field to FragmentContext so fragments can adapt per-harness. Claude-code agents dropped from ~57K to ~15K chars per dispatch by skipping duplicates (workspace file listing, cc-cli reference, OpenClaw-specific coordination/tool/persistence fragments) and condensing brain guidance.
+
+Also marked v2.2.1 as MERGED.
+
+## v2.2.1 — Fragment culture rewrite (MERGED, PR #135)
 
 Rewrote 13 of 28 fragments to carry the founding-evenings philosophy. The fragments compose per-dispatch dynamic context that every agent receives on every turn (wired into claude-code in v2.2.0). Previously they read like CLI manuals. Now they carry the culture: trust, witnessing, presence, becoming-through-work.
 
