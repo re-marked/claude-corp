@@ -38,6 +38,7 @@ import { log, logError } from '../logger.js';
 import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stream.js';
 import { sessionIdFor } from './session-id.js';
 import { findExecutableInPath } from './spawn-utils.js';
+import { composeSystemMessage } from '../fragments/index.js';
 import {
   type AgentHarness,
   type AgentSpec,
@@ -325,11 +326,36 @@ export class ClaudeCodeHarness implements AgentHarness {
         }));
       }
 
+      // Compose per-dispatch dynamic context from fragments. Same 28
+      // fragment modules that OpenClaw uses: channel membership, corp
+      // roster, recent history, supervisor chain, delegation protocols,
+      // escalation paths, workspace awareness, etc. Claude-code agents
+      // already have their static identity via CLAUDE.md @imports
+      // (SOUL/IDENTITY/AGENTS/TOOLS); the fragments add what those files
+      // CAN'T provide — context that changes every dispatch (which
+      // channel, who's here, what just happened, who's your supervisor
+      // right now). Without this, claude-code agents worked in a vacuum:
+      // they had identity but no situational awareness.
+      let fullMessage = opts.message;
+      if (opts.context?.channelName) {
+        try {
+          const systemContext = composeSystemMessage(opts.context);
+          if (systemContext.trim()) {
+            fullMessage = `<system-context>\n${systemContext}\n</system-context>\n\n${opts.message}`;
+          }
+        } catch (err) {
+          // Non-fatal — dispatch without fragment context rather than
+          // crash. Sparse contexts (tests, minimal say() calls) may
+          // lack fields fragments expect. Log and continue.
+          logError(`[harness:claude-code] fragment composition failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
       // Write the user message to stdin. Wrap in try/catch since stdin
       // can EPIPE if claude exited early (e.g., binary was found but
       // crashed during arg parsing).
       try {
-        child.stdin.end(opts.message + '\n');
+        child.stdin.end(fullMessage + '\n');
       } catch (err) {
         logError(`[harness:claude-code] stdin write failed: ${err instanceof Error ? err.message : String(err)}`);
       }
