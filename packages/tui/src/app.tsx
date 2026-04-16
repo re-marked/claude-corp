@@ -290,8 +290,13 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       }
       return;
     }
-    // Ctrl+L — logs
+    // Ctrl+L — clocks
     if (key.ctrl && input === 'l') {
+      if (current?.type !== 'clock') navigate({ type: 'clock' });
+      return;
+    }
+    // Ctrl+G — logs
+    if (key.ctrl && input === 'g') {
       if (current?.type !== 'logs') navigate({ type: 'logs' });
       return;
     }
@@ -432,7 +437,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   if (!current) return null;
 
   // Hints for status bar
-  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-L:logs  C-D:ceo  Esc:back';
+  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-L:clocks  C-G:logs  C-D:ceo  Esc:back';
   const hints: Record<string, string> = {
     'chat': globalHints,
     'task-board': `Enter:detail  Tab:filter  ${globalHints}`,
