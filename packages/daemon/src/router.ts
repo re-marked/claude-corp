@@ -266,6 +266,8 @@ export class MessageRouter {
 
     if (targetIds.length === 0) return;
 
+    log(`[router] @mentions in msg ${msg.id}: ${targetIds.join(', ')} (from ${senderOrSystem.displayName})`);
+
     // ALL @mentions → immediate dispatch, regardless of sender type.
     // Previously agent→agent mentions were routed to the inbox to wait
     // for the next heartbeat (~3min latency), to prevent runaway loops
@@ -324,7 +326,7 @@ export class MessageRouter {
       const queue = this.dispatchQueue.get(targetId) ?? [];
       queue.push({ msg, channel, targetId, members, sender });
       this.dispatchQueue.set(targetId, queue);
-      log(`[router] ${agentProc.displayName} is busy — queued (${queue.length} waiting)`);
+      log(`[router] ${agentProc.displayName} busy — queued dispatch from ${sender.displayName} (${queue.length} waiting)`);
       return;
     }
 
@@ -398,6 +400,7 @@ export class MessageRouter {
       // started from zero. Channel-scoped (not agent-global) so the
       // agent's channel persona stays distinct from its DM thread.
       const routerSessionKey = `agent:${targetId}:channel-${channel.id}`;
+      log(`[router] DISPATCHING to ${target.displayName} for msg ${msg.id.slice(0,8)} from ${sender.displayName}`);
       const result = await this.daemon.harness.dispatch({
         agentId: agentProc.memberId,
         message: messageContent,
