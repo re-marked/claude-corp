@@ -23,7 +23,7 @@ import { HireWizard } from './hire-wizard.js';
 import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
 import { COLORS, agentColor } from '../theme.js';
-import { parseAskFounder, QuestionCard, type FounderQuestion } from '../components/ask-founder.js';
+import { parseAskFounder, QuestionBanner, type FounderQuestion } from '../components/ask-founder.js';
 import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
@@ -77,12 +77,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showHarnessModal, setShowHarnessModal] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
-  /** Track answered questions by message ID so we don't re-show them */
-  const [answeredQuestions, setAnsweredQuestions] = useState<Map<string, string>>(new Map());
-  /** Multi-select: currently toggled values per message ID */
-  const [multiSelections, setMultiSelections] = useState<Map<string, Set<string>>>(new Map());
-  /** Score: current slider position per message ID */
-  const [scorePositions, setScorePositions] = useState<Map<string, number>>(new Map());
+  /** Track answered questions by message ID — ephemeral: answered = removed from chat */
+  const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
+  /** Active question interaction state */
+  const [questionFocus, setQuestionFocus] = useState(0);
+  const [questionMulti, setQuestionMulti] = useState<Set<string>>(new Set());
+  const [questionScore, setQuestionScore] = useState(5);
   const [showAfkWizard, setShowAfkWizard] = useState(false);
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
 
@@ -226,6 +226,18 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
+  // Derive the pending (unanswered) question from recent messages
+  const pendingQuestion = useMemo(() => {
+    const recent = messages.slice(-50);
+    for (let i = recent.length - 1; i >= 0; i--) {
+      const m = recent[i]!;
+      if (answeredQuestions.has(m.id)) continue;
+      const { questions } = parseAskFounder(m.content ?? '', m.id);
+      if (questions.length > 0) return questions[0]!;
+    }
+    return null;
+  }, [messages, answeredQuestions]);
+
   // Track sleeping status for DM agents (autoemon)
   const [sleepInfo, setSleepInfo] = useState<{ sleepUntil: number; remainingMs: number; reason: string } | null>(null);
   const [slumberActive, setSlumberActive] = useState(false);
@@ -299,83 +311,91 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return; // Consume all input in plan review mode
     }
 
-    // askFounder — handle all question types
-    if (!sending) {
-      // Find the most recent unanswered question
-      const recentMsgs = messages.slice(-50);
-      let pendingQ: ReturnType<typeof parseAskFounder>['questions'][0] | null = null;
-      let pendingMsgId = '';
-      for (let i = recentMsgs.length - 1; i >= 0; i--) {
-        const m = recentMsgs[i]!;
-        if (answeredQuestions.has(m.id)) continue;
-        const { questions } = parseAskFounder(m.content ?? '', m.id);
-        if (questions.length === 0) continue;
-        pendingQ = questions[0]!;
-        pendingMsgId = m.id;
-        break;
+    // askFounder — when a question is pending, it owns ALL input
+    // (replaces the input bar, like planReview does)
+    if (pendingQuestion && !sending) {
+      const pq = pendingQuestion;
+      const totalOptions = pq.answers.length + 1; // +1 for "Other"
+
+      if (key.escape) {
+        // Dismiss without answering
+        setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+        return;
       }
 
-      if (pendingQ) {
-        // ── Score mode: arrow keys adjust, Enter confirms ──
-        if (pendingQ.type === 'score') {
-          const min = pendingQ.min ?? 0;
-          const max = pendingQ.max ?? 10;
-          const current = scorePositions.get(pendingMsgId) ?? Math.floor((min + max) / 2);
-
-          if (key.leftArrow) {
-            setScorePositions(prev => new Map(prev).set(pendingMsgId, Math.max(min, current - 1)));
-            return;
-          }
-          if (key.rightArrow) {
-            setScorePositions(prev => new Map(prev).set(pendingMsgId, Math.min(max, current + 1)));
-            return;
-          }
-          if (key.return) {
-            setAnsweredQuestions(prev => new Map(prev).set(pendingMsgId, String(current)));
-            handleSend(`[Answer: ${current}/${max}] ${pendingQ.question}: ${current}`);
-            return;
-          }
-        }
-
-        // ── Multi-select mode: number keys toggle, Enter confirms ──
-        if (pendingQ.type === 'multi') {
-          if (/^[1-9]$/.test(input)) {
-            const idx = parseInt(input) - 1;
-            if (idx >= 0 && idx < pendingQ.answers.length) {
-              const val = pendingQ.answers[idx]!.value;
-              setMultiSelections(prev => {
-                const next = new Map(prev);
-                const set = new Set(next.get(pendingMsgId) ?? []);
-                if (set.has(val)) set.delete(val); else set.add(val);
-                next.set(pendingMsgId, set);
-                return next;
-              });
-            }
-            return;
-          }
-          if (key.return) {
-            const selected = multiSelections.get(pendingMsgId);
-            if (selected && selected.size > 0) {
-              const values = [...selected];
-              const labels = values.map(v => pendingQ!.answers.find(a => a.value === v)?.label ?? v);
-              setAnsweredQuestions(prev => new Map(prev).set(pendingMsgId, values.join(',')));
-              handleSend(`[Answer: ${values.join(', ')}] ${labels.join(', ')}`);
-            }
-            return;
-          }
-        }
-
-        // ── Choice mode: number keys select immediately ──
-        if (pendingQ.type === 'choice' && /^[1-9]$/.test(input)) {
-          const idx = parseInt(input) - 1;
-          if (idx >= 0 && idx < pendingQ.answers.length) {
-            const answer = pendingQ.answers[idx]!;
-            setAnsweredQuestions(prev => new Map(prev).set(pendingMsgId, answer.value));
-            handleSend(`[Answer: ${answer.value}] ${answer.label}`);
-          }
+      // ── Score mode ──
+      if (pq.type === 'score') {
+        const min = pq.min ?? 0;
+        const max = pq.max ?? 10;
+        if (key.leftArrow) { setQuestionScore(s => Math.max(min, s - 1)); return; }
+        if (key.rightArrow) { setQuestionScore(s => Math.min(max, s + 1)); return; }
+        if (key.return) {
+          setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+          handleSend(`[Answer: ${questionScore}/${max}] ${pq.question}: ${questionScore}`);
           return;
         }
+        return; // Consume all other input in score mode
       }
+
+      // ── Arrow navigation (choice + multi) ──
+      if (key.upArrow) { setQuestionFocus(f => Math.max(0, f - 1)); return; }
+      if (key.downArrow) { setQuestionFocus(f => Math.min(totalOptions - 1, f + 1)); return; }
+
+      // ── Number key shortcuts ──
+      if (/^[0-9]$/.test(input)) {
+        const num = parseInt(input);
+        if (num === 0) {
+          // "Other" — dismiss the question, let founder type freely
+          setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+          return;
+        }
+        const idx = num - 1;
+        if (idx >= 0 && idx < pq.answers.length) {
+          if (pq.type === 'multi') {
+            // Toggle
+            const val = pq.answers[idx]!.value;
+            setQuestionMulti(prev => {
+              const next = new Set(prev);
+              if (next.has(val)) next.delete(val); else next.add(val);
+              return next;
+            });
+            setQuestionFocus(idx);
+          } else {
+            // Choice — select immediately
+            const answer = pq.answers[idx]!;
+            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            handleSend(`[Answer: ${answer.value}] ${answer.label}`);
+          }
+        }
+        return;
+      }
+
+      // ── Enter to confirm ──
+      if (key.return) {
+        if (pq.type === 'multi') {
+          if (questionMulti.size > 0) {
+            const values = [...questionMulti];
+            const labels = values.map(v => pq.answers.find(a => a.value === v)?.label ?? v);
+            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            handleSend(`[Answer: ${values.join(', ')}] ${labels.join(', ')}`);
+            setQuestionMulti(new Set());
+          }
+        } else {
+          // Choice — confirm focused option
+          if (questionFocus < pq.answers.length) {
+            const answer = pq.answers[questionFocus]!;
+            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            handleSend(`[Answer: ${answer.value}] ${answer.label}`);
+          } else {
+            // "Other" focused — dismiss, let founder type
+            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+          }
+        }
+        setQuestionFocus(0);
+        return;
+      }
+
+      return; // Consume all input when question is active
     }
 
     if (key.ctrl && input === 'm') {
@@ -1931,9 +1951,10 @@ Always consider what happens when things go wrong.`,
     const isUser = sender?.type === 'user';
     const nameColor = isUser ? COLORS.user : agentColor(COLORS, sender?.rank);
 
-    // Detect <askFounder> blocks in agent messages
-    const { cleanContent, questions } = parseAskFounder(msg.content ?? '', msg.id);
-    const hasQuestions = questions.length > 0;
+    // Strip <askFounder> tags from display — questions are ephemeral
+    // (shown as a banner replacing the input bar, not inline in chat)
+    const { cleanContent } = parseAskFounder(msg.content ?? '', msg.id);
+    const displayContent = cleanContent.trim() || msg.content;
 
     return (
       <Box key={msg.id} flexDirection="column" marginBottom={isContinuation ? 0 : 1}>
@@ -1944,24 +1965,9 @@ Always consider what happens when things go wrong.`,
             <Text color={COLORS.muted}>{time}</Text>
           </Box>
         )}
-        {cleanContent.trim() && (
-          <Box paddingLeft={2}>
-            <Text wrap="wrap">{renderContent(cleanContent, memberMap)}</Text>
-          </Box>
-        )}
-        {hasQuestions && questions.map((q, qi) => (
-          <Box key={`q-${qi}`} paddingLeft={2}>
-            <QuestionCard
-              question={q}
-              answered={answeredQuestions.has(q.messageId)}
-              selectedValue={answeredQuestions.get(q.messageId)}
-              selectedValues={multiSelections.get(q.messageId)}
-              scoreValue={answeredQuestions.has(q.messageId) ? parseInt(answeredQuestions.get(q.messageId)!) : undefined}
-              scoreFocused={scorePositions.get(q.messageId)}
-              active={!answeredQuestions.has(q.messageId)}
-            />
-          </Box>
-        ))}
+        <Box paddingLeft={2}>
+          <Text wrap="wrap">{renderContent(displayContent, memberMap)}</Text>
+        </Box>
         {replyCount > 0 && !activeThread && (
           <Box paddingLeft={2} marginTop={0}>
             <Text color={COLORS.info}>  {replyCount} {replyCount === 1 ? 'reply' : 'replies'}</Text>
@@ -2071,6 +2077,13 @@ Always consider what happens when things go wrong.`,
           </Box>
           <Text color={COLORS.info}> PLAN REVIEW  up/down:select  Enter:confirm  Esc:cancel</Text>
         </Box>
+      ) : pendingQuestion ? (
+        <QuestionBanner
+          question={pendingQuestion}
+          focusedIndex={questionFocus}
+          multiSelected={questionMulti}
+          scoreValue={questionScore}
+        />
       ) : (
         <>
           {/* Sleeping agent banner — shown in DMs when agent is in autoemon sleep */}
