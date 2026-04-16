@@ -415,9 +415,30 @@ export function createApi(daemon: Daemon): Server {
           writeGlobalConfig(persisted);
         } catch {}
 
-        // Update corp gateway
+        // Update corp gateway (OpenClaw agents)
         const gw = daemon.processManager.corpGateway;
         if (gw) gw.updateDefaultModel(model, provider);
+
+        // Propagate to ALL agents' config.json — without this,
+        // claude-code agents read their model from config.json at
+        // dispatch time and never see the new default. Setting a
+        // corp default should actually set the corp default.
+        try {
+          const allMembers = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
+          for (const m of allMembers) {
+            if (m.type !== 'agent' || !m.agentDir) continue;
+            const cfgPath = join(daemon.corpRoot, m.agentDir, 'config.json');
+            try {
+              const cfg = readConfig<Record<string, unknown>>(cfgPath);
+              cfg.model = model;
+              cfg.provider = provider;
+              writeConfig(cfgPath, cfg);
+            } catch {}
+          }
+          log(`[models] Propagated default model ${model} to all agents`);
+        } catch (err) {
+          logError(`[models] Failed to propagate default: ${err}`);
+        }
 
         // Broadcast event
         daemon.events.broadcast({ type: 'model_changed', agentName: null, model });
@@ -439,6 +460,23 @@ export function createApi(daemon: Daemon): Server {
 
         const gw = daemon.processManager.corpGateway;
         if (gw) gw.updateAgentModel(agentName, model, provider);
+
+        // Write to agent's config.json — claude-code agents read model
+        // from here at dispatch time, so the gateway update alone misses them.
+        try {
+          const allMembers = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
+          const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+          const member = allMembers.find((m: any) =>
+            m.type === 'agent' && (normalize(m.displayName) === normalize(agentName) || m.id === agentName),
+          );
+          if (member?.agentDir) {
+            const cfgPath = join(daemon.corpRoot, member.agentDir, 'config.json');
+            const cfg = readConfig<Record<string, unknown>>(cfgPath);
+            cfg.model = model;
+            cfg.provider = provider;
+            writeConfig(cfgPath, cfg);
+          }
+        } catch {}
 
         daemon.events.broadcast({ type: 'model_changed', agentName, model });
 
