@@ -79,6 +79,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showTeamWizard, setShowTeamWizard] = useState(false);
   /** Track answered questions by message ID so we don't re-show them */
   const [answeredQuestions, setAnsweredQuestions] = useState<Map<string, string>>(new Map());
+  /** Multi-select: currently toggled values per message ID */
+  const [multiSelections, setMultiSelections] = useState<Map<string, Set<string>>>(new Map());
+  /** Score: current slider position per message ID */
+  const [scorePositions, setScorePositions] = useState<Map<string, number>>(new Map());
   const [showAfkWizard, setShowAfkWizard] = useState(false);
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
 
@@ -295,24 +299,82 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return; // Consume all input in plan review mode
     }
 
-    // askFounder — number keys answer the most recent unanswered question
-    if (/^[1-9]$/.test(input) && !sending) {
-      // Find the most recent message with an unanswered <askFounder>
+    // askFounder — handle all question types
+    if (!sending) {
+      // Find the most recent unanswered question
       const recentMsgs = messages.slice(-50);
+      let pendingQ: ReturnType<typeof parseAskFounder>['questions'][0] | null = null;
+      let pendingMsgId = '';
       for (let i = recentMsgs.length - 1; i >= 0; i--) {
         const m = recentMsgs[i]!;
         if (answeredQuestions.has(m.id)) continue;
         const { questions } = parseAskFounder(m.content ?? '', m.id);
         if (questions.length === 0) continue;
-        const q = questions[0]!; // First question in the message
-        const idx = parseInt(input) - 1;
-        if (idx >= 0 && idx < q.answers.length) {
-          const answer = q.answers[idx]!;
-          setAnsweredQuestions(prev => new Map(prev).set(m.id, answer.value));
-          // Send the answer as a channel message
-          handleSend(`[Answer: ${answer.value}] ${answer.label}`);
-        }
+        pendingQ = questions[0]!;
+        pendingMsgId = m.id;
         break;
+      }
+
+      if (pendingQ) {
+        // ── Score mode: arrow keys adjust, Enter confirms ──
+        if (pendingQ.type === 'score') {
+          const min = pendingQ.min ?? 0;
+          const max = pendingQ.max ?? 10;
+          const current = scorePositions.get(pendingMsgId) ?? Math.floor((min + max) / 2);
+
+          if (key.leftArrow) {
+            setScorePositions(prev => new Map(prev).set(pendingMsgId, Math.max(min, current - 1)));
+            return;
+          }
+          if (key.rightArrow) {
+            setScorePositions(prev => new Map(prev).set(pendingMsgId, Math.min(max, current + 1)));
+            return;
+          }
+          if (key.return) {
+            setAnsweredQuestions(prev => new Map(prev).set(pendingMsgId, String(current)));
+            handleSend(`[Answer: ${current}/${max}] ${pendingQ.question}: ${current}`);
+            return;
+          }
+        }
+
+        // ── Multi-select mode: number keys toggle, Enter confirms ──
+        if (pendingQ.type === 'multi') {
+          if (/^[1-9]$/.test(input)) {
+            const idx = parseInt(input) - 1;
+            if (idx >= 0 && idx < pendingQ.answers.length) {
+              const val = pendingQ.answers[idx]!.value;
+              setMultiSelections(prev => {
+                const next = new Map(prev);
+                const set = new Set(next.get(pendingMsgId) ?? []);
+                if (set.has(val)) set.delete(val); else set.add(val);
+                next.set(pendingMsgId, set);
+                return next;
+              });
+            }
+            return;
+          }
+          if (key.return) {
+            const selected = multiSelections.get(pendingMsgId);
+            if (selected && selected.size > 0) {
+              const values = [...selected];
+              const labels = values.map(v => pendingQ!.answers.find(a => a.value === v)?.label ?? v);
+              setAnsweredQuestions(prev => new Map(prev).set(pendingMsgId, values.join(',')));
+              handleSend(`[Answer: ${values.join(', ')}] ${labels.join(', ')}`);
+            }
+            return;
+          }
+        }
+
+        // ── Choice mode: number keys select immediately ──
+        if (pendingQ.type === 'choice' && /^[1-9]$/.test(input)) {
+          const idx = parseInt(input) - 1;
+          if (idx >= 0 && idx < pendingQ.answers.length) {
+            const answer = pendingQ.answers[idx]!;
+            setAnsweredQuestions(prev => new Map(prev).set(pendingMsgId, answer.value));
+            handleSend(`[Answer: ${answer.value}] ${answer.label}`);
+          }
+          return;
+        }
       }
     }
 
@@ -1893,6 +1955,10 @@ Always consider what happens when things go wrong.`,
               question={q}
               answered={answeredQuestions.has(q.messageId)}
               selectedValue={answeredQuestions.get(q.messageId)}
+              selectedValues={multiSelections.get(q.messageId)}
+              scoreValue={answeredQuestions.has(q.messageId) ? parseInt(answeredQuestions.get(q.messageId)!) : undefined}
+              scoreFocused={scorePositions.get(q.messageId)}
+              active={!answeredQuestions.has(q.messageId)}
             />
           </Box>
         ))}
