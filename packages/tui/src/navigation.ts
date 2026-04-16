@@ -6,7 +6,8 @@ export type View =
   | { type: 'hierarchy' }
   | { type: 'corp-home' }
   | { type: 'time-machine' }
-  | { type: 'clock' };
+  | { type: 'clock' }
+  | { type: 'logs' };
 
 export class ViewStack {
   private stack: View[] = [];
@@ -52,6 +53,7 @@ export class ViewStack {
         case 'corp-home': return 'Home';
         case 'time-machine': return 'Time Machine';
         case 'clock': return 'Clocks';
+        case 'logs': return 'Logs';
       }
     });
   }

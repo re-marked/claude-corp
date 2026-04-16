@@ -947,7 +947,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         '  /weather           Show current weather for London',
         '  /ping              Test command (responds with pong!)',
         '  /uptime            Show daemon uptime and message count',
-        '  /logs              Show recent daemon logs',
+        '  /log, /logs        Open daemon log viewer (full-screen, filterable)',
         '  /tm                Open Time Machine (rewind/forward any snapshot)',
         '  /theme [name]      Switch color palette (coral|lavender|indigo|rose|mono)',
         '',
@@ -1129,22 +1129,6 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return;
     }
 
-    // /logs — show recent daemon logs
-    if (cmd === '/logs') {
-      try {
-        const { readFileSync, existsSync } = await import('node:fs');
-        const { DAEMON_LOG_PATH } = await import('@claudecorp/shared');
-        if (existsSync(DAEMON_LOG_PATH)) {
-          const content = readFileSync(DAEMON_LOG_PATH, 'utf-8');
-          const lines = content.trim().split('\n').slice(-30);
-          writeSystemMessage('--- Recent Daemon Logs ---\n' + lines.join('\n'));
-        } else {
-          writeSystemMessage('No daemon logs found.');
-        }
-      } catch {}
-      return;
-    }
-
     // /channels — list all channels
     if (cmd === '/channels' || cmd === '/ch') {
       try {
@@ -1180,6 +1164,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     }
     if (cmd === '/clock' || cmd === '/clocks') {
       setTimeout(() => onNavigate?.({ type: 'clock' }), 10);
+      return;
+    }
+    if (cmd === '/log' || cmd === '/logs') {
+      setTimeout(() => onNavigate?.({ type: 'logs' }), 10);
       return;
     }
 

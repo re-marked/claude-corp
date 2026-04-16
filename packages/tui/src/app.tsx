@@ -23,6 +23,7 @@ import { TaskDetail } from './views/task-detail.js';
 import { CorpHome } from './views/corp-home.js';
 import { TimeMachine } from './views/time-machine.js';
 import { ClockView } from './views/clock.js';
+import { LogViewer } from './views/log-viewer.js';
 import { StatusBar } from './components/status-bar.js';
 import { DaemonClient } from './lib/daemon-client.js';
 import { useDaemonEvents } from './hooks/use-daemon-events.js';
@@ -289,9 +290,9 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       }
       return;
     }
-    // Ctrl+L — clocks
+    // Ctrl+L — logs
     if (key.ctrl && input === 'l') {
-      if (current?.type !== 'clock') navigate({ type: 'clock' });
+      if (current?.type !== 'logs') navigate({ type: 'logs' });
       return;
     }
     // Escape — go back
@@ -431,7 +432,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   if (!current) return null;
 
   // Hints for status bar
-  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-L:clocks  C-D:ceo  Esc:back';
+  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-L:logs  C-D:ceo  Esc:back';
   const hints: Record<string, string> = {
     'chat': globalHints,
     'task-board': `Enter:detail  Tab:filter  ${globalHints}`,
@@ -440,6 +441,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
     'task-detail': globalHints,
     'corp-home': `Enter:open  ${globalHints}`,
     'clock': `P:pause/resume  ${globalHints}`,
+    'logs': `F:filter  P:pause  C:clear-filter  ${globalHints}`,
     'time-machine': 'Enter:rewind  F:forward  R:refresh  Esc:back',
   };
 
@@ -517,6 +519,12 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       case 'clock':
         return (
           <ClockView
+            onBack={goBack}
+          />
+        );
+      case 'logs':
+        return (
+          <LogViewer
             onBack={goBack}
           />
         );
