@@ -484,13 +484,31 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
-      // DELETE /models/agent/:name — clear per-agent override
+      // DELETE /models/agent/:name — clear per-agent override → revert to corp default
       if (method === 'DELETE' && modelAgentMatch) {
         const agentName = decodeURIComponent(modelAgentMatch[1]!);
         const gw = daemon.processManager.corpGateway;
         if (gw) gw.updateAgentModel(agentName, null);
 
-        daemon.events.broadcast({ type: 'model_changed', agentName, model: daemon.globalConfig.defaults.model });
+        // Reset config.json to corp default so claude-code agents pick it up
+        const defaultModel = daemon.globalConfig.defaults.model;
+        const defaultProvider = daemon.globalConfig.defaults.provider;
+        try {
+          const allMembers = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
+          const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+          const member = allMembers.find((m: any) =>
+            m.type === 'agent' && (normalize(m.displayName) === normalize(agentName) || m.id === agentName),
+          );
+          if (member?.agentDir) {
+            const cfgPath = join(daemon.corpRoot, member.agentDir, 'config.json');
+            const cfg = readConfig<Record<string, unknown>>(cfgPath);
+            cfg.model = defaultModel;
+            cfg.provider = defaultProvider;
+            writeConfig(cfgPath, cfg);
+          }
+        } catch {}
+
+        daemon.events.broadcast({ type: 'model_changed', agentName, model: defaultModel });
 
         json(res, { ok: true, agentName, model: 'default' });
         return;
