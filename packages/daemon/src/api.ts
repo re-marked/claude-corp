@@ -597,6 +597,7 @@ export function createApi(daemon: Daemon): Server {
           channelKind: 'direct' as const,
           supervisorName,
           autoemonEnrolled: daemon.autoemon.isEnrolled(target.id),
+          harness: (agentProc.mode === 'harness' ? 'claude-code' : 'openclaw') as 'openclaw' | 'claude-code',
         };
 
         // Set target busy

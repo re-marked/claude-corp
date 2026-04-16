@@ -14,6 +14,8 @@ export interface FragmentContext {
   supervisorName: string | null;
   /** Whether this agent is enrolled in autoemon (autonomous tick mode) */
   autoemonEnrolled?: boolean;
+  /** Harness executing this agent — fragments can skip content that's already in the system prompt for a given harness */
+  harness?: 'openclaw' | 'claude-code';
 }
 
 export type FragmentFn = (ctx: FragmentContext) => string;

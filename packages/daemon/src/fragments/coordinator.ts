@@ -13,7 +13,9 @@ import type { Fragment } from './types.js';
 
 export const coordinatorFragment: Fragment = {
   id: 'coordinator',
-  applies: (ctx) => ctx.agentRank === 'master' || ctx.agentRank === 'leader',
+  // OpenClaw-specific coordination mode — claude-code agents handle
+  // coordination through their own tool system (Task/Agent/subagent).
+  applies: (ctx) => (ctx.agentRank === 'master' || ctx.agentRank === 'leader') && ctx.harness !== 'claude-code',
   order: 15, // High priority — before delegation fragment
   render: (ctx) => `# Coordinator Mode
 

@@ -21,8 +21,8 @@ import {
 
 export const brainFragment: Fragment = {
   id: 'brain',
-  applies: () => true, // Every agent has a BRAIN
-  order: 14, // After context-persistence (13), before cc-cli (15)
+  applies: () => true,
+  order: 14,
   render: (ctx) => {
     const brainDir = getBrainDir(ctx.agentDir);
     const hasBrain = existsSync(brainDir);
@@ -34,15 +34,27 @@ export const brainFragment: Fragment = {
       const staleFiles = findStaleFiles(ctx.agentDir, STALENESS_THRESHOLD_DAYS);
 
       if (files.length === 0) {
-        stateSection = `\n## Current State\nYour BRAIN/ is empty. As you work and learn, write important discoveries here. Dreams will also consolidate observations into BRAIN/ over time.`;
+        stateSection = `\n**State:** BRAIN/ is empty. Write discoveries here as you work.`;
       } else {
         const staleWarning = staleFiles.length > 0
-          ? `\n\n**Stale memories (not validated in ${STALENESS_THRESHOLD_DAYS}+ days):** ${staleFiles.map(f => f.name).join(', ')}. Re-read these and either validate or delete them.`
+          ? ` **Stale (${STALENESS_THRESHOLD_DAYS}+ days):** ${staleFiles.map(f => f.name).join(', ')}.`
           : '';
-        stateSection = `\n## Current State\n${files.length} memory file${files.length === 1 ? '' : 's'} in BRAIN/.${staleWarning}`;
+        stateSection = `\n**State:** ${files.length} file${files.length === 1 ? '' : 's'} in BRAIN/.${staleWarning}`;
       }
     } else {
-      stateSection = `\n## Current State\nNo BRAIN/ directory yet. It will be created when you write your first memory or when dreams first consolidate.`;
+      stateSection = `\n**State:** No BRAIN/ yet — created on first write or first dream.`;
+    }
+
+    // Claude-code agents get SOUL.md (which covers the philosophy of
+    // BRAIN as identity) + MEMORY.md (the index). Just give them the
+    // practical schema + dynamic state, skip the full explanation.
+    if (ctx.harness === 'claude-code') {
+      return `## BRAIN/ — Live State
+
+MEMORY.md indexes your BRAIN/ files. Write to BRAIN/ when: founder tells you something important (\`type: founder-preference\`), you get corrected (\`type: correction\`), you discover a critical fact (\`type: technical\`), you make a decision worth preserving (\`type: decision\`).
+
+Frontmatter: \`type\` + \`tags\` + \`source\` + \`confidence\` + \`created/updated/last_validated\`. Use \`[[wikilinks]]\` to cross-reference. Delete wrong memories, don't supersede.
+${stateSection}`;
     }
 
     return `## B.R.A.I.N. — Your Long-Term Memory

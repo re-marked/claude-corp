@@ -18,8 +18,8 @@ import type { Fragment } from './types.js';
 
 export const contextPersistenceFragment: Fragment = {
   id: 'context-persistence',
-  applies: () => true,
-  order: 13, // Right after tool-result-management
+  applies: (ctx) => ctx.harness !== 'claude-code', // OpenClaw session persistence — claude-code handles natively
+  order: 13,
   render: () => `# Context Persistence
 
 Your session may be compacted at any time. When this happens, your conversation history is summarized and older messages are removed. You won't know it happened — you'll just have less context.

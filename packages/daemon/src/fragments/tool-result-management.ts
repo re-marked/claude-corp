@@ -17,8 +17,8 @@ import type { Fragment } from './types.js';
 
 export const toolResultManagementFragment: Fragment = {
   id: 'tool-result-management',
-  applies: () => true,
-  order: 12, // Early — before task execution, after workspace
+  applies: (ctx) => ctx.harness !== 'claude-code', // OpenClaw tool formatting — claude-code has its own
+  order: 12,
   render: () => `# Tool Result Management
 
 ## Results Are Ephemeral

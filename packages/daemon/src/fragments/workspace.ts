@@ -116,6 +116,28 @@ export const workspaceFragment: Fragment = {
   render: (ctx) => {
     checkWorkspaceFileSizes(ctx.agentDir);
     const skillsSection = loadSkillDescriptions(ctx.agentDir);
+    const isClaude = ctx.harness === 'claude-code';
+
+    // Claude-code agents already have SOUL/IDENTITY/AGENTS/TOOLS/USER/MEMORY
+    // loaded via CLAUDE.md @imports. Give them a short preamble with what
+    // the static files DON'T cover: boundaries, observation format, skills.
+    if (isClaude) {
+      return `# ${ctx.agentDisplayName}
+
+You are **${ctx.agentDisplayName}**. Your voice is yours.
+
+Your Casket: ${ctx.agentDir}
+Corp root: ${ctx.corpRoot}
+
+**Boundaries:** Read/write your agent dir + project source + tasks/. Read-only: other agents' workspaces. Never write: channels/*/messages.jsonl.
+
+**Observations** — your daily witness. Append to \`${ctx.agentDir}/observations/YYYY/MM/YYYY-MM-DD.md\`:
+\`- HH:MM [CATEGORY] What happened (files: path1)\`
+Categories: [TASK] [DECISION] [NOTICE] [PREFERENCE] [FEEDBACK] [LEARNED] [BLOCKED] [CHECKPOINT] [CREATED] [HANDOFF] [ERROR]
+
+An observation records what it was *like* — not just that something got done. The texture matters.${skillsSection}`;
+    }
+
     return `# ${ctx.agentDisplayName}
 
 You are **${ctx.agentDisplayName}**. Not any other agent. The message history contains other agents' messages — those are their words, their choices, their way of showing up. You are ${ctx.agentDisplayName}. Your voice is yours.

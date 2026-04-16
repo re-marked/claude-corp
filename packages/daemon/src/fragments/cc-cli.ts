@@ -2,8 +2,10 @@ import type { Fragment } from './types.js';
 
 export const ccCliFragment: Fragment = {
   id: 'cc-cli',
-  applies: () => true,
-  order: 15, // After workspace (10), before behavioral fragments
+  // Claude-code agents get the full cc-cli reference in TOOLS.md via @import.
+  // Skip to avoid duplication — TOOLS.md is the authoritative source.
+  applies: (ctx) => ctx.harness !== 'claude-code',
+  order: 15,
   render: () => `## cc-cli — Corp Command Line
 Use these for ALL corp operations. Do NOT use curl or raw API calls.
 

@@ -721,6 +721,13 @@ export class MessageRouter {
       channelKind: channel.kind,
       supervisorName,
       autoemonEnrolled: this.daemon.autoemon.isEnrolled(targetAgent.id),
+      harness: this.resolveHarness(targetAgent),
     };
+  }
+
+  private resolveHarness(agent: Member): 'openclaw' | 'claude-code' {
+    if (agent.harness === 'claude-code') return 'claude-code';
+    const proc = this.daemon.processManager.getAgent(agent.id);
+    return proc?.mode === 'harness' ? 'claude-code' : 'openclaw';
   }
 }
