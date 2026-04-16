@@ -317,9 +317,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       const pq = pendingQuestion;
       const totalOptions = pq.answers.length + 1; // +1 for "Other"
 
-      if (key.escape) {
-        // Dismiss without answering
+      // 'd' dismisses the question without answering.
+      // Esc is NOT used here — it stays as global back-navigation
+      // so Mark can always Esc out of any view consistently.
+      if (input === 'd') {
         setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+        setQuestionFocus(0);
         return;
       }
 
@@ -1952,22 +1955,30 @@ Always consider what happens when things go wrong.`,
     const nameColor = isUser ? COLORS.user : agentColor(COLORS, sender?.rank);
 
     // Strip <askFounder> tags from display — questions are ephemeral
-    // (shown as a banner replacing the input bar, not inline in chat)
-    const { cleanContent } = parseAskFounder(msg.content ?? '', msg.id);
-    const displayContent = cleanContent.trim() || msg.content;
+    // (shown as a banner replacing the input bar, not inline in chat).
+    // If the message is ONLY an askFounder tag, displayContent is empty
+    // and we skip rendering the text box entirely (no raw XML leak).
+    const { cleanContent, questions: msgQuestions } = parseAskFounder(msg.content ?? '', msg.id);
+    const displayContent = cleanContent.trim();
+    const isQuestionOnly = !displayContent && msgQuestions.length > 0;
+
+    // If the message is ONLY a question tag AND it's been answered, hide entirely
+    if (isQuestionOnly && answeredQuestions.has(msg.id)) return null;
 
     return (
       <Box key={msg.id} flexDirection="column" marginBottom={isContinuation ? 0 : 1}>
-        {!isContinuation && (
+        {!isContinuation && !isQuestionOnly && (
           <Box gap={1}>
             <Text color={nameColor}>{'\u25CF'}</Text>
             <Text bold color={nameColor}>{name}</Text>
             <Text color={COLORS.muted}>{time}</Text>
           </Box>
         )}
-        <Box paddingLeft={2}>
-          <Text wrap="wrap">{renderContent(displayContent, memberMap)}</Text>
-        </Box>
+        {displayContent && (
+          <Box paddingLeft={2}>
+            <Text wrap="wrap">{renderContent(displayContent, memberMap)}</Text>
+          </Box>
+        )}
         {replyCount > 0 && !activeThread && (
           <Box paddingLeft={2} marginTop={0}>
             <Text color={COLORS.info}>  {replyCount} {replyCount === 1 ? 'reply' : 'replies'}</Text>

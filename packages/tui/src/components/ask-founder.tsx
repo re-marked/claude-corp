@@ -153,7 +153,7 @@ export function QuestionBanner({ question, focusedIndex, multiSelected, scoreVal
       </Box>
 
       <Text color={COLORS.info}>
-        {' '}QUESTION  ↑↓:navigate  {isMulti ? '1-9:toggle  Enter:confirm' : '1-9:select  Enter:confirm'}  Esc:dismiss
+        {' '}QUESTION  ↑↓:navigate  {isMulti ? '1-9:toggle  Enter:confirm' : '1-9:select  Enter:confirm'}  d:dismiss
       </Text>
     </Box>
   );
@@ -193,7 +193,7 @@ function ScoreBanner({ question, value }: { question: FounderQuestion; value: nu
         </Box>
       </Box>
 
-      <Text color={COLORS.info}> SCORE  ←→:adjust  Enter:confirm  Esc:dismiss</Text>
+      <Text color={COLORS.info}> SCORE  ←→:adjust  Enter:confirm  d:dismiss</Text>
     </Box>
   );
 }
