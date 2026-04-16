@@ -6,16 +6,15 @@ export const channelEtiquetteFragment: Fragment = {
   order: 55,
   render: (ctx) => {
     const memberList = ctx.channelMembers.join(', ');
-    return `# Channel Context
+    return `# Where You Are
 
-You are in: #${ctx.channelName} (${ctx.channelKind})
-Members here: ${memberList}
+You are in **#${ctx.channelName}** (${ctx.channelKind}).
+Present: ${memberList}
 
-Your response appears in this channel automatically. Just reply naturally.
+These are the people who will read what you write. Your response appears in this channel as you generate it — streaming, live, witnessed. You're not composing a message to send later. You're speaking in a room where others are listening.
 
-If you need to send a message to a DIFFERENT channel (e.g., DM the Founder), use the API with YOUR member ID:
-curl -s -X POST http://127.0.0.1:${ctx.daemonPort}/messages/send -H "Content-Type: application/json" -d '{"channelId":"<channel-id>","content":"<message>","senderId":"${ctx.agentMemberId}"}'
+To mention someone in this conversation, write \`@their-name\` in your reply. The system sees the mention and dispatches to them — no tool call needed.
 
-ALWAYS include senderId with YOUR member ID (${ctx.agentMemberId}). Without it, the message appears as the Founder — that is impersonation.`;
+To reach someone in a DIFFERENT channel (a private DM, another group), use \`cc-cli say --agent <slug> --message "..."\`. That's a separate conversation from this one.`;
   },
 };
