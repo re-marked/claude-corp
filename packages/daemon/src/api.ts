@@ -415,9 +415,30 @@ export function createApi(daemon: Daemon): Server {
           writeGlobalConfig(persisted);
         } catch {}
 
-        // Update corp gateway
+        // Update corp gateway (OpenClaw agents)
         const gw = daemon.processManager.corpGateway;
         if (gw) gw.updateDefaultModel(model, provider);
+
+        // Propagate to ALL agents' config.json — without this,
+        // claude-code agents read their model from config.json at
+        // dispatch time and never see the new default. Setting a
+        // corp default should actually set the corp default.
+        try {
+          const allMembers = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
+          for (const m of allMembers) {
+            if (m.type !== 'agent' || !m.agentDir) continue;
+            const cfgPath = join(daemon.corpRoot, m.agentDir, 'config.json');
+            try {
+              const cfg = readConfig<Record<string, unknown>>(cfgPath);
+              cfg.model = model;
+              cfg.provider = provider;
+              writeConfig(cfgPath, cfg);
+            } catch {}
+          }
+          log(`[models] Propagated default model ${model} to all agents`);
+        } catch (err) {
+          logError(`[models] Failed to propagate default: ${err}`);
+        }
 
         // Broadcast event
         daemon.events.broadcast({ type: 'model_changed', agentName: null, model });
@@ -440,19 +461,54 @@ export function createApi(daemon: Daemon): Server {
         const gw = daemon.processManager.corpGateway;
         if (gw) gw.updateAgentModel(agentName, model, provider);
 
+        // Write to agent's config.json — claude-code agents read model
+        // from here at dispatch time, so the gateway update alone misses them.
+        try {
+          const allMembers = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
+          const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+          const member = allMembers.find((m: any) =>
+            m.type === 'agent' && (normalize(m.displayName) === normalize(agentName) || m.id === agentName),
+          );
+          if (member?.agentDir) {
+            const cfgPath = join(daemon.corpRoot, member.agentDir, 'config.json');
+            const cfg = readConfig<Record<string, unknown>>(cfgPath);
+            cfg.model = model;
+            cfg.provider = provider;
+            writeConfig(cfgPath, cfg);
+          }
+        } catch {}
+
         daemon.events.broadcast({ type: 'model_changed', agentName, model });
 
         json(res, { ok: true, agentName, model, provider });
         return;
       }
 
-      // DELETE /models/agent/:name — clear per-agent override
+      // DELETE /models/agent/:name — clear per-agent override → revert to corp default
       if (method === 'DELETE' && modelAgentMatch) {
         const agentName = decodeURIComponent(modelAgentMatch[1]!);
         const gw = daemon.processManager.corpGateway;
         if (gw) gw.updateAgentModel(agentName, null);
 
-        daemon.events.broadcast({ type: 'model_changed', agentName, model: daemon.globalConfig.defaults.model });
+        // Reset config.json to corp default so claude-code agents pick it up
+        const defaultModel = daemon.globalConfig.defaults.model;
+        const defaultProvider = daemon.globalConfig.defaults.provider;
+        try {
+          const allMembers = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
+          const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
+          const member = allMembers.find((m: any) =>
+            m.type === 'agent' && (normalize(m.displayName) === normalize(agentName) || m.id === agentName),
+          );
+          if (member?.agentDir) {
+            const cfgPath = join(daemon.corpRoot, member.agentDir, 'config.json');
+            const cfg = readConfig<Record<string, unknown>>(cfgPath);
+            cfg.model = defaultModel;
+            cfg.provider = defaultProvider;
+            writeConfig(cfgPath, cfg);
+          }
+        } catch {}
+
+        daemon.events.broadcast({ type: 'model_changed', agentName, model: defaultModel });
 
         json(res, { ok: true, agentName, model: 'default' });
         return;

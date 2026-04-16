@@ -165,18 +165,42 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   // responds with "@Failsafe ...", router dispatches Failsafe, but
   // the spinner still says "CEO is mulling..." because thinkingAgents
   // outranks dispatchingAgents in the render predicate.
+  //
+  // Bell only on text (don't ding for every tool call), but state
+  // cleanup runs for tool_event too — when an agent's turn ENDS on a
+  // tool call (e.g., final action was an Edit) the last message in
+  // the channel is a tool_event, not text. Without clearing on
+  // tool_event, `thinking` stays true forever and the spinner hangs.
   useEffect(() => {
     if (messages.length > lastMsgCount.current) {
       const newMsg = messages[messages.length - 1];
       const founder = members.find((m) => m.rank === 'owner');
-      if (newMsg && founder && newMsg.senderId !== founder.id && newMsg.kind === 'text') {
+      const isFromAgent = newMsg && founder && newMsg.senderId !== founder.id;
+      const isAgentText = isFromAgent && newMsg.kind === 'text';
+      const isAgentTool = isFromAgent && newMsg.kind === 'tool_event';
+      if (isAgentText || isAgentTool) {
         setThinking(false);
         setThinkingAgents([]);
-        process.stdout.write('\x07'); // Terminal bell
+        if (isAgentText) process.stdout.write('\x07'); // Terminal bell on text only
       }
     }
     lastMsgCount.current = messages.length;
   }, [messages.length]);
+
+  // Belt-and-suspenders: when no agent is actively dispatching, no
+  // agent should be in the "thinking" state either. The dispatch_end
+  // WebSocket event is the daemon's authoritative "this turn is over"
+  // signal; if dispatchingAgents drops to empty while we're still
+  // showing thinking, the daemon already declared the turn done and
+  // we just missed the message-arrival cleanup above (e.g., the turn
+  // ended with NO output at all — neither text nor tool — which we
+  // see in claude-code dispatches that hit auth/timeout errors).
+  useEffect(() => {
+    if (dispatchingAgents.length === 0 && (thinking || thinkingAgents.length > 0)) {
+      setThinking(false);
+      setThinkingAgents([]);
+    }
+  }, [dispatchingAgents.length, thinking, thinkingAgents.length]);
 
   // Streaming + dispatch state now comes from WebSocket events (via props)
 

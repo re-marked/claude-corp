@@ -4,7 +4,24 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.1.20 — Spinner indicator follows the actual dispatch chain (IN PROGRESS)
+## v2.1.21 — Spinner clears when turn ends on tool call (IN PROGRESS)
+
+Mark observed at 19:08: Herald hung the spinner ("Herald is reasoning...") after its turn ended on a USER.md edit. The daemon correctly emitted dispatch_end, but the TUI never let go of the `thinking` flag. Companion bug to v2.1.20 — same class (state cleanup miss) on a different transition.
+
+Two root causes in `chat.tsx`:
+
+1. The "stop thinking when a non-founder message arrives" effect only fired on `kind === 'text'`. When an agent's turn ended on a tool call (Edit was the final action, no follow-up text), the last channel message was a `tool_event` — filtered out. `thinking` stayed true forever. The spinner condition `isStreaming || thinking || dispatchingAgents.length > 0` kept firing because of the stale `thinking` flag, even though `dispatchingAgents` had correctly cleared via the `dispatch_end` WebSocket event.
+
+2. No fallback when a turn ends with literally zero output (auth/timeout error mid-claude-code dispatch). Previously nothing cleared `thinking` because no message arrived to trigger the message-arrival effect.
+
+Fixes:
+
+- Broaden the message-arrival effect to also fire on `tool_event` from non-founder senders. Bell still only dings on text (don't ding for every tool call), but state cleanup runs for both.
+- New belt-and-suspenders effect: when `dispatchingAgents` transitions to empty AND `thinking` or `thinkingAgents` is still set, clear them. The daemon's `dispatch_end` is the authoritative "turn is over" signal.
+
+Also marked v2.1.20 as MERGED in STATUS.
+
+## v2.1.20 — Spinner indicator follows the actual dispatch chain (MERGED, PR #131)
 
 Mark observed at 18:51: when agent A @-mentions agent B mid-response, the "is working" indicator at the bottom of the channel keeps showing A's name instead of B's. Purely visual but reads as broken — the spinner points at the wrong agent for the duration of B's actual work.
 
