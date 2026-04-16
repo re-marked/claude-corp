@@ -342,6 +342,7 @@ export class ClaudeCodeHarness implements AgentHarness {
           const systemContext = composeSystemMessage(opts.context);
           if (systemContext.trim()) {
             fullMessage = `<system-context>\n${systemContext}\n</system-context>\n\n${opts.message}`;
+            log(`[harness:claude-code] fragments injected: ${systemContext.length} chars for ${opts.agentId} in ${opts.context.channelName}`);
           }
         } catch (err) {
           // Non-fatal — dispatch without fragment context rather than
