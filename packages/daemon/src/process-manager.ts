@@ -143,10 +143,18 @@ export class ProcessManager {
       openclawCount++;
     }
 
-    // Only start the gateway if at least one agent actually needs it.
-    // Future hires of openclaw agents go through hire.ts which calls
-    // gw.start() lazily when status === 'stopped'.
-    if (openclawCount > 0 && gw.hasAgents()) {
+    // Only keep the gateway if at least one agent actually needs it.
+    // If nobody is on openclaw, discard the gateway entirely — saves
+    // ~500MB RAM + a port + startup latency. The recovery clock checks
+    // `if (!corpGw) return;` so it won't try to revive a null gateway.
+    // Future hires of openclaw agents go through hire.ts which creates
+    // the gateway lazily.
+    if (openclawCount === 0) {
+      this.corpGateway = null;
+      return;
+    }
+
+    if (gw.hasAgents()) {
       await gw.start();
     }
   }
