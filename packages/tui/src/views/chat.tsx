@@ -23,6 +23,7 @@ import { HireWizard } from './hire-wizard.js';
 import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
 import { COLORS, agentColor } from '../theme.js';
+import { parseAskFounder, QuestionCard, type FounderQuestion } from '../components/ask-founder.js';
 import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
@@ -76,6 +77,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showHarnessModal, setShowHarnessModal] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
+  /** Track answered questions by message ID so we don't re-show them */
+  const [answeredQuestions, setAnsweredQuestions] = useState<Map<string, string>>(new Map());
   const [showAfkWizard, setShowAfkWizard] = useState(false);
   const [showMemberSidebar, setShowMemberSidebar] = useState(false);
 
@@ -291,6 +294,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       }
       return; // Consume all input in plan review mode
     }
+
+    // askFounder — number keys answer the most recent unanswered question
+    if (/^[1-9]$/.test(input) && !sending) {
+      // Find the most recent message with an unanswered <askFounder>
+      const recentMsgs = messages.slice(-50);
+      for (let i = recentMsgs.length - 1; i >= 0; i--) {
+        const m = recentMsgs[i]!;
+        if (answeredQuestions.has(m.id)) continue;
+        const { questions } = parseAskFounder(m.content ?? '', m.id);
+        if (questions.length === 0) continue;
+        const q = questions[0]!; // First question in the message
+        const idx = parseInt(input) - 1;
+        if (idx >= 0 && idx < q.answers.length) {
+          const answer = q.answers[idx]!;
+          setAnsweredQuestions(prev => new Map(prev).set(m.id, answer.value));
+          // Send the answer as a channel message
+          handleSend(`[Answer: ${answer.value}] ${answer.label}`);
+        }
+        break;
+      }
+    }
+
     if (key.ctrl && input === 'm') {
       setShowMemberSidebar(prev => !prev);
     }
@@ -1843,6 +1868,11 @@ Always consider what happens when things go wrong.`,
     const replyCount = threadCounts.get(msg.id) ?? 0;
     const isUser = sender?.type === 'user';
     const nameColor = isUser ? COLORS.user : agentColor(COLORS, sender?.rank);
+
+    // Detect <askFounder> blocks in agent messages
+    const { cleanContent, questions } = parseAskFounder(msg.content ?? '', msg.id);
+    const hasQuestions = questions.length > 0;
+
     return (
       <Box key={msg.id} flexDirection="column" marginBottom={isContinuation ? 0 : 1}>
         {!isContinuation && (
@@ -1852,9 +1882,20 @@ Always consider what happens when things go wrong.`,
             <Text color={COLORS.muted}>{time}</Text>
           </Box>
         )}
-        <Box paddingLeft={2}>
-          <Text wrap="wrap">{renderContent(msg.content, memberMap)}</Text>
-        </Box>
+        {cleanContent.trim() && (
+          <Box paddingLeft={2}>
+            <Text wrap="wrap">{renderContent(cleanContent, memberMap)}</Text>
+          </Box>
+        )}
+        {hasQuestions && questions.map((q, qi) => (
+          <Box key={`q-${qi}`} paddingLeft={2}>
+            <QuestionCard
+              question={q}
+              answered={answeredQuestions.has(q.messageId)}
+              selectedValue={answeredQuestions.get(q.messageId)}
+            />
+          </Box>
+        ))}
         {replyCount > 0 && !activeThread && (
           <Box paddingLeft={2} marginTop={0}>
             <Text color={COLORS.info}>  {replyCount} {replyCount === 1 ? 'reply' : 'replies'}</Text>
