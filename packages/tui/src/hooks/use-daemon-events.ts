@@ -16,8 +16,8 @@ interface ToolState {
 interface DaemonEventState {
   /** Active streaming content keyed by agent name */
   streams: Map<string, StreamState>;
-  /** Agent names currently dispatching */
-  dispatching: Set<string>;
+  /** Agent names currently dispatching, mapped to the channel they're dispatching in */
+  dispatching: Map<string, string>;
   /** Active tool calls per agent */
   toolActivity: Map<string, ToolState>;
 }
@@ -29,7 +29,7 @@ interface DaemonEventState {
  */
 export function useDaemonEvents(port: number): DaemonEventState {
   const [streams, setStreams] = useState<Map<string, StreamState>>(new Map());
-  const [dispatching, setDispatching] = useState<Set<string>>(new Set());
+  const [dispatching, setDispatching] = useState<Map<string, string>>(new Map());
   const [toolActivity, setToolActivity] = useState<Map<string, ToolState>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,7 +55,7 @@ export function useDaemonEvents(port: number): DaemonEventState {
 
           switch (event.type) {
             case 'dispatch_start':
-              setDispatching((prev) => new Set(prev).add(event.agentName));
+              setDispatching((prev) => new Map(prev).set(event.agentName, event.channelId ?? ''));
               streamBufferRef.current.set(event.agentName, {
                 agentName: event.agentName,
                 content: '',
@@ -110,7 +110,7 @@ export function useDaemonEvents(port: number): DaemonEventState {
             case 'stream_end':
             case 'dispatch_end':
               setDispatching((prev) => {
-                const next = new Set(prev);
+                const next = new Map(prev);
                 next.delete(event.agentName);
                 return next;
               });

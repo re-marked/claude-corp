@@ -463,7 +463,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
             channel={ch}
             messagesPath={messagesPath}
             streamData={streamsForChannel}
-            dispatchingAgents={[...events.dispatching]}
+            dispatchingAgents={[...events.dispatching.entries()].filter(([, chId]) => chId === ch.id).map(([name]) => name)}
             activeToolCalls={toolsForChannel}
             onNavigate={navigate}
           />
