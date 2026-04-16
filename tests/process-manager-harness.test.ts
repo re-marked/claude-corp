@@ -146,8 +146,8 @@ describe('ProcessManager — harness-aware registration', () => {
     });
   });
 
-  describe('initCorpGateway — skip start when no openclaw agents', () => {
-    it('does not start the OpenClaw process when every agent is non-openclaw', async () => {
+  describe('initCorpGateway — skip entirely when no openclaw agents', () => {
+    it('sets corpGateway to null when every agent is non-openclaw — saves ~500MB RAM', async () => {
       seedCorp({ harness: 'claude-code' });
       seedMember({ id: 'ceo', displayName: 'CEO', harness: 'claude-code' });
       seedMember({ id: 'planner', displayName: 'Planner', harness: 'claude-code' });
@@ -155,22 +155,20 @@ describe('ProcessManager — harness-aware registration', () => {
 
       await pm.initCorpGateway();
 
-      // Gateway instance gets created (cheap — just object construction
-      // + config read). What we care about: it never started, so no
-      // OpenClaw subprocess is consuming RAM/ports for nothing.
-      expect(pm.corpGateway).not.toBeNull();
-      expect(pm.corpGateway!.getStatus()).toBe('stopped');
-      expect(pm.corpGateway!.hasAgents()).toBe(false);
+      // Gateway is null — no object, no process, no port, no RAM.
+      // Recovery clock checks `if (!corpGw) return;` so it won't
+      // try to revive a null gateway.
+      expect(pm.corpGateway).toBeNull();
     });
 
-    it('initializes gateway with no agents when corp.harness is claude-code and no per-member overrides', async () => {
+    it('sets corpGateway to null when corp.harness is claude-code and no per-member overrides', async () => {
       seedCorp({ harness: 'claude-code' });
       seedMember({ id: 'ceo', displayName: 'CEO' }); // inherits corp default
       const pm = new ProcessManager(corpRoot, GLOBAL_CONFIG);
 
       await pm.initCorpGateway();
 
-      expect(pm.corpGateway!.hasAgents()).toBe(false);
+      expect(pm.corpGateway).toBeNull();
     });
   });
 });
