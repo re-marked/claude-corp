@@ -12,6 +12,7 @@ import { syncSkillsToAgent } from './skills.js';
 import { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';
 import { buildAgentBootstrap } from './templates/bootstrap-agent.js';
 import { getSharedTags } from './brain-culture.js';
+import { readCulture } from './culture.js';
 import { defaultIdentity as identityTemplate } from './templates/identity.js';
 import { MEMORY_TEMPLATE } from './templates/memory.js';
 import { USER_TEMPLATE } from './templates/user.js';
@@ -142,9 +143,15 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
       } catch { /* name resolution failed — fine, bootstrap works without it */ }
     }
 
+    let hasCulture = false;
+    try {
+      hasCulture = readCulture(corpRoot) !== null;
+    } catch { /* fine, bootstrap works without it */ }
+
     bootstrapContent = buildAgentBootstrap({
       sharedTags: sharedTags.length > 0 ? sharedTags : undefined,
       hiringAgentName,
+      hasCulture,
     });
   }
   writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), bootstrapContent, 'utf-8');

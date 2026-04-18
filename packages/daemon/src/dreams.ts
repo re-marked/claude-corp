@@ -31,6 +31,7 @@ import {
   findOrphans,
   getSharedTags,
   getAgentTagSignature,
+  getCultureCandidates,
   STALENESS_THRESHOLD_DAYS,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
@@ -452,6 +453,23 @@ export class DreamManager {
         // Missing or unreadable — proceed without the feedback phase
       }
 
+      // CEO-only: compute culture-promotion candidates from every
+      // agent's BRAIN/. Dream Phase 5 renders these so the CEO can
+      // decide which compounded feedback becomes corp-wide law in
+      // CULTURE.md.
+      const isCeo = agent.rank === 'master'
+        || agent.displayName.toLowerCase() === 'ceo'
+        || slug === 'ceo';
+      let cultureCandidates: ReturnType<typeof getCultureCandidates> | undefined;
+      if (isCeo) {
+        try {
+          const candidates = getCultureCandidates(this.daemon.corpRoot);
+          if (candidates.length > 0) cultureCandidates = candidates;
+        } catch {
+          // If scan fails, CEO dream proceeds without Phase 5
+        }
+      }
+
       const prompt = buildDreamPrompt({
         agentName: agent.displayName,
         agentDir: agentDir.replace(/\\/g, '/'),
@@ -465,6 +483,8 @@ export class DreamManager {
         brainState,
         cultureContext,
         pendingFeedback,
+        isCeo,
+        cultureCandidates,
       });
 
       const resp = await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {

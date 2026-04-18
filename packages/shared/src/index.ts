@@ -179,6 +179,20 @@ export {
   getCultureHealth,
   getCorpCultureStats,
 } from './brain-culture.js';
+
+// Corp Culture — CULTURE.md + feedback promotion
+export {
+  CULTURE_MD_FILENAME,
+  getCulturePath,
+  readCulture,
+  writeCulture,
+  getCultureCandidates,
+} from './culture.js';
+export type {
+  CandidateStrength,
+  CandidateEntry,
+  CultureCandidate,
+} from './culture.js';
 export type {
   CorpTag,
   AgentTagSignature,

@@ -26,6 +26,7 @@ export type BrainSource =
   | 'observation'         // The agent noticed this during work.
   | 'dream'              // Consolidated from observations during dreaming.
   | 'correction'         // The founder corrected the agent on this.
+  | 'confirmation'       // The founder explicitly affirmed a behavior/choice.
   | 'agent-secondhand';  // Another agent communicated this.
 
 /** How confident the agent is in this memory. */
@@ -55,6 +56,14 @@ export interface BrainFrontmatter {
 
   /** How confident the agent is. founder-direct = high, inferred = medium, guessing = low. */
   confidence: BrainConfidence;
+
+  /**
+   * How many times this rule/fact has been confirmed — via founder
+   * repetition, cross-agent corroboration, or recurring observation.
+   * Optional. Dreams increment on semantic-match hits; synthesis uses
+   * this as a primary signal for promoting a memory to corp culture.
+   */
+  times_heard?: number;
 }
 
 // ── Parsed BRAIN File ───────────────────────────────────────────────
