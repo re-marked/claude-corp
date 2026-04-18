@@ -202,6 +202,19 @@ export type {
   CorpCultureStats,
 } from './brain-culture.js';
 
+// Feedback Intel — read-only introspection of the feedback pipeline
+export {
+  parsePendingFeedback,
+  getAgentFeedbackIntel,
+  getCorpFeedbackIntel,
+} from './feedback-intel.js';
+export type {
+  PendingFeedbackEntry,
+  FeedbackBrainEntry,
+  AgentFeedbackIntel,
+  CorpFeedbackIntel,
+} from './feedback-intel.js';
+
 // Templates
 export { UNIVERSAL_SOUL } from './templates/soul.js';
 export { CEO_BOOTSTRAP } from './templates/bootstrap-ceo.js';

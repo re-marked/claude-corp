@@ -58,6 +58,7 @@ export function CommandPalette({ lastVisited, onNavigate, onSelectChannel, onClo
   allItems.push({ id: 'v-tasks', label: 'Task Board', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'task-board' }) });
   allItems.push({ id: 'v-clocks', label: 'Clocks', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'clock' }) });
   allItems.push({ id: 'v-logs', label: 'Daemon Logs', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'logs' }) });
+  allItems.push({ id: 'v-feedback', label: 'Feedback Pipeline', kind: 'view', icon: '\u25C6', action: () => onNavigate({ type: 'feedback' }) });
 
   // --- Channels ---
   allItems.push({ id: 'h-channels', label: 'Channels', kind: 'channel', icon: '', action: () => {}, isHeader: true });

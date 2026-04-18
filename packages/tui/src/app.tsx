@@ -24,6 +24,7 @@ import { CorpHome } from './views/corp-home.js';
 import { TimeMachine } from './views/time-machine.js';
 import { ClockView } from './views/clock.js';
 import { LogViewer } from './views/log-viewer.js';
+import { FeedbackView } from './views/feedback.js';
 import { StatusBar } from './components/status-bar.js';
 import { DaemonClient } from './lib/daemon-client.js';
 import { useDaemonEvents } from './hooks/use-daemon-events.js';
@@ -300,6 +301,11 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       if (current?.type !== 'logs') navigate({ type: 'logs' });
       return;
     }
+    // Ctrl+F — feedback pipeline
+    if (key.ctrl && input === 'f') {
+      if (current?.type !== 'feedback') navigate({ type: 'feedback' });
+      return;
+    }
     // Escape — go back
     if (key.escape) {
       if (viewStack.depth() > 1) goBack();
@@ -437,7 +443,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
   if (!current) return null;
 
   // Hints for status bar
-  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-L:clocks  C-G:logs  C-D:ceo  Esc:back';
+  const globalHints = 'C-K:palette  C-H:home  C-T:tasks  C-L:clocks  C-G:logs  C-F:feedback  C-D:ceo  Esc:back';
   const hints: Record<string, string> = {
     'chat': globalHints,
     'task-board': `Enter:detail  Tab:filter  ${globalHints}`,
@@ -447,6 +453,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
     'corp-home': `Enter:open  ${globalHints}`,
     'clock': `P:pause/resume  ${globalHints}`,
     'logs': `F:filter  P:pause  C:clear-filter  ${globalHints}`,
+    'feedback': `Tab:pane  ↑↓:select  C:culture  R:refresh  Esc:back`,
     'time-machine': 'Enter:rewind  F:forward  R:refresh  Esc:back',
   };
 
@@ -530,6 +537,12 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       case 'logs':
         return (
           <LogViewer
+            onBack={goBack}
+          />
+        );
+      case 'feedback':
+        return (
+          <FeedbackView
             onBack={goBack}
           />
         );
