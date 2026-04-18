@@ -438,6 +438,20 @@ export class DreamManager {
         // If culture gathering fails, dream proceeds without it
       }
 
+      // Read pending feedback stamped by the router during this sleep
+      // window. Missing file is normal (no corrections happened); only
+      // surface when the file exists AND has content.
+      let pendingFeedback: string | undefined;
+      try {
+        const feedbackPath = join(agentDir, '.pending-feedback.md');
+        if (existsSync(feedbackPath)) {
+          const raw = readFileSync(feedbackPath, 'utf-8').trim();
+          if (raw.length > 0) pendingFeedback = raw;
+        }
+      } catch {
+        // Missing or unreadable — proceed without the feedback phase
+      }
+
       const prompt = buildDreamPrompt({
         agentName: agent.displayName,
         agentDir: agentDir.replace(/\\/g, '/'),
@@ -450,6 +464,7 @@ export class DreamManager {
         agentSummaries,
         brainState,
         cultureContext,
+        pendingFeedback,
       });
 
       const resp = await fetch(`http://127.0.0.1:${this.daemon.getPort()}/cc/say`, {
