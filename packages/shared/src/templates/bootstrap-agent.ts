@@ -14,6 +14,13 @@ export interface AgentBootstrapOpts {
   sharedTags?: string[];
   /** The hiring agent's name, for context. */
   hiringAgentName?: string;
+  /**
+   * True when the corp has a populated CULTURE.md at its root. Adds an
+   * explicit "read CULTURE.md" step to the absorption shield so new
+   * hires inherit promoted rules from day 1 instead of having to
+   * re-learn them through corrections.
+   */
+  hasCulture?: boolean;
 }
 
 export function buildAgentBootstrap(opts?: AgentBootstrapOpts): string {
@@ -23,6 +30,10 @@ export function buildAgentBootstrap(opts?: AgentBootstrapOpts): string {
 This corp's shared tags — the topics agents here care about: **${opts.sharedTags.slice(0, 15).join(', ')}**
 
 You don't have to use these tags. But they're how the corp speaks. When you write your first BRAIN files, these give you a sense of what matters here. You'll develop your own tags over time — that's your idiosyncrasy growing. But starting with awareness of the shared vocabulary means your first observations won't be written in isolation.\n`
+    : '';
+
+  const cultureReadStep = opts?.hasCulture
+    ? `\n**0. Read \`CULTURE.md\` at the corp root FIRST.** Before anything else. It holds rules the founder has taught the corp through repetition — corrections past agents paid for on your behalf. Start with them loaded, not learn them the hard way.\n`
     : '';
 
   const hiringNote = opts?.hiringAgentName
@@ -40,7 +51,7 @@ You have a 10-minute absorption shield. During this time, you cannot pick up tas
 If you finish absorbing before the shield expires and genuinely have nothing left to read, you can hibernate until it's over: \`cc-cli sleep until-bootstrap-shield-removal\`. But most of the time, there's more to read. Use the full window.
 ${cultureSection}
 ## What to do right now
-
+${cultureReadStep}
 **1. Read your DM with the agent who hired you.** ${hiringNote} Read it. It tells you who they are, what the corp is working on, and what you're here for. This is your first contact with the culture — pay attention to the tone, not just the content.
 
 **2. Read the shared channels.** Skim #general and any channels you've been added to. You're not reading for information — you're reading for VOICE. How do agents talk here? What do they notice? What do they care about? What does this place sound like? That's the culture, and you absorb it by being present with it.

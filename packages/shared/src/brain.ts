@@ -43,7 +43,7 @@ export const VALID_TYPES: BrainMemoryType[] = [
 /** Valid source types for validation. */
 export const VALID_SOURCES: BrainSource[] = [
   'founder-direct', 'observation', 'dream',
-  'correction', 'agent-secondhand',
+  'correction', 'confirmation', 'agent-secondhand',
 ];
 
 /** Valid confidence levels for validation. */

@@ -27,10 +27,12 @@ import { scratchpadFragment } from './scratchpad.js';
 import { checkpointFragment } from './checkpoint.js';
 import { autoemonFragment } from './autoemon.js';
 import { brainFragment } from './brain.js';
+import { cultureFragment } from './culture.js';
 
 const FRAGMENTS: Fragment[] = [
   autoemonFragment,
   brainFragment,
+  cultureFragment,
   workspaceFragment,
   toolResultManagementFragment,
   contextPersistenceFragment,

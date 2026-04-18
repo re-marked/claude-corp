@@ -11,6 +11,9 @@
  *   - Corp-specific context: STATUS.md, task completions, Herald narration
  */
 
+import { join } from 'node:path';
+import type { CultureCandidate } from '@claudecorp/shared';
+
 // ── BRAIN State Renderer ────────────────────────────────────────────
 
 function renderCultureContext(culture: NonNullable<DreamPromptOpts['cultureContext']>): string {
@@ -204,13 +207,19 @@ function renderPendingFeedbackPhase(opts: DreamPromptOpts): string {
   lines.push('   - Was your prior message actually wrong, or did the founder change their mind?');
   lines.push('   - Is it specific (one decision) or thematic (how you work in general)?');
   lines.push('3. **Append a `[FEEDBACK]` observation** to today\'s observation log documenting what you heard — in your own voice, not the router\'s. Include: what the founder said, what you had done, and your interpretation.');
-  lines.push('4. **Promote to BRAIN if it\'s load-bearing.** Create or update a `BRAIN/` file with:');
+  lines.push('4. **Check for a matching existing BRAIN entry FIRST.** Before creating anything new, list `BRAIN/` and read any file whose tags or title could be the same theme. Semantic match beats exact title — "don\'t summarize" and "stop recapping" are the same rule. If you find a match:');
+  lines.push('   - **Do NOT create a duplicate.** Open the existing file.');
+  lines.push('   - Increment `times_heard:` in the frontmatter (default 1 if missing → 2). This counter is load-bearing: corp-level culture synthesis uses it to decide what becomes law.');
+  lines.push('   - If `times_heard` just hit 2+, bump `confidence` one level (`low → medium → high`). Repetition is proof.');
+  lines.push('   - Append a dated instance under a "## Heard again" section with the new quote. Don\'t rewrite history — add to it.');
+  lines.push('   - Update `updated` and `last_validated` to today.');
+  lines.push('5. **Otherwise, create a new BRAIN file** with:');
   lines.push('   - `type: correction` for corrections, `type: founder-preference` for confirmations of taste/style');
   lines.push('   - `source: correction` or `source: confirmation` (NOT `source: dream` — the founder spoke, be honest about it)');
   lines.push('   - `confidence`: `high` if the founder was explicit and specific, `medium` if inferred across the pattern+quote, `low` if ambiguous');
+  lines.push('   - `times_heard: 1` (the counter starts here)');
   lines.push('   - Lead with the rule/preference itself, then a **Why:** line (the reasoning you can infer from the quote) and a **How to apply:** line (when this kicks in).');
-  lines.push('   - If a related BRAIN file already exists, **update it** instead of creating a duplicate — add the new instance as evidence that compounds confidence.');
-  lines.push('5. **Skip if it\'s noise.** A "lol" or "thanks" on its own doesn\'t need a BRAIN file. Capture only what future-you would want to know.\n');
+  lines.push('6. **Skip if it\'s noise.** A "lol" or "thanks" on its own doesn\'t need a BRAIN file. Capture only what future-you would want to know.\n');
 
   lines.push('### After you\'ve consumed every entry\n');
   lines.push('Delete the file so next cycle starts clean:\n');
@@ -218,6 +227,69 @@ function renderPendingFeedbackPhase(opts: DreamPromptOpts): string {
   lines.push(`rm "${opts.agentDir}/.pending-feedback.md"`);
   lines.push('```\n');
   lines.push('If you skipped entries (deemed them noise), still delete the file — the observations/BRAIN are the durable record. The pending file is an inbox, not an archive.\n');
+  lines.push('---\n');
+
+  return '\n' + lines.join('\n') + '\n';
+}
+
+// ── Culture Synthesis Phase (CEO only — runs after consolidation) ──
+//
+// Rendered when `isCeo: true` and `cultureCandidates` are non-empty.
+// CEO reviews feedback BRAIN entries that compounded across agents or
+// repeated for one agent, and promotes the ones worth making corp-wide
+// law to CULTURE.md at the corp root.
+function renderCultureSynthesisPhase(opts: DreamPromptOpts): string {
+  const candidates = opts.cultureCandidates ?? [];
+  if (candidates.length === 0) return '';
+
+  const lines: string[] = [];
+  lines.push('## Phase 5 — Culture Synthesis (CEO only)\n');
+  lines.push('You are the CEO. Feedback that compounds into the founder\'s repeated voice should become **corp culture** — rules every agent inherits, not lessons every agent has to relearn. That\'s your job this phase.\n');
+  lines.push(`Candidates below come from scanning every agent's BRAIN/ for entries sourced from founder corrections or confirmations. They are clustered by shared tags — not exact-title matches — so related themes group together. **You make the final call** on whether each cluster is corp-worthy.\n`);
+
+  lines.push('### The candidates\n');
+  const MAX_CANDIDATES = 10;
+  const shown = candidates.slice(0, MAX_CANDIDATES);
+  for (const c of shown) {
+    lines.push(`**Cluster** — tags: \`${c.sharedTags.slice(0, 6).join(', ')}\` · agents: ${c.agents.join(', ')} · strength: **${c.strength}** · heard ${c.totalTimesHeard}× across ${c.entries.length} entr${c.entries.length === 1 ? 'y' : 'ies'} (max ${c.maxTimesHeard} for one agent)`);
+    for (const e of c.entries.slice(0, 4)) {
+      const excerpt = e.excerpt.replace(/\n+/g, ' ').slice(0, 160);
+      lines.push(`  - \`${e.agent}\` → [[${e.file}]] (${e.type} · ${e.source} · conf=${e.confidence} · ×${e.timesHeard}): ${excerpt}${e.excerpt.length > 160 ? '…' : ''}`);
+    }
+    lines.push('');
+  }
+  if (candidates.length > MAX_CANDIDATES) {
+    lines.push(`_(${candidates.length - MAX_CANDIDATES} weaker cluster(s) hidden — scan BRAIN/ directly if you want them)_\n`);
+  }
+
+  const culturePath = join(opts.corpRoot, 'CULTURE.md').replace(/\\/g, '/');
+  lines.push('### What to do\n');
+  lines.push(`1. **Read \`${culturePath}\` if it exists.** Existing rules are sacred — don't reword them, don't reorder them, don't lose them. You append; you don't rewrite.`);
+  lines.push('2. **For each candidate above:**');
+  lines.push('   - If the cluster is \`strong\` (3+ agents or max times_heard ≥ 3) → **promote** it: write a rule in your own voice, cite the source ("Observed from corrections to: agentA, agentB, agentC"), tag it with the shared tags.');
+  lines.push('   - If \`moderate\` (2 agents or times_heard ≥ 2) → **judge**. If the theme is clearly the founder\'s voice (not situational), promote. If it might be a fluke, leave it for next dream.');
+  lines.push('   - If you\'re not sure, read 1-2 of the linked BRAIN files directly (`cat "$AGENT_DIR/BRAIN/<file>.md"`) before deciding.');
+  lines.push('3. **CULTURE.md structure:** YAML frontmatter + append-only entries. Each entry:');
+  lines.push('```markdown');
+  lines.push('## <short title>');
+  lines.push('');
+  lines.push('<rule — one or two sentences, founder\'s voice>');
+  lines.push('');
+  lines.push('- **Why:** <reason, from the corrections>');
+  lines.push('- **When:** <when this rule applies>');
+  lines.push('- **Sources:** <agents where this showed up> (heard Nx total)');
+  lines.push('- **Promoted:** <YYYY-MM-DD>');
+  lines.push('```');
+  lines.push(`4. **Write** to \`${culturePath}\` (append if the file exists, create with a header if not). Header template for first-ever write:`);
+  lines.push('```markdown');
+  lines.push('# Corp Culture');
+  lines.push('');
+  lines.push('> Rules the founder taught us through repetition. Every agent reads this. Every new hire inherits it. Promoted by the CEO during dreams when feedback compounds across agents.');
+  lines.push('');
+  lines.push('---');
+  lines.push('```');
+  lines.push('5. **Don\'t delete agent-level BRAIN entries.** The per-agent memory stays — CULTURE.md is a corp-wide layer ON TOP of it, not a replacement.');
+  lines.push('6. **If nothing is worth promoting this cycle**, that\'s fine. Leave CULTURE.md alone. Say so in the summary.\n');
   lines.push('---\n');
 
   return '\n' + lines.join('\n') + '\n';
@@ -259,6 +331,19 @@ export interface DreamPromptOpts {
    * delete the file so the same signals don't double-count next cycle.
    */
   pendingFeedback?: string;
+
+  /**
+   * True when the dreaming agent is the CEO. CEO gets an extra Phase 5
+   * that synthesizes cross-agent feedback into corp-wide CULTURE.md.
+   */
+  isCeo?: boolean;
+
+  /**
+   * Pre-computed culture-promotion candidates from `getCultureCandidates`.
+   * Rendered during Phase 5 when isCeo is true. CEO makes the final
+   * semantic call on which clusters become corp law.
+   */
+  cultureCandidates?: CultureCandidate[];
 }
 
 export function buildDreamPrompt(opts: DreamPromptOpts): string {
@@ -427,7 +512,7 @@ Update \`MEMORY.md\` so it stays under 200 lines:
 - Group by type: Founder, Technical, Decisions, Self, Corrections, Relationships
 
 ---
-
+${opts.isCeo ? renderCultureSynthesisPhase(opts) : ''}
 Return a brief summary of what you consolidated, updated, or pruned. Format:
 - X new topics created
 - Y topics updated
