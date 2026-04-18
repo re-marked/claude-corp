@@ -40,7 +40,8 @@ export type ObservationCategory =
   | 'CHECKPOINT'
   | 'SLUMBER'
   | 'ERROR'
-  | 'HANDOFF';
+  | 'HANDOFF'
+  | 'FEEDBACK';
 
 export interface Observation {
   /** ISO timestamp */
