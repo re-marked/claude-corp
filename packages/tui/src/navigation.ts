@@ -7,7 +7,8 @@ export type View =
   | { type: 'corp-home' }
   | { type: 'time-machine' }
   | { type: 'clock' }
-  | { type: 'logs' };
+  | { type: 'logs' }
+  | { type: 'feedback' };
 
 export class ViewStack {
   private stack: View[] = [];
@@ -54,6 +55,7 @@ export class ViewStack {
         case 'time-machine': return 'Time Machine';
         case 'clock': return 'Clocks';
         case 'logs': return 'Logs';
+        case 'feedback': return 'Feedback';
       }
     });
   }

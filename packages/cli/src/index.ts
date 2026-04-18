@@ -54,6 +54,8 @@ const { values, positionals } = parseArgs({
     force: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
     json: { type: 'boolean', default: false },
+    pending: { type: 'boolean', default: false },
+    culture: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
   allowPositionals: true,
@@ -93,6 +95,12 @@ Commands:
   logs       Show daemon logs
   refresh    Refresh SOUL.md + AGENTS.md from current templates (--all, --force, --dry-run)
   dogfood    Set up dogfood project + dev team + task
+
+Feedback pipeline:
+  feedback                              Corp overview — pending, BRAIN, CULTURE candidates
+  feedback --agent <name>               Per-agent: pending file + feedback-sourced BRAIN
+  feedback --pending                    CULTURE.md promotion queue (next CEO dream)
+  feedback --culture                    Dump CULTURE.md to stdout
 
 B.R.A.I.N. commands:
   brain                                 Show usage + quick stats
@@ -323,6 +331,16 @@ async function run() {
       const { cmdDream } = await import('./commands/dream.js');
       await cmdDream({
         agent: values.agent as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'feedback': {
+      const { cmdFeedback } = await import('./commands/feedback.js');
+      await cmdFeedback({
+        agent: values.agent as string | undefined,
+        pending: !!values.pending,
+        culture: !!values.culture,
         json: !!values.json,
       });
       break;
