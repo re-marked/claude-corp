@@ -289,7 +289,8 @@ function renderCultureSynthesisPhase(opts: DreamPromptOpts): string {
   lines.push('---');
   lines.push('```');
   lines.push('5. **Don\'t delete agent-level BRAIN entries.** The per-agent memory stays — CULTURE.md is a corp-wide layer ON TOP of it, not a replacement.');
-  lines.push('6. **If nothing is worth promoting this cycle**, that\'s fine. Leave CULTURE.md alone. Say so in the summary.\n');
+  lines.push('6. **Keep CULTURE.md tight.** It is read by every agent on every dispatch — bloat here costs every token in every session. If you see contradicted, outdated, or duplicate rules in existing CULTURE.md, prune them. New entries should be one-screen max, no filler. Treat it like a constitution, not a changelog.');
+  lines.push('7. **If nothing is worth promoting this cycle**, that\'s fine. Leave CULTURE.md alone. Say so in the summary.\n');
   lines.push('---\n');
 
   return '\n' + lines.join('\n') + '\n';
