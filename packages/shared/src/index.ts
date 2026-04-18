@@ -61,6 +61,8 @@ export {
   tempSuffix,
 } from './id.js';
 export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
+export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
+export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 
 // Schedule parsing
 export {

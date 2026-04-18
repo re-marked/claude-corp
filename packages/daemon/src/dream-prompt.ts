@@ -176,6 +176,53 @@ function findSuggestedConnections(
   return suggestions.sort((x, y) => y.sharedTags.length - x.sharedTags.length);
 }
 
+// ── Pending Feedback Phase (Phase 0 — runs before Orient) ──────────
+//
+// Rendered only when `.pending-feedback.md` exists. The router stamped
+// it with raw quotes + matched-pattern hints. Dreams author the
+// interpreted observation + BRAIN entry, then delete the file.
+function renderPendingFeedbackPhase(opts: DreamPromptOpts): string {
+  const lines: string[] = [];
+  lines.push('## Phase 0 — Pending Feedback (READ THIS FIRST)\n');
+  lines.push('The founder corrected or confirmed you while you were working. The router captured the raw quotes for you. **You are the interpreter** — the file holds signals, not conclusions. Read the quotes, weigh them against what you were actually doing, then write memory that will help future-you.\n');
+
+  lines.push('### The captured feedback (`.pending-feedback.md`)\n');
+  lines.push('```markdown');
+  // Truncate very long files to avoid blowing the prompt; agent can still
+  // cat the file if they need the rest.
+  const truncated = opts.pendingFeedback!.length > 8000
+    ? opts.pendingFeedback!.slice(0, 8000) + '\n\n[... truncated. cat the file for full contents ...]'
+    : opts.pendingFeedback!;
+  lines.push(truncated);
+  lines.push('```\n');
+
+  lines.push('### What to do with it\n');
+  lines.push('For **each entry** in the file above:\n');
+  lines.push('1. **Read the quote** carefully. The `Signal:` line is only a hint — patterns can false-positive (e.g., "not bad" has the word "not" but is praise). Trust the quote over the tags.');
+  lines.push('2. **Judge severity and tone** from the full quote + prior context:');
+  lines.push('   - Is this a firm correction, a gentle nudge, a joke, a casual affirmation, or mixed?');
+  lines.push('   - Was your prior message actually wrong, or did the founder change their mind?');
+  lines.push('   - Is it specific (one decision) or thematic (how you work in general)?');
+  lines.push('3. **Append a `[FEEDBACK]` observation** to today\'s observation log documenting what you heard — in your own voice, not the router\'s. Include: what the founder said, what you had done, and your interpretation.');
+  lines.push('4. **Promote to BRAIN if it\'s load-bearing.** Create or update a `BRAIN/` file with:');
+  lines.push('   - `type: correction` for corrections, `type: founder-preference` for confirmations of taste/style');
+  lines.push('   - `source: correction` or `source: confirmation` (NOT `source: dream` — the founder spoke, be honest about it)');
+  lines.push('   - `confidence`: `high` if the founder was explicit and specific, `medium` if inferred across the pattern+quote, `low` if ambiguous');
+  lines.push('   - Lead with the rule/preference itself, then a **Why:** line (the reasoning you can infer from the quote) and a **How to apply:** line (when this kicks in).');
+  lines.push('   - If a related BRAIN file already exists, **update it** instead of creating a duplicate — add the new instance as evidence that compounds confidence.');
+  lines.push('5. **Skip if it\'s noise.** A "lol" or "thanks" on its own doesn\'t need a BRAIN file. Capture only what future-you would want to know.\n');
+
+  lines.push('### After you\'ve consumed every entry\n');
+  lines.push('Delete the file so next cycle starts clean:\n');
+  lines.push('```bash');
+  lines.push(`rm "${opts.agentDir}/.pending-feedback.md"`);
+  lines.push('```\n');
+  lines.push('If you skipped entries (deemed them noise), still delete the file — the observations/BRAIN are the durable record. The pending file is an inbox, not an archive.\n');
+  lines.push('---\n');
+
+  return '\n' + lines.join('\n') + '\n';
+}
+
 export interface DreamPromptOpts {
   agentName: string;
   agentDir: string;
@@ -203,6 +250,15 @@ export interface DreamPromptOpts {
     agentUniqueTags: string[];
     alignmentScore: number;
   };
+  /**
+   * Raw contents of `.pending-feedback.md` if present in the agent's
+   * workspace. The router stamped this file every time the founder's
+   * message tripped a correction/confirmation pattern. Dreams are where
+   * interpretation happens: read the quotes, judge severity + tone in
+   * context, author [FEEDBACK] observations, promote to BRAIN, and then
+   * delete the file so the same signals don't double-count next cycle.
+   */
+  pendingFeedback?: string;
 }
 
 export function buildDreamPrompt(opts: DreamPromptOpts): string {
@@ -282,7 +338,7 @@ It has been ${opts.hoursSinceLast.toFixed(0)} hours since your last consolidatio
 **CRITICAL: You MUST use tools.** Read actual files. Write actual BRAIN/ topic files. Run actual commands. Do NOT just describe what you would do or reply with a summary. Execute every phase below using tools. If there is nothing to consolidate, say DREAM_CLEAN.
 
 ---
-${opts.brainState ? renderBrainState(opts.brainState) : ''}${opts.cultureContext ? renderCultureContext(opts.cultureContext) : ''}
+${opts.brainState ? renderBrainState(opts.brainState) : ''}${opts.cultureContext ? renderCultureContext(opts.cultureContext) : ''}${opts.pendingFeedback ? renderPendingFeedbackPhase(opts) : ''}
 ## Phase 1 — Orient
 
 Execute these commands NOW:

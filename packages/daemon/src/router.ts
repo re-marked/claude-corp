@@ -1,4 +1,4 @@
-import { watch, type FSWatcher, existsSync, readdirSync } from 'node:fs';
+import { watch, type FSWatcher, existsSync, readdirSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type Member,
@@ -11,6 +11,7 @@ import {
   post,
   resolveMentions,
   generateId,
+  detectFeedback,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -336,6 +337,13 @@ export class MessageRouter {
     // Load recent channel history for context — thread-aware
     const msgPath = join(this.daemon.corpRoot, channel.path, MESSAGES_JSONL);
     const allRecent = tailMessages(msgPath, 100);
+
+    // Feedback capture: if the founder just sent this message and it
+    // matches a correction/confirmation pattern, stamp the agent's
+    // .pending-feedback.md. Dreams consume the file during their next
+    // reflection cycle — agent work stays uninterrupted, but the
+    // correction doesn't evaporate with the session.
+    this.maybeCaptureFeedback(msg, target, sender, channel, allRecent);
     // If dispatching about a thread, show thread history. Otherwise main channel only.
     const recent = msg.threadId
       ? allRecent.filter((m) => m.threadId === msg.threadId || m.id === msg.threadId)
@@ -729,5 +737,83 @@ export class MessageRouter {
     if (agent.harness === 'claude-code') return 'claude-code';
     const proc = this.daemon.processManager.getAgent(agent.id);
     return proc?.mode === 'harness' ? 'claude-code' : 'openclaw';
+  }
+
+  /**
+   * If the incoming message is a founder correction or confirmation
+   * targeted at this agent, append an entry to the agent's
+   * `.pending-feedback.md` file. Dreams consume the file during their
+   * next reflection cycle — the agent's current turn stays
+   * uninterrupted.
+   *
+   * Rules:
+   * - Only founder-authored messages (rank: owner). Agent-to-agent
+   *   corrections stay in-conversation; they don't compound into BRAIN.
+   * - Only when detectFeedback() matches. Conservative regex catches
+   *   clear signal; dreams handle interpretation from the quote.
+   * - One entry per founder message (timestamped). Multiple corrections
+   *   between dreams accumulate as separate entries in the same file.
+   */
+  private maybeCaptureFeedback(
+    msg: ChannelMessage,
+    target: Member,
+    sender: Member,
+    channel: Channel,
+    recent: ChannelMessage[],
+  ): void {
+    if (sender.rank !== 'owner') return;
+    if (!target.agentDir) return;
+
+    const match = detectFeedback(msg.content ?? '');
+    if (!match) return;
+
+    // Find the agent's most recent text message before this one —
+    // gives dreams the context of what the agent just did/said that
+    // prompted the correction.
+    const priorAgentMsg = recent
+      .filter(m => m.senderId === target.id && m.kind === 'text' && m.timestamp < msg.timestamp)
+      .slice(-1)[0];
+    const priorContext = priorAgentMsg
+      ? `Your message at ${new Date(priorAgentMsg.timestamp).toISOString().slice(11, 19)}: "${(priorAgentMsg.content ?? '').slice(0, 200)}${(priorAgentMsg.content ?? '').length > 200 ? '...' : ''}"`
+      : '(no recent agent message before this correction)';
+
+    const feedbackPath = join(this.daemon.corpRoot, target.agentDir, '.pending-feedback.md');
+    const entryTime = new Date(msg.timestamp).toISOString();
+    const channelLabel = channel.kind === 'direct' ? `DM (${channel.name})` : `#${channel.name}`;
+
+    // Build the entry — rich enough for a dream to write a meaningful
+    // observation, not just "Mark said don't."
+    const entry = [
+      '',
+      `## ${entryTime}`,
+      '',
+      `**Channel:** ${channelLabel}`,
+      `**Signal:** ${match.polarity} (matched: ${match.matchedPatterns.slice(0, 5).join(', ')}${match.matchedPatterns.length > 5 ? `, +${match.matchedPatterns.length - 5} more` : ''})`,
+      '',
+      '**Quote:**',
+      '> ' + (msg.content ?? '').replace(/\n/g, '\n> '),
+      '',
+      '**Prior context:**',
+      priorContext,
+      '',
+      '---',
+      '',
+    ].join('\n');
+
+    // Create header on first entry
+    const header = existsSync(feedbackPath) ? '' : [
+      '# Pending Feedback',
+      '',
+      'Corrections and confirmations captured from the founder. Consumed and cleared during your next dream cycle.',
+      '',
+      '---',
+    ].join('\n');
+
+    try {
+      appendFileSync(feedbackPath, header + entry, 'utf-8');
+      log(`[router] Captured ${match.polarity} feedback for ${target.displayName} (${match.matchedPatterns.length} pattern(s))`);
+    } catch (err) {
+      logError(`[router] Failed to write pending-feedback for ${target.displayName}: ${err}`);
+    }
   }
 }
