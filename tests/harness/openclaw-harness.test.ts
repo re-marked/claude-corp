@@ -63,7 +63,21 @@ const BASE_OPTS = {
   agentId: 'ceo',
   message: 'hello',
   sessionKey: 'say:ceo:mark',
-  context: {} as never,
+  // Minimal FragmentContext — fragments like history/workspace/brain
+  // read array/string fields on this and crash if they're undefined.
+  // Values don't matter for abort-propagation tests; shape does.
+  context: {
+    agentDir: '/tmp/agent-ceo',
+    corpRoot: '/tmp/corp',
+    channelName: 'dm-mark-ceo',
+    channelMembers: ['CEO', 'Mark'],
+    corpMembers: [],
+    recentHistory: [],
+    agentDisplayName: 'CEO',
+    channelKind: 'direct',
+    supervisorName: null,
+    harness: 'openclaw',
+  } as never,
 };
 
 describe('OpenClawHarness', () => {
@@ -213,6 +227,126 @@ describe('OpenClawHarness', () => {
       await harness.dispatch(BASE_OPTS).catch(() => void 0);
       expect(getCorp).toHaveBeenCalled();
       expect(getUser).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dispatch — caller abort propagation', () => {
+    // These prove the PR 1 invariant: when opts.signal fires, openclaw-
+    // harness calls wsClient.chatAbort server-side so the provider
+    // stream + in-flight tools cease. Without this, "interrupt" in the
+    // TUI looked like it worked but the agent kept running in the
+    // background and its side effects landed anyway.
+
+    /**
+     * Build a WS-shaped fake that simulates a long-running chat.send
+     * and spies on chat.abort. `resolveSend` / `emitLifecycle` let
+     * tests drive the timing of runId arrival and natural completion.
+     */
+    function makeAbortableWS(opts: {
+      runIdOnSend?: string;
+      resolveSendImmediately?: boolean;
+    } = {}) {
+      const { runIdOnSend = 'run-xyz', resolveSendImmediately = true } = opts;
+      const chatAbort = vi.fn(async () => ({ ok: true, aborted: true, runIds: [runIdOnSend] }));
+      let resolveSend: (v: { runId: string }) => void = () => {};
+      const chatSend = vi.fn(
+        () => resolveSendImmediately
+          ? Promise.resolve({ runId: runIdOnSend })
+          : new Promise<{ runId: string }>((r) => { resolveSend = r; }),
+      );
+      return {
+        ws: {
+          isConnected: () => true,
+          chatSend,
+          chatAbort,
+          // dispatchViaWebSocket subscribes to these — return no-op
+          // unsubscribes. We never emit end events, so the dispatch
+          // promise stays pending forever (which is what we want —
+          // the test fires abort, not a natural completion).
+          onAgentEvent: vi.fn(() => () => {}),
+          onChatEvent: vi.fn(() => () => {}),
+        } as unknown as OpenClawWS,
+        chatAbort,
+        chatSend,
+        resolveSend: (v: { runId: string } = { runId: runIdOnSend }) => resolveSend(v),
+      };
+    }
+
+    it('fires chat.abort with the captured runId when signal fires after chatSend resolves', async () => {
+      const { ws, chatAbort } = makeAbortableWS({ runIdOnSend: 'run-42', resolveSendImmediately: true });
+      deps = makeDeps({ getCorpGatewayWS: () => ws });
+      harness = new OpenClawHarness(deps);
+      await harness.init(BASE_CONFIG);
+
+      const ac = new AbortController();
+      const dispatchP = harness.dispatch({ ...BASE_OPTS, signal: ac.signal });
+      // Yield so chatSend resolves → onRunStarted fires → capturedRunId is set
+      await new Promise((r) => setImmediate(r));
+      ac.abort();
+
+      await expect(dispatchP).rejects.toMatchObject({ category: 'aborted' });
+      expect(chatAbort).toHaveBeenCalledTimes(1);
+      expect(chatAbort).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: 'say:ceo:mark',
+          runId: 'run-42',
+          stopReason: 'caller-abort',
+        }),
+      );
+    });
+
+    it('falls back to sessionKey-only abort when signal fires before runId arrives', async () => {
+      // chatSend stays pending — no runId yet — so the abort listener
+      // must fire without one, then the onRunStarted replay fires a
+      // second abort when the runId finally arrives.
+      const { ws, chatAbort, resolveSend } = makeAbortableWS({
+        runIdOnSend: 'run-late',
+        resolveSendImmediately: false,
+      });
+      deps = makeDeps({ getCorpGatewayWS: () => ws });
+      harness = new OpenClawHarness(deps);
+      await harness.init(BASE_CONFIG);
+
+      const ac = new AbortController();
+      const dispatchP = harness.dispatch({ ...BASE_OPTS, signal: ac.signal });
+      await new Promise((r) => setImmediate(r));
+      ac.abort(); // runId not yet captured — first chat.abort is sessionKey-only
+
+      await expect(dispatchP).rejects.toMatchObject({ category: 'aborted' });
+      // First call — no runId in params, sessionKey only
+      expect(chatAbort.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({ sessionKey: 'say:ceo:mark', stopReason: 'caller-abort' }),
+      );
+      expect(chatAbort.mock.calls[0]?.[0]?.runId).toBeUndefined();
+
+      // Replay — chatSend finally resolves, onRunStarted sees
+      // abortIntentFired=true and fires a precise abort with the runId.
+      resolveSend();
+      await new Promise((r) => setImmediate(r));
+      expect(chatAbort).toHaveBeenCalledTimes(2);
+      expect(chatAbort.mock.calls[1]?.[0]).toEqual(
+        expect.objectContaining({ sessionKey: 'say:ceo:mark', runId: 'run-late' }),
+      );
+    });
+
+    it('does not call chat.abort when dispatch completes naturally', async () => {
+      // Sanity: chatAbort must only fire on caller abort, not on normal
+      // teardown. Without this guard, a spurious abort could interrupt
+      // sibling runs on the same session.
+      const { ws, chatAbort } = makeAbortableWS();
+      deps = makeDeps({ getCorpGatewayWS: () => ws });
+      harness = new OpenClawHarness(deps);
+      await harness.init(BASE_CONFIG);
+
+      const dispatchP = harness.dispatch({ ...BASE_OPTS });
+      // Never abort, never resolve — let the promise hang and just verify
+      // the side effect hasn't happened. Short wait to make sure any
+      // scheduled work runs.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(chatAbort).not.toHaveBeenCalled();
+
+      // Clean up — don't leak a pending rejection handler.
+      dispatchP.catch(() => void 0);
     });
   });
 
