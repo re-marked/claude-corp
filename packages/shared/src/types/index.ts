@@ -16,6 +16,8 @@ export type {
 export type {
   ChannelMessage,
   MessageKind,
+  AmbientKind,
+  AmbientMetadata,
 } from './message.js';
 
 export type {

@@ -11,6 +11,8 @@ export type {
   ChannelScope,
   ChannelMessage,
   MessageKind,
+  AmbientKind,
+  AmbientMetadata,
   Task,
   TaskStatus,
   TaskPriority,
@@ -63,6 +65,13 @@ export {
 export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
+
+// One brain per agent — unified session keys for every reasoning dispatch
+export {
+  agentSessionKey,
+  isAgentSession,
+  AGENT_SESSION_PREFIX,
+} from './session-key.js';
 
 // Schedule parsing
 export {
