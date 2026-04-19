@@ -23,7 +23,12 @@ import { HireWizard } from './hire-wizard.js';
 import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
 import { COLORS, agentColor } from '../theme.js';
-import { parseAskFounder, QuestionBanner, type FounderQuestion } from '../components/ask-founder.js';
+import {
+  parseAskFounder,
+  QuestionBanner,
+  deriveAnsweredQuestions,
+  type FounderQuestion,
+} from '../components/ask-founder.js';
 import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
@@ -230,23 +235,17 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
-  // Rehydrate answeredQuestions from persisted metadata. When the
-  // founder answers, the outgoing message carries metadata.answerFor
-  // pointing at the question's message id; scanning messages on every
-  // refresh rebuilds the set so answered questions stay dead across
-  // TUI restarts. Equivalent to Claude Code seeing a tool_result paired
-  // with its tool_use.
+  // Rehydrate answeredQuestions from persisted metadata on every
+  // refresh. Answer and dismissal writes both stamp
+  // metadata.answerFor; deriveAnsweredQuestions rebuilds the set from
+  // the JSONL so answered questions stay dead across TUI restarts.
   useEffect(() => {
-    const ids: string[] = [];
-    for (const m of messages) {
-      const ref = m.metadata?.answerFor;
-      if (typeof ref === 'string') ids.push(ref);
-    }
-    if (ids.length === 0) return;
+    const persisted = deriveAnsweredQuestions(messages);
+    if (persisted.size === 0) return;
     setAnsweredQuestions(prev => {
       let changed = false;
       const next = new Set(prev);
-      for (const id of ids) {
+      for (const id of persisted) {
         if (!next.has(id)) { next.add(id); changed = true; }
       }
       return changed ? next : prev;
