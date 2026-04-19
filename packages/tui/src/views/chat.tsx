@@ -501,37 +501,33 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     //
     // Priority 1: if the most recent ambient stack in view is collapsed,
     //   expand it to 'items'. If already expanded, collapse back. Gives
-    //   keyboard-only users a fallback when mouse isn't available
-    //   (ssh without mouse-reporting, screen readers, etc.).
+    //   keyboard-only users a fallback when mouse isn't available.
     // Priority 2 (fallback): toggle thread view, same as before.
     if (key.ctrl && input === 'y') {
-      // Find the most recent ambient stack by walking aggregated
-      // entries backward. We don't call aggregateAmbient here again;
-      // we look for the last message carrying metadata.ambient as a
-      // proxy (good enough for keyboard fallback).
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i]!;
-        const mMeta = m.metadata as Record<string, unknown> | null;
-        const mAmbient = mMeta?.ambient as { kind?: string } | undefined;
-        const mTurnId = mMeta?.turnId as string | undefined;
-        if (mAmbient?.kind && mTurnId) {
-          // Stack id scheme mirrors ambient-stack.ts: `<kind>:<firstTurnId>`.
-          // With just a single message we don't know the stack's first
-          // turnId, so we use THIS turn's as the key. It may not match
-          // the canonical stack id if the stack has older turns, but
-          // the user gets a deterministic target: toggle THIS turn's
-          // entry. The component-layer pin/expand logic treats unknown
-          // stack ids as collapsed by default, so the toggle still
-          // produces a visible state change.
-          const probeId = `${mAmbient.kind}:${mTurnId}`;
-          setStackExpansion(prev => {
-            const next = new Map(prev);
-            const cur = next.get(probeId)?.kind ?? 'collapsed';
-            next.set(probeId, cur === 'collapsed' ? { kind: 'items' } : { kind: 'collapsed' });
-            return next;
-          });
-          return;
+      // Use the same aggregation pass the render loop uses, so stack
+      // ids match exactly. Previous implementation guessed the id from
+      // the LAST ambient message's turnId, which never matched the
+      // canonical id (aggregator keys on the FIRST turn) — toggles
+      // landed on phantom entries no component was reading.
+      const entries = aggregateAmbient(messages.slice(-100));
+      let lastStackId: string | null = null;
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i]!.kind === 'stack') {
+          lastStackId = entries[i]!.id;
+          break;
         }
+      }
+      if (lastStackId) {
+        setStackExpansion(prev => {
+          const next = new Map(prev);
+          const cur = next.get(lastStackId!)?.kind ?? 'collapsed';
+          next.set(
+            lastStackId!,
+            cur === 'collapsed' ? { kind: 'items' } : { kind: 'collapsed' },
+          );
+          return next;
+        });
+        return;
       }
       // No ambient to toggle — fall through to thread view.
       if (activeThread) {
