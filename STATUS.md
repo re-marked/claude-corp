@@ -4,6 +4,24 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.5.0 — One brain per agent (OPEN, PR schizophrenic 2/3)
+
+Closes the TODO flagged in v2.1.10's audit ("worth unifying many of these into the agent's main thread — pinged Mark for the call"). Mark called it: unify everything.
+
+Every reasoning dispatch for agent X now lands on the same `agent:<slug>` session, replacing 9 legacy per-kind prefixes (`jack:`, `say:<a>:<b>`, `cron:`, `loop:`, `heartbeat:`, `inbox:<agent>:<ts>`, `agent:<id>:channel-<cid>`, `herald-narration:<ts>`, `failsafe-heartbeat:<ts>`). The "two Janitors interleaving in one JSONL" bug was the visible symptom of parallel selves with separate memories; unifying kills that class of schizophrenia entirely.
+
+18 dispatch sites migrated (15 in daemon + 3 in cc-cli). New `agentSessionKey(slug)` helper in shared + `AmbientMetadata` convention on `metadata.ambient: { kind, summary }`. Scheduled/system work (cron, heartbeat, dream, autoemon, herald, failsafe) stamps ambient so the TUI collapses it into dim one-line badges with kind icons — cron ⚙, heartbeat ⏱, dream 🌙 — without polluting the main conversation. Founder-attention dispatches (pulse escalation, SLUMBER state change, wake-up briefing) omit the tag so they render expanded.
+
+TUI: Ctrl+Y expands the most recent ambient turn (placeholder; PR 2b ships Yokai native mouse + click-to-expand + auto-stacking of same-kind bursts).
+
+Deferred to PR 2.5: per-agent FIFO queue with founder preemption. For now, PR 1's InflightRegistry abort-previous preserves "newest wins" semantics at the single-session boundary — which is cleaner to reason about once every input funnels through that one boundary.
+
+Regression tests reshaped to verify the unified shape across all dispatch sites (13 new + 10 existing). 763/763 suite green.
+
+## v2.4.0 — Agent interrupt (OPEN, PR schizophrenic 1/3)
+
+Esc during a live jack dispatch cleanly aborts the turn on both harnesses (claude-code via SIGINT, openclaw via the now-wired `chat.abort` RPC), preserves the input buffer, keeps the founder in the chat view. Centralized single-owner Esc routing via the `interruptRegistry` singleton — no more dual-handler race that used to throw the founder back to home.
+
 ## v2.3.0 — askFounder structured questions + /log viewer + fragment condensing (IN PROGRESS)
 
 Three features shipped:
