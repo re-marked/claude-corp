@@ -4,7 +4,24 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.5.0 — One brain per agent (PR open)
+## v2.5.1 — Fix now, don't "note" (PR open)
+
+One prompt fragment at order 55 that reshapes agent defaults when the
+founder flags an issue. Before: agents deflected fixable feedback into
+"ok, got it, I'll remember next time" — looks receptive, leaves the
+broken thing broken. Now: default is to fix it in the same turn. The
+tool call is the response.
+
+Three explicit carve-outs for when acknowledgment IS correct (past
+decisions that can't be undone, preferences for future calls with no
+current match, behavioral feedback about the agent itself). Fallback:
+if in doubt, ask "do you want me to fix that now?" — don't assume
+"next time" is the answer.
+
+Content-level tests (7) lock the specific wording — this fragment's
+value is its voice, so wording drift = feature drift.
+
+## v2.5.0 — One brain per agent (MERGED, PR #142)
 
 Every reasoning dispatch — DM, @mention, cron, loop, heartbeat, dream,
 autoemon tick, herald narration, failsafe monitor, CEO escalation,
