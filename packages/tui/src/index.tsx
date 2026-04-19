@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import React from 'react';
-import { render } from '@claude-code-kit/ink-renderer';
+import { render, AlternateScreen } from '@claude-code-kit/ink-renderer';
 import { App } from './app.js';
 import { ensureClaudeCorpHome, listCorps, deleteCorp } from '@claudecorp/shared';
 import { getPasteFilter, enableBracketedPaste, disableBracketedPaste } from './lib/paste-filter.js';
@@ -103,10 +103,22 @@ function restoreTerminal() {
 }
 
 // cck render() is async — use top-level await (ESM + Node 22+)
-const { unmount, waitUntilExit } = await render(<App forceNew={forceNew} />, {
-  stdin: pasteStdin as any,
-  exitOnCtrlC: true,
-});
+//
+// AlternateScreen: run the TUI in the terminal's alternate screen
+// buffer so shell history above the launch point is preserved on
+// exit, and — load-bearing — enable SGR mouse tracking (clicks,
+// hover, wheel). Without this wrap, `onClick` / `onMouseEnter` on
+// any Box is a no-op. Yokai handles clean teardown on unmount AND
+// signal-exit so the terminal never gets stuck in mouse mode.
+const { unmount, waitUntilExit } = await render(
+  <AlternateScreen>
+    <App forceNew={forceNew} />
+  </AlternateScreen>,
+  {
+    stdin: pasteStdin as any,
+    exitOnCtrlC: true,
+  },
+);
 
 waitUntilExit().then(async () => {
   restoreTerminal();
