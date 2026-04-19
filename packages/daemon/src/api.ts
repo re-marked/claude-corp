@@ -1030,7 +1030,7 @@ export function createApi(daemon: Daemon): Server {
             body: JSON.stringify({
               target: slug,
               message: prompt,
-              sessionKey: `jack:${slug}`,
+              sessionKey: agentSessionKey(slug),
               channelId: channelId || undefined,
             }),
             signal: AbortSignal.timeout(timeout),
