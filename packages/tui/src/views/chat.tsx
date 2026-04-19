@@ -87,6 +87,14 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
    *  messages; this set just covers the <50ms window between the user
    *  pressing a key and refreshMessages picking up the new record. */
   const [answeredOverride, setAnsweredOverride] = useState<Set<string>>(new Set());
+  /**
+   * In-flight AbortController for the current jack dispatch. Held on a
+   * ref (not state) because the abort path doesn't need to re-render
+   * and state updates are async — Esc needs to abort on the exact
+   * handler tick, not on the next render. Cleared after each send so
+   * Esc during idle can't accidentally fire a stale abort.
+   */
+  const inflightAbortRef = useRef<AbortController | null>(null);
   /** Active question interaction state */
   const [questionFocus, setQuestionFocus] = useState(0);
   const [questionMulti, setQuestionMulti] = useState<Set<string>>(new Set());
@@ -298,6 +306,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   useInput((input, key) => {
     if (showHireWizard || showModelWizard || showHarnessModal) return;
+
+    // Interrupt: Esc during a live jack dispatch kills the turn on
+    // both sides (client fetch + server-side chat.abort) and returns
+    // focus to the input bar with whatever the founder was typing
+    // preserved. Only fires when an in-flight controller is registered —
+    // when idle, Esc falls through to normal back-nav. The streaming
+    // indicator + footer hint tell the user which Esc they're pressing.
+    if (key.escape && inflightAbortRef.current && (sending || thinking) && jackMode?.active) {
+      const controller = inflightAbortRef.current;
+      const sessionKey = jackMode.sessionKey;
+      inflightAbortRef.current = null;
+      try { controller.abort(); } catch { /* already aborted */ }
+      // Best-effort server-side cancel. Don't await — the local abort
+      // already frees the UI; server cleanup continues in background.
+      void daemonClient.interrupt(sessionKey);
+      setThinking(false);
+      setThinkingAgents([]);
+      setSending(false);
+      writeSystemMessage('(interrupted)');
+      return;
+    }
+
     // Plan review mode keyboard handling
     if (planReview) {
       if (key.escape) { setPlanReview(null); return; }
@@ -1739,10 +1769,25 @@ Always consider what happens when things go wrong.`,
 
       // Send raw message — OpenClaw manages conversation history via persistent session key.
       // No client-side history stuffing. Proper turn structure > flat text dump.
+      //
+      // Interrupt support: own an AbortController for this dispatch so
+      // Esc during streaming can abort both the local fetch and (via
+      // /cc/interrupt) the server-side turn.
+      const controller = new AbortController();
+      inflightAbortRef.current = controller;
       try {
-        const result = await daemonClient.say(jackMode.agentSlug, text, jackMode.sessionKey, channel.id);
+        const result = await daemonClient.say(
+          jackMode.agentSlug,
+          text,
+          jackMode.sessionKey,
+          channel.id,
+          controller.signal,
+        );
 
-        if (result.ok && result.response) {
+        if (result.interrupted) {
+          // Caller aborted — UI marker + state clear already handled by
+          // the Esc handler. Silence here; don't treat as error.
+        } else if (result.ok && result.response) {
           // Response already written to JSONL by say endpoint via post().
           // ScrollBox renders messages as normal React state — no Ink Static
           // scrollback bug. Just refresh to pick up the persisted message.
@@ -1752,7 +1797,15 @@ Always consider what happens when things go wrong.`,
           writeSystemMessage(`Jack dispatch failed: ${(result as any).error ?? 'No response'}`);
         }
       } catch (err) {
-        writeSystemMessage(`Jack error: ${err instanceof Error ? err.message : String(err)}. Session continues.`);
+        // Abort rejects the fetch with a DOMException (or AbortError) —
+        // treat that as a clean interrupt, not a dispatch error.
+        const isAbort = controller.signal.aborted
+          || (err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message)));
+        if (!isAbort) {
+          writeSystemMessage(`Jack error: ${err instanceof Error ? err.message : String(err)}. Session continues.`);
+        }
+      } finally {
+        if (inflightAbortRef.current === controller) inflightAbortRef.current = null;
       }
 
       setThinking(false);
@@ -2174,7 +2227,7 @@ Always consider what happens when things go wrong.`,
               : jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
             agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
           />
-          <Text color={slumberActive ? '#a5b4fc' : jackMode?.active ? COLORS.warning : COLORS.muted}> {slumberActive ? 'SLUMBER active · /wake /brief  ' : ''}{jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  Esc:back</Text>
+          <Text color={slumberActive ? '#a5b4fc' : jackMode?.active ? COLORS.warning : COLORS.muted}> {slumberActive ? 'SLUMBER active · /wake /brief  ' : ''}{jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  {(sending || thinking) && jackMode?.active ? 'Esc:interrupt' : 'Esc:back'}</Text>
         </>
       )}
     </Box>

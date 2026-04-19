@@ -145,11 +145,20 @@ export class OpenClawHarness implements AgentHarness {
       });
     }
 
-    // AbortSignal support: race the dispatch against a signal-rejection promise.
-    // Note: the underlying ws.chatSend is not truly interrupted today —
-    // caller-side abort just causes this promise to reject early while the
-    // underlying turn completes in the background. Matches existing behavior
-    // (no regression) and can be made fully-cancelling in a follow-up.
+    // AbortSignal support: when the caller aborts, fire chat.abort on
+    // the gateway so the provider stream + in-flight tool calls actually
+    // stop server-side. Track the runId via onRunStarted so we can abort
+    // precisely (not just by sessionKey — that would kill sibling runs
+    // on the same session, which matters once we unify to one session
+    // per agent in PR 2/3).
+    //
+    // Race: if the caller aborts before chat.send resolves with a
+    // runId, fall back to aborting by sessionKey (wider but correct).
+    // We also queue the intent so the post-runId abort lands if the
+    // signal fires during the chatSend round-trip.
+    let capturedRunId: string | null = null;
+    let abortIntentFired = false;
+
     const dispatchPromise = dispatchToAgent(
       agentProc,
       opts.message,
@@ -157,7 +166,21 @@ export class OpenClawHarness implements AgentHarness {
       opts.sessionKey,
       callbacks?.onToken,
       wsClient,
-      { onToolStart, onToolEnd },
+      {
+        onToolStart,
+        onToolEnd,
+        onRunStarted: (runId) => {
+          capturedRunId = runId;
+          // Signal fired before we had a runId → apply it now.
+          if (abortIntentFired && wsClient?.isConnected()) {
+            void wsClient.chatAbort({
+              sessionKey: opts.sessionKey,
+              runId,
+              stopReason: 'caller-abort',
+            }).catch(() => { /* best-effort */ });
+          }
+        },
+      },
     );
 
     let abortPromise: Promise<never> | null = null;
@@ -165,6 +188,17 @@ export class OpenClawHarness implements AgentHarness {
     if (opts.signal) {
       abortPromise = new Promise<never>((_, reject) => {
         abortListener = () => {
+          abortIntentFired = true;
+          // Fire server-side abort. Precise when we have a runId;
+          // wider (sessionKey-scoped) otherwise.
+          if (wsClient?.isConnected()) {
+            const abortParams: Parameters<typeof wsClient.chatAbort>[0] = {
+              sessionKey: opts.sessionKey,
+              stopReason: 'caller-abort',
+            };
+            if (capturedRunId) abortParams.runId = capturedRunId;
+            void wsClient.chatAbort(abortParams).catch(() => { /* best-effort */ });
+          }
           reject(new HarnessError({
             category: 'aborted',
             harnessName: this.name,

@@ -22,6 +22,13 @@ export interface DispatchCallbacks {
   onToolStart?: (tool: ToolCallInfo) => void;
   onToolEnd?: (tool: ToolCallInfo & { result?: string }) => void;
   onLifecycle?: (phase: string) => void;
+  /**
+   * Fires once chat.send resolves with a runId. Lets the harness
+   * capture the runId so it can call chat.abort with precision when
+   * the caller signals cancellation. Optional — fallback path aborts
+   * by sessionKey only (also valid, just wider blast radius).
+   */
+  onRunStarted?: (runId: string) => void;
 }
 
 // --- WebSocket-based dispatch (preferred — gives tool events) ---
@@ -46,6 +53,7 @@ export async function dispatchViaWebSocket(
   });
 
   log(`[dispatch] Run started: ${runId}`);
+  callbacks.onRunStarted?.(runId);
 
   return new Promise((resolve, reject) => {
     let accumulated = '';
@@ -312,7 +320,12 @@ export async function dispatchToAgent(
   /** WebSocket client for the agent's gateway (if available) */
   wsClient?: OpenClawWS | null,
   /** Extra callbacks for tool events (only work with WebSocket) */
-  toolCallbacks?: { onToolStart?: DispatchCallbacks['onToolStart']; onToolEnd?: DispatchCallbacks['onToolEnd'] },
+  toolCallbacks?: {
+    onToolStart?: DispatchCallbacks['onToolStart'];
+    onToolEnd?: DispatchCallbacks['onToolEnd'];
+    /** Fires when WS dispatch receives its runId — needed for precise chat.abort. */
+    onRunStarted?: DispatchCallbacks['onRunStarted'];
+  },
 ): Promise<DispatchResult> {
   // Prefer WebSocket dispatch for tool event visibility
   if (wsClient?.isConnected()) {
@@ -321,9 +334,12 @@ export async function dispatchToAgent(
       onToken,
       onToolStart: toolCallbacks?.onToolStart,
       onToolEnd: toolCallbacks?.onToolEnd,
+      onRunStarted: toolCallbacks?.onRunStarted,
     });
   }
 
-  // Fallback to HTTP SSE (no tool events)
+  // Fallback to HTTP SSE (no tool events). No runId available here —
+  // HTTP path can't be aborted server-side today, so we simply don't
+  // fire onRunStarted.
   return dispatchViaHTTP(agent, message, context, sessionUser, onToken);
 }
