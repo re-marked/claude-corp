@@ -26,6 +26,7 @@ import {
   AmbientStackView,
   type StackExpansion,
 } from '../components/ambient-stack-view.js';
+import { QuietInterval, QUIET_THRESHOLD_MS } from '../components/quiet-interval.js';
 import { HireWizard } from './hire-wizard.js';
 import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
@@ -2188,16 +2189,33 @@ Always consider what happens when things go wrong.`,
           // turn-grouping (metadata.turnId → one bubble) keeps working
           // across stack boundaries.
           let prevSingleton: ChannelMessage | null = null;
+          // Timestamp of the last thing rendered (message or stack
+          // boundary), for deciding when to inject a QuietInterval.
+          let prevEndMs: number | null = null;
+          const pushQuietIfNeeded = (nextMs: number, prefix: string) => {
+            if (prevEndMs !== null) {
+              const gap = nextMs - prevEndMs;
+              if (gap >= QUIET_THRESHOLD_MS) {
+                nodes.push(
+                  <QuietInterval key={`${prefix}-quiet-${prevEndMs}`} gapMs={gap} />,
+                );
+              }
+            }
+          };
           for (const entry of entries) {
             if (entry.kind === 'message') {
+              const ms = new Date(entry.message.timestamp).getTime();
+              pushQuietIfNeeded(ms, entry.id);
               nodes.push(
                 <React.Fragment key={entry.id}>
                   {renderMsg(entry.message, prevSingleton)}
                 </React.Fragment>,
               );
               prevSingleton = entry.message;
+              prevEndMs = ms;
             } else {
               // stack
+              pushQuietIfNeeded(entry.startMs, entry.id);
               const expansion = stackExpansion.get(entry.id) ?? { kind: 'collapsed' as const };
               nodes.push(
                 <AmbientStackView
@@ -2230,6 +2248,7 @@ Always consider what happens when things go wrong.`,
               // Stacks break the single-thread turn-grouping chain —
               // the next singleton should get a fresh header.
               prevSingleton = null;
+              prevEndMs = entry.endMs;
             }
           }
           return nodes;
