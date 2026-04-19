@@ -809,7 +809,13 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         return;
       }
       if (!agentSlug) { writeSystemMessage('Usage: /dream @agent'); return; }
-      writeSystemMessage(`Triggering dream for @${agentSlug}...`);
+      // Tag the triggering line too so the whole dream flow (trigger +
+      // complete) lands in one ambient stack instead of splitting into
+      // alternating expanded + collapsed rows.
+      writeSystemMessage(
+        `Triggering dream for @${agentSlug}...`,
+        { kind: 'dream', summary: `dream for @${agentSlug}` },
+      );
       try {
         const result = await daemonClient.triggerDream(agentSlug);
         if (result.ok) {
