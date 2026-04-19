@@ -12,6 +12,7 @@ import {
   resolveMentions,
   generateId,
   detectFeedback,
+  agentSessionKey,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -399,15 +400,14 @@ export class MessageRouter {
       // timestamped messages.
       const turnId = generateId();
 
-      // Session key is deterministic per agent + channel so consecutive
-      // @mentions in the same channel accumulate into ONE continuing
-      // conversation — the agent remembers prior mentions in that
-      // channel, tools it already ran, what it was working on. The
-      // previous `channel-${id}-${msg.id}` key minted a brand-new
-      // claude session for every single mention, so each @mention
-      // started from zero. Channel-scoped (not agent-global) so the
-      // agent's channel persona stays distinct from its DM thread.
-      const routerSessionKey = `agent:${targetId}:channel-${channel.id}`;
+      // One brain per agent: every @mention from any channel lands on
+      // the agent's single session, alongside DMs, crons, dreams — the
+      // agent has continuous memory across every kind of input.
+      // Previous implementation split channel traffic off into its own
+      // `agent:<id>:channel-<cid>` session, which meant the agent
+      // couldn't remember what the founder said in DM when replying in
+      // #general. Unifying closes that gap.
+      const routerSessionKey = agentSessionKey(target.displayName);
       log(`[router] DISPATCHING to ${target.displayName} for msg ${msg.id.slice(0,8)} from ${sender.displayName}`);
       const result = await this.daemon.harness.dispatch({
         agentId: agentProc.memberId,

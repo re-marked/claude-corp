@@ -19,6 +19,7 @@ import {
   readConfig,
   post,
   createTask,
+  agentSessionKey,
   CHANNELS_JSON,
   MEMBERS_JSON,
   MESSAGES_JSONL,
@@ -562,7 +563,11 @@ export class CronManager {
             body: JSON.stringify({
               target: clock.targetAgent,
               message: clock.command,
-              sessionKey: `cron:${slug}`,
+              sessionKey: agentSessionKey(clock.targetAgent),
+              ambient: {
+                kind: 'cron',
+                summary: clock.name ?? slug,
+              },
             }),
             signal: AbortSignal.timeout(watchdogMs),
           });

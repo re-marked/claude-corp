@@ -31,6 +31,7 @@ import {
   readConfig,
   listTasks,
   listAllContracts,
+  agentSessionKey,
   type Member,
   type Contract,
   MEMBERS_JSON,
@@ -796,8 +797,8 @@ export class AutoemonManager {
       });
     }
 
-    // Dispatch via say() — persistent session per agent
-    const sessionKey = `jack:${agentSlug}`;
+    // Dispatch via say() — one-brain session per agent
+    const sessionKey = agentSessionKey(agentSlug);
     const startTime = Date.now();
 
     log(`[autoemon] Tick #${agentState.tickCount + 1} → ${member.displayName} (interval: ${Math.round(agentState.tickIntervalMs / 1000)}s)`);
@@ -810,6 +811,10 @@ export class AutoemonManager {
           target: agentSlug,
           message: tickMessage,
           sessionKey,
+          ambient: {
+            kind: 'autoemon',
+            summary: `tick #${agentState.tickCount + 1}`,
+          },
         }),
         signal: AbortSignal.timeout(TICK_DISPATCH_TIMEOUT_MS),
       });
@@ -1305,8 +1310,10 @@ export class AutoemonManager {
               'You are in watchman mode — monitor for problems only.',
               'The Founder can type /wake to resume control at any time.',
             ].join('\n'),
-            sessionKey: `jack:${ceoSlug}`,
+            sessionKey: agentSessionKey(ceoSlug),
             channelId: ceoDm?.id,
+            // State-change notification — demands CEO attention,
+            // render expanded (no ambient tag).
           }),
         });
         log(`[autoemon] CEO notified of auto-AFK activation`);
@@ -1418,7 +1425,7 @@ export class AutoemonManager {
         body: JSON.stringify({
           target: ceoSlug,
           message: `[SCHEDULED SLUMBER] Profile: ${schedule.profileId}. Window: ${schedule.raw}. You have autonomous control.`,
-          sessionKey: `jack:${ceoSlug}`,
+          sessionKey: agentSessionKey(ceoSlug),
         }),
       }).catch(() => {});
     }
@@ -1546,8 +1553,9 @@ export class AutoemonManager {
         body: JSON.stringify({
           target: agentSlug,
           message: prompt,
-          sessionKey: `jack:${agentSlug}`,
+          sessionKey: agentSessionKey(agentSlug),
           channelId: channelId ?? undefined,
+          // Wake-up briefing — founder-facing, render expanded.
         }),
         signal: AbortSignal.timeout(90_000),
       });

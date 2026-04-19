@@ -18,6 +18,7 @@ import {
   readTask,
   updateTask,
   taskPath,
+  agentSessionKey,
   CHANNELS_JSON,
   MEMBERS_JSON,
   MESSAGES_JSONL,
@@ -346,10 +347,11 @@ export class LoopManager {
       try {
         if (clock.targetAgent) {
           // Dispatch to agent via say() — pass channelId for streaming events
-          const sayPayload: Record<string, string> = {
+          const sayPayload: Record<string, unknown> = {
             target: clock.targetAgent,
             message: clock.command,
-            sessionKey: `loop:${slug}`,
+            sessionKey: agentSessionKey(clock.targetAgent),
+            ambient: { kind: 'loop', summary: clock.name ?? slug },
           };
           if (clock.channelId) sayPayload.channelId = clock.channelId;
 

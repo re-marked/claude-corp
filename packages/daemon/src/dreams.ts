@@ -32,6 +32,7 @@ import {
   getSharedTags,
   getAgentTagSignature,
   getCultureCandidates,
+  agentSessionKey,
   STALENESS_THRESHOLD_DAYS,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
@@ -493,9 +494,13 @@ export class DreamManager {
         body: JSON.stringify({
           target: slug,
           message: prompt,
-          sessionKey: `jack:${slug}`,
+          sessionKey: agentSessionKey(slug),
           // Pass DM channelId so tool events + streaming show in the agent's DM
           channelId: dmChannel?.id ?? undefined,
+          ambient: {
+            kind: 'dream',
+            summary: `dreamed for ${Math.round(hoursSince)}h`,
+          },
         }),
         signal: AbortSignal.timeout(DREAM_TIMEOUT_MS),
       });

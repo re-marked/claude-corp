@@ -1,4 +1,4 @@
-import { readConfig, type Member, MEMBERS_JSON } from '@claudecorp/shared';
+import { readConfig, agentSessionKey, type Member, MEMBERS_JSON } from '@claudecorp/shared';
 import { join } from 'node:path';
 import type { Daemon } from './daemon.js';
 import { log, logError } from './logger.js';
@@ -158,7 +158,8 @@ export class Pulse {
         body: JSON.stringify({
           target: agentSlug,
           message,
-          sessionKey: `heartbeat:${agentSlug}`,
+          sessionKey: agentSessionKey(agentSlug),
+          ambient: { kind: 'heartbeat', summary: 'heartbeat' },
         }),
         signal: AbortSignal.timeout(PING_TIMEOUT_MS),
       });
@@ -191,7 +192,11 @@ export class Pulse {
               body: JSON.stringify({
                 target: 'ceo',
                 message: `RECOVERY: Agent "${displayName}" is back online and responding to heartbeats. Previous escalation resolved.`,
-                sessionKey: `jack:ceo`,
+                sessionKey: agentSessionKey('ceo'),
+                ambient: {
+                  kind: 'recovery',
+                  summary: `${displayName} recovered`,
+                },
               }),
               signal: AbortSignal.timeout(30_000),
             });
@@ -271,7 +276,9 @@ export class Pulse {
             body: JSON.stringify({
               target: 'ceo',
               message: `ESCALATION from Pulse: Agent "${agent.displayName}" is unresponsive. Reason: ${reason}. Missed ${state.missedCount} consecutive heartbeats. Please investigate — the agent may need to be restarted or the issue may need founder attention.`,
-              sessionKey: `jack:ceo`,
+              sessionKey: agentSessionKey('ceo'),
+              // Escalation is NOT ambient — it demands attention in
+              // the main conversation. No ambient tag = full render.
             }),
             signal: AbortSignal.timeout(60_000),
           });

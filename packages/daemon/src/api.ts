@@ -21,7 +21,9 @@ import {
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
+  agentSessionKey,
   type ChannelMessage,
+  type AmbientMetadata,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
@@ -647,10 +649,19 @@ export function createApi(daemon: Daemon): Server {
         // so the catch block can reference them (interrupt bookkeeping
         // needs both, and the catch runs if abort fires).
         const saySenderId = (body.senderId as string) ?? 'founder';
-        const senderSlug = members.find((m: any) => m.id === saySenderId)?.displayName?.toLowerCase().replace(/\s+/g, '-') ?? 'system';
         const targetSlugNorm = normalize(target.displayName);
+        // One brain per agent: every reasoning dispatch lands on the
+        // same `agent:<slug>` session regardless of who triggered it
+        // (founder jack, agent-to-agent say, cron tick, etc.). An
+        // explicit sessionKey in the request body still wins — callers
+        // that have their own reason for a separate session (tests,
+        // ephemeral one-shot probes) can override.
         const sessionKey = (body.sessionKey as string)
-          ?? `say:${senderSlug}:${targetSlugNorm}`;
+          ?? agentSessionKey(targetSlugNorm);
+        // Optional ambient tag for scheduled / system work. When
+        // present, the TUI collapses these turns into stacked badges
+        // so the main conversation stays clean.
+        const ambient = body.ambient as AmbientMetadata | undefined;
         const abortController = new AbortController();
         daemon.registerInflight(sessionKey, abortController);
 
@@ -729,7 +740,14 @@ export function createApi(daemon: Daemon): Server {
                   content: text,
                   source: 'jack',
                   slumber: daemon.autoemon.isActive(),
-                  metadata: { sessionKey: (body.sessionKey as string) ?? null, turnId },
+                  metadata: {
+                    sessionKey: (body.sessionKey as string) ?? null,
+                    turnId,
+                    // Stamp ambient on agent responses triggered by
+                    // scheduled / system work so the TUI collapses the
+                    // whole turn into one badge.
+                    ...(ambient ? { ambient } : {}),
+                  },
                 });
                 persistedTextBlocks++;
                 lastPersistedLength += text.length;
@@ -781,6 +799,9 @@ export function createApi(daemon: Daemon): Server {
                         ? (typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result)).slice(0, 300)
                         : undefined,
                       turnId,
+                      // Tool events inherit the turn's ambient tag so
+                      // the whole turn collapses as one unit in the TUI.
+                      ...(ambient ? { ambient } : {}),
                     },
                   });
                 }
@@ -802,7 +823,11 @@ export function createApi(daemon: Daemon): Server {
               content: result.content,
               source: 'jack',
               slumber: daemon.autoemon.isActive(),
-              metadata: { sessionKey: (body.sessionKey as string) ?? null, turnId },
+              metadata: {
+                sessionKey: (body.sessionKey as string) ?? null,
+                turnId,
+                ...(ambient ? { ambient } : {}),
+              },
             });
           }
 

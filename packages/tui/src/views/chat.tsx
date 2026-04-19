@@ -10,6 +10,7 @@ import {
   appendMessage,
   generateId,
   parseIntervalExpression,
+  agentSessionKey,
   MEMBERS_JSON,
   MESSAGES_JSONL,
   CORP_JSON,
@@ -89,6 +90,14 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
    *  pressing a key and refreshMessages picking up the new record. */
   const [answeredOverride, setAnsweredOverride] = useState<Set<string>>(new Set());
   /**
+   * Ambient turn expansion — turnIds the founder has manually expanded.
+   * Placeholder for PR 2b's full stacking + mouse. For now: Ctrl+Y
+   * toggles expansion on the most recent ambient turn. Collapsed turns
+   * render as single-line dim badges so cron ticks, heartbeats, and
+   * dreams don't bury the real conversation.
+   */
+  const [expandedAmbient, setExpandedAmbient] = useState<Set<string>>(new Set());
+  /**
    * In-flight AbortController for the current jack dispatch. Held on a
    * ref (not state) because the abort path doesn't need to re-render
    * and state updates are async — Esc needs to abort on the exact
@@ -156,7 +165,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // when the key stays stable.
     setJackMode({
       active: true,
-      sessionKey: `jack:${slug}`,
+      sessionKey: agentSessionKey(slug),
       agentSlug: slug,
       agentName: agent.displayName,
       agentId: agent.id,
@@ -476,12 +485,36 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     if (key.ctrl && input === 'm') {
       setShowMemberSidebar(prev => !prev);
     }
-    // Ctrl+Y — open/close thread view (Ctrl+T is task board)
+    // Ctrl+Y — context-aware.
+    //
+    // Priority 1: if there's a collapsed ambient turn visible (a cron
+    //   badge, heartbeat, dream, etc.), Ctrl+Y expands the most recent
+    //   one. Second Ctrl+Y on the same turn collapses it back.
+    // Priority 2 (fallback): toggle thread view, same as before.
+    //
+    // Placeholder UX for PR 2b — that PR replaces this with mouse
+    // click-to-expand on each badge + auto-stacking of same-kind bursts.
     if (key.ctrl && input === 'y') {
+      // Find most recent ambient turn in view.
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]!;
+        const mMeta = m.metadata as Record<string, unknown> | null;
+        const mAmbient = mMeta?.ambient;
+        const mTurnId = mMeta?.turnId as string | undefined;
+        if (mAmbient && mTurnId) {
+          setExpandedAmbient(prev => {
+            const next = new Set(prev);
+            if (next.has(mTurnId)) next.delete(mTurnId);
+            else next.add(mTurnId);
+            return next;
+          });
+          return;
+        }
+      }
+      // No ambient to toggle — fall through to thread view.
       if (activeThread) {
         setActiveThread(undefined);
       } else {
-        // Open the thread with most replies
         const sorted = [...threadCounts.entries()].sort((a, b) => b[1] - a[1]);
         if (sorted.length > 0) setActiveThread(sorted[0]![0]);
       }
@@ -565,7 +598,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       // same UUID so claude-code resumes the existing session.
       setJackMode({
         active: true,
-        sessionKey: `jack:${slug}`,
+        sessionKey: agentSessionKey(slug),
         agentSlug: slug,
         agentName: agent.displayName,
         agentId: agent.id,
@@ -877,7 +910,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         const data = await daemonClient.post('/cc/say', {
           target: ceoSlug,
           message: slumberPrompt,
-          sessionKey: `jack:${ceoSlug}`,
+          sessionKey: agentSessionKey(ceoSlug),
           channelId: channel.id,
         }) as any;
 
@@ -1083,7 +1116,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         await daemonClient.post('/cc/say', {
           target: ceoSlug,
           message: briefPrompt,
-          sessionKey: `jack:${ceoSlug}`,
+          sessionKey: agentSessionKey(ceoSlug),
           channelId: channel.id,
         });
 
@@ -1871,7 +1904,7 @@ Always consider what happens when things go wrong.`,
               const data = await daemonClient.post('/cc/say', {
                 target: ceoSlug,
                 message: `[SLUMBER MODE ACTIVATED — ${profileId}${durationMs ? ` for ${durationLabel}` : ''}${goal ? `\nGoal: ${goal}` : ''}]\nThe Founder is stepping away. You have autonomous control.\nAcknowledge briefly and continue from where the conversation left off.\nYou'll receive <tick> prompts. Act on them autonomously.`,
-                sessionKey: `jack:${ceoSlug}`,
+                sessionKey: agentSessionKey(ceoSlug),
                 channelId: channel.id,
               }) as any;
 
@@ -1996,6 +2029,37 @@ Always consider what happens when things go wrong.`,
     const name = sender?.displayName ?? 'system';
     const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const isSystem = msg.senderId === 'system' || msg.kind === 'system' || msg.kind === 'task_event';
+
+    // Ambient work collapse. Scheduled/system turns (cron, heartbeat,
+    // dream, autoemon tick, loop, etc.) carry metadata.ambient stamped
+    // by the dispatch site. By default we render them as a single dim
+    // badge so they don't bury the real conversation. When the turn is
+    // in `expandedAmbient`, fall through to normal rendering.
+    const meta = msg.metadata as Record<string, unknown> | null;
+    const ambient = meta?.ambient as { kind: string; summary: string } | undefined;
+    const turnId = meta?.turnId as string | undefined;
+    if (ambient && !(turnId && expandedAmbient.has(turnId))) {
+      // Only the FIRST message of an ambient turn shows the badge;
+      // subsequent messages in the same turn are hidden until expansion.
+      const prevMeta = prev?.metadata as Record<string, unknown> | null;
+      const prevTurnId = prevMeta?.turnId as string | undefined;
+      const isFirstOfTurn = !turnId || prevTurnId !== turnId || !prevMeta?.ambient;
+      if (!isFirstOfTurn) return null;
+
+      const kindIcon: Record<string, string> = {
+        heartbeat: '⏱', cron: '⚙', loop: '↻', autoemon: '◐',
+        dream: '🌙', inbox: '✉', failsafe: '🛡', herald: '◆',
+        recovery: '✓',
+      };
+      const icon = kindIcon[ambient.kind] ?? '·';
+      return (
+        <Box key={msg.id} paddingLeft={1}>
+          <Text color={COLORS.muted}>
+            {' '}{icon} {name} — {ambient.summary}  <Text color={COLORS.subtle}>{time} · Ctrl+Y to expand</Text>
+          </Text>
+        </Box>
+      );
+    }
 
     if (isSystem) {
       // Empty system messages are invisible markers (e.g. question
