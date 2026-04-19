@@ -25,6 +25,7 @@ import { TimeMachine } from './views/time-machine.js';
 import { ClockView } from './views/clock.js';
 import { LogViewer } from './views/log-viewer.js';
 import { FeedbackView } from './views/feedback.js';
+import * as interruptRegistry from './lib/interrupt-registry.js';
 import { StatusBar } from './components/status-bar.js';
 import { DaemonClient } from './lib/daemon-client.js';
 import { useDaemonEvents } from './hooks/use-daemon-events.js';
@@ -306,8 +307,13 @@ function ResumeView({ corpPath }: { corpPath: string }) {
       if (current?.type !== 'feedback') navigate({ type: 'feedback' });
       return;
     }
-    // Escape — go back
+    // Escape — first chance for any registered interruptible (e.g., a
+    // streaming jack dispatch in chat) to claim the key. consume() runs
+    // the published abort and returns true when it fires, so we don't
+    // fall through to nav-back and accidentally dump the user at home.
+    // If nothing's registered, Esc keeps its normal meaning: go back.
     if (key.escape) {
+      if (interruptRegistry.consume()) return;
       if (viewStack.depth() > 1) goBack();
       return;
     }

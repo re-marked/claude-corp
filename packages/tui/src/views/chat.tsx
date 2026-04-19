@@ -19,6 +19,7 @@ import { renderContent, isTurnContinuation } from '../components/message-list.js
 import { MessageInput } from '../components/message-input.js';
 import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
+import * as interruptRegistry from '../lib/interrupt-registry.js';
 import { HireWizard } from './hire-wizard.js';
 import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
@@ -304,29 +305,36 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     return () => clearInterval(timer);
   }, [isDm, dmAgent?.id]);
 
+  // Interrupt registration. While a jack dispatch is in flight the chat
+  // publishes its abort into the shared registry; app.tsx's Esc handler
+  // calls consume() before falling through to nav-back. Closures capture
+  // controller + sessionKey at registration time so no stale state reads
+  // happen inside the abort path — kills both the "Esc throws me home"
+  // and "Esc sometimes doesn't fire" bugs at once.
+  useEffect(() => {
+    if (!jackMode?.active) return;
+    if (!sending && !thinking) return;
+    const controller = inflightAbortRef.current;
+    if (!controller) return;
+    const sessionKey = jackMode.sessionKey;
+    return interruptRegistry.register({
+      sessionKey,
+      abort: () => {
+        inflightAbortRef.current = null;
+        try { controller.abort(); } catch { /* already aborted */ }
+        // Best-effort server-side cancel — local abort frees the UI;
+        // the server finishes unwind in the background.
+        void daemonClient.interrupt(sessionKey);
+        setThinking(false);
+        setThinkingAgents([]);
+        setSending(false);
+        writeSystemMessage('(interrupted)');
+      },
+    });
+  }, [jackMode?.active, jackMode?.sessionKey, sending, thinking, daemonClient]);
+
   useInput((input, key) => {
     if (showHireWizard || showModelWizard || showHarnessModal) return;
-
-    // Interrupt: Esc during a live jack dispatch kills the turn on
-    // both sides (client fetch + server-side chat.abort) and returns
-    // focus to the input bar with whatever the founder was typing
-    // preserved. Only fires when an in-flight controller is registered —
-    // when idle, Esc falls through to normal back-nav. The streaming
-    // indicator + footer hint tell the user which Esc they're pressing.
-    if (key.escape && inflightAbortRef.current && (sending || thinking) && jackMode?.active) {
-      const controller = inflightAbortRef.current;
-      const sessionKey = jackMode.sessionKey;
-      inflightAbortRef.current = null;
-      try { controller.abort(); } catch { /* already aborted */ }
-      // Best-effort server-side cancel. Don't await — the local abort
-      // already frees the UI; server cleanup continues in background.
-      void daemonClient.interrupt(sessionKey);
-      setThinking(false);
-      setThinkingAgents([]);
-      setSending(false);
-      writeSystemMessage('(interrupted)');
-      return;
-    }
 
     // Plan review mode keyboard handling
     if (planReview) {
