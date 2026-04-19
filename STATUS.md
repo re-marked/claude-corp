@@ -4,7 +4,29 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.6.0 — Native mouse interaction (OPEN, PR schizophrenic 2b)
+## v2.6.0 — Ambient stacks + deferred mouse (OPEN, PR schizophrenic 2b) — NEEDS RETHINKING
+
+The visual half is solid: ambient turns (crons, heartbeats, dreams, autoemon ticks) aggregate into collapsed stacks with animated kind icons, sparklines, and quiet-interval dividers. Ctrl+Y toggles expand-all. The underlying aggregator is pure + well-tested.
+
+**What's messy (requires rethinking, not more patches):**
+
+1. **Alt-screen was the wrong foundation.** Wrapping in `<AlternateScreen>` broke terminal-native scroll, drag-to-select (copy-paste), and pushed the input bar off-screen. Reverted. Native mouse is gone until a proper opt-in design — per-region enable, modifier-guarded select pass-through, verified layout constraints.
+
+2. **Interaction model is lopsided.** We built the UI assuming mouse (click-to-expand, hover, wheel-riffle, pin targets), then lost mouse. Keyboard fallback (Ctrl+Y = expand-all) is the only surviving path, and it's blunt — no per-stack targeting, no pin via keyboard, no way to open a single turn inside a stack.
+
+3. **Only dream-complete + dream-triggering are ambient-tagged.** Other repeat system-writes (heartbeat echoes, scheduled pulses, recovery notifications) route through different code paths and aren't stamped yet. Partial coverage = inconsistent collapsing.
+
+4. **Commit cadence during PR 2b was reactive.** Alt-screen → revert → Ctrl+Y bug → fix → Ctrl+Y design change → redo. Not a coherent design sequence; a spiral of live-test patches.
+
+**Proper rethinking (not in this PR):**
+
+- Do we actually want ambient INLINE in chat, or in a separate panel? Inline felt right but maybe the right answer is a dedicated view (reachable via `Ctrl+A` or the command palette) that shows "what's the corp been doing lately" without touching the main conversation.
+- What's the non-mouse interaction model? Arrow-keys-with-focus? Vim-style `h/c/d` kind-jumps? Number-hint codes? Something we haven't considered?
+- What ambient sources should collapse at all? A cron that fires twice a day is fine to see inline; a heartbeat that fires every 3 min is noise. Maybe the right threshold is per-kind frequency, not per-kind type.
+
+PR 2b stays open but is **experimental/WIP**. Session unification (2a) is the real PR 2 win — that's the capability shift. The UI shape for ambient stacks is still TBD.
+
+## v2.5.0 — One brain per agent (OPEN, PR schizophrenic 2a)
 
 The UI half of PR 2a's ambient-stack story. Yokai exposes `onClick`, `onMouseEnter`, `onMouseLeave`, and `key.wheelUp`/`wheelDown` natively — first-class citizens, not a hack. Wrapping the app in `<AlternateScreen>` unlocks the whole stack.
 
