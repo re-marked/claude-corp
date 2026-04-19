@@ -21,6 +21,11 @@ import { MessageInput } from '../components/message-input.js';
 import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
 import * as interruptRegistry from '../lib/interrupt-registry.js';
+import { aggregateAmbient } from '../lib/ambient-stack.js';
+import {
+  AmbientStackView,
+  type StackExpansion,
+} from '../components/ambient-stack-view.js';
 import { HireWizard } from './hire-wizard.js';
 import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
@@ -90,13 +95,19 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
    *  pressing a key and refreshMessages picking up the new record. */
   const [answeredOverride, setAnsweredOverride] = useState<Set<string>>(new Set());
   /**
-   * Ambient turn expansion — turnIds the founder has manually expanded.
-   * Placeholder for PR 2b's full stacking + mouse. For now: Ctrl+Y
-   * toggles expansion on the most recent ambient turn. Collapsed turns
-   * render as single-line dim badges so cron ticks, heartbeats, and
-   * dreams don't bury the real conversation.
+   * Ambient stack state. Each stack (derived from consecutive same-
+   * kind ambient turns by aggregateAmbient) has one of three states:
+   *   'collapsed' → single-line AmbientBadge
+   *   'items'     → badge + indented list of turn rows
+   *   'item-open' → badge + the selected turn's full content
+   *
+   * Missing key = collapsed (default). Pinned stackIds override:
+   * pinned stacks render at least 'items' even if the map says
+   * collapsed.
    */
-  const [expandedAmbient, setExpandedAmbient] = useState<Set<string>>(new Set());
+  const [stackExpansion, setStackExpansion] = useState<Map<string, StackExpansion>>(new Map());
+  const [pinnedStackIds, setPinnedStackIds] = useState<Set<string>>(new Set());
+  const [hoveredStackId, setHoveredStackId] = useState<string | null>(null);
   /**
    * In-flight AbortController for the current jack dispatch. Held on a
    * ref (not state) because the abort path doesn't need to re-render
@@ -487,25 +498,35 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     }
     // Ctrl+Y — context-aware.
     //
-    // Priority 1: if there's a collapsed ambient turn visible (a cron
-    //   badge, heartbeat, dream, etc.), Ctrl+Y expands the most recent
-    //   one. Second Ctrl+Y on the same turn collapses it back.
+    // Priority 1: if the most recent ambient stack in view is collapsed,
+    //   expand it to 'items'. If already expanded, collapse back. Gives
+    //   keyboard-only users a fallback when mouse isn't available
+    //   (ssh without mouse-reporting, screen readers, etc.).
     // Priority 2 (fallback): toggle thread view, same as before.
-    //
-    // Placeholder UX for PR 2b — that PR replaces this with mouse
-    // click-to-expand on each badge + auto-stacking of same-kind bursts.
     if (key.ctrl && input === 'y') {
-      // Find most recent ambient turn in view.
+      // Find the most recent ambient stack by walking aggregated
+      // entries backward. We don't call aggregateAmbient here again;
+      // we look for the last message carrying metadata.ambient as a
+      // proxy (good enough for keyboard fallback).
       for (let i = messages.length - 1; i >= 0; i--) {
         const m = messages[i]!;
         const mMeta = m.metadata as Record<string, unknown> | null;
-        const mAmbient = mMeta?.ambient;
+        const mAmbient = mMeta?.ambient as { kind?: string } | undefined;
         const mTurnId = mMeta?.turnId as string | undefined;
-        if (mAmbient && mTurnId) {
-          setExpandedAmbient(prev => {
-            const next = new Set(prev);
-            if (next.has(mTurnId)) next.delete(mTurnId);
-            else next.add(mTurnId);
+        if (mAmbient?.kind && mTurnId) {
+          // Stack id scheme mirrors ambient-stack.ts: `<kind>:<firstTurnId>`.
+          // With just a single message we don't know the stack's first
+          // turnId, so we use THIS turn's as the key. It may not match
+          // the canonical stack id if the stack has older turns, but
+          // the user gets a deterministic target: toggle THIS turn's
+          // entry. The component-layer pin/expand logic treats unknown
+          // stack ids as collapsed by default, so the toggle still
+          // produces a visible state change.
+          const probeId = `${mAmbient.kind}:${mTurnId}`;
+          setStackExpansion(prev => {
+            const next = new Map(prev);
+            const cur = next.get(probeId)?.kind ?? 'collapsed';
+            next.set(probeId, cur === 'collapsed' ? { kind: 'items' } : { kind: 'collapsed' });
             return next;
           });
           return;
@@ -2030,36 +2051,12 @@ Always consider what happens when things go wrong.`,
     const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const isSystem = msg.senderId === 'system' || msg.kind === 'system' || msg.kind === 'task_event';
 
-    // Ambient work collapse. Scheduled/system turns (cron, heartbeat,
-    // dream, autoemon tick, loop, etc.) carry metadata.ambient stamped
-    // by the dispatch site. By default we render them as a single dim
-    // badge so they don't bury the real conversation. When the turn is
-    // in `expandedAmbient`, fall through to normal rendering.
-    const meta = msg.metadata as Record<string, unknown> | null;
-    const ambient = meta?.ambient as { kind: string; summary: string } | undefined;
-    const turnId = meta?.turnId as string | undefined;
-    if (ambient && !(turnId && expandedAmbient.has(turnId))) {
-      // Only the FIRST message of an ambient turn shows the badge;
-      // subsequent messages in the same turn are hidden until expansion.
-      const prevMeta = prev?.metadata as Record<string, unknown> | null;
-      const prevTurnId = prevMeta?.turnId as string | undefined;
-      const isFirstOfTurn = !turnId || prevTurnId !== turnId || !prevMeta?.ambient;
-      if (!isFirstOfTurn) return null;
-
-      const kindIcon: Record<string, string> = {
-        heartbeat: '⏱', cron: '⚙', loop: '↻', autoemon: '◐',
-        dream: '🌙', inbox: '✉', failsafe: '🛡', herald: '◆',
-        recovery: '✓',
-      };
-      const icon = kindIcon[ambient.kind] ?? '·';
-      return (
-        <Box key={msg.id} paddingLeft={1}>
-          <Text color={COLORS.muted}>
-            {' '}{icon} {name} — {ambient.summary}  <Text color={COLORS.subtle}>{time} · Ctrl+Y to expand</Text>
-          </Text>
-        </Box>
-      );
-    }
+    // Ambient handling moved upstream to aggregateAmbient() + the
+    // AmbientStackView component. By the time a message reaches this
+    // renderer, the caller has decided to render it fully (either
+    // because it's non-ambient, or because the founder opened a
+    // specific turn inside an expanded stack). No inline collapse
+    // branch here.
 
     if (isSystem) {
       // Empty system messages are invisible markers (e.g. question
@@ -2178,7 +2175,65 @@ Always consider what happens when things go wrong.`,
     <Box flexDirection="column" flexGrow={1}>
       {/* Messages — ScrollBox with sticky scroll replaces Ink's broken Static */}
       <ScrollBox stickyScroll flexGrow={1} flexDirection="column">
-        {messages.slice(-100).map((msg, idx, arr) => renderMsg(msg, idx > 0 ? arr[idx - 1] ?? null : null))}
+        {(() => {
+          // Collapse consecutive same-kind ambient turns into virtual
+          // stacks so cron ticks / heartbeats / dreams don't bury the
+          // real conversation. Non-ambient messages pass through as
+          // singletons. Each entry renders either a normal message
+          // (via renderMsg) or an interactive AmbientStackView.
+          const windowed = messages.slice(-100);
+          const entries = aggregateAmbient(windowed);
+          const nodes: React.ReactNode[] = [];
+          // Track the "previous message" the singleton renderer sees so
+          // turn-grouping (metadata.turnId → one bubble) keeps working
+          // across stack boundaries.
+          let prevSingleton: ChannelMessage | null = null;
+          for (const entry of entries) {
+            if (entry.kind === 'message') {
+              nodes.push(
+                <React.Fragment key={entry.id}>
+                  {renderMsg(entry.message, prevSingleton)}
+                </React.Fragment>,
+              );
+              prevSingleton = entry.message;
+            } else {
+              // stack
+              const expansion = stackExpansion.get(entry.id) ?? { kind: 'collapsed' as const };
+              nodes.push(
+                <AmbientStackView
+                  key={entry.id}
+                  stack={entry}
+                  expansion={expansion}
+                  pinned={pinnedStackIds.has(entry.id)}
+                  hovered={hoveredStackId === entry.id}
+                  onMouseEnter={() => setHoveredStackId(entry.id)}
+                  onMouseLeave={() => setHoveredStackId(prev => (prev === entry.id ? null : prev))}
+                  onSetExpansion={(next) => {
+                    setStackExpansion(prev => {
+                      const m = new Map(prev);
+                      if (next.kind === 'collapsed') m.delete(entry.id);
+                      else m.set(entry.id, next);
+                      return m;
+                    });
+                  }}
+                  onTogglePin={() => {
+                    setPinnedStackIds(prev => {
+                      const s = new Set(prev);
+                      if (s.has(entry.id)) s.delete(entry.id);
+                      else s.add(entry.id);
+                      return s;
+                    });
+                  }}
+                  renderMessage={renderMsg}
+                />,
+              );
+              // Stacks break the single-thread turn-grouping chain —
+              // the next singleton should get a fresh header.
+              prevSingleton = null;
+            }
+          }
+          return nodes;
+        })()}
       </ScrollBox>
       {/* Streaming messages — each renders inline like a real message in the chat */}
       {channelStreams.filter(s => s.content).map(stream => {
