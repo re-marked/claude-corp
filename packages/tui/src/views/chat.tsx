@@ -82,12 +82,11 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showHarnessModal, setShowHarnessModal] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
-  /** Track answered questions by message ID. Hydrated from persisted
-   *  metadata.answerFor on every messages refresh so answered questions
-   *  stay dead across TUI restarts — mirrors Claude Code's tool_use /
-   *  tool_result pairing, adapted to JSONL. Local writes also update it
-   *  optimistically so there's no flash before the message lands. */
-  const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
+  /** Optimistic overlay for in-session answer/dismiss actions. The
+   *  authoritative source is the persisted `metadata.answerFor` on
+   *  messages; this set just covers the <50ms window between the user
+   *  pressing a key and refreshMessages picking up the new record. */
+  const [answeredOverride, setAnsweredOverride] = useState<Set<string>>(new Set());
   /** Active question interaction state */
   const [questionFocus, setQuestionFocus] = useState(0);
   const [questionMulti, setQuestionMulti] = useState<Set<string>>(new Set());
@@ -235,22 +234,16 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
-  // Rehydrate answeredQuestions from persisted metadata on every
-  // refresh. Answer and dismissal writes both stamp
-  // metadata.answerFor; deriveAnsweredQuestions rebuilds the set from
-  // the JSONL so answered questions stay dead across TUI restarts.
-  useEffect(() => {
-    const persisted = deriveAnsweredQuestions(messages);
-    if (persisted.size === 0) return;
-    setAnsweredQuestions(prev => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const id of persisted) {
-        if (!next.has(id)) { next.add(id); changed = true; }
-      }
-      return changed ? next : prev;
-    });
-  }, [messages]);
+  // Answered questions derive synchronously from messages + an
+  // optimistic overlay. Deriving via useMemo (not useEffect) means the
+  // answered set is in sync with the messages list within a single
+  // render pass — no flicker where a historical question briefly
+  // surfaces before being hidden.
+  const answeredQuestions = useMemo(() => {
+    const derived = deriveAnsweredQuestions(messages);
+    for (const id of answeredOverride) derived.add(id);
+    return derived;
+  }, [messages, answeredOverride]);
 
   // Derive the pending (unanswered) question from recent messages
   const pendingQuestion = useMemo(() => {
@@ -347,7 +340,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       // Esc is NOT used here — it stays as global back-navigation
       // so Mark can always Esc out of any view consistently.
       if (input === 'd') {
-        setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+        setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
         markQuestionDismissed(pq.messageId);
         setQuestionFocus(0);
         return;
@@ -360,7 +353,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         if (key.leftArrow) { setQuestionScore(s => Math.max(min, s - 1)); return; }
         if (key.rightArrow) { setQuestionScore(s => Math.min(max, s + 1)); return; }
         if (key.return) {
-          setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+          setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
           handleSend(
             `[Answer: ${questionScore}/${max}] ${pq.question}: ${questionScore}`,
             { answerFor: pq.messageId },
@@ -379,7 +372,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         const num = parseInt(input);
         if (num === 0) {
           // "Other" — dismiss the question, let founder type freely
-          setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+          setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
           markQuestionDismissed(pq.messageId);
           return;
         }
@@ -397,7 +390,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           } else {
             // Choice — select immediately
             const answer = pq.answers[idx]!;
-            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
             handleSend(
               `[Answer: ${answer.value}] ${answer.label}`,
               { answerFor: pq.messageId },
@@ -413,7 +406,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           if (questionMulti.size > 0) {
             const values = [...questionMulti];
             const labels = values.map(v => pq.answers.find(a => a.value === v)?.label ?? v);
-            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
             handleSend(
               `[Answer: ${values.join(', ')}] ${labels.join(', ')}`,
               { answerFor: pq.messageId },
@@ -424,14 +417,14 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           // Choice — confirm focused option
           if (questionFocus < pq.answers.length) {
             const answer = pq.answers[questionFocus]!;
-            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
             handleSend(
               `[Answer: ${answer.value}] ${answer.label}`,
               { answerFor: pq.messageId },
             );
           } else {
             // "Other" focused — dismiss, let founder type
-            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
             markQuestionDismissed(pq.messageId);
           }
         }
