@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { agentSessionKey } from '@claudecorp/shared';
 import { getClient, getCorpRoot, getMembers } from '../client.js';
 import { DaemonClient } from '@claudecorp/daemon';
 
@@ -45,12 +46,10 @@ export async function cmdJack(opts: {
   }
 
   // Persistent session key — deterministic per agent so consecutive
-  // `cc-cli jack` invocations resume the same conversation rather than
-  // each one spawning a fresh claude-code session. Matches the format
-  // used by every daemon-side dispatcher (autoemon, dreams, slumber,
-  // api). The previous `:${Date.now()}` suffix made every jack call
-  // re-introduce the agent.
-  const sessionKey = `jack:${normalize(target.displayName)}`;
+  // `cc-cli jack` invocations resume the same conversation, and so
+  // the CLI-side jack shares memory with every other dispatch path
+  // (autoemon, dreams, slumber, @mentions, crons). One brain per agent.
+  const sessionKey = agentSessionKey(target.displayName);
   const conversation: ConversationEntry[] = [];
   const jackStart = Date.now();
 

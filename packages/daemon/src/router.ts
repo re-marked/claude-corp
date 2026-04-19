@@ -12,6 +12,7 @@ import {
   resolveMentions,
   generateId,
   detectFeedback,
+  agentSessionKey,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -405,9 +406,12 @@ export class MessageRouter {
       // channel, tools it already ran, what it was working on. The
       // previous `channel-${id}-${msg.id}` key minted a brand-new
       // claude session for every single mention, so each @mention
-      // started from zero. Channel-scoped (not agent-global) so the
-      // agent's channel persona stays distinct from its DM thread.
-      const routerSessionKey = `agent:${targetId}:channel-${channel.id}`;
+      // started from zero. Now agent-global (one brain per agent) —
+      // the agent's @mention replies share memory with its DM thread,
+      // crons, loops, dreams, and heartbeats. Collapsing scoping
+      // surfaces the one-brain principle: same agent, same memory,
+      // regardless of how the turn got triggered.
+      const routerSessionKey = agentSessionKey(target.displayName);
       log(`[router] DISPATCHING to ${target.displayName} for msg ${msg.id.slice(0,8)} from ${sender.displayName}`);
       const result = await this.daemon.harness.dispatch({
         agentId: agentProc.memberId,

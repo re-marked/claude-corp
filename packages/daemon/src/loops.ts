@@ -15,6 +15,7 @@ import {
   formatIntervalMs,
   readConfig,
   post,
+  agentSessionKey,
   readTask,
   updateTask,
   taskPath,
@@ -349,7 +350,7 @@ export class LoopManager {
           const sayPayload: Record<string, string> = {
             target: clock.targetAgent,
             message: clock.command,
-            sessionKey: `loop:${slug}`,
+            sessionKey: agentSessionKey(clock.targetAgent),
           };
           if (clock.channelId) sayPayload.channelId = clock.channelId;
 

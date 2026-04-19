@@ -4,6 +4,58 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.5.0 — One brain per agent (PR open)
+
+Every reasoning dispatch — DM, @mention, cron, loop, heartbeat, dream,
+autoemon tick, herald narration, failsafe monitor, CEO escalation,
+recovery notice — now funnels onto a single per-agent session key
+(`agent:<normalized>`). Agents have continuous memory across every
+path the founder and the system can reach them by.
+
+Before: the same agent maintained a separate, amnesiac claude-code
+session per dispatch kind. Ask @ceo a question in DM, then a cron fires
+`@ceo status-check` — the cron-self was a stranger to the DM-self. Same
+persona file, totally different conversation memory. The "schizophrenic"
+symptom in the JSONL feed (v2.4.0-era) where agents looked oblivious
+to work their other-self had just done an hour ago.
+
+Now: one `agentSessionKey(slug) → 'agent:<slug>'` helper in
+`packages/shared/src/session-key.ts`. 15 call sites migrated across
+daemon (router, crons, loops, pulse, dreams, autoemon, heartbeat,
+herald, failsafe, /cc/say default, CEO kickoff), TUI (5 chat.tsx
+sites), and CLI (jack + slumber wake).
+
+Router channel-scoping dropped as part of this — the previous
+`agent:<id>:channel-<cid>` key gave an agent a separate mind per
+channel, which conflicted with the unification principle. Now the
+agent's #general replies share memory with its DM thread. Validated
+as the correct call in the founding principles (one agent = one
+self, across every surface).
+
+Tests: 9 unit tests for the helper (normalization, idempotency,
+convergence) + grep regression tests that lock every migrated site
+against reintroducing a legacy prefix.
+
+Did NOT ship in this PR: ambient-metadata stamping and TUI badge
+stacking. Initial attempt (v2.6.0-experimental on fix/agents-
+schizophrenic-2b-mouse-interaction) proved messy — AlternateScreen
+broke scroll/copy-paste, and collapsing felt like buried work rather
+than clean observability. Deferred. For now the agent's DM dumps
+every tick/heartbeat/cron raw alongside conversation — simple, honest,
+worked-with-ably for the moment.
+
+## v2.4.0 — Agent interrupt (MERGED, PR #140)
+
+Esc now interrupts an in-flight agent turn. Previously the founder
+had no way to stop a runaway dispatch — the turn completed regardless.
+
+Three-layer plumbing: OpenClaw `chat.abort` RPC (new), daemon
+`InflightRegistry` that tracks active AbortControllers per sessionKey
+so /cc/interrupt can cancel them, TUI `interruptRegistry` singleton so
+the keyboard handler has one owner (avoids the previous ambiguity of
+"which component caught Esc?"). Full test coverage at all three
+layers.
+
 ## v2.3.0 — askFounder structured questions + /log viewer + fragment condensing (IN PROGRESS)
 
 Three features shipped:

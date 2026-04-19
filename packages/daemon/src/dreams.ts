@@ -18,6 +18,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync, mkdirSyn
 import { join } from 'node:path';
 import {
   readConfig,
+  agentSessionKey,
   type Member,
   type Channel,
   MEMBERS_JSON,
@@ -493,7 +494,7 @@ export class DreamManager {
         body: JSON.stringify({
           target: slug,
           message: prompt,
-          sessionKey: `jack:${slug}`,
+          sessionKey: agentSessionKey(slug),
           // Pass DM channelId so tool events + streaming show in the agent's DM
           channelId: dmChannel?.id ?? undefined,
         }),

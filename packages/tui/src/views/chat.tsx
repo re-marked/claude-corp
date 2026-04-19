@@ -10,6 +10,7 @@ import {
   appendMessage,
   generateId,
   parseIntervalExpression,
+  agentSessionKey,
   MEMBERS_JSON,
   MESSAGES_JSONL,
   CORP_JSON,
@@ -156,7 +157,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // when the key stays stable.
     setJackMode({
       active: true,
-      sessionKey: `jack:${slug}`,
+      sessionKey: agentSessionKey(slug),
       agentSlug: slug,
       agentName: agent.displayName,
       agentId: agent.id,
@@ -565,7 +566,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       // same UUID so claude-code resumes the existing session.
       setJackMode({
         active: true,
-        sessionKey: `jack:${slug}`,
+        sessionKey: agentSessionKey(slug),
         agentSlug: slug,
         agentName: agent.displayName,
         agentId: agent.id,
@@ -877,7 +878,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         const data = await daemonClient.post('/cc/say', {
           target: ceoSlug,
           message: slumberPrompt,
-          sessionKey: `jack:${ceoSlug}`,
+          sessionKey: agentSessionKey(ceoSlug),
           channelId: channel.id,
         }) as any;
 
@@ -1083,7 +1084,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         await daemonClient.post('/cc/say', {
           target: ceoSlug,
           message: briefPrompt,
-          sessionKey: `jack:${ceoSlug}`,
+          sessionKey: agentSessionKey(ceoSlug),
           channelId: channel.id,
         });
 
@@ -1871,7 +1872,7 @@ Always consider what happens when things go wrong.`,
               const data = await daemonClient.post('/cc/say', {
                 target: ceoSlug,
                 message: `[SLUMBER MODE ACTIVATED — ${profileId}${durationMs ? ` for ${durationLabel}` : ''}${goal ? `\nGoal: ${goal}` : ''}]\nThe Founder is stepping away. You have autonomous control.\nAcknowledge briefly and continue from where the conversation left off.\nYou'll receive <tick> prompts. Act on them autonomously.`,
-                sessionKey: `jack:${ceoSlug}`,
+                sessionKey: agentSessionKey(ceoSlug),
                 channelId: channel.id,
               }) as any;
 
