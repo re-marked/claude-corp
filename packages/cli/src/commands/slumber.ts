@@ -13,7 +13,7 @@
  */
 
 import { getClient, getCorpRoot, getFounder, getMembers } from '../client.js';
-import { parseIntervalExpression, type Member } from '@claudecorp/shared';
+import { parseIntervalExpression, agentSessionKey, type Member } from '@claudecorp/shared';
 
 export async function cmdSlumber(opts: {
   args: string[];
@@ -201,7 +201,7 @@ export async function cmdBrief(opts: { json: boolean }): Promise<void> {
       `Session so far: ${elapsed}m elapsed, ${status.totalTicks} ticks, ${status.totalProductiveTicks} productive.`,
       `Give a quick update: what have you done, what now, anything urgent?`,
     ].join('\n'),
-    sessionKey: `jack:${ceoSlug}`,
+    sessionKey: agentSessionKey(ceoSlug),
   }) as any;
 
   if (opts.json) {
