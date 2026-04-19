@@ -25,6 +25,30 @@ export interface FounderQuestion {
 
 // ── Parser ─────────────────────────────────────────────────────────
 
+/**
+ * Scan a message list for answerFor markers and return the set of
+ * question message ids that should stay dead.
+ *
+ * This is the persistence layer for askFounder — answered and
+ * dismissed questions each write a message carrying
+ * `metadata.answerFor: <questionMessageId>`. A plain jack-mode user
+ * reply carries it alongside `source: 'jack'`; a dismissal marker is
+ * an empty-content system message that only exists to record the id.
+ * Rebuilding from persisted metadata means "answered" survives TUI
+ * restart — mirroring how Claude Code pairs a tool_use with its
+ * tool_result in history.
+ */
+export function deriveAnsweredQuestions(
+  messages: ReadonlyArray<{ metadata: Record<string, unknown> | null }>,
+): Set<string> {
+  const answered = new Set<string>();
+  for (const m of messages) {
+    const ref = m.metadata?.answerFor;
+    if (typeof ref === 'string' && ref.length > 0) answered.add(ref);
+  }
+  return answered;
+}
+
 export function parseAskFounder(content: string, messageId: string): {
   cleanContent: string;
   questions: FounderQuestion[];

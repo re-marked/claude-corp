@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { parseAskFounder } from '../packages/tui/src/components/ask-founder.js';
+import {
+  parseAskFounder,
+  deriveAnsweredQuestions,
+} from '../packages/tui/src/components/ask-founder.js';
 
 describe('parseAskFounder', () => {
   it('parses a basic choice question', () => {
@@ -81,5 +84,63 @@ describe('parseAskFounder', () => {
     const content = `<askFounder><question>Q</question><answers><answer value="a" preview="line1\\nline2">A</answer></answers></askFounder>`;
     const { questions } = parseAskFounder(content, 'msg-11');
     expect(questions[0]!.answers[0]!.preview).toBe('line1\nline2');
+  });
+});
+
+describe('deriveAnsweredQuestions', () => {
+  it('returns empty set for empty messages', () => {
+    expect(deriveAnsweredQuestions([])).toEqual(new Set());
+  });
+
+  it('ignores messages without answerFor', () => {
+    const out = deriveAnsweredQuestions([
+      { metadata: null },
+      { metadata: {} },
+      { metadata: { source: 'jack' } },
+    ]);
+    expect(out.size).toBe(0);
+  });
+
+  it('picks up a jack-mode answer', () => {
+    const out = deriveAnsweredQuestions([
+      { metadata: { source: 'jack', answerFor: 'q-123' } },
+    ]);
+    expect(out.has('q-123')).toBe(true);
+  });
+
+  it('picks up a dismissal marker', () => {
+    const out = deriveAnsweredQuestions([
+      { metadata: { source: 'system', answerFor: 'q-1', dismissed: true } },
+    ]);
+    expect(out.has('q-1')).toBe(true);
+  });
+
+  it('merges multiple answered ids across the message list', () => {
+    const out = deriveAnsweredQuestions([
+      { metadata: { source: 'jack', answerFor: 'q-a' } },
+      { metadata: null },
+      { metadata: { source: 'system', answerFor: 'q-b', dismissed: true } },
+      { metadata: { source: 'jack', answerFor: 'q-c' } },
+    ]);
+    expect(out).toEqual(new Set(['q-a', 'q-b', 'q-c']));
+  });
+
+  it('rejects non-string answerFor values', () => {
+    const out = deriveAnsweredQuestions([
+      { metadata: { answerFor: 42 } },
+      { metadata: { answerFor: null } },
+      { metadata: { answerFor: '' } }, // empty string shouldn't count
+      { metadata: { answerFor: { nested: 'no' } } },
+    ]);
+    expect(out.size).toBe(0);
+  });
+
+  it('dedups when the same question is answered twice', () => {
+    const out = deriveAnsweredQuestions([
+      { metadata: { source: 'jack', answerFor: 'q-x' } },
+      { metadata: { source: 'jack', answerFor: 'q-x' } },
+    ]);
+    expect(out.size).toBe(1);
+    expect(out.has('q-x')).toBe(true);
   });
 });

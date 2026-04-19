@@ -23,7 +23,12 @@ import { HireWizard } from './hire-wizard.js';
 import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
 import { COLORS, agentColor } from '../theme.js';
-import { parseAskFounder, QuestionBanner, type FounderQuestion } from '../components/ask-founder.js';
+import {
+  parseAskFounder,
+  QuestionBanner,
+  deriveAnsweredQuestions,
+  type FounderQuestion,
+} from '../components/ask-founder.js';
 import { TaskWizard } from './task-wizard.js';
 import { ProjectWizard } from './project-wizard.js';
 import { TeamWizard } from './team-wizard.js';
@@ -77,8 +82,11 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showHarnessModal, setShowHarnessModal] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
-  /** Track answered questions by message ID — ephemeral: answered = removed from chat */
-  const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
+  /** Optimistic overlay for in-session answer/dismiss actions. The
+   *  authoritative source is the persisted `metadata.answerFor` on
+   *  messages; this set just covers the <50ms window between the user
+   *  pressing a key and refreshMessages picking up the new record. */
+  const [answeredOverride, setAnsweredOverride] = useState<Set<string>>(new Set());
   /** Active question interaction state */
   const [questionFocus, setQuestionFocus] = useState(0);
   const [questionMulti, setQuestionMulti] = useState<Set<string>>(new Set());
@@ -226,6 +234,17 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
+  // Answered questions derive synchronously from messages + an
+  // optimistic overlay. Deriving via useMemo (not useEffect) means the
+  // answered set is in sync with the messages list within a single
+  // render pass — no flicker where a historical question briefly
+  // surfaces before being hidden.
+  const answeredQuestions = useMemo(() => {
+    const derived = deriveAnsweredQuestions(messages);
+    for (const id of answeredOverride) derived.add(id);
+    return derived;
+  }, [messages, answeredOverride]);
+
   // Derive the pending (unanswered) question from recent messages
   const pendingQuestion = useMemo(() => {
     const recent = messages.slice(-50);
@@ -321,7 +340,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       // Esc is NOT used here — it stays as global back-navigation
       // so Mark can always Esc out of any view consistently.
       if (input === 'd') {
-        setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+        setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
+        markQuestionDismissed(pq.messageId);
         setQuestionFocus(0);
         return;
       }
@@ -333,8 +353,11 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         if (key.leftArrow) { setQuestionScore(s => Math.max(min, s - 1)); return; }
         if (key.rightArrow) { setQuestionScore(s => Math.min(max, s + 1)); return; }
         if (key.return) {
-          setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
-          handleSend(`[Answer: ${questionScore}/${max}] ${pq.question}: ${questionScore}`);
+          setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
+          handleSend(
+            `[Answer: ${questionScore}/${max}] ${pq.question}: ${questionScore}`,
+            { answerFor: pq.messageId },
+          );
           return;
         }
         return; // Consume all other input in score mode
@@ -349,7 +372,8 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         const num = parseInt(input);
         if (num === 0) {
           // "Other" — dismiss the question, let founder type freely
-          setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+          setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
+          markQuestionDismissed(pq.messageId);
           return;
         }
         const idx = num - 1;
@@ -366,8 +390,11 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           } else {
             // Choice — select immediately
             const answer = pq.answers[idx]!;
-            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
-            handleSend(`[Answer: ${answer.value}] ${answer.label}`);
+            setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
+            handleSend(
+              `[Answer: ${answer.value}] ${answer.label}`,
+              { answerFor: pq.messageId },
+            );
           }
         }
         return;
@@ -379,19 +406,26 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           if (questionMulti.size > 0) {
             const values = [...questionMulti];
             const labels = values.map(v => pq.answers.find(a => a.value === v)?.label ?? v);
-            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
-            handleSend(`[Answer: ${values.join(', ')}] ${labels.join(', ')}`);
+            setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
+            handleSend(
+              `[Answer: ${values.join(', ')}] ${labels.join(', ')}`,
+              { answerFor: pq.messageId },
+            );
             setQuestionMulti(new Set());
           }
         } else {
           // Choice — confirm focused option
           if (questionFocus < pq.answers.length) {
             const answer = pq.answers[questionFocus]!;
-            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
-            handleSend(`[Answer: ${answer.value}] ${answer.label}`);
+            setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
+            handleSend(
+              `[Answer: ${answer.value}] ${answer.label}`,
+              { answerFor: pq.messageId },
+            );
           } else {
             // "Other" focused — dismiss, let founder type
-            setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            setAnsweredOverride(prev => new Set(prev).add(pq.messageId));
+            markQuestionDismissed(pq.messageId);
           }
         }
         setQuestionFocus(0);
@@ -434,6 +468,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     appendMessage(join(corpRoot, channel.path, MESSAGES_JSONL), sysMsg);
   };
 
+  // Write a zero-visible-content marker that kills a pending question
+  // without posting an answer. Hydration's answerFor scan picks this up
+  // on restart so dismissed questions stay dismissed. Rendered as null
+  // (empty system messages are filtered in renderMsg).
+  const markQuestionDismissed = (questionMessageId: string) => {
+    const marker: ChannelMessage = {
+      id: generateId(),
+      channelId: channel.id,
+      senderId: 'system',
+      threadId: null,
+      content: '',
+      kind: 'system',
+      mentions: [],
+      metadata: { source: 'system', answerFor: questionMessageId, dismissed: true },
+      depth: 0,
+      originId: '',
+      timestamp: new Date().toISOString(),
+    };
+    marker.originId = marker.id;
+    appendMessage(join(corpRoot, channel.path, MESSAGES_JSONL), marker);
+  };
+
   const handleHired = (agentName: string, displayName: string) => {
     // Write system message to current channel
     writeSystemMessage(`${displayName} has been hired as ${agentName}. You can now @mention them.`);
@@ -446,7 +502,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     setTimeout(() => setShowHireWizard(false), 1500);
   };
 
-  const handleSend = useCallback(async (text: string) => {
+  const handleSend = useCallback(async (text: string, extraMetadata?: Record<string, unknown>) => {
     // /jack — re-enter live session (if previously unjacked)
     if (text.trim().toLowerCase() === '/jack') {
       if (channel.kind !== 'direct') {
@@ -1672,7 +1728,7 @@ Always consider what happens when things go wrong.`,
         content: text,
         kind: 'text',
         mentions: [],
-        metadata: { source: 'jack' },
+        metadata: { source: 'jack', ...(extraMetadata ?? {}) },
         depth: 0,
         originId: '',
         timestamp: new Date().toISOString(),
@@ -1881,6 +1937,10 @@ Always consider what happens when things go wrong.`,
     const isSystem = msg.senderId === 'system' || msg.kind === 'system' || msg.kind === 'task_event';
 
     if (isSystem) {
+      // Empty system messages are invisible markers (e.g. question
+      // dismissal records). Skip rendering so they don't leave ghost
+      // vertical bars in chat.
+      if (!msg.content || !msg.content.trim()) return null;
       return (
         <Box key={msg.id} flexDirection="column" paddingLeft={1} marginBottom={0}>
           <Text color={COLORS.muted}> {'\u2502'} {msg.content}</Text>
