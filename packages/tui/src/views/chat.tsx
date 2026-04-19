@@ -110,6 +110,14 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [pinnedStackIds, setPinnedStackIds] = useState<Set<string>>(new Set());
   const [hoveredStackId, setHoveredStackId] = useState<string | null>(null);
   /**
+   * Global expand-all toggle for ambient stacks. Ctrl+Y flips it.
+   * When true, every stack renders as 'items' regardless of its
+   * per-stack state — keyboard-only users get "show me everything"
+   * with a single keystroke. Per-stack mouse interaction still works
+   * on top when the flag is off.
+   */
+  const [allAmbientExpanded, setAllAmbientExpanded] = useState(false);
+  /**
    * In-flight AbortController for the current jack dispatch. Held on a
    * ref (not state) because the abort path doesn't need to re-render
    * and state updates are async — Esc needs to abort on the exact
@@ -499,37 +507,19 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     }
     // Ctrl+Y — context-aware.
     //
-    // Priority 1: if the most recent ambient stack in view is collapsed,
-    //   expand it to 'items'. If already expanded, collapse back. Gives
-    //   keyboard-only users a fallback when mouse isn't available.
-    // Priority 2 (fallback): toggle thread view, same as before.
+    // Priority 1: if any ambient stacks are in view, toggle the global
+    //   expand-all flag. First press → every stack renders as 'items'
+    //   (one keystroke reveals everything). Second press → back to
+    //   default collapsed state. Eliminates the "which stack did Ctrl+Y
+    //   target?" ambiguity.
+    // Priority 2 (fallback): toggle thread view.
     if (key.ctrl && input === 'y') {
-      // Use the same aggregation pass the render loop uses, so stack
-      // ids match exactly. Previous implementation guessed the id from
-      // the LAST ambient message's turnId, which never matched the
-      // canonical id (aggregator keys on the FIRST turn) — toggles
-      // landed on phantom entries no component was reading.
       const entries = aggregateAmbient(messages.slice(-100));
-      let lastStackId: string | null = null;
-      for (let i = entries.length - 1; i >= 0; i--) {
-        if (entries[i]!.kind === 'stack') {
-          lastStackId = entries[i]!.id;
-          break;
-        }
-      }
-      if (lastStackId) {
-        setStackExpansion(prev => {
-          const next = new Map(prev);
-          const cur = next.get(lastStackId!)?.kind ?? 'collapsed';
-          next.set(
-            lastStackId!,
-            cur === 'collapsed' ? { kind: 'items' } : { kind: 'collapsed' },
-          );
-          return next;
-        });
+      const hasAnyStack = entries.some(e => e.kind === 'stack');
+      if (hasAnyStack) {
+        setAllAmbientExpanded(prev => !prev);
         return;
       }
-      // No ambient to toggle — fall through to thread view.
       if (activeThread) {
         setActiveThread(undefined);
       } else {
@@ -2282,7 +2272,13 @@ Always consider what happens when things go wrong.`,
             } else {
               // stack
               pushQuietIfNeeded(entry.startMs, entry.id);
-              const expansion = stackExpansion.get(entry.id) ?? { kind: 'collapsed' as const };
+              // Global expand-all (Ctrl+Y) overrides per-stack state.
+              // Per-stack state still applies when the global flag is
+              // off, so mouse-clicked interactions (future PR 2c) are
+              // preserved.
+              const expansion: StackExpansion = allAmbientExpanded
+                ? { kind: 'items' }
+                : (stackExpansion.get(entry.id) ?? { kind: 'collapsed' });
               nodes.push(
                 <AmbientStackView
                   key={entry.id}
