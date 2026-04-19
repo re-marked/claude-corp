@@ -4,6 +4,26 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
+## v2.6.0 — Native mouse interaction (OPEN, PR schizophrenic 2b)
+
+The UI half of PR 2a's ambient-stack story. Yokai exposes `onClick`, `onMouseEnter`, `onMouseLeave`, and `key.wheelUp`/`wheelDown` natively — first-class citizens, not a hack. Wrapping the app in `<AlternateScreen>` unlocks the whole stack.
+
+Ambient turns (crons, heartbeats, dreams, autoemon ticks) aggregate into clickable three-state stacks:
+
+- **Collapsed** — single dim row: animated kind icon · summary · count · activity sparkline · relative time · pin glyph. Click expands. Pin glyph has its own click target (uses `stopImmediatePropagation` so it doesn't also expand).
+- **Items** — header + indented list of per-turn rows. Each row clickable → opens that specific turn inline.
+- **Item-open** — full turn content (prompt + response + tools) rendered through the normal message renderer. "← back to N runs" control returns to items.
+
+Creative details beyond the core spec:
+- **Animated kind icons** — dream waxes through moon phases 🌑🌘🌗🌖🌕🌔🌓🌒, cron clock-hand ticks ◴◷◶◵, autoemon rotates ◐◓◑◒, loop flips ↻↺, heartbeat does a subtle color pulse at 700ms (resting-pulse rhythm) keeping the ⏱ glyph stable.
+- **Inline sparklines** — `▃▅▇▅▃▂` density chart binned across the stack's time window, max-normalized so spikes pop without min-max overdramatizing.
+- **Wheel-riffle** — mouse over an expanded stack, scroll wheel leafs through turns like pages; past the edge snaps back to the items list. Mouse elsewhere, wheel scrolls chat normally.
+- **Quiet-interval dividers** — between messages ≥10min apart: faint centered `· · · 4h 45m quiet · · ·`. Communicates "the corp rested" instead of leaving jarring timestamp jumps.
+- **Pin override** — pinned stacks never snap shut. `collapsed` auto-promotes to `items`.
+- **Ctrl+Y keyboard fallback** — for ssh-without-mouse or screen readers; toggles most recent stack's expansion via the same state map mouse uses.
+
+38 new tests (sparkline 14, ambient-stack 12, use-kind-icon 5, quiet-interval 7). 801/801 suite green.
+
 ## v2.5.0 — One brain per agent (OPEN, PR schizophrenic 2/3)
 
 Closes the TODO flagged in v2.1.10's audit ("worth unifying many of these into the agent's main thread — pinged Mark for the call"). Mark called it: unify everything.
