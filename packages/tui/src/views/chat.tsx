@@ -541,6 +541,48 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         if (sorted.length > 0) setActiveThread(sorted[0]![0]);
       }
     }
+
+    // Wheel-riffle. When the mouse is hovering an expanded ambient
+    // stack (in 'items' mode), wheel events navigate through the
+    // turn list by opening the next/previous item in-place — so you
+    // can "leaf through" all 8 heartbeats without clicking each one.
+    // When the hovered stack is in 'collapsed' or 'item-open' mode,
+    // wheel falls through to ScrollBox's default (chat scroll).
+    if ((key.wheelUp || key.wheelDown) && hoveredStackId) {
+      const expansion = stackExpansion.get(hoveredStackId);
+      if (expansion?.kind === 'items' || expansion?.kind === 'item-open') {
+        // Reach into the aggregated entries to find this stack so we
+        // know its turn list. The aggregator runs cheaply on the same
+        // message window the render loop uses, so results are identical.
+        const entries = aggregateAmbient(messages.slice(-100));
+        const stack = entries.find(e => e.kind === 'stack' && e.id === hoveredStackId);
+        if (stack && stack.kind === 'stack') {
+          const currentTurnId = expansion.kind === 'item-open' ? expansion.turnId : null;
+          const idx = currentTurnId
+            ? stack.turns.findIndex(t => t.turnId === currentTurnId)
+            : (key.wheelDown ? -1 : stack.turns.length); // start past-the-edge
+          const nextIdx = key.wheelDown ? idx + 1 : idx - 1;
+          if (nextIdx >= 0 && nextIdx < stack.turns.length) {
+            const nextTurn = stack.turns[nextIdx]!;
+            setStackExpansion(prev => {
+              const m = new Map(prev);
+              m.set(hoveredStackId, { kind: 'item-open', turnId: nextTurn.turnId });
+              return m;
+            });
+            return;
+          }
+          // At the edge — wheel further collapses back to items view.
+          if ((nextIdx < 0 && key.wheelUp) || (nextIdx >= stack.turns.length && key.wheelDown)) {
+            setStackExpansion(prev => {
+              const m = new Map(prev);
+              m.set(hoveredStackId, { kind: 'items' });
+              return m;
+            });
+            return;
+          }
+        }
+      }
+    }
   });
 
   const writeSystemMessage = (content: string) => {
