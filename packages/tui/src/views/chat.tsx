@@ -585,21 +585,37 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     }
   });
 
-  const writeSystemMessage = (content: string) => {
+  const writeSystemMessage = (
+    content: string,
+    ambient?: { kind: string; summary: string },
+  ) => {
+    // Ambient-tag optional: callers that emit repeat status lines
+    // ("Dream complete", scheduled pulse echoes, etc.) pass ambient
+    // metadata so the TUI aggregates them into collapsed stacks
+    // instead of N separate system rows. Non-ambient system writes
+    // (SLUMBER state change, genuine user-facing errors) omit it and
+    // render fully as before.
+    //
+    // Also stamp a synthetic turnId — aggregator groups by turnId, so
+    // giving each ambient system write its OWN turn lets N consecutive
+    // same-kind ones stack into a single badge with count N.
+    const id = generateId();
     const sysMsg: ChannelMessage = {
-      id: generateId(),
+      id,
       channelId: channel.id,
       senderId: 'system',
       threadId: null,
       content,
       kind: 'system',
       mentions: [],
-      metadata: { source: 'system' },
+      metadata: {
+        source: 'system',
+        ...(ambient ? { ambient, turnId: `sys-${id}` } : {}),
+      },
       depth: 0,
-      originId: '',
+      originId: id,
       timestamp: new Date().toISOString(),
     };
-    sysMsg.originId = sysMsg.id;
     appendMessage(join(corpRoot, channel.path, MESSAGES_JSONL), sysMsg);
   };
 
@@ -797,8 +813,14 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       try {
         const result = await daemonClient.triggerDream(agentSlug);
         if (result.ok) {
-          writeSystemMessage(`Dream complete: ${result.summary ?? 'consolidated'}`);
+          // Ambient-tag so consecutive dream completions stack into a
+          // single "🌙 N dreams" badge instead of N separate rows.
+          writeSystemMessage(
+            `Dream complete: ${result.summary ?? 'consolidated'}`,
+            { kind: 'dream', summary: `dream for @${agentSlug}` },
+          );
         } else {
+          // Failures stay expanded — the founder needs to see them.
           writeSystemMessage(`Dream failed: ${result.error ?? 'unknown'}`);
         }
       } catch (err) {
