@@ -77,7 +77,11 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [showHarnessModal, setShowHarnessModal] = useState(false);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [showTeamWizard, setShowTeamWizard] = useState(false);
-  /** Track answered questions by message ID — ephemeral: answered = removed from chat */
+  /** Track answered questions by message ID. Hydrated from persisted
+   *  metadata.answerFor on every messages refresh so answered questions
+   *  stay dead across TUI restarts — mirrors Claude Code's tool_use /
+   *  tool_result pairing, adapted to JSONL. Local writes also update it
+   *  optimistically so there's no flash before the message lands. */
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
   /** Active question interaction state */
   const [questionFocus, setQuestionFocus] = useState(0);
@@ -226,6 +230,29 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
 
   const memberMap = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
+  // Rehydrate answeredQuestions from persisted metadata. When the
+  // founder answers, the outgoing message carries metadata.answerFor
+  // pointing at the question's message id; scanning messages on every
+  // refresh rebuilds the set so answered questions stay dead across
+  // TUI restarts. Equivalent to Claude Code seeing a tool_result paired
+  // with its tool_use.
+  useEffect(() => {
+    const ids: string[] = [];
+    for (const m of messages) {
+      const ref = m.metadata?.answerFor;
+      if (typeof ref === 'string') ids.push(ref);
+    }
+    if (ids.length === 0) return;
+    setAnsweredQuestions(prev => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (!next.has(id)) { next.add(id); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [messages]);
+
   // Derive the pending (unanswered) question from recent messages
   const pendingQuestion = useMemo(() => {
     const recent = messages.slice(-50);
@@ -322,6 +349,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       // so Mark can always Esc out of any view consistently.
       if (input === 'd') {
         setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+        markQuestionDismissed(pq.messageId);
         setQuestionFocus(0);
         return;
       }
@@ -334,7 +362,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         if (key.rightArrow) { setQuestionScore(s => Math.min(max, s + 1)); return; }
         if (key.return) {
           setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
-          handleSend(`[Answer: ${questionScore}/${max}] ${pq.question}: ${questionScore}`);
+          handleSend(
+            `[Answer: ${questionScore}/${max}] ${pq.question}: ${questionScore}`,
+            { answerFor: pq.messageId },
+          );
           return;
         }
         return; // Consume all other input in score mode
@@ -350,6 +381,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         if (num === 0) {
           // "Other" — dismiss the question, let founder type freely
           setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+          markQuestionDismissed(pq.messageId);
           return;
         }
         const idx = num - 1;
@@ -367,7 +399,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
             // Choice — select immediately
             const answer = pq.answers[idx]!;
             setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
-            handleSend(`[Answer: ${answer.value}] ${answer.label}`);
+            handleSend(
+              `[Answer: ${answer.value}] ${answer.label}`,
+              { answerFor: pq.messageId },
+            );
           }
         }
         return;
@@ -380,7 +415,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
             const values = [...questionMulti];
             const labels = values.map(v => pq.answers.find(a => a.value === v)?.label ?? v);
             setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
-            handleSend(`[Answer: ${values.join(', ')}] ${labels.join(', ')}`);
+            handleSend(
+              `[Answer: ${values.join(', ')}] ${labels.join(', ')}`,
+              { answerFor: pq.messageId },
+            );
             setQuestionMulti(new Set());
           }
         } else {
@@ -388,10 +426,14 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
           if (questionFocus < pq.answers.length) {
             const answer = pq.answers[questionFocus]!;
             setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
-            handleSend(`[Answer: ${answer.value}] ${answer.label}`);
+            handleSend(
+              `[Answer: ${answer.value}] ${answer.label}`,
+              { answerFor: pq.messageId },
+            );
           } else {
             // "Other" focused — dismiss, let founder type
             setAnsweredQuestions(prev => new Set(prev).add(pq.messageId));
+            markQuestionDismissed(pq.messageId);
           }
         }
         setQuestionFocus(0);
@@ -434,6 +476,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     appendMessage(join(corpRoot, channel.path, MESSAGES_JSONL), sysMsg);
   };
 
+  // Write a zero-visible-content marker that kills a pending question
+  // without posting an answer. Hydration's answerFor scan picks this up
+  // on restart so dismissed questions stay dismissed. Rendered as null
+  // (empty system messages are filtered in renderMsg).
+  const markQuestionDismissed = (questionMessageId: string) => {
+    const marker: ChannelMessage = {
+      id: generateId(),
+      channelId: channel.id,
+      senderId: 'system',
+      threadId: null,
+      content: '',
+      kind: 'system',
+      mentions: [],
+      metadata: { source: 'system', answerFor: questionMessageId, dismissed: true },
+      depth: 0,
+      originId: '',
+      timestamp: new Date().toISOString(),
+    };
+    marker.originId = marker.id;
+    appendMessage(join(corpRoot, channel.path, MESSAGES_JSONL), marker);
+  };
+
   const handleHired = (agentName: string, displayName: string) => {
     // Write system message to current channel
     writeSystemMessage(`${displayName} has been hired as ${agentName}. You can now @mention them.`);
@@ -446,7 +510,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     setTimeout(() => setShowHireWizard(false), 1500);
   };
 
-  const handleSend = useCallback(async (text: string) => {
+  const handleSend = useCallback(async (text: string, extraMetadata?: Record<string, unknown>) => {
     // /jack — re-enter live session (if previously unjacked)
     if (text.trim().toLowerCase() === '/jack') {
       if (channel.kind !== 'direct') {
@@ -1672,7 +1736,7 @@ Always consider what happens when things go wrong.`,
         content: text,
         kind: 'text',
         mentions: [],
-        metadata: { source: 'jack' },
+        metadata: { source: 'jack', ...(extraMetadata ?? {}) },
         depth: 0,
         originId: '',
         timestamp: new Date().toISOString(),
@@ -1881,6 +1945,10 @@ Always consider what happens when things go wrong.`,
     const isSystem = msg.senderId === 'system' || msg.kind === 'system' || msg.kind === 'task_event';
 
     if (isSystem) {
+      // Empty system messages are invisible markers (e.g. question
+      // dismissal records). Skip rendering so they don't leave ghost
+      // vertical bars in chat.
+      if (!msg.content || !msg.content.trim()) return null;
       return (
         <Box key={msg.id} flexDirection="column" paddingLeft={1} marginBottom={0}>
           <Text color={COLORS.muted}> {'\u2502'} {msg.content}</Text>
