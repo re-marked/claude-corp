@@ -11,6 +11,7 @@ import {
   readConfig,
   post,
   resolveMentions,
+  agentSessionKey,
   MEMBERS_JSON,
   CHANNELS_JSON,
   CORP_JSON,
@@ -373,7 +374,7 @@ export class Daemon {
           body: JSON.stringify({
             target: ceoSlug,
             message: kickoffContent,
-            sessionKey: `jack:${ceoSlug}`,
+            sessionKey: agentSessionKey(ceoSlug),
             channelId: ceoDm.id,
           }),
         });
@@ -473,7 +474,7 @@ export class Daemon {
         body: JSON.stringify({
           target: 'herald',
           message: 'Narrate the current state of the corp. Run cc-cli activity and cc-cli status, then give a 1-2 sentence summary.',
-          sessionKey: `herald-narration:${Date.now()}`,
+          sessionKey: agentSessionKey('herald'),
         }),
         signal: AbortSignal.timeout(60_000),
       });
@@ -520,7 +521,7 @@ export class Daemon {
         body: JSON.stringify({
           target: 'failsafe',
           message: 'Run your monitoring protocol. Check all agent statuses via cc-cli status and report.',
-          sessionKey: `failsafe-heartbeat:${Date.now()}`,
+          sessionKey: agentSessionKey('failsafe'),
         }),
         signal: AbortSignal.timeout(90_000), // 90s timeout
       });

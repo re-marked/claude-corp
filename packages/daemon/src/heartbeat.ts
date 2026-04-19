@@ -5,6 +5,7 @@ import {
   type Channel,
   type ChannelMessage,
   readConfig,
+  agentSessionKey,
   listTasks,
   readTask,
   taskPath,
@@ -158,7 +159,7 @@ export class HeartbeatManager {
       // Mark busy during inbox dispatch
       this.daemon.setAgentWorkStatus(memberId, agent.displayName, 'busy');
 
-      const sessionKey = `inbox:${agentProc.model.replace('openclaw:', '')}:${Date.now()}`;
+      const sessionKey = agentSessionKey(agent.displayName);
 
       try {
         const result = await this.daemon.harness.dispatch({

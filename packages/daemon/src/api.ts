@@ -18,6 +18,7 @@ import {
   resolveModelAlias,
   writeGlobalConfig,
   readGlobalConfig,
+  agentSessionKey,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -650,7 +651,7 @@ export function createApi(daemon: Daemon): Server {
         const senderSlug = members.find((m: any) => m.id === saySenderId)?.displayName?.toLowerCase().replace(/\s+/g, '-') ?? 'system';
         const targetSlugNorm = normalize(target.displayName);
         const sessionKey = (body.sessionKey as string)
-          ?? `say:${senderSlug}:${targetSlugNorm}`;
+          ?? agentSessionKey(targetSlugNorm);
         const abortController = new AbortController();
         daemon.registerInflight(sessionKey, abortController);
 
@@ -1005,7 +1006,7 @@ export function createApi(daemon: Daemon): Server {
             body: JSON.stringify({
               target: slug,
               message: prompt,
-              sessionKey: `jack:${slug}`,
+              sessionKey: agentSessionKey(slug),
               channelId: channelId || undefined,
             }),
             signal: AbortSignal.timeout(timeout),
