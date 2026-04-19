@@ -40,6 +40,7 @@ import { DreamManager } from './dreams.js';
 import { AutoemonManager } from './autoemon.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
+import { InflightRegistry } from './inflight-registry.js';
 import {
   type AgentHarness,
   ClaudeCodeHarness,
@@ -73,6 +74,15 @@ export class Daemon {
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
+  /**
+   * In-flight dispatch registry. Lets /cc/interrupt find and abort an
+   * ongoing turn. Populated on /cc/say entry, cleared on any exit path.
+   * Rule: one dispatch per sessionKey at a time — mirrors the intent
+   * of PR 2 (one brain per agent, no parallel turns for the same
+   * session). Extracted to its own class so the abort semantics are
+   * testable without a full Daemon.
+   */
+  private inflightRegistry = new InflightRegistry();
   /** Computed work status per agent (memberId → status) */
   agentWorkStatus = new Map<string, AgentWorkStatus>();
   /** Agent inbox system — tracks unread messages per channel per agent */
@@ -187,6 +197,37 @@ export class Daemon {
   /** Register a callback for when an agent transitions idle→busy */
   onAgentBusy(cb: (memberId: string, displayName: string) => void): void {
     this.onBusyCallbacks.push(cb);
+  }
+
+  // ── In-flight dispatch registry (agent-interrupt support) ──────────
+  //
+  // The /cc/say handler registers an AbortController here on entry and
+  // clears it on every exit path. /cc/interrupt looks the controller
+  // up and fires it. Precise scope: sessionKey, not agentId — because
+  // the same agent can legitimately be on separate sessions today
+  // (legacy per-sender pairs, jack, etc.). PR 2 narrows the world to
+  // one session per agent; the registry will narrow alongside.
+
+  /** Register a new in-flight dispatch. Delegates to InflightRegistry
+   *  (extracted class) — kept here as a thin pass-through so callers
+   *  don't have to reach through a private property. */
+  registerInflight(sessionKey: string, controller: AbortController): void {
+    this.inflightRegistry.register(sessionKey, controller);
+  }
+
+  /** Remove an in-flight dispatch from the registry. */
+  clearInflight(sessionKey: string, controller: AbortController): void {
+    this.inflightRegistry.clear(sessionKey, controller);
+  }
+
+  /** Fire the abort for an in-flight dispatch, if one exists. */
+  abortInflight(sessionKey: string): { found: boolean; aborted: boolean } {
+    return this.inflightRegistry.abort(sessionKey);
+  }
+
+  /** Diagnostic — list all currently in-flight session keys. */
+  listInflight(): string[] {
+    return this.inflightRegistry.list();
   }
 
   /** Update agent work status + broadcast event + fire transition callbacks + analytics */

@@ -377,7 +377,13 @@ export class DaemonClient {
 
   // --- cc say (direct agent-to-agent) ---
 
-  async say(agentSlug: string, message: string, sessionKey?: string, channelId?: string): Promise<{ ok: boolean; from: string; response: string }> {
+  async say(
+    agentSlug: string,
+    message: string,
+    sessionKey?: string,
+    channelId?: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; from: string; response: string; interrupted?: boolean }> {
     const payload: Record<string, string> = { target: agentSlug, message };
     if (sessionKey) payload.sessionKey = sessionKey;
     if (channelId) payload.channelId = channelId;
@@ -385,7 +391,34 @@ export class DaemonClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal,
     });
+    // 499 (caller aborted) is expected when /cc/interrupt wins the race
+    // against dispatch completion. Surface it as { ok:false, interrupted:true }
+    // so the TUI doesn't treat it as a generic error.
+    if (resp.status === 499) {
+      return { ok: false, interrupted: true, from: agentSlug, response: '' };
+    }
     return resp.json() as Promise<any>;
+  }
+
+  /**
+   * Abort an in-flight /cc/say dispatch for a given session key. Best-
+   * effort: network failures don't throw (the TUI has already aborted
+   * its local fetch and cleared UI state — a failed server abort just
+   * means the backend turn completes on its own). Idempotent.
+   */
+  async interrupt(sessionKey: string): Promise<{ ok: boolean; found: boolean; aborted: boolean }> {
+    try {
+      const resp = await fetch(`${this.baseUrl}/cc/interrupt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey }),
+      });
+      if (!resp.ok) return { ok: false, found: false, aborted: false };
+      return resp.json() as Promise<{ ok: boolean; found: boolean; aborted: boolean }>;
+    } catch {
+      return { ok: false, found: false, aborted: false };
+    }
   }
 }

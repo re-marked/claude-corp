@@ -253,6 +253,40 @@ export class OpenClawWS {
     });
   }
 
+  /**
+   * Abort an in-flight chat run on the gateway side. Kills the provider
+   * stream + any pending tool calls for the target run(s); the gateway
+   * persists partial assistant text that was already emitted.
+   *
+   * Params: `sessionKey` (required) + optional `runId`. When `runId` is
+   * omitted, aborts ALL runs on the session — useful when the caller
+   * doesn't yet know the runId (e.g., abort fired before chat.send
+   * resolved).
+   *
+   * Idempotent: if the target run already ended, the gateway returns
+   * `aborted: false` and we treat that as success.
+   */
+  async chatAbort(params: {
+    sessionKey: string;
+    runId?: string;
+    stopReason?: string;
+  }): Promise<{ ok: boolean; aborted: boolean; runIds: string[] }> {
+    if (!this.connected || !this.ws) {
+      // No connection to abort through — callers treat this as a soft
+      // failure and fall back to local-only cancellation.
+      return { ok: false, aborted: false, runIds: [] };
+    }
+
+    const id = String(++this.reqId);
+    return new Promise((resolve, reject) => {
+      this.pendingRequests.set(id, { resolve, reject });
+      this.ws!.send(JSON.stringify({
+        type: 'req', id, method: 'chat.abort',
+        params,
+      }));
+    });
+  }
+
   /** Subscribe to agent events for a specific runId. Returns unsubscribe function. */
   onAgentEvent(runId: string, cb: (event: AgentEvent) => void): () => void {
     if (!this.eventListeners.has(runId)) {

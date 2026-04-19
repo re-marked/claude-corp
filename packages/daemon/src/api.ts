@@ -549,6 +549,33 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /cc/interrupt — abort an in-flight /cc/say dispatch.
+      //
+      // Body: { sessionKey: string }
+      // Response: { ok: boolean, found: boolean, aborted: boolean }
+      //   - ok=true always when the request is well-formed (idempotent)
+      //   - found=true if a controller was registered for this sessionKey
+      //   - aborted=true if we actually triggered the abort (vs the
+      //     controller already being in aborted state from a race)
+      //
+      // Why sessionKey, not memberId: an agent can legitimately have
+      // multiple sessions today (jack:<slug>, say:<a>:<b>, etc.).
+      // PR 2's one-session-per-agent work will eventually collapse
+      // this to "agent:<slug>" but the endpoint stays sessionKey-
+      // addressable for back-compat and precision.
+      if (method === 'POST' && path === '/cc/interrupt') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const sessionKey = body.sessionKey as string;
+        if (!sessionKey) {
+          json(res, { error: 'sessionKey is required' }, 400);
+          return;
+        }
+        const { found, aborted } = daemon.abortInflight(sessionKey);
+        log(`[interrupt] sessionKey="${sessionKey}" found=${found} aborted=${aborted}`);
+        json(res, { ok: true, found, aborted });
+        return;
+      }
+
       // POST /cc/say — direct agent-to-agent dispatch (synchronous, private, no JSONL)
       if (method === 'POST' && path === '/cc/say') {
         const body = await readBody(req) as Record<string, unknown>;
@@ -616,15 +643,18 @@ export function createApi(daemon: Daemon): Server {
         // Cache tool args from start events — end events often lack them
         const toolArgsCache = new Map<string, Record<string, unknown>>();
 
+        // Resolve sessionKey + build an AbortController OUTSIDE the try
+        // so the catch block can reference them (interrupt bookkeeping
+        // needs both, and the catch runs if abort fires).
+        const saySenderId = (body.senderId as string) ?? 'founder';
+        const senderSlug = members.find((m: any) => m.id === saySenderId)?.displayName?.toLowerCase().replace(/\s+/g, '-') ?? 'system';
+        const targetSlugNorm = normalize(target.displayName);
+        const sessionKey = (body.sessionKey as string)
+          ?? `say:${senderSlug}:${targetSlugNorm}`;
+        const abortController = new AbortController();
+        daemon.registerInflight(sessionKey, abortController);
+
         try {
-          // Persistent sessions by default — ALL communication has memory.
-          // Deterministic key per sender→target pair: OpenClaw accumulates conversation history.
-          // Explicit sessionKey (from Jack/TUI) overrides. Otherwise: persistent per pair.
-          const saySenderId = (body.senderId as string) ?? 'founder';
-          const senderSlug = members.find((m: any) => m.id === saySenderId)?.displayName?.toLowerCase().replace(/\s+/g, '-') ?? 'system';
-          const targetSlugNorm = normalize(target.displayName);
-          const sessionKey = (body.sessionKey as string)
-            ?? `say:${senderSlug}:${targetSlugNorm}`;
 
           // Emit WebSocket events so TUI gets streaming + tool indicators
           if (channelId) {
@@ -661,6 +691,7 @@ export function createApi(daemon: Daemon): Server {
             agentId: agentProc.memberId,
             message,
             sessionKey,
+            signal: abortController.signal,
             context,
             callbacks: {
               // onToken — cross-block accumulated. Streaming overlay
@@ -782,6 +813,7 @@ export function createApi(daemon: Daemon): Server {
             daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId });
           }
           daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
+          daemon.clearInflight(sessionKey, abortController);
 
           // Write to target agent's inbox.jsonl
           const { appendFileSync } = await import('node:fs');
@@ -807,6 +839,24 @@ export function createApi(daemon: Daemon): Server {
             daemon.events.broadcast({ type: 'dispatch_end', agentName: target.displayName, channelId });
           }
           daemon.setAgentWorkStatus(target.id, target.displayName, 'idle');
+          daemon.clearInflight(sessionKey, abortController);
+
+          // Caller-triggered abort (via /cc/interrupt): don't treat as
+          // server failure — return a distinct shape so the TUI can tell
+          // "user interrupted" apart from "dispatch crashed." HTTP 499
+          // is the de facto "client closed request" code.
+          const aborted = (err && typeof err === 'object' && 'category' in err && (err as { category?: string }).category === 'aborted')
+            || abortController.signal.aborted;
+          if (aborted) {
+            log(`[cc-say] dispatch aborted by caller for session "${sessionKey}"`);
+            json(res, {
+              ok: false,
+              interrupted: true,
+              from: target.displayName,
+              response: '',
+            }, 499);
+            return;
+          }
 
           // Detect overloaded errors on remote CEO gateway → restart to clear cooldown
           const errMsg = err instanceof Error ? err.message : String(err);
