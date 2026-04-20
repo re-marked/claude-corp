@@ -75,6 +75,21 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
+  async fireAgent(opts: {
+    targetId: string;
+    requesterId: string;
+    action: 'fire' | 'remove';
+    cascade?: boolean;
+  }): Promise<{ ok: boolean; firedAgents: string[]; message: string }> {
+    const { targetId, ...body } = opts;
+    const resp = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(targetId)}/fire`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return resp.json() as Promise<any>;
+  }
+
   async createTask(opts: {
     title: string;
     description?: string;
