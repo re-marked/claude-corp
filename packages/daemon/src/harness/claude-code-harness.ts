@@ -666,17 +666,46 @@ function resolveWorkspace(opts: DispatchOpts): string {
 }
 
 /**
+ * Canonical Anthropic aliases the claude CLI accepts verbatim. Kept in
+ * sync with `KNOWN_MODELS` in @claudecorp/shared — duplicated rather
+ * than imported because the daemon boots without the shared cache
+ * warmed and we want the harness to be self-contained.
+ */
+const CLAUDE_CLI_ALIASES = new Set(['sonnet', 'opus', 'haiku']);
+
+/**
+ * Does `model` look like a shape the claude CLI will accept for
+ * `--model`? Accepts:
+ *   - Canonical aliases: 'sonnet' | 'opus' | 'haiku'
+ *   - Full Anthropic IDs: anything starting with 'claude-'
+ *
+ * Rejects anything else (e.g., 'haiku5', 'hauku', 'claude4') — claude
+ * exits with code 1 and *empty stderr* on unknown models, which is a
+ * silent failure mode that's extremely hard to diagnose. Better to
+ * drop the flag and let claude use its default than to pass garbage.
+ */
+function looksLikeValidClaudeModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  return CLAUDE_CLI_ALIASES.has(normalized) || normalized.startsWith('claude-');
+}
+
+/**
  * Read the agent's config.json and return its model only when the
- * configured provider resolves to Anthropic — the only family claude
- * accepts for `--model`. Returns null when:
+ * configured provider resolves to Anthropic AND the model value itself
+ * is a shape the claude CLI accepts. Returns null when:
  *   - config.json is missing / unreadable
  *   - no model field is set
- *   - provider is something other than anthropic/claude (e.g., an
- *     openclaw agent's openai-codex leaking through; we'd rather
- *     drop the flag than have claude reject it with a cryptic error)
+ *   - provider is something other than anthropic/claude
+ *   - provider IS anthropic but the model value is nonsense (typo,
+ *     stale alias the user made up, etc.) — logs a warning and drops
+ *     the --model flag so claude runs on its default rather than
+ *     silent-exiting with code 1
  *
- * Model names pass through verbatim — claude accepts both aliases
- * ('sonnet', 'opus', 'haiku') and full ids ('claude-sonnet-4-6').
+ * Previously, a provider=anthropic + model='haiku5' config wrote
+ * `--model haiku5` into the argv. claude rejected it with code 1 and
+ * no stderr — undiagnosable from the daemon side. Agent looked "broken"
+ * for reasons no log could explain. Now we catch it at the harness
+ * boundary instead of flying the bad flag into the subprocess.
  */
 function resolveAnthropicModel(workspace: string): string | null {
   const configPath = join(workspace, 'config.json');
@@ -692,10 +721,18 @@ function resolveAnthropicModel(workspace: string): string | null {
       raw.provider === 'anthropic' ||
       raw.provider === 'claude' ||
       raw.model.startsWith('claude-') ||
-      raw.model === 'sonnet' ||
-      raw.model === 'opus' ||
-      raw.model === 'haiku';
-    return providerLooksAnthropic ? raw.model : null;
+      CLAUDE_CLI_ALIASES.has(raw.model);
+    if (!providerLooksAnthropic) return null;
+    if (!looksLikeValidClaudeModel(raw.model)) {
+      logError(
+        `[harness:claude-code] config.json at ${configPath} has invalid model ` +
+        `"${raw.model}" — claude CLI won't accept it. Dropping --model flag; ` +
+        `dispatch will use claude's global default. Fix by editing config.json ` +
+        `to one of: sonnet, opus, haiku, or a full 'claude-*' ID.`,
+      );
+      return null;
+    }
+    return raw.model;
   } catch {
     return null;
   }

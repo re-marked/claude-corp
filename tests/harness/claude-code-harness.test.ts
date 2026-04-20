@@ -472,6 +472,81 @@ describe('ClaudeCodeHarness', () => {
       }
     });
 
+    it('drops --model for invalid Anthropic model typo (e.g., "haiku5") instead of silent-exiting claude', async () => {
+      // The CEO silent-exit bug: config.json had { model: "haiku5",
+      // provider: "anthropic" }. Harness used to pass it through as
+      // --model haiku5, claude rejected it with exit code 1 and *empty
+      // stderr*, dispatch failed undiagnosably. Now we validate against
+      // claude's accepted shapes (canonical aliases + claude-* IDs),
+      // drop the flag on mismatch, and log a warning.
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), 'cc-harness-model-'));
+      writeFileSync(
+        join(tmpWorkspace, 'config.json'),
+        JSON.stringify({ model: 'haiku5', provider: 'anthropic' }),
+        'utf-8',
+      );
+      try {
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          context: { corpRoot: tmpWorkspace, agentDir: '' } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        expect(dispatchCall.args).not.toContain('--model');
+        // And the warning must land in the log stream with enough
+        // context for the user to fix their config.
+        const warning = consoleSpy.mock.calls
+          .map((args) => String(args[0] ?? ''))
+          .find((line) => line.includes('invalid model "haiku5"'));
+        expect(warning).toBeDefined();
+        expect(warning).toContain('sonnet, opus, haiku');
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('accepts full Anthropic IDs (claude-haiku-4-5) verbatim', async () => {
+      const tmpWorkspace = mkdtempSync(join(tmpdir(), 'cc-harness-model-'));
+      writeFileSync(
+        join(tmpWorkspace, 'config.json'),
+        JSON.stringify({ model: 'claude-haiku-4-5', provider: 'anthropic' }),
+        'utf-8',
+      );
+      try {
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          context: { corpRoot: tmpWorkspace, agentDir: '' } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        const modelIdx = dispatchCall.args.indexOf('--model');
+        expect(modelIdx).toBeGreaterThan(-1);
+        expect(dispatchCall.args[modelIdx + 1]).toBe('claude-haiku-4-5');
+      } finally {
+        rmSync(tmpWorkspace, { recursive: true, force: true });
+      }
+    });
+
 it('always passes --dangerously-skip-permissions for autonomous tool use', async () => {
       // Without this flag, claude's default permission mode pauses every
       // Bash/Edit/Write tool call for interactive approval. There's no

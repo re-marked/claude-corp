@@ -1,5 +1,21 @@
 import { getClient } from '../client.js';
-import { resolveModelAlias, modelDisplayName } from '@claudecorp/shared';
+import { resolveModelAlias, modelDisplayName, isKnownModel, KNOWN_MODELS } from '@claudecorp/shared';
+
+/**
+ * Print a yellow warning if `resolved` isn't a known model. Catches
+ * typos ("haiku5", "opuss") at write-time — before they land in
+ * config.json and break dispatches silently. Does not block: users may
+ * legitimately want to set a brand-new model we haven't added yet.
+ */
+function warnIfUnknown(raw: string, resolved: string): void {
+  if (isKnownModel(resolved)) return;
+  const validAliases = KNOWN_MODELS.map(m => m.alias).join(', ');
+  console.error(
+    `\n⚠  "${raw}" isn't a known alias or model ID — writing it anyway.\n` +
+    `   If that wasn't intentional, valid aliases: ${validAliases}\n` +
+    `   Full list: cc-cli models (no args)\n`,
+  );
+}
 
 export async function cmdModels(opts: {
   action?: string;
@@ -37,6 +53,7 @@ export async function cmdModels(opts: {
       process.exit(1);
     }
     const resolved = resolveModelAlias(opts.model) ?? opts.model;
+    warnIfUnknown(opts.model, resolved);
     const result = await client.setDefaultModel(resolved);
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -53,6 +70,7 @@ export async function cmdModels(opts: {
       process.exit(1);
     }
     const resolved = resolveModelAlias(opts.model) ?? opts.model;
+    warnIfUnknown(opts.model, resolved);
     const result = await client.setAgentModel(opts.agent, resolved);
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -83,7 +101,12 @@ export async function cmdModels(opts: {
       console.error('Usage: claudecorp-cli models fallback --chain "sonnet,haiku"');
       process.exit(1);
     }
-    const chain = opts.chain.split(',').map(m => resolveModelAlias(m.trim()) ?? m.trim());
+    const chain = opts.chain.split(',').map(m => {
+      const raw = m.trim();
+      const resolved = resolveModelAlias(raw) ?? raw;
+      warnIfUnknown(raw, resolved);
+      return resolved;
+    });
     const result = await client.setFallbackChain(chain);
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));

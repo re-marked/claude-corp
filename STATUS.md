@@ -4,7 +4,36 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.5.1 — Fix now, don't "note" (PR open)
+## v2.5.2 — Silent-exit diagnostics + model validation (PR open)
+
+CEO dispatches were silent-failing with "claude exited with code 1"
+and empty stderr. Root cause: config.json had `"model": "haiku5"`
+(typo, probably from an agent or CLI call that wrote it without
+validation). The harness passed `--model haiku5` verbatim to claude,
+which rejected it with exit code 1 and NOTHING in stderr.
+
+Fix lands at three layers, defense in depth:
+
+1. **Harness exit diagnostic** (PR #144): on any non-zero claude exit,
+   log argv + stdout/stderr lengths + tails. Silent-exit failures are
+   now diagnosable on the first occurrence — no more hours of
+   log-spelunking.
+
+2. **Harness model validation**: reject configured models that aren't
+   canonical aliases (sonnet/opus/haiku) or `claude-*` full IDs. Drop
+   the --model flag + log warning instead of passing garbage into
+   claude and triggering the silent-exit. Dispatch succeeds on
+   claude's default.
+
+3. **CLI write-time validation**: `cc-cli models set/default/fallback`
+   warn (yellow) when the resolved model isn't in KNOWN_MODELS. Stops
+   typos at origin before they land in config.json.
+
+New `isKnownModel()` helper in shared + 5 unit tests locking the
+contract (every canonical id passes, plausible typos fail, round-trips
+with resolveModelAlias).
+
+## v2.5.1 — Fix now, don't "note" (MERGED, PR #143)
 
 One prompt fragment at order 55 that reshapes agent defaults when the
 founder flags an issue. Before: agents deflected fixable feedback into

@@ -267,6 +267,7 @@ export {
   DEFAULT_FALLBACK_CHAIN,
   resolveModelAlias,
   getModelEntry,
+  isKnownModel,
   formatProviderModel,
   parseProviderModel,
   modelDisplayName,
