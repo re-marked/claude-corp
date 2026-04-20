@@ -83,6 +83,8 @@ Commands:
   inspect    Show detailed agent info (SOUL, tasks, model)
   send       Send a message to a channel
   hire       Hire a new agent
+  fire       Fire (archive) an agent
+  remove     Remove (delete completely) an agent
   agent      Start/stop an agent (agent start/stop --agent <id>)
   models     View and change AI models
   channels   List all channels
