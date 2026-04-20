@@ -3,8 +3,16 @@
 Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
+## v2.6.0 - Agent fire (archival) and removal
 
-## v2.5.3 — Fragments inject only on session seed (PR open)
+This feature was fully built and tested by my personal
+corporation. New TUI command: /fire, similar to /hire, but for 
+archiving and removing agents. If an agent has children (for example,
+a leader agent with worker agents under it), you must use cascade
+archival which also archives all orphans. Also new cc-cli commands: 
+fire and remove, as well as the underlying daemon endpoint.  
+
+## v2.5.3 — Fragments inject only on session seed (PR merged)
 
 Claude-code dispatches used to re-inject the full 28-fragment system
 context (~48KB of roster, channels, history, supervisor chain,
@@ -62,6 +70,8 @@ with resolveModelAlias).
 
 ## v2.5.1 — Fix now, don't "note" (MERGED, PR #143)
 
+(this is the thrid PR from the "schizophrenic Claude" suite)
+
 One prompt fragment at order 55 that reshapes agent defaults when the
 founder flags an issue. Before: agents deflected fixable feedback into
 "ok, got it, I'll remember next time" — looks receptive, leaves the
@@ -78,6 +88,8 @@ Content-level tests (7) lock the specific wording — this fragment's
 value is its voice, so wording drift = feature drift.
 
 ## v2.5.0 — One brain per agent (MERGED, PR #142)
+
+(this is the second PR from the "schizophrenic Claude" suite)
 
 Every reasoning dispatch — DM, @mention, cron, loop, heartbeat, dream,
 autoemon tick, herald narration, failsafe monitor, CEO escalation,
@@ -118,6 +130,8 @@ every tick/heartbeat/cron raw alongside conversation — simple, honest,
 worked-with-ably for the moment.
 
 ## v2.4.0 — Agent interrupt (MERGED, PR #140)
+
+(this is the first PR from the "schizophrenic Claude" suite)
 
 Esc now interrupts an in-flight agent turn. Previously the founder
 had no way to stop a runaway dispatch — the turn completed regardless.
