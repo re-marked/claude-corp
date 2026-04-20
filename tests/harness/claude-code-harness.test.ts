@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   ClaudeCodeHarness,
@@ -12,6 +12,7 @@ import {
   type ClaudeSpawnFn,
   type DispatchOpts,
 } from '../../packages/daemon/src/harness/index.js';
+import { encodeClaudeWorkspacePath } from '../../packages/daemon/src/harness/claude-code-harness.js';
 
 const BASE_CONFIG = {
   corpRoot: '/tmp/does-not-exist',
@@ -820,6 +821,163 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
       await harness.init(BASE_CONFIG);
       await harness.dispatch(BASE_OPTS({ message: 'unique-test-prompt' }));
       expect(stdinChunks.join('')).toContain('unique-test-prompt');
+    });
+
+    it('injects <system-context> fragments on session seed (first dispatch, --session-id)', async () => {
+      // First dispatch for a session: --session-id path, fragments
+      // must land so claude has the roster/channels/history/supervisor
+      // chain context. This is THE seeding moment — after this, claude
+      // has it in session state and doesn't need it re-injected.
+      const stdinChunks: string[] = [];
+      const { spawn, calls } = makeSpawner((proc, call) => {
+        if (call.args.includes('--version')) {
+          proc.stdout.write('2.1.107\n');
+          proc.exit(0);
+          return;
+        }
+        proc.stdin.on('data', (chunk: Buffer) => stdinChunks.push(chunk.toString('utf-8')));
+        happyPathScenario('ok')(proc);
+      });
+      const harness = new ClaudeCodeHarness({ spawn });
+      await harness.init(BASE_CONFIG);
+      await harness.dispatch(BASE_OPTS({
+        message: 'seed-dispatch',
+        // Context with channelName — fragments require channelName to
+        // render anything. sessionKey is unique so no session file
+        // exists for it → harness takes the --session-id path.
+        sessionKey: 'fragments-seed-test-' + Date.now(),
+        context: {
+          corpRoot: '/tmp/fragments-test',
+          agentDir: 'agents/ceo',
+          channelName: 'cc-direct',
+          channelMembers: ['ceo', 'mark'],
+          corpMembers: [],
+          recentHistory: [],
+          agentDisplayName: 'ceo',
+          channelKind: 'direct',
+          supervisorName: 'founder',
+        } as never,
+      }));
+
+      const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+      expect(dispatchCall.args).toContain('--session-id');
+      const stdin = stdinChunks.join('');
+      expect(stdin).toContain('<system-context>');
+      expect(stdin).toContain('</system-context>');
+      expect(stdin).toContain('seed-dispatch');
+    });
+
+    it('warns when resumed session file is past the bloat threshold (>1MB)', async () => {
+      // Proactive observability: sessions that pass ~1MB are trending
+      // toward the 200K context cap. The harness logs a warning at
+      // resume time so Mark / the founder can rotate before silent-
+      // exit. Asserts the logError fires with the expected shape.
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const sessionKey = 'bloat-warning-test-' + Date.now();
+      const sessionId = sessionIdFor(sessionKey);
+      const workspace = mkdtempSync(join(tmpdir(), 'cc-harness-bloat-'));
+      const sessionDir = join(homedir(), '.claude', 'projects', encodeClaudeWorkspacePath(workspace));
+      mkdirSync(sessionDir, { recursive: true });
+      const sessionFile = join(sessionDir, `${sessionId}.jsonl`);
+      // Write 1.5MB of content to cross the 1MB warning threshold.
+      const bloat = '{"type":"x","junk":"' + 'a'.repeat(1024) + '"}\n';
+      writeFileSync(sessionFile, bloat.repeat(1500), 'utf-8');
+
+      try {
+        const { spawn } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          sessionKey,
+          context: { corpRoot: workspace, agentDir: '' } as never,
+        }));
+
+        const warning = consoleSpy.mock.calls
+          .map((args) => String(args[0] ?? ''))
+          .find((line) => line.includes('session bloat warning'));
+        expect(warning).toBeDefined();
+        expect(warning).toMatch(/size=1\.\d+MB/);
+        expect(warning).toContain('rotate before');
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+        rmSync(sessionDir, { recursive: true, force: true });
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('does NOT re-inject fragments on --resume (session already has them)', async () => {
+      // The core fix for session bloat. Fragments are seeded once on
+      // session creation and baked into claude's context. Every resume
+      // dispatch used to re-inject ~48KB of roster/channel/history —
+      // session files ballooned to megabytes in hours, hit the 200K
+      // context cap, silent-exited.
+      //
+      // Now: resume path sends the raw message. Agents that need
+      // current state Read the files.
+      const stdinChunks: string[] = [];
+
+      // Simulate an existing session by creating the session file at
+      // the path the harness probes. sessionId is derived from
+      // sessionKey via uuidv5 with a fixed namespace.
+      const sessionKey = 'resume-no-fragments-test-' + Date.now();
+      const sessionId = sessionIdFor(sessionKey);
+      const workspace = mkdtempSync(join(tmpdir(), 'cc-harness-resume-'));
+      // Use the actual harness encoder so any future encoding change
+      // is caught by this test instead of silently skipping the
+      // session-exists probe.
+      const sessionDir = join(homedir(), '.claude', 'projects', encodeClaudeWorkspacePath(workspace));
+      mkdirSync(sessionDir, { recursive: true });
+      const sessionFile = join(sessionDir, `${sessionId}.jsonl`);
+      writeFileSync(sessionFile, '{"type":"prior-turn"}\n', 'utf-8');
+
+      try {
+        const { spawn, calls } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          proc.stdin.on('data', (chunk: Buffer) => stdinChunks.push(chunk.toString('utf-8')));
+          happyPathScenario('ok')(proc);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+        await harness.dispatch(BASE_OPTS({
+          message: 'resume-dispatch-raw',
+          sessionKey,
+          context: {
+            corpRoot: workspace,
+            agentDir: '',
+            channelName: 'cc-direct',
+            channelMembers: ['ceo', 'mark'],
+            corpMembers: [],
+            recentHistory: [],
+            agentDisplayName: 'ceo',
+            channelKind: 'direct',
+            supervisorName: 'founder',
+          } as never,
+        }));
+
+        const dispatchCall = calls.find((c) => !c.args.includes('--version'))!;
+        // Path confirmation: --resume, not --session-id
+        expect(dispatchCall.args).toContain('--resume');
+        expect(dispatchCall.args).not.toContain('--session-id');
+        // Core assertion: stdin is the bare message, no system-context
+        // wrapper. This is the whole point — session stays small.
+        const stdin = stdinChunks.join('');
+        expect(stdin).not.toContain('<system-context>');
+        expect(stdin).toContain('resume-dispatch-raw');
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+        rmSync(sessionDir, { recursive: true, force: true });
+      }
     });
 
     it('captures tool calls into DispatchResult.toolCalls + fires both callbacks', async () => {

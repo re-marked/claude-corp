@@ -32,7 +32,7 @@
 
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { isAbsolute, join } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { log, logError } from '../logger.js';
 import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stream.js';
@@ -98,6 +98,14 @@ interface DispatchInternalState {
 
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const VERSION_CHECK_TIMEOUT_MS = 5_000;
+
+/**
+ * Warn threshold for session file size. Claude's standard-context
+ * limit is 200K tokens; sessions get there at roughly 3-4MB of JSONL.
+ * Warning at 1MB gives roughly 2-3x headroom — enough warning to act,
+ * but not so early it's noise for legitimately long-lived sessions.
+ */
+const SESSION_SIZE_WARN_BYTES = 1 * 1024 * 1024;
 
 export class ClaudeCodeHarness implements AgentHarness {
   readonly name = 'claude-code';
@@ -229,6 +237,28 @@ export class ClaudeCodeHarness implements AgentHarness {
     // + the sessionId to see exactly which flag fired.
     log(`[harness:claude-code] dispatch agentId=${opts.agentId} session=${sessionId.slice(0, 8)} flag=${continuationFlag}`);
 
+    // Proactive session-bloat warning. Sessions approach the 200K
+    // context cap well before they actually silent-exit; warning at
+    // 1MB gives the founder a chance to rotate before CEO is stuck.
+    // Cheap check (one stat per dispatch), only fires on the resume
+    // path where bloat matters.
+    if (sessionHasHistory) {
+      try {
+        const sessionPath = join(homedir(), '.claude', 'projects', encodeClaudeWorkspacePath(workspace), `${sessionId}.jsonl`);
+        const stats = statSync(sessionPath);
+        if (stats.size > SESSION_SIZE_WARN_BYTES) {
+          logError(
+            `[harness:claude-code] session bloat warning: agentId=${opts.agentId} ` +
+            `session=${sessionId.slice(0, 8)} size=${(stats.size / 1024 / 1024).toFixed(1)}MB ` +
+            `— rotate before it hits the 200K context cap (rename the jsonl to reset).`,
+          );
+        }
+      } catch {
+        // Stat failure is non-fatal. File may have been rotated
+        // between the existence check above and now.
+      }
+    }
+
     // Resolve the agent's configured model. Each hire writes
     // { model, provider } to the agent's workspace config.json; if
     // provider is Anthropic we pass --model to claude so per-agent
@@ -263,7 +293,7 @@ export class ClaudeCodeHarness implements AgentHarness {
       '--add-dir', workspace,
     ];
 
-    return this.runOneDispatch(opts, args, sessionId, workspace, start);
+    return this.runOneDispatch(opts, args, sessionId, workspace, start, sessionHasHistory);
   }
 
   // --- Internals ----------------------------------------------------------
@@ -274,6 +304,7 @@ export class ClaudeCodeHarness implements AgentHarness {
     sessionId: string,
     workspace: string,
     start: number,
+    sessionHasHistory: boolean,
   ): Promise<DispatchResult> {
     const parser = new ClaudeCodeStreamParser();
     const state: DispatchInternalState = {
@@ -326,23 +357,26 @@ export class ClaudeCodeHarness implements AgentHarness {
         }));
       }
 
-      // Compose per-dispatch dynamic context from fragments. Same 28
-      // fragment modules that OpenClaw uses: channel membership, corp
-      // roster, recent history, supervisor chain, delegation protocols,
-      // escalation paths, workspace awareness, etc. Claude-code agents
-      // already have their static identity via CLAUDE.md @imports
-      // (SOUL/IDENTITY/AGENTS/TOOLS); the fragments add what those files
-      // CAN'T provide — context that changes every dispatch (which
-      // channel, who's here, what just happened, who's your supervisor
-      // right now). Without this, claude-code agents worked in a vacuum:
-      // they had identity but no situational awareness.
+      // Fragments seed the session ONCE, on creation. After that, claude
+      // has the full 28-fragment context (roster, channels, history,
+      // supervisor chain, delegation protocols, etc.) baked into its
+      // session state and persists it across dispatches. Re-injecting
+      // the same ~48KB on every `--resume` dispatch is pure waste —
+      // the content is already in claude's context window, the JSONL
+      // session file grows linearly per turn, and sessions hit the
+      // 200K context cap in hours instead of weeks.
+      //
+      // Rule: fragments only on the first dispatch of a session
+      // (`--session-id` path). On resume, send the user message raw.
+      // Agents that need current state have Read/Grep — members.json,
+      // channels.json, messages.jsonl are all one tool call away.
       let fullMessage = opts.message;
-      if (opts.context?.channelName) {
+      if (!sessionHasHistory && opts.context?.channelName) {
         try {
           const systemContext = composeSystemMessage(opts.context);
           if (systemContext.trim()) {
             fullMessage = `<system-context>\n${systemContext}\n</system-context>\n\n${opts.message}`;
-            log(`[harness:claude-code] fragments injected: ${systemContext.length} chars for ${opts.agentId} in ${opts.context.channelName}`);
+            log(`[harness:claude-code] fragments injected (session seed): ${systemContext.length} chars for ${opts.agentId} in ${opts.context.channelName}`);
           }
         } catch (err) {
           // Non-fatal — dispatch without fragment context rather than
@@ -790,7 +824,7 @@ function claudeSessionFileExists(sessionId: string, workspace: string): boolean 
  * "Session ID X is already in use" — exactly the bug Mark hit in a
  * fresh-corp second dispatch at v2.1.7.
  */
-function encodeClaudeWorkspacePath(workspace: string): string {
+export function encodeClaudeWorkspacePath(workspace: string): string {
   const trimmed = workspace.replace(/[\\/]+$/, '');
   return trimmed.replace(/[:\\/.]/g, '-');
 }
