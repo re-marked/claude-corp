@@ -380,6 +380,13 @@ export class ClaudeCodeHarness implements AgentHarness {
 
       child.on('error', (err) => {
         // Spawn-time errors (binary missing, EACCES, etc.) surface here.
+        // Log with full argv so the transport-layer failure can be
+        // reproduced — these are the silent-exit failures that leave
+        // stderr empty because claude never ran.
+        logError(
+          `[harness:claude-code] spawn error agentId=${opts.agentId} session=${sessionId.slice(0, 8)} ` +
+          `err=${err.message} argv=${JSON.stringify(args)}`,
+        );
         settle(() => {
           this._errors += 1;
           reject(new HarnessError({
@@ -428,10 +435,26 @@ export class ClaudeCodeHarness implements AgentHarness {
           if (code !== 0) {
             this._errors += 1;
             const stderrCategory = categorizeStderr(stderrBuf);
+            // Always log the raw tail of stderr + stdout + the exact
+            // argv on non-zero exit. Without this, silent-exit bugs
+            // ("claude exited with code 1" and nothing to grep) cost
+            // hours every time — we've now hit one in production. With
+            // it: one pass through `cc-cli logs` tells you exactly what
+            // command was tried and what (if anything) claude said on
+            // the way out. Truncated to 500 chars each to keep the log
+            // readable.
+            const stderrTail = stderrBuf.trim().slice(-500);
+            const stdoutTail = stdoutBuf.trim().slice(-500);
+            logError(
+              `[harness:claude-code] exit code=${code} agentId=${opts.agentId} session=${sessionId.slice(0, 8)} ` +
+              `stderr.len=${stderrBuf.length} stdout.len=${stdoutBuf.length} ` +
+              `stderr.tail=${JSON.stringify(stderrTail)} stdout.tail=${JSON.stringify(stdoutTail)} ` +
+              `argv=${JSON.stringify(args)}`,
+            );
             reject(new HarnessError({
               category: stderrCategory ?? 'internal',
               harnessName: this.name,
-              message: stderrToMessage(stderrBuf) || `claude exited with code ${code}`,
+              message: stderrToMessage(stderrBuf) || `claude exited with code ${code} (stderr empty; see [harness:claude-code] log for argv + stdout tail)`,
             }));
             return;
           }

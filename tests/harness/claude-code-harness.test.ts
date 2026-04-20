@@ -1059,6 +1059,50 @@ it('always passes --dangerously-skip-permissions for autonomous tool use', async
       expect(dispatchProc!.killed).toBe(true);
       expect(dispatchProc!.killSignal).toBe('SIGKILL');
     });
+
+    it('surfaces argv hint in error message when claude exits non-zero with empty stderr', async () => {
+      // Reproduces the CEO "claude exited with code 1" failure mode
+      // where stderr was empty and the daemon message had nothing
+      // actionable in it. The HarnessError.message must tell the user
+      // where to look; the full diagnostic (argv + stdout tail) must
+      // land via console.error so it ends up in daemon.log.
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const { spawn } = makeSpawner((proc, call) => {
+          if (call.args.includes('--version')) {
+            proc.stdout.write('2.1.107\n');
+            proc.exit(0);
+            return;
+          }
+          proc.stdout.write('{"type":"system","subtype":"init","session_id":"x","model":"claude-haiku-4-5","tools":[]}\n');
+          proc.exit(1);
+        });
+        const harness = new ClaudeCodeHarness({ spawn });
+        await harness.init(BASE_CONFIG);
+
+        await expect(harness.dispatch(BASE_OPTS())).rejects.toMatchObject({
+          category: 'internal',
+          harnessName: 'claude-code',
+          message: expect.stringContaining('stderr empty'),
+        });
+
+        // Verify the diagnostic actually lands in the log stream. If
+        // this assertion breaks, someone ripped out the logError that
+        // makes silent-exit failures debuggable — that's the whole
+        // reason the log line exists.
+        const diagnostic = consoleSpy.mock.calls
+          .map((args) => String(args[0] ?? ''))
+          .find((line) => line.includes('[harness:claude-code] exit code='));
+        expect(diagnostic).toBeDefined();
+        expect(diagnostic).toContain('code=1');
+        expect(diagnostic).toContain('stderr.len=0');
+        expect(diagnostic).toContain('argv=');
+        // argv should include the -p flag (it's always passed)
+        expect(diagnostic).toContain('"-p"');
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
   });
 
   describe('telemetry', () => {
