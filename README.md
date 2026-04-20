@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./banner.png" alt="Claude Corp" width="100%" />
+  <img src="./banner.png" alt="Claude Corp" width="67%" />
 </p>
 
 <h1 align="center">Claude Corp — Your Personal AI Corporation</h1>
@@ -10,7 +10,7 @@ A hierarchy of AI agents that runs as a company on your machine — even while y
 <p align="center">
   <a href="https://github.com/re-marked/claude-corp/actions"><img src="https://img.shields.io/github/actions/workflow/status/re-marked/claude-corp/ci.yml?style=flat-square&label=CI" alt="CI" /></a>
   <a href="https://github.com/re-marked/claude-corp/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" /></a>
-  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/v2.0.0-harness--agnostic-blue?style=flat-square" alt="v2.0.0" /></a>
+  <a href="https://github.com/re-marked/claude-corp"><img src="https://img.shields.io/badge/v2.6.0-fire--agents-red?style=flat-square" alt="v2.0.0" /></a>
 </p>
 
 <p align="center">
