@@ -29,6 +29,8 @@ export interface AgentSetupOpts {
   scope: Member['scope'];
   scopeId: string;
   spawnedBy: string;
+  /** Explicit management supervisor. When set, persisted on the Member and used for hierarchy checks. */
+  supervisorId?: string | null;
   model: string;
   provider: string;
   soulContent: string;
@@ -239,6 +241,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     agentDir: agentRelDir,
     port: null,
     spawnedBy,
+    ...(opts.supervisorId ? { supervisorId: opts.supervisorId } : {}),
     createdAt: now,
     ...(opts.harness ? { harness: opts.harness } : {}),
   };

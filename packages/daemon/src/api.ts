@@ -1,5 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
+import { renameSync, rmSync } from 'node:fs';
 import {
   createTask,
   listTasks,
@@ -23,6 +24,8 @@ import {
   CHANNELS_JSON,
   MESSAGES_JSONL,
   type ChannelMessage,
+  type Member,
+  type Channel,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
@@ -180,8 +183,135 @@ export function createApi(daemon: Daemon): Server {
           model: (body.model as string) ?? undefined,
           provider: (body.provider as string) ?? undefined,
           harness: (body.harness as string) ?? undefined,
+          supervisorId: (body.supervisorId as string) ?? undefined,
         });
         json(res, { ok: true, member: result.member, dmChannel: result.dmChannel });
+        return;
+      }
+
+      // POST /agents/:id/fire — archive (fire) or permanently delete (remove) an agent
+      const fireMatch = path.match(/^\/agents\/([^/]+)\/fire$/);
+      if (method === 'POST' && fireMatch) {
+        const targetId = decodeURIComponent(fireMatch[1]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        const { requesterId, action, cascade } = body;
+
+        if (!requesterId || !action || !['fire', 'remove'].includes(action as string)) {
+          json(res, { error: 'requesterId and action ("fire"|"remove") are required' }, 400);
+          return;
+        }
+
+        const membersPath = join(daemon.corpRoot, MEMBERS_JSON);
+        const members = readConfig<Member[]>(membersPath);
+        const requester = members.find((m) => m.id === (requesterId as string));
+        const target = members.find((m) => m.id === targetId);
+
+        if (!requester) { json(res, { error: 'Requester not found' }, 404); return; }
+        if (!target)    { json(res, { error: 'Target agent not found' }, 404); return; }
+
+        // CEO is sacred — nobody can fire it
+        if (target.rank === 'master') {
+          json(res, { error: 'CEO cannot be fired' }, 403);
+          return;
+        }
+
+        // Authorization: owner/master can fire anyone; leaders only their direct reports
+        // supervisorId is the explicit management relationship; spawnedBy is the fallback
+        const targetSupervisor = target.supervisorId ?? target.spawnedBy;
+        const canFire =
+          requester.rank === 'owner' ||
+          (requester.rank === 'master' && requester.id !== targetId) ||
+          (requester.rank === 'leader' && targetSupervisor === requester.id);
+
+        if (!canFire) {
+          json(res, { error: 'Insufficient authority to fire this agent' }, 403);
+          return;
+        }
+
+        // Collect all direct subordinates (recursive BFS) using supervisorId with spawnedBy fallback
+        const allSubordinates = (root: Member): Member[] => {
+          const result: Member[] = [];
+          const queue = [root.id];
+          while (queue.length > 0) {
+            const pid = queue.shift()!;
+            const children = members.filter((m) => (m.supervisorId ?? m.spawnedBy) === pid && m.id !== root.id);
+            result.push(...children);
+            queue.push(...children.map((c) => c.id));
+          }
+          return result;
+        };
+
+        const subordinates = allSubordinates(target);
+        if (subordinates.length > 0 && !cascade) {
+          json(res, { error: "can't fire a leader with active workers — fire workers first or pass cascade: true" }, 400);
+          return;
+        }
+
+        // Build ordered list: subordinates first (leaves → root), then target
+        const toFire = [...subordinates, target];
+
+        const firedIds: string[] = [];
+
+        for (const agent of toFire) {
+          // 1. Stop agent process if running
+          try { await daemon.processManager.stopAgent(agent.id); } catch {}
+
+          // 2. Remove agent from members.json (fire marks archived; remove deletes)
+          const idx = members.findIndex((m) => m.id === agent.id);
+          if (action === 'remove') {
+            if (idx >= 0) members.splice(idx, 1);
+          } else {
+            if (idx >= 0) members[idx] = { ...members[idx]!, status: 'archived' };
+          }
+
+          // 3. Strip agent from all channel memberIds
+          const channelsPath = join(daemon.corpRoot, CHANNELS_JSON);
+          const channels = readConfig<Channel[]>(channelsPath);
+          for (const ch of channels) {
+            const mi = ch.memberIds.indexOf(agent.id);
+            if (mi >= 0) ch.memberIds.splice(mi, 1);
+          }
+
+          // 4. Delete dm-<agentId>-* channels from registry and disk
+          const dmChannels = channels.filter(
+            (c) => c.kind === 'direct' && c.name.includes(agent.id),
+          );
+          for (const dm of dmChannels) {
+            const di = channels.indexOf(dm);
+            if (di >= 0) channels.splice(di, 1);
+            try { rmSync(join(daemon.corpRoot, dm.path), { recursive: true, force: true }); } catch {}
+          }
+          writeConfig(channelsPath, channels);
+
+          // 5. Archive or purge workspace
+          if (agent.agentDir) {
+            const agentAbs = isAbsolute(agent.agentDir)
+              ? agent.agentDir
+              : join(daemon.corpRoot, agent.agentDir);
+            if (action === 'fire') {
+              // Archive: rename to .archived-<slug>-<YYYY-MM-DD>
+              const dateStr = new Date().toISOString().slice(0, 10);
+              const agentParent = agentAbs.replace(/[\\/][^\\/]+[\\/]?$/, '');
+              const archiveName = `.archived-${agent.id}-${dateStr}`;
+              try { renameSync(agentAbs, join(agentParent, archiveName)); } catch {}
+            } else {
+              // Remove: permanent deletion
+              try { rmSync(agentAbs, { recursive: true, force: true }); } catch {}
+            }
+          }
+
+          firedIds.push(agent.id);
+        }
+
+        // Persist updated members list
+        writeConfig(membersPath, members);
+
+        json(res, {
+          ok: true,
+          action,
+          firedAgents: firedIds,
+          message: `${action === 'fire' ? 'Archived' : 'Removed'} ${firedIds.length} agent(s)`,
+        });
         return;
       }
 
@@ -734,13 +864,10 @@ export function createApi(daemon: Daemon): Server {
                 });
                 persistedTextBlocks++;
                 lastPersistedLength += text.length;
-                daemon.streaming.delete(target.id);
-                daemon.events.broadcast({
-                  type: 'stream_token',
-                  agentName: target.displayName,
-                  channelId,
-                  content: '',
-                });
+                // Don't clear streaming state mid-dispatch — the overlay uses
+                // accumulated.slice(lastPersistedLength) so it naturally shows ""
+                // after persistence. Clearing here caused TUI flicker where persisted
+                // text blocks briefly disappeared before the next stream token arrived.
               } : undefined,
               // Tool callbacks — emit events + write tool_event messages to JSONL
               onToolStart: channelId ? (tool) => {

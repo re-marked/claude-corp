@@ -50,6 +50,8 @@ const { values, positionals } = parseArgs({
     source: { type: 'string' },
     confidence: { type: 'string' },
     harness: { type: 'string' },
+    supervisor: { type: 'string' },
+    cascade: { type: 'boolean', default: false },
     all: { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
@@ -81,6 +83,8 @@ Commands:
   inspect    Show detailed agent info (SOUL, tasks, model)
   send       Send a message to a channel
   hire       Hire a new agent
+  fire       Fire (archive) an agent
+  remove     Remove (delete completely) an agent
   agent      Start/stop an agent (agent start/stop --agent <id>)
   models     View and change AI models
   channels   List all channels
@@ -154,7 +158,9 @@ Management commands:
   projects list | projects create --name "..." [--type development]
   teams list | teams create --name "..." --project <id> --lead <id>
   agent start --agent <id> | agent stop --agent <id>
-  agent set-harness --agent <id> --harness <name>   Change an agent's execution substrate
+  agent set-harness --agent <id> --harness <name>              Change execution substrate
+  agent fire   --agent <id> [--cascade]                        Archive agent (offline, searchable)
+  agent remove --agent <id> [--cascade]                        Remove agent permanently
   harness list                                      Show registered harnesses + health
   hire --name <n> --rank <r> [--harness claude-code|openclaw]  Pick substrate at creation
 
@@ -238,6 +244,7 @@ async function run() {
         model: values.model as string | undefined,
         project: values.project as string | undefined,
         harness: values.harness as string | undefined,
+        supervisor: values.supervisor as string | undefined,
         json: !!values.json,
       });
       break;
@@ -469,8 +476,18 @@ async function run() {
         });
         break;
       }
+      if (action === 'fire' || action === 'remove') {
+        const { cmdAgentFire } = await import('./commands/agent-control.js');
+        await cmdAgentFire({
+          agent: values.agent as string | undefined,
+          action: action as 'fire' | 'remove',
+          cascade: !!values.cascade,
+          json: !!values.json,
+        });
+        break;
+      }
       if (action !== 'start' && action !== 'stop') {
-        console.error('Usage: cc-cli agent start|stop|set-harness --agent <name> [--harness <name>]');
+        console.error('Usage: cc-cli agent start|stop|set-harness|fire|remove --agent <name> [--harness <name>] [--cascade]');
         process.exit(1);
       }
       const { cmdAgentControl } = await import('./commands/agent-control.js');
@@ -585,10 +602,21 @@ run().then(
     // the output prints, blocking the agent's next step.
     // `start` holds the process via an unresolving Promise so this
     // never fires for the long-running daemon path.
-    process.exit(0);
+    //
+    // Use exitCode + unref'd timeout instead of process.exit() to let
+    // Node drain async handles first — process.exit() while libuv handles
+    // are mid-close triggers an assertion crash on Windows.
+    process.exitCode = 0;
   },
   (err) => {
     console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
+    process.exitCode = 1;
   },
 );
+
+// Windows: give libuv 500 ms to close handles before forcing exit.
+// The timeout is unref'd so it won't prevent a natural exit if all
+// handles close sooner.
+if (process.platform === 'win32') {
+  setTimeout(() => process.exit(process.exitCode ?? 0), 500).unref();
+}

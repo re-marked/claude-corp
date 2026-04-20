@@ -9,6 +9,7 @@ export async function cmdHire(opts: {
   model?: string;
   project?: string;
   harness?: string;
+  supervisor?: string;
   json: boolean;
 }) {
   if (!opts.name) {
@@ -59,6 +60,7 @@ export async function cmdHire(opts: {
     scope,
     scopeId,
     ...(harness ? { harness } : {}),
+    ...(opts.supervisor ? { supervisorId: opts.supervisor } : {}),
   } as any);
 
   if (opts.json) {

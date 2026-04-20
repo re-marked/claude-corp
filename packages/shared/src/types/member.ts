@@ -16,6 +16,8 @@ export interface Member {
   agentDir: string | null;
   port: number | null;
   spawnedBy: string | null;
+  /** Explicit management relationship — who this agent reports to. Takes precedence over spawnedBy for hierarchy checks. */
+  supervisorId?: string | null;
   createdAt: string;
   /**
    * Registered harness name that executes turns for this agent.

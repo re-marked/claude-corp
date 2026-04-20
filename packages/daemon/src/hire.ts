@@ -43,6 +43,7 @@ export interface HireOpts {
    * final fallback.
    */
   harness?: string;
+  supervisorId?: string | null;
 }
 
 export interface HireResult {
@@ -119,6 +120,7 @@ export async function hireAgent(
     scope,
     scopeId,
     spawnedBy: opts.creatorId,
+    supervisorId: opts.supervisorId,
     model,
     provider,
     soulContent,

@@ -22,6 +22,7 @@ import { MemberSidebar } from '../components/member-sidebar.js';
 import { useMessages } from '../hooks/use-messages.js';
 import * as interruptRegistry from '../lib/interrupt-registry.js';
 import { HireWizard } from './hire-wizard.js';
+import { FireWizard } from './fire-wizard.js';
 import { HarnessModal } from './harness-modal.js';
 import { ModelWizard } from './model-wizard.js';
 import { COLORS, agentColor } from '../theme.js';
@@ -79,6 +80,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   const [thinkingAgents, setThinkingAgents] = useState<string[]>([]);
   const [members, setMembers] = useState(ctxMembers);
   const [showHireWizard, setShowHireWizard] = useState(false);
+  const [showFireWizard, setShowFireWizard] = useState(false);
   const [showModelWizard, setShowModelWizard] = useState(false);
   const [showTaskWizard, setShowTaskWizard] = useState(false);
   const [showHarnessModal, setShowHarnessModal] = useState(false);
@@ -335,7 +337,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   }, [jackMode?.active, jackMode?.sessionKey, sending, thinking, daemonClient]);
 
   useInput((input, key) => {
-    if (showHireWizard || showModelWizard || showHarnessModal) return;
+    if (showHireWizard || showFireWizard || showModelWizard || showHarnessModal) return;
 
     // Plan review mode keyboard handling
     if (planReview) {
@@ -589,6 +591,12 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
     // /hire opens the wizard
     if (text.trim().toLowerCase() === '/hire') {
       setShowHireWizard(true);
+      return;
+    }
+
+    // /fire opens the fire wizard
+    if (text.trim().toLowerCase() === '/fire') {
+      setShowFireWizard(true);
       return;
     }
 
@@ -1158,6 +1166,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
         '',
         '⚙️ Management:',
         '  /hire              Open agent hiring wizard',
+        '  /fire              Open agent fire/remove wizard',
         '  /harness           Switch an agent\'s execution engine',
         '  /model             View and change AI models',
         '  /task              Create a task (planning)',
@@ -1796,10 +1805,10 @@ Always consider what happens when things go wrong.`,
         if (result.interrupted) {
           // Caller aborted — UI marker + state clear already handled by
           // the Esc handler. Silence here; don't treat as error.
-        } else if (result.ok && result.response) {
-          // Response already written to JSONL by say endpoint via post().
-          // ScrollBox renders messages as normal React state — no Ink Static
-          // scrollback bug. Just refresh to pick up the persisted message.
+        } else if (result.ok) {
+          // Refresh unconditionally — even on empty response the agent may have
+          // persisted text blocks mid-dispatch via onAssistantText. Skipping
+          // refresh when result.response is falsy caused messages to disappear.
           setTimeout(() => refreshMessages(), 50);
           setTimeout(() => refreshMessages(), 300);
         } else {
@@ -1967,6 +1976,23 @@ Always consider what happens when things go wrong.`,
           corpDefaultHarness={corpDefaultHarness}
           onClose={() => setShowHireWizard(false)}
           onHired={handleHired}
+        />
+      </Box>
+    );
+  }
+
+  if (showFireWizard) {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" minHeight={10}>
+        <FireWizard
+          daemonClient={daemonClient}
+          requesterId={founder?.id ?? ''}
+          members={members}
+          onClose={() => setShowFireWizard(false)}
+          onFired={(displayName) => {
+            writeSystemMessage(`${displayName} has been fired.`);
+            setTimeout(() => setShowFireWizard(false), 1500);
+          }}
         />
       </Box>
     );

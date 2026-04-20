@@ -203,3 +203,59 @@ export async function cmdAgentSetHarness(opts: {
     console.log('  Daemon not running — start it to route with the new harness.');
   }
 }
+
+export async function cmdAgentFire(opts: {
+  agent?: string;
+  action: 'fire' | 'remove';
+  cascade: boolean;
+  json: boolean;
+}): Promise<void> {
+  if (!opts.agent) {
+    console.error('Usage: cc-cli agent fire|remove --agent <name> [--cascade]');
+    process.exit(1);
+  }
+
+  const client = getClient();
+  const corpRoot = await getCorpRoot();
+  const members = readConfigOr<Member[]>(join(corpRoot, MEMBERS_JSON), []);
+
+  const normalize = (s: string) => s.toLowerCase().replace(/[\s-_]+/g, '');
+  const needle = normalize(opts.agent);
+  const target = members.find((m) =>
+    m.id === opts.agent ||
+    normalize(m.displayName) === needle ||
+    (m.agentDir && normalize(m.agentDir).includes(needle)),
+  );
+
+  if (!target) {
+    console.error(`Agent "${opts.agent}" not found.`);
+    process.exit(1);
+  }
+
+  // Use CEO as requester (highest authority available from CLI context)
+  const ceo = members.find((m) => m.rank === 'master');
+  if (!ceo) {
+    console.error('CEO not found — cannot determine requester.');
+    process.exit(1);
+  }
+
+  const data = await client.post(
+    `/agents/${encodeURIComponent(target.id)}/fire`,
+    { requesterId: ceo.id, action: opts.action, cascade: opts.cascade },
+  ) as Record<string, unknown>;
+
+  if (!data.ok) {
+    console.error(`Error: ${data.error ?? 'unknown error'}`);
+    process.exit(1);
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+
+  const firedCount = (data.firedAgents as string[] | undefined)?.length ?? 1;
+  const label = opts.action === 'fire' ? 'Archived' : 'Removed';
+  const extra = firedCount > 1 ? ` and ${firedCount - 1} subordinate(s)` : '';
+  console.log(`${label} ${target.displayName}${extra}.`);
+}
