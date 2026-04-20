@@ -225,8 +225,30 @@ export function createApi(daemon: Daemon): Server {
           return;
         }
 
-        // PLACEHOLDER: hierarchy + operations follow in subsequent commits
-        json(res, { ok: true, placeholder: true });
+        // Collect all direct subordinates (recursive BFS)
+        const allSubordinates = (root: Member): Member[] => {
+          const result: Member[] = [];
+          const queue = [root.id];
+          while (queue.length > 0) {
+            const pid = queue.shift()!;
+            const children = members.filter((m) => m.spawnedBy === pid && m.id !== root.id);
+            result.push(...children);
+            queue.push(...children.map((c) => c.id));
+          }
+          return result;
+        };
+
+        const subordinates = allSubordinates(target);
+        if (subordinates.length > 0 && !cascade) {
+          json(res, { error: "can't fire a leader with active workers — fire workers first or pass cascade: true" }, 400);
+          return;
+        }
+
+        // Build ordered list: subordinates first (leaves → root), then target
+        const toFire = [...subordinates, target];
+
+        // PLACEHOLDER: stop + cleanup + archive/purge follow in next commit
+        json(res, { ok: true, placeholder: true, toFire: toFire.map((m) => m.id) });
         return;
       }
 
