@@ -50,6 +50,7 @@ const { values, positionals } = parseArgs({
     source: { type: 'string' },
     confidence: { type: 'string' },
     harness: { type: 'string' },
+    supervisor: { type: 'string' },
     cascade: { type: 'boolean', default: false },
     all: { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
@@ -241,6 +242,7 @@ async function run() {
         model: values.model as string | undefined,
         project: values.project as string | undefined,
         harness: values.harness as string | undefined,
+        supervisor: values.supervisor as string | undefined,
         json: !!values.json,
       });
       break;

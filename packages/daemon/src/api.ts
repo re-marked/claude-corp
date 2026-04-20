@@ -183,6 +183,7 @@ export function createApi(daemon: Daemon): Server {
           model: (body.model as string) ?? undefined,
           provider: (body.provider as string) ?? undefined,
           harness: (body.harness as string) ?? undefined,
+          supervisorId: (body.supervisorId as string) ?? undefined,
         });
         json(res, { ok: true, member: result.member, dmChannel: result.dmChannel });
         return;
@@ -214,24 +215,26 @@ export function createApi(daemon: Daemon): Server {
           return;
         }
 
-        // Authorization: owner/master can fire anyone; leaders only their direct workers
+        // Authorization: owner/master can fire anyone; leaders only their direct reports
+        // supervisorId is the explicit management relationship; spawnedBy is the fallback
+        const targetSupervisor = target.supervisorId ?? target.spawnedBy;
         const canFire =
           requester.rank === 'owner' ||
           (requester.rank === 'master' && requester.id !== targetId) ||
-          (requester.rank === 'leader' && target.spawnedBy === requester.id);
+          (requester.rank === 'leader' && targetSupervisor === requester.id);
 
         if (!canFire) {
           json(res, { error: 'Insufficient authority to fire this agent' }, 403);
           return;
         }
 
-        // Collect all direct subordinates (recursive BFS)
+        // Collect all direct subordinates (recursive BFS) using supervisorId with spawnedBy fallback
         const allSubordinates = (root: Member): Member[] => {
           const result: Member[] = [];
           const queue = [root.id];
           while (queue.length > 0) {
             const pid = queue.shift()!;
-            const children = members.filter((m) => m.spawnedBy === pid && m.id !== root.id);
+            const children = members.filter((m) => (m.supervisorId ?? m.spawnedBy) === pid && m.id !== root.id);
             result.push(...children);
             queue.push(...children.map((c) => c.id));
           }
