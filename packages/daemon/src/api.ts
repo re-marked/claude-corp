@@ -864,13 +864,10 @@ export function createApi(daemon: Daemon): Server {
                 });
                 persistedTextBlocks++;
                 lastPersistedLength += text.length;
-                daemon.streaming.delete(target.id);
-                daemon.events.broadcast({
-                  type: 'stream_token',
-                  agentName: target.displayName,
-                  channelId,
-                  content: '',
-                });
+                // Don't clear streaming state mid-dispatch — the overlay uses
+                // accumulated.slice(lastPersistedLength) so it naturally shows ""
+                // after persistence. Clearing here caused TUI flicker where persisted
+                // text blocks briefly disappeared before the next stream token arrived.
               } : undefined,
               // Tool callbacks — emit events + write tool_event messages to JSONL
               onToolStart: channelId ? (tool) => {

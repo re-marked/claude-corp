@@ -1805,10 +1805,10 @@ Always consider what happens when things go wrong.`,
         if (result.interrupted) {
           // Caller aborted — UI marker + state clear already handled by
           // the Esc handler. Silence here; don't treat as error.
-        } else if (result.ok && result.response) {
-          // Response already written to JSONL by say endpoint via post().
-          // ScrollBox renders messages as normal React state — no Ink Static
-          // scrollback bug. Just refresh to pick up the persisted message.
+        } else if (result.ok) {
+          // Refresh unconditionally — even on empty response the agent may have
+          // persisted text blocks mid-dispatch via onAssistantText. Skipping
+          // refresh when result.response is falsy caused messages to disappear.
           setTimeout(() => refreshMessages(), 50);
           setTimeout(() => refreshMessages(), 300);
         } else {
