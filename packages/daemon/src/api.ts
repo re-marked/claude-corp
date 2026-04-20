@@ -188,6 +188,48 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
+      // POST /agents/:id/fire — archive (fire) or permanently delete (remove) an agent
+      const fireMatch = path.match(/^\/agents\/([^/]+)\/fire$/);
+      if (method === 'POST' && fireMatch) {
+        const targetId = decodeURIComponent(fireMatch[1]!);
+        const body = await readBody(req) as Record<string, unknown>;
+        const { requesterId, action, cascade } = body;
+
+        if (!requesterId || !action || !['fire', 'remove'].includes(action as string)) {
+          json(res, { error: 'requesterId and action ("fire"|"remove") are required' }, 400);
+          return;
+        }
+
+        const membersPath = join(daemon.corpRoot, MEMBERS_JSON);
+        const members = readConfig<Member[]>(membersPath);
+        const requester = members.find((m) => m.id === (requesterId as string));
+        const target = members.find((m) => m.id === targetId);
+
+        if (!requester) { json(res, { error: 'Requester not found' }, 404); return; }
+        if (!target)    { json(res, { error: 'Target agent not found' }, 404); return; }
+
+        // CEO is sacred — nobody can fire it
+        if (target.rank === 'master') {
+          json(res, { error: 'CEO cannot be fired' }, 403);
+          return;
+        }
+
+        // Authorization: owner/master can fire anyone; leaders only their direct workers
+        const canFire =
+          requester.rank === 'owner' ||
+          (requester.rank === 'master' && requester.id !== targetId) ||
+          (requester.rank === 'leader' && target.spawnedBy === requester.id);
+
+        if (!canFire) {
+          json(res, { error: 'Insufficient authority to fire this agent' }, 403);
+          return;
+        }
+
+        // PLACEHOLDER: hierarchy + operations follow in subsequent commits
+        json(res, { ok: true, placeholder: true });
+        return;
+      }
+
       // POST /tasks/create
       if (method === 'POST' && path === '/tasks/create') {
         const body = await readBody(req) as Record<string, unknown>;
