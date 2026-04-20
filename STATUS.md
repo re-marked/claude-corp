@@ -4,7 +4,34 @@ Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
 
-## v2.5.2 — Silent-exit diagnostics + model validation (PR open)
+## v2.5.3 — Fragments inject only on session seed (PR open)
+
+Claude-code dispatches used to re-inject the full 28-fragment system
+context (~48KB of roster, channels, history, supervisor chain,
+delegation protocols) on EVERY dispatch — including every pulse
+heartbeat, cron tick, loop iteration, autoemon tick, etc. Content that
+claude already had in session state from turn 1 got re-appended
+forever. CEO's session file grew to 6.5MB in a few weeks; after
+rotation yesterday it hit 1.9MB in 25 minutes of normal activity.
+Sessions silent-exited when they crossed the 200K context cap.
+
+Fix: fragments only seed the session ONCE, on creation
+(`--session-id` path). On resume, messages go in raw. Agents that
+need current state have Read/Grep — members.json, channels.json,
+recent JSONL are all one tool call away.
+
+Rough impact: ~48KB → ~0 per dispatch after turn 1. Sessions grow at
+a human-readable rate instead of exploding.
+
+Two tests lock the contract:
+- Seed dispatch injects `<system-context>` wrapper
+- Resume dispatch sends bare message, never wraps
+
+Real-world note: existing oversized sessions from before this fix
+still have fragment bloat baked in. Rotate (rename the session jsonl)
+to reset. After rotation, the new session grows much more slowly.
+
+## v2.5.2 — Silent-exit diagnostics + model validation (MERGED, PR #145)
 
 CEO dispatches were silent-failing with "claude exited with code 1"
 and empty stderr. Root cause: config.json had `"model": "haiku5"`
