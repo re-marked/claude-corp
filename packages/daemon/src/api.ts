@@ -247,8 +247,68 @@ export function createApi(daemon: Daemon): Server {
         // Build ordered list: subordinates first (leaves → root), then target
         const toFire = [...subordinates, target];
 
-        // PLACEHOLDER: stop + cleanup + archive/purge follow in next commit
-        json(res, { ok: true, placeholder: true, toFire: toFire.map((m) => m.id) });
+        const firedIds: string[] = [];
+
+        for (const agent of toFire) {
+          // 1. Stop agent process if running
+          try { await daemon.processManager.stopAgent(agent.id); } catch {}
+
+          // 2. Remove agent from members.json (fire marks archived; remove deletes)
+          const idx = members.findIndex((m) => m.id === agent.id);
+          if (action === 'remove') {
+            if (idx >= 0) members.splice(idx, 1);
+          } else {
+            if (idx >= 0) members[idx] = { ...members[idx]!, status: 'archived' };
+          }
+
+          // 3. Strip agent from all channel memberIds
+          const channelsPath = join(daemon.corpRoot, CHANNELS_JSON);
+          const channels = readConfig<Channel[]>(channelsPath);
+          for (const ch of channels) {
+            const mi = ch.memberIds.indexOf(agent.id);
+            if (mi >= 0) ch.memberIds.splice(mi, 1);
+          }
+
+          // 4. Delete dm-<agentId>-* channels from registry and disk
+          const dmChannels = channels.filter(
+            (c) => c.kind === 'direct' && c.name.includes(agent.id),
+          );
+          for (const dm of dmChannels) {
+            const di = channels.indexOf(dm);
+            if (di >= 0) channels.splice(di, 1);
+            try { rmSync(join(daemon.corpRoot, dm.path), { recursive: true, force: true }); } catch {}
+          }
+          writeConfig(channelsPath, channels);
+
+          // 5. Archive or purge workspace
+          if (agent.agentDir) {
+            const agentAbs = isAbsolute(agent.agentDir)
+              ? agent.agentDir
+              : join(daemon.corpRoot, agent.agentDir);
+            if (action === 'fire') {
+              // Archive: rename to .archived-<slug>-<YYYY-MM-DD>
+              const dateStr = new Date().toISOString().slice(0, 10);
+              const agentParent = agentAbs.replace(/[\\/][^\\/]+[\\/]?$/, '');
+              const archiveName = `.archived-${agent.id}-${dateStr}`;
+              try { renameSync(agentAbs, join(agentParent, archiveName)); } catch {}
+            } else {
+              // Remove: permanent deletion
+              try { rmSync(agentAbs, { recursive: true, force: true }); } catch {}
+            }
+          }
+
+          firedIds.push(agent.id);
+        }
+
+        // Persist updated members list
+        writeConfig(membersPath, members);
+
+        json(res, {
+          ok: true,
+          action,
+          firedAgents: firedIds,
+          message: `${action === 'fire' ? 'Archived' : 'Removed'} ${firedIds.length} agent(s)`,
+        });
         return;
       }
 
