@@ -155,7 +155,9 @@ Management commands:
   projects list | projects create --name "..." [--type development]
   teams list | teams create --name "..." --project <id> --lead <id>
   agent start --agent <id> | agent stop --agent <id>
-  agent set-harness --agent <id> --harness <name>   Change an agent's execution substrate
+  agent set-harness --agent <id> --harness <name>              Change execution substrate
+  agent fire   --agent <id> [--cascade]                        Archive agent (offline, searchable)
+  agent remove --agent <id> [--cascade]                        Remove agent permanently
   harness list                                      Show registered harnesses + health
   hire --name <n> --rank <r> [--harness claude-code|openclaw]  Pick substrate at creation
 
@@ -470,8 +472,18 @@ async function run() {
         });
         break;
       }
+      if (action === 'fire' || action === 'remove') {
+        const { cmdAgentFire } = await import('./commands/agent-control.js');
+        await cmdAgentFire({
+          agent: values.agent as string | undefined,
+          action: action as 'fire' | 'remove',
+          cascade: !!values.cascade,
+          json: !!values.json,
+        });
+        break;
+      }
       if (action !== 'start' && action !== 'stop') {
-        console.error('Usage: cc-cli agent start|stop|set-harness --agent <name> [--harness <name>]');
+        console.error('Usage: cc-cli agent start|stop|set-harness|fire|remove --agent <name> [--harness <name>] [--cascade]');
         process.exit(1);
       }
       const { cmdAgentControl } = await import('./commands/agent-control.js');
