@@ -50,6 +50,7 @@ const { values, positionals } = parseArgs({
     source: { type: 'string' },
     confidence: { type: 'string' },
     harness: { type: 'string' },
+    cascade: { type: 'boolean', default: false },
     all: { type: 'boolean', default: false },
     force: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
