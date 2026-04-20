@@ -1,5 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
+import { renameSync, rmSync } from 'node:fs';
 import {
   createTask,
   listTasks,
@@ -23,6 +24,8 @@ import {
   CHANNELS_JSON,
   MESSAGES_JSONL,
   type ChannelMessage,
+  type Member,
+  type Channel,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
