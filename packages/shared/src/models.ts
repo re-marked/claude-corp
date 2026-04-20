@@ -86,6 +86,20 @@ export function getModelEntry(id: string): ModelEntry | undefined {
   return KNOWN_MODELS.find(m => m.id === id);
 }
 
+/**
+ * Is `id` a model the corp knows about? Used by `cc-cli models set/
+ * default/fallback` to warn at write-time when the user passes a
+ * typo or an unrecognized name, before it gets baked into config.json
+ * and silently breaks dispatches later.
+ *
+ * Purposefully only matches exact IDs (post-resolveModelAlias), not
+ * aliases or partials — the caller should already have normalized via
+ * resolveModelAlias first.
+ */
+export function isKnownModel(id: string): boolean {
+  return KNOWN_MODELS.some(m => m.id === id);
+}
+
 /** Format "anthropic/claude-opus-4-6" from provider + model. */
 export function formatProviderModel(provider: string, model: string): string {
   return `${provider}/${model}`;
