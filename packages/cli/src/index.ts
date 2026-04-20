@@ -585,10 +585,21 @@ run().then(
     // the output prints, blocking the agent's next step.
     // `start` holds the process via an unresolving Promise so this
     // never fires for the long-running daemon path.
-    process.exit(0);
+    //
+    // Use exitCode + unref'd timeout instead of process.exit() to let
+    // Node drain async handles first — process.exit() while libuv handles
+    // are mid-close triggers an assertion crash on Windows.
+    process.exitCode = 0;
   },
   (err) => {
     console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
+    process.exitCode = 1;
   },
 );
+
+// Windows: give libuv 500 ms to close handles before forcing exit.
+// The timeout is unref'd so it won't prevent a natural exit if all
+// handles close sooner.
+if (process.platform === 'win32') {
+  setTimeout(() => process.exit(process.exitCode ?? 0), 500).unref();
+}
