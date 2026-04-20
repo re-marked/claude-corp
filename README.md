@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./banner.png" alt="Claude Corp" width="67%" />
+  <img src="./banner.png" alt="Claude Corp" width="100%" />
 </p>
 
 <h1 align="center">Claude Corp — Your Personal AI Corporation</h1>
