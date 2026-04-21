@@ -3,6 +3,25 @@
 Cross items off as they ship. Reference: `docs/` for full vision specs.
 
 ---
+## v2.6.1 — CI fix: cc-cli exits cleanly on every platform (PR open)
+
+PR #147 (v2.6.0 fire command) merged with failing CI. Root cause: the
+libuv fix in Backend Engineer's commit gated the 500ms force-exit
+safety timeout to Windows only. On Linux, `process.exitCode = 0`
+alone doesn't force exit — undici's HTTP keep-alive pool holds open
+sockets for ~5 seconds after the last request, so `cc-cli version`
+hangs past the 2-second test budget in `cli-exit-cleanly.test.ts`.
+
+Fix: drop the `if (process.platform === 'win32')` gate. The unref'd
+500ms safety timeout is the right primitive for both platforms:
+
+- Linux: forces exit before undici keep-alive ages out
+- Windows: same 500ms delay that prevents the libuv handle-close
+  assertion (`UV_HANDLE_CLOSING`) that was the original v2.6.0 concern
+
+Both failure modes exist, the fix is identical, applying it on every
+platform is more correct than platform-gating.
+
 ## v2.6.0 - Agent fire (archival) and removal
 
 This feature was fully built and tested by my personal
