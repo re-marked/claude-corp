@@ -21,7 +21,13 @@ export type ContractStatus =
  * them into tasks and hand them to workers. When all tasks complete, the
  * Warden reviews and signs off. The Herald narrates progress.
  *
- * Contracts live inside projects: projects/<name>/contracts/<id>.md
+ * Contracts are Chits (type=contract) under project scope. Storage:
+ *   projects/<name>/chits/contract/<id>.md
+ *
+ * Pre-0.4 format was projects/<name>/contracts/<id>.md — the chit
+ * substrate now owns the primitive (migration: `cc-cli migrate contracts`).
+ * This Contract interface is preserved for backward compatibility; every
+ * CRUD function in contracts.ts is a thin wrapper over chit primitives.
  */
 export interface Contract {
   /** Unique identifier */
