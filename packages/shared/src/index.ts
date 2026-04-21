@@ -76,6 +76,13 @@ export {
 } from './id.js';
 export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
 export { atomicWriteSync } from './atomic-write.js';
+export {
+  CHIT_TYPES,
+  ChitValidationError,
+  getChitType,
+  isKnownChitType,
+} from './chit-types.js';
+export type { ChitTypeEntry } from './chit-types.js';
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 
