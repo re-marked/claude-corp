@@ -104,7 +104,7 @@ function parseChitFile(path: string): { chit: Chit; body: string } {
   }
 }
 
-// ─── ID generation ──────────────────────────────────────────────────
+// ─── ID generation + validation ─────────────────────────────────────
 
 /**
  * Generate a chit id of the form `chit-<type-prefix>-<8-hex>`. The
@@ -116,6 +116,31 @@ export function chitId(type: ChitTypeId): string {
   if (!entry) throw new ChitValidationError(`unknown chit type: ${type}`, 'type');
   const hex = randomUUID().replace(/-/g, '').slice(0, 8);
   return `chit-${entry.idPrefix}-${hex}`;
+}
+
+const CHIT_ID_PATTERN = /^(chit-[a-z-]+-[0-9a-f]+|casket-[a-z0-9-]+)$/;
+
+/**
+ * Returns true for any string matching Claude Corp's chit id format:
+ * either `chit-<prefix>-<hex>` (normal chits) or `casket-<slug>`
+ * (casket special case). Used to validate references and dependsOn
+ * at the CRUD boundary so typo'd ids fail fast instead of becoming
+ * orphaned dangling pointers.
+ */
+export function isChitIdFormat(id: string): boolean {
+  return typeof id === 'string' && CHIT_ID_PATTERN.test(id);
+}
+
+function validateChitLinks(field: 'references' | 'dependsOn', ids: readonly string[] | undefined): void {
+  if (!ids) return;
+  for (const id of ids) {
+    if (!isChitIdFormat(id)) {
+      throw new ChitValidationError(
+        `${field} contains invalid chit id: ${JSON.stringify(id)}`,
+        field,
+      );
+    }
+  }
 }
 
 /**
@@ -232,6 +257,9 @@ export function createChit<T extends ChitTypeId>(
 
   const fieldsForType = (opts.fields as Record<string, unknown>)[opts.type as string];
   entry.validate(fieldsForType);
+
+  validateChitLinks('references', opts.references);
+  validateChitLinks('dependsOn', opts.dependsOn);
 
   const id = opts.id ?? chitId(opts.type);
   const status = opts.status ?? entry.defaultStatus;
@@ -364,6 +392,9 @@ export function updateChit<T extends ChitTypeId>(
     const fieldsForType = (newFields as Record<string, unknown>)[type as string];
     entry.validate(fieldsForType);
   }
+
+  validateChitLinks('references', updates.references);
+  validateChitLinks('dependsOn', updates.dependsOn);
 
   const updated = {
     ...current,

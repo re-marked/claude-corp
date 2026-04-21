@@ -111,7 +111,7 @@ describe('validator: task', () => {
     expect(() => entry.validate({ title: 'Do the thing', priority: 'normal' })).not.toThrow();
   });
 
-  it('accepts a fully-populated task', () => {
+  it('accepts a fully-populated task with all optional fields', () => {
     expect(() =>
       entry.validate({
         title: 'Do the thing',
@@ -119,7 +119,35 @@ describe('validator: task', () => {
         assignee: 'backend-engineer',
         acceptanceCriteria: ['test passes', 'PR merged'],
         estimate: '~2h',
+        handedBy: 'engineering-lead',
+        handedAt: '2026-04-21T14:32:17Z',
+        dueAt: '2026-04-28T00:00:00Z',
+        loopId: 'chit-t-aabbccdd',
       }),
+    ).not.toThrow();
+  });
+
+  it('rejects malformed handedAt timestamp', () => {
+    expect(() =>
+      entry.validate({ title: 'x', priority: 'normal', handedAt: 'yesterday' }),
+    ).toThrow(/handedAt.*ISO/);
+  });
+
+  it('rejects malformed dueAt timestamp', () => {
+    expect(() => entry.validate({ title: 'x', priority: 'normal', dueAt: '2026-04-28' })).toThrow(
+      /dueAt.*ISO/,
+    );
+  });
+
+  it('accepts ISO with fractional seconds and Z', () => {
+    expect(() =>
+      entry.validate({ title: 'x', priority: 'normal', dueAt: '2026-04-28T12:00:00.123Z' }),
+    ).not.toThrow();
+  });
+
+  it('accepts ISO with timezone offset', () => {
+    expect(() =>
+      entry.validate({ title: 'x', priority: 'normal', dueAt: '2026-04-28T12:00:00+02:00' }),
     ).not.toThrow();
   });
 
@@ -159,6 +187,24 @@ describe('validator: contract', () => {
     expect(() => entry.validate({ title: 'Ship X', goal: 'X is shipped', taskIds: [] })).not.toThrow();
   });
 
+  it('accepts a fully-populated contract', () => {
+    expect(() =>
+      entry.validate({
+        title: 'Ship X',
+        goal: 'X is shipped',
+        taskIds: ['chit-t-aabbccdd', 'chit-t-11223344'],
+        priority: 'high',
+        leadId: 'engineering-lead',
+        blueprintId: 'ship-feature',
+        deadline: '2026-04-30T00:00:00Z',
+        completedAt: null,
+        reviewedBy: null,
+        reviewNotes: null,
+        rejectionCount: 0,
+      }),
+    ).not.toThrow();
+  });
+
   it('rejects missing goal', () => {
     expect(() => entry.validate({ title: 'x', taskIds: [] })).toThrow(/goal/);
   });
@@ -170,6 +216,36 @@ describe('validator: contract', () => {
   it('rejects non-string elements in taskIds', () => {
     expect(() => entry.validate({ title: 'x', goal: 'y', taskIds: ['a', 42] })).toThrow(/taskIds/);
   });
+
+  it('rejects invalid priority enum', () => {
+    expect(() =>
+      entry.validate({ title: 'x', goal: 'y', taskIds: [], priority: 'urgent' }),
+    ).toThrow(/priority/);
+  });
+
+  it('rejects negative rejectionCount', () => {
+    expect(() =>
+      entry.validate({ title: 'x', goal: 'y', taskIds: [], rejectionCount: -1 }),
+    ).toThrow(/rejectionCount/);
+  });
+
+  it('rejects non-integer rejectionCount', () => {
+    expect(() =>
+      entry.validate({ title: 'x', goal: 'y', taskIds: [], rejectionCount: 1.5 }),
+    ).toThrow(/rejectionCount/);
+  });
+
+  it('rejects malformed deadline', () => {
+    expect(() =>
+      entry.validate({ title: 'x', goal: 'y', taskIds: [], deadline: 'soon' }),
+    ).toThrow(/deadline/);
+  });
+
+  it('rejects malformed completedAt', () => {
+    expect(() =>
+      entry.validate({ title: 'x', goal: 'y', taskIds: [], completedAt: 'never' }),
+    ).toThrow(/completedAt/);
+  });
 });
 
 describe('validator: observation', () => {
@@ -179,6 +255,25 @@ describe('validator: observation', () => {
     expect(() =>
       entry.validate({ category: 'FEEDBACK', subject: 'mark', importance: 4 }),
     ).not.toThrow();
+  });
+
+  it('accepts a fully-populated observation with context', () => {
+    expect(() =>
+      entry.validate({
+        category: 'FEEDBACK',
+        subject: 'mark',
+        importance: 4,
+        object: 'cascade-archive-errors',
+        title: 'Mark prefers actionable errors',
+        context: 'mid-work on the cascade feature',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects non-string context', () => {
+    expect(() =>
+      entry.validate({ category: 'NOTICE', subject: 'x', importance: 1, context: 42 }),
+    ).toThrow(/context/);
   });
 
   it('rejects invalid category', () => {
@@ -203,6 +298,12 @@ describe('validator: casket', () => {
 
   it('accepts null currentStep (idle casket)', () => {
     expect(() => entry.validate({ currentStep: null })).not.toThrow();
+  });
+
+  it('rejects malformed lastAdvanced timestamp', () => {
+    expect(() => entry.validate({ currentStep: null, lastAdvanced: 'yesterday' })).toThrow(
+      /lastAdvanced/,
+    );
   });
 
   it('accepts string currentStep', () => {

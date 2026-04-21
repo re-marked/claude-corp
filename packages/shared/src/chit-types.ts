@@ -119,6 +119,31 @@ function requireStringOrNull(v: unknown, field: string): void {
   }
 }
 
+/**
+ * Strict ISO 8601 timestamp check — YYYY-MM-DDTHH:MM:SS with optional
+ * fractional seconds and a Z or ±HH:MM offset. Rejects half-valid
+ * strings (missing time, wrong separators, etc.) that would parse
+ * loosely with Date.parse.
+ */
+const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
+
+function optionalIsoTimestamp(v: unknown, field: string): void {
+  if (v === undefined || v === null) return;
+  if (typeof v !== 'string' || !ISO_TIMESTAMP_PATTERN.test(v)) {
+    throw new ChitValidationError(
+      `${field} must be an ISO 8601 timestamp (e.g. 2026-04-21T15:30:00Z) or null`,
+      field,
+    );
+  }
+}
+
+function optionalNonNegativeInteger(v: unknown, field: string): void {
+  if (v === undefined || v === null) return;
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+    throw new ChitValidationError(`${field} must be a non-negative integer`, field);
+  }
+}
+
 // ─── Per-type validators ────────────────────────────────────────────
 
 function validateTask(fields: unknown): void {
@@ -130,6 +155,10 @@ function validateTask(fields: unknown): void {
     requireStringArray(f.acceptanceCriteria, 'task.acceptanceCriteria');
   }
   if (f.estimate !== undefined) requireStringOrNull(f.estimate, 'task.estimate');
+  if (f.handedBy !== undefined) requireStringOrNull(f.handedBy, 'task.handedBy');
+  optionalIsoTimestamp(f.handedAt, 'task.handedAt');
+  optionalIsoTimestamp(f.dueAt, 'task.dueAt');
+  if (f.loopId !== undefined) requireStringOrNull(f.loopId, 'task.loopId');
 }
 
 function validateContract(fields: unknown): void {
@@ -137,9 +166,16 @@ function validateContract(fields: unknown): void {
   requireNonEmptyString(f.title, 'contract.title');
   requireNonEmptyString(f.goal, 'contract.goal');
   requireStringArray(f.taskIds, 'contract.taskIds');
+  if (f.priority !== undefined) {
+    requireEnum(f.priority, 'contract.priority', ['critical', 'high', 'normal', 'low'] as const);
+  }
   if (f.leadId !== undefined) requireStringOrNull(f.leadId, 'contract.leadId');
   if (f.blueprintId !== undefined) requireStringOrNull(f.blueprintId, 'contract.blueprintId');
-  if (f.deadline !== undefined) requireStringOrNull(f.deadline, 'contract.deadline');
+  optionalIsoTimestamp(f.deadline, 'contract.deadline');
+  optionalIsoTimestamp(f.completedAt, 'contract.completedAt');
+  if (f.reviewedBy !== undefined) requireStringOrNull(f.reviewedBy, 'contract.reviewedBy');
+  if (f.reviewNotes !== undefined) requireStringOrNull(f.reviewNotes, 'contract.reviewNotes');
+  optionalNonNegativeInteger(f.rejectionCount, 'contract.rejectionCount');
 }
 
 function validateObservation(fields: unknown): void {
@@ -156,6 +192,7 @@ function validateObservation(fields: unknown): void {
   requireInteger(f.importance, 'observation.importance', 1, 5);
   if (f.object !== undefined) requireStringOrNull(f.object, 'observation.object');
   if (f.title !== undefined) requireStringOrNull(f.title, 'observation.title');
+  if (f.context !== undefined) requireStringOrNull(f.context, 'observation.context');
 }
 
 function validateCasket(fields: unknown): void {
@@ -165,12 +202,8 @@ function validateCasket(fields: unknown): void {
     throw new ChitValidationError('casket.currentStep must be defined (string or null)', 'casket.currentStep');
   }
   requireStringOrNull(f.currentStep, 'casket.currentStep');
-  if (f.lastAdvanced !== undefined) requireStringOrNull(f.lastAdvanced, 'casket.lastAdvanced');
-  if (f.sessionCount !== undefined && f.sessionCount !== null) {
-    if (typeof f.sessionCount !== 'number' || !Number.isInteger(f.sessionCount) || f.sessionCount < 0) {
-      throw new ChitValidationError('casket.sessionCount must be a non-negative integer', 'casket.sessionCount');
-    }
-  }
+  optionalIsoTimestamp(f.lastAdvanced, 'casket.lastAdvanced');
+  optionalNonNegativeInteger(f.sessionCount, 'casket.sessionCount');
 }
 
 function validateHandoff(fields: unknown): void {

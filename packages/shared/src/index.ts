@@ -86,6 +86,7 @@ export type { ChitTypeEntry } from './chit-types.js';
 export {
   chitId,
   casketChitId,
+  isChitIdFormat,
   chitPath,
   createChit,
   readChit,

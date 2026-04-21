@@ -133,6 +133,14 @@ export interface TaskFields {
   acceptanceCriteria?: string[] | null;
   /** Free-form effort estimate (e.g. "~2 hours", "small"). Null means no estimate. */
   estimate?: string | null;
+  /** Member id of the Partner who most recently handed this task (audit trail — who's accountable for it landing on this Casket). Null if never handed. */
+  handedBy?: string | null;
+  /** ISO timestamp of the most recent hand. Null if never handed. */
+  handedAt?: string | null;
+  /** ISO timestamp when the task should be done. Null for open-ended. */
+  dueAt?: string | null;
+  /** Chit id of the Loop driving this task (auto-advance tasks tied to recurring work). Null for standalone tasks. */
+  loopId?: string | null;
 }
 
 export interface ContractFields {
@@ -142,12 +150,22 @@ export interface ContractFields {
   goal: string;
   /** Chit ids of the tasks inside this contract, in intended order. Chain semantics read from each task's dependsOn. */
   taskIds: string[];
+  /** Contract-level urgency, reuses the task priority enum for consistency. */
+  priority?: 'critical' | 'high' | 'normal' | 'low';
   /** Member id of the Partner owning this contract's execution. Null for drafts. */
   leadId?: string | null;
   /** Optional blueprint that cooked this contract — for provenance + re-cook. */
   blueprintId?: string | null;
   /** Optional deadline (ISO timestamp). Null means open-ended. */
   deadline?: string | null;
+  /** ISO timestamp when the Warden approved this contract. Null until approval. */
+  completedAt?: string | null;
+  /** Member id of the Warden who reviewed. Null until reviewed. */
+  reviewedBy?: string | null;
+  /** Warden's approval note or rejection reason (free-form). Null until review. */
+  reviewNotes?: string | null;
+  /** How many times the Warden rejected this contract before approval. Non-negative integer. */
+  rejectionCount?: number;
 }
 
 export interface ObservationFields {
@@ -161,6 +179,8 @@ export interface ObservationFields {
   object?: string | null;
   /** Optional one-line title. Free-form; observations don't always have tidy titles. */
   title?: string | null;
+  /** Ambient context when the observation was captured — what else was going on. Free-form prose, supports dream distillation's pattern-detection. */
+  context?: string | null;
 }
 
 export interface CasketFields {

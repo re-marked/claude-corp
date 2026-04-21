@@ -5,6 +5,7 @@ import { join, dirname } from 'node:path';
 import {
   chitId,
   casketChitId,
+  isChitIdFormat,
   chitPath,
   createChit,
   readChit,
@@ -45,6 +46,92 @@ describe('chit id generation', () => {
     expect(() => casketChitId('Toast')).toThrow(ChitValidationError);
     expect(() => casketChitId('toast_underscore')).toThrow(ChitValidationError);
     expect(() => casketChitId('')).toThrow(ChitValidationError);
+  });
+
+  describe('isChitIdFormat', () => {
+    it('accepts normal chit ids', () => {
+      expect(isChitIdFormat('chit-t-abcdef01')).toBe(true);
+      expect(isChitIdFormat('chit-o-12345678')).toBe(true);
+      expect(isChitIdFormat('chit-dc-deadbeef')).toBe(true);
+      expect(isChitIdFormat('chit-pbe-cafebabe')).toBe(true);
+    });
+
+    it('accepts casket ids', () => {
+      expect(isChitIdFormat('casket-toast')).toBe(true);
+      expect(isChitIdFormat('casket-backend-engineer')).toBe(true);
+    });
+
+    it('rejects typos and garbage', () => {
+      expect(isChitIdFormat('random-string')).toBe(false);
+      expect(isChitIdFormat('chit-x')).toBe(false);
+      expect(isChitIdFormat('chit-t-ZZZZZZZZ')).toBe(false); // non-hex
+      expect(isChitIdFormat('')).toBe(false);
+      expect(isChitIdFormat('CHIT-T-ABCDEF01')).toBe(false); // uppercase
+    });
+  });
+});
+
+describe('references + dependsOn id validation at CRUD boundary', () => {
+  let corpRoot: string;
+
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'chits-links-'));
+  });
+
+  afterEach(() => {
+    rmSync(corpRoot, { recursive: true, force: true });
+  });
+
+  it('createChit rejects references with invalid chit id format', () => {
+    expect(() =>
+      createChit(corpRoot, {
+        type: 'task',
+        scope: 'corp',
+        fields: { task: { title: 't', priority: 'normal' } },
+        createdBy: 'ceo',
+        references: ['chit-t-abcdef01', 'typo-not-a-chit'],
+      }),
+    ).toThrow(ChitValidationError);
+  });
+
+  it('createChit rejects dependsOn with invalid chit id format', () => {
+    expect(() =>
+      createChit(corpRoot, {
+        type: 'task',
+        scope: 'corp',
+        fields: { task: { title: 't', priority: 'normal' } },
+        createdBy: 'ceo',
+        dependsOn: ['not-a-chit-id'],
+      }),
+    ).toThrow(ChitValidationError);
+  });
+
+  it('updateChit rejects references with invalid chit id format', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+
+    expect(() =>
+      updateChit(corpRoot, 'corp', 'task', task.id, {
+        references: ['not-valid'],
+        updatedBy: 'ceo',
+      }),
+    ).toThrow(ChitValidationError);
+  });
+
+  it('accepts valid references including casket ids', () => {
+    expect(() =>
+      createChit(corpRoot, {
+        type: 'observation',
+        scope: 'agent:toast',
+        fields: { observation: { category: 'NOTICE', subject: 'mark', importance: 2 } },
+        createdBy: 'toast',
+        references: ['chit-t-11223344', 'casket-toast'],
+      }),
+    ).not.toThrow();
   });
 });
 
