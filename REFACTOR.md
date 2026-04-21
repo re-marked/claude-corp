@@ -699,9 +699,10 @@ Each blueprint tested against a real use case before landing.
 **Scope.**
 - Two session tiers per Employee working a multi-Task Contract:
   - **task-session** — spawned per Task, executes the Task, writes output, exits
-  - **review-session** — spawned between Tasks, reads the Contract + the just-completed Task's output + prior Tasks, reviews, decides: accept & dispatch next, redo, flag-for-founder
+  - **review-session** — spawned between Tasks, reads the Contract Chit + the just-completed Task Chit's output + prior Tasks, reviews, decides: accept & dispatch next, redo, flag-for-founder
 - Review prompts are distinct from execution prompts: "you are reviewing your own work against the Contract's goal and acceptance criteria."
-- Review output schema (XML): `<review><verdict/>(accept|redo|flag)<reasoning/><notes-for-next-task/></review>` written to the Contract's review-log.
+- **Review outputs are Chits of `type: review`** (ephemeral by default, promote to permanent if the Contract gets a Warden rejection and Warden needs to see what the Employee thought). Chit fields: `verdict: accept|redo|flag`, `reasoning`, `notes_for_next_task`, `references: [<task-chit-id>, <contract-chit-id>]`. Review Chits burn after the Contract closes cleanly; surface if Warden disagrees.
+- Alternative implementation option from the Claude Code research gems: use claude-code's blockable `Stop` hook — when the task-session signals completion, daemon intercepts via `PreStop` (returning exit 2), spawns the review-session, and only lets the original session truly stop after the review verdict is accept.
 - Integration with Warden: Warden still does final Contract-level review, but Employee-level self-review catches obvious issues early.
 
 **Acceptance criteria.**
@@ -749,14 +750,15 @@ Each blueprint tested against a real use case before landing.
 **Problem.** Bacteria scaling + parallel Employees = multiple PRs landing against main concurrently. They collide on rebases, step on each other's changes, leave main in a mess. Today this requires a human to serialize. Refinery is the Partner who owns the merge queue.
 
 **Scope.**
-- Merge queue data structure: ordered list of submitted PRs (branch name, Contract id, submitted-at, submitter).
-- `cc-cli refinery submit --branch <name> --contract <id>` — Employees call this after pushing, instead of directly merging.
-- Refinery processes the queue serially: checkout branch → rebase onto main → run tests → merge if clean → close Contract.
+- **Merge queue is Chits of `type: merge-submission`.** Each submission is a Chit carrying branch name, Contract reference, submitter slug, priority, retry count. Non-ephemeral (useful audit trail). Status lifecycle: `queued → processing → merged` (terminal success) or `queued → conflict → resolved → queued → processing → merged` or terminal-failure `rejected | failed`. Query pattern for the active queue: `cc-cli chit list --type merge-submission --status queued --sort priority` returns ordered pending list. No separate queue file or in-memory data structure.
+- `cc-cli refinery submit --branch <name> --contract <chit-id>` — Employees call this after pushing. Creates the merge-submission Chit with `references: [<contract-chit-id>]`.
+- Priority scoring (from Gas Town research gem): `1000 + convoy_age×10/hr + (4-priority)×100 - min(retries×50, 300) + mr_age×1/hr` — anti-thrashing cap on retry penalty prevents permanent starvation. Stored as `fields.merge_submission.score`, recomputed on each Refinery tick.
+- Refinery processes queue serially: read top-scored queued Chit → checkout branch → rebase onto main → run tests → merge if clean → flip Chit to `status: merged` → close the referenced Contract.
 - Conflict handling:
-  - Simple conflict (file not touched by the other side — false positive) → resolve automatically.
-  - Real conflict → create a conflict-resolution Task for the Contract's assigned Employee, unblock queue, move on.
+  - Simple conflict (false positive — files touched by one side only) → resolve automatically, retain `status: processing`.
+  - Real conflict → flip Chit to `status: conflict`, create a conflict-resolution Task Chit on the Contract's assigned Employee's Casket (via standard sling from 1.4), move on to next submission. When Employee closes conflict-resolution, Refinery flips the submission Chit back to `status: queued` with incremented retry counter.
 - Refinery is a Partner, has its own workspace, compacts like any Partner.
-- TUI shows the merge queue as a visible primitive (Project 6.3 wires this into the UI).
+- TUI shows the merge queue as a live Chit-query view (Project 6.3 wires `cc-cli chit list --type merge-submission --status queued` into the sidebar).
 
 **Acceptance criteria.**
 - Two Employees submit PRs touching different files at roughly the same time → Refinery merges them serially, main is clean.
@@ -792,25 +794,29 @@ Each blueprint tested against a real use case before landing.
 
 *Soul stops being decorative and starts being load-bearing.*
 
-### 4.1 — Structured observations
+### 4.1 — Observation weighting for dream distillation
 
-**Problem.** Observations today are free prose in `observations/YYYY-MM-DD.md`. They can't be queried, aggregated, or distilled mechanically. Patterns across observations are invisible. Dreams have nothing to distill *from* because everything is unstructured paragraph.
+**Note.** The *structural* piece — turning observations into typed, queryable Chits — is done in Project 0.5. What's left for Project 4.1 is the *weighting logic* that dreams (4.2) need to decide which observations to compound vs. let burn. Previously this sub-project was "create structured observations," but Project 0 absorbs that; what remains is actual downstream usefulness logic.
+
+**Problem.** Observations are now structured Chits (type=observation, ephemeral by default), but dreams still need a way to decide which to promote to BRAIN. Raw count ("3+ observations = rule") is too coarse — one loud observation from the founder should weigh more than three casual sidebar comments. Time matters too (recent > old). Category matters (FEEDBACK > NOTICE). Subject proximity matters (direct founder observation > observation-about-another-agent).
 
 **Scope.**
-- Observation schema (XML-tagged, structured):
-  - `<observation>` with child tags: `<category>` (one of NOTICE, PREFERENCE, FEEDBACK, DECISION, DISCOVERY, CORRECTION), `<subject>` (who/what is observed), `<object>` (what's said about them), `<context>` (when/where — channel, task, incident), `<importance>` (1-5), `<timestamp>`.
-- File format: observations get written as XML blocks in `observations/YYYY-MM-DD.md`; daily file groups them chronologically; agents still read the file as markdown but the structured data is inside.
-- Write API: `cc-cli observe --category FEEDBACK --subject mark --object "prefers terse commits" --context "2026-04-21 session" --importance 4`
-- Query API: `cc-cli observations --category FEEDBACK --subject mark --since 7d` returns structured results.
-- Migration: existing free-prose observations stay readable (not mandatory to restructure), but new observations written in structured form.
-- Agents prompted in their SOUL/AGENTS guidance: "when you notice X, write an observation via `cc-cli observe` — don't freeform."
+- Observation importance/weight score function: combination of `fields.observation.importance` (1-5, author-rated), category weight (FEEDBACK=3, DECISION=3, DISCOVERY=2, PREFERENCE=2, NOTICE=1, CORRECTION=3), recency decay (observations older than 30d count half, 90d quarter), subject weight (observations about Mark: 2x, about a Partner: 1.5x, about an Employee: 1x).
+- Dream-distillation input: when Dream process queries observations, it queries with score and uses score-thresholds for promotion decisions (3 observations scoring ≥ X → pattern; 2 observations scoring ≥ Y contradicting existing BRAIN rule → flag).
+- Score is computed on query, not stored on the Chit, so the function can be tuned without rewriting history.
 
-**Acceptance criteria.**
-- An Employee makes a FEEDBACK observation via the command; it's queryable by category + subject.
-- Dream process (4.2) can read the structured observation and reason about patterns across them.
+**File paths:**
+- `packages/shared/src/observation-weight.ts` (new — pure weight function, test-friendly)
+- `packages/shared/src/chits.ts` (query API extension — `queryChits` with computed `weight` field when sorted)
+- `packages/daemon/src/dreams.ts` (consume weighted observations in dream prompts)
 
-**Depends on:** nothing
-**PRs:** 2-3
+**Test strategy.**
+- Unit: weight function produces expected scores for known scenarios (founder feedback on Partner = X; casual NOTICE about Employee = Y; etc).
+- Unit: recency decay formula verified at multiple time points.
+- Integration: dream run with weighted observation input correctly promotes high-weight patterns while skipping low-weight noise.
+
+**Depends on:** 0.1 (Chit), 0.5 (observation type)
+**PRs:** 1-2
 
 ### 4.2 — Dreams that actually distill
 
