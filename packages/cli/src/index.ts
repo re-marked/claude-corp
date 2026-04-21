@@ -614,9 +614,22 @@ run().then(
   },
 );
 
-// Windows: give libuv 500 ms to close handles before forcing exit.
-// The timeout is unref'd so it won't prevent a natural exit if all
-// handles close sooner.
-if (process.platform === 'win32') {
-  setTimeout(() => process.exit(process.exitCode ?? 0), 500).unref();
-}
+// Safety net: force-exit 500ms after run() resolves. Covers two
+// distinct failure modes that both cause cc-cli to hang past the
+// 2-second test budget:
+//
+// 1. Linux: undici's HTTP keep-alive connection pool holds open
+//    sockets for ~5s after the last request. With process.exitCode
+//    alone, Node waits for them. CI (Linux) fails cli-exit-cleanly
+//    tests because `cc-cli version` dangles ~5s.
+//
+// 2. Windows: calling process.exit() *while* libuv handles are
+//    mid-close triggers "Assertion failed: !(handle->flags &
+//    UV_HANDLE_CLOSING)". The 500ms delay gives handles time to
+//    finish closing before we force exit.
+//
+// The timeout is unref'd so it doesn't keep the event loop alive —
+// if handles drain naturally before 500ms (most paths), Node exits
+// immediately and the timeout never fires. Applies on every platform
+// because both failure modes exist and the fix is identical.
+setTimeout(() => process.exit(process.exitCode ?? 0), 500).unref();
