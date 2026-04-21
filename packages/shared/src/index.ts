@@ -88,6 +88,7 @@ export {
   casketChitId,
   isChitIdFormat,
   chitPath,
+  chitScopeFromPath,
   createChit,
   readChit,
   updateChit,

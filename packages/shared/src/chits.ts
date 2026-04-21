@@ -220,6 +220,60 @@ export function chitPath(
   return join(corpRoot, scopeToPath(scope), 'chits', type, `${id}.md`);
 }
 
+/**
+ * Inverse of chitPath: given a chit's absolute filesystem path and the
+ * corpRoot it lives under, derive the ChitScope value. Useful for any
+ * code that gets a path from findChitById or queryChits and needs to
+ * call back into CRUD functions that take scope explicitly (update,
+ * close, promote, archive).
+ *
+ * Handles cross-platform path separators (Windows `\`, Unix `/`).
+ * Throws if the path doesn't match the expected chit layout.
+ */
+export function chitScopeFromPath(corpRoot: string, path: string): ChitScope {
+  // Normalize separators so the parsing is platform-neutral.
+  const normalize = (p: string): string => p.replace(/\\/g, '/');
+  const normalizedPath = normalize(path);
+  const normalizedRoot = normalize(corpRoot);
+
+  if (!normalizedPath.startsWith(normalizedRoot)) {
+    throw new Error(`path is not under corpRoot: ${path}`);
+  }
+  let rel = normalizedPath.slice(normalizedRoot.length).replace(/^\/+/, '');
+
+  // Strip the trailing `chits/<type>/<id>.md` — we only care about the
+  // scope-path prefix before that.
+  const chitsIdx = rel.indexOf('/chits/');
+  if (chitsIdx === -1) {
+    // Might be corp-scope (chits/ is the first segment)
+    if (rel.startsWith('chits/')) return 'corp';
+    throw new Error(`no chits/ segment found in path: ${path}`);
+  }
+  const scopePath = rel.slice(0, chitsIdx);
+
+  if (!scopePath) return 'corp';
+
+  // agents/<slug>
+  if (scopePath.startsWith('agents/')) {
+    const slug = scopePath.slice('agents/'.length);
+    if (!slug || slug.includes('/')) throw new Error(`malformed agent scope: ${scopePath}`);
+    return `agent:${slug}`;
+  }
+
+  // projects/<name>/teams/<team>
+  const teamsMatch = /^projects\/([^/]+)\/teams\/([^/]+)$/.exec(scopePath);
+  if (teamsMatch) return `team:${teamsMatch[1]}/${teamsMatch[2]}`;
+
+  // projects/<name>
+  if (scopePath.startsWith('projects/')) {
+    const name = scopePath.slice('projects/'.length);
+    if (!name || name.includes('/')) throw new Error(`malformed project scope: ${scopePath}`);
+    return `project:${name}`;
+  }
+
+  throw new Error(`cannot derive scope from path: ${path}`);
+}
+
 // ─── TTL computation ────────────────────────────────────────────────
 
 const TTL_PATTERN = /^(\d+)([dhm])$/;

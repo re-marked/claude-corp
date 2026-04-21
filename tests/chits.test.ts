@@ -7,6 +7,7 @@ import {
   casketChitId,
   isChitIdFormat,
   chitPath,
+  chitScopeFromPath,
   createChit,
   readChit,
   updateChit,
@@ -135,6 +136,48 @@ describe('references + dependsOn id validation at CRUD boundary', () => {
         references: ['chit-t-11223344', 'casket-toast'],
       }),
     ).not.toThrow();
+  });
+});
+
+describe('chitScopeFromPath', () => {
+  const corpRoot = '/corp';
+
+  it('derives corp scope from corp-level path', () => {
+    expect(chitScopeFromPath(corpRoot, '/corp/chits/contract/chit-c-abc.md')).toBe('corp');
+  });
+
+  it('derives agent scope from agent-level path', () => {
+    expect(chitScopeFromPath(corpRoot, '/corp/agents/toast/chits/casket/casket-toast.md')).toBe(
+      'agent:toast',
+    );
+  });
+
+  it('derives project scope from project-level path', () => {
+    expect(chitScopeFromPath(corpRoot, '/corp/projects/fire/chits/task/chit-t-xyz.md')).toBe(
+      'project:fire',
+    );
+  });
+
+  it('derives team scope from team-level path', () => {
+    expect(
+      chitScopeFromPath(corpRoot, '/corp/projects/fire/teams/backend/chits/task/chit-t-xyz.md'),
+    ).toBe('team:fire/backend');
+  });
+
+  it('handles Windows-style backslash paths', () => {
+    expect(chitScopeFromPath('C:\\corp', 'C:\\corp\\agents\\toast\\chits\\casket\\casket-toast.md')).toBe(
+      'agent:toast',
+    );
+  });
+
+  it('throws for paths outside the corpRoot', () => {
+    expect(() => chitScopeFromPath(corpRoot, '/other/path.md')).toThrow(/not under corpRoot/);
+  });
+
+  it('throws for malformed chit paths', () => {
+    expect(() => chitScopeFromPath(corpRoot, '/corp/not-chits-at-all.md')).toThrow(
+      /no chits\/ segment/,
+    );
   });
 });
 
