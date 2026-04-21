@@ -4,7 +4,7 @@ import type { Contract, ContractStatus, ContractProgress } from './types/contrac
 import type { TaskPriority } from './types/task.js';
 import { parse as parseFrontmatter, stringify as stringifyFrontmatter } from './parsers/frontmatter.js';
 import { contractId } from './id.js';
-import { listTasks, readTask } from './tasks.js';
+import { listTasks, readTask, findTaskById } from './tasks.js';
 
 export interface CreateContractOpts {
   title: string;
@@ -177,27 +177,16 @@ export function getContractProgress(corpRoot: string, contract: Contract): Contr
   let pending = 0;
 
   for (const taskId of contract.taskIds) {
-    try {
-      // Try corp-level tasks first, then project-level
-      let taskFile = join(corpRoot, 'tasks', `${taskId}.md`);
-      if (!existsSync(taskFile)) {
-        // Try project tasks
-        const { getProject } = require('./projects.js');
-        const project = getProject(corpRoot, contract.projectId);
-        if (project) {
-          taskFile = join(corpRoot, 'projects', project.name, 'tasks', `${taskId}.md`);
-        }
-      }
-      if (!existsSync(taskFile)) { pending++; continue; }
-
-      const { task } = readTask(taskFile);
-      if (task.status === 'completed') completed++;
-      else if (task.status === 'in_progress') inProgress++;
-      else if (task.status === 'blocked') blocked++;
-      else pending++;
-    } catch {
-      pending++;
-    }
+    // findTaskById resolves the task across every scope (corp + project +
+    // team) via the chit primitive. Replaces the old "try corp/, fall back
+    // to project/" manual path construction that broke after 0.3 when
+    // corp-flat tasks migrated to <corpRoot>/chits/task/.
+    const found = findTaskById(corpRoot, taskId);
+    if (!found) { pending++; continue; }
+    if (found.task.status === 'completed') completed++;
+    else if (found.task.status === 'in_progress') inProgress++;
+    else if (found.task.status === 'blocked') blocked++;
+    else pending++;
   }
 
   const total = contract.taskIds.length;
