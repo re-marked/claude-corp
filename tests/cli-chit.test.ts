@@ -491,6 +491,69 @@ describe('cc-cli chit close', () => {
   });
 });
 
+describe('cc-cli observe (alias for chit create --type observation)', () => {
+  let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
+
+  beforeEach(() => {
+    env = setupTempCorp();
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('creates an observation chit with the same effect as chit create --type observation', async () => {
+    const { exitCode, stdout, stderr } = await runCli(
+      [
+        'observe',
+        '--scope',
+        'agent:toast',
+        '--field',
+        'category=FEEDBACK',
+        '--field',
+        'subject=mark',
+        '--field',
+        'importance=3',
+        '--tag',
+        'via-observe-alias',
+        '--content',
+        'an observation written via the alias',
+      ],
+      { env: env.homeEnv },
+    );
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+    const id = stdout.trim();
+    expect(id).toMatch(/^chit-o-/);
+
+    // Verify via read
+    const read = await runCli(['chit', 'read', id, '--json'], { env: env.homeEnv });
+    const chit = JSON.parse(read.stdout).chit;
+    expect(chit.type).toBe('observation');
+    expect(chit.tags).toContain('via-observe-alias');
+    expect(chit.ephemeral).toBe(true);
+  });
+
+  it('passes through --type if the user explicitly sets it (no double injection)', async () => {
+    const { exitCode, stderr } = await runCli(
+      [
+        'observe',
+        '--type',
+        'observation',
+        '--scope',
+        'agent:toast',
+        '--field',
+        'category=NOTICE',
+        '--field',
+        'subject=mark',
+        '--field',
+        'importance=1',
+      ],
+      { env: env.homeEnv },
+    );
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+  });
+});
+
 describe('cc-cli chit list', () => {
   let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
 

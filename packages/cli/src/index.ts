@@ -100,6 +100,7 @@ Commands:
   refresh    Refresh SOUL.md + AGENTS.md from current templates (--all, --force, --dry-run)
   dogfood    Set up dogfood project + dev team + task
   chit       Unified work-record primitive (create/read/update/close/list/promote/archive)
+  observe    Capture an observation — alias for 'chit create --type observation'
 
 Feedback pipeline:
   feedback                              Corp overview — pending, BRAIN, CULTURE candidates
@@ -201,6 +202,14 @@ async function run() {
       // process.argv.slice(3) = everything after `node cc-cli chit`.
       const { cmdChit } = await import('./commands/chit.js');
       await cmdChit(process.argv.slice(3));
+      break;
+    }
+    case 'observe': {
+      // Thin alias for `cc-cli chit create --type observation`. Same
+      // pass-through pattern as the chit dispatcher: raw args after
+      // 'observe', the alias handler injects --type and delegates.
+      const { cmdObserve } = await import('./commands/observe.js');
+      await cmdObserve(process.argv.slice(3));
       break;
     }
     case 'start': {
