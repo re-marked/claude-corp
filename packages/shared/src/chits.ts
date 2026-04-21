@@ -476,7 +476,20 @@ export function updateChit<T extends ChitTypeId>(
 
   let newFields = current.fields;
   if (updates.fields) {
-    newFields = { ...current.fields, ...updates.fields } as typeof current.fields;
+    // Deep merge at the fields.<type> level so updating one sub-field
+    // (e.g. fields.task.priority) doesn't wipe the other sub-fields
+    // (title, assignee). Shallow spread at the top level would replace
+    // fields.task wholesale, which surprises every caller that expects
+    // partial-at-value semantics from the word "update."
+    const typeKey = type as string;
+    const currentTypeFields =
+      ((current.fields as Record<string, unknown>)[typeKey] as Record<string, unknown>) ?? {};
+    const updateTypeFields =
+      ((updates.fields as Record<string, unknown>)[typeKey] as Record<string, unknown>) ?? {};
+    newFields = {
+      ...current.fields,
+      [typeKey]: { ...currentTypeFields, ...updateTypeFields },
+    } as typeof current.fields;
     const fieldsForType = (newFields as Record<string, unknown>)[type as string];
     entry.validate(fieldsForType);
   }

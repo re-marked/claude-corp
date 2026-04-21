@@ -452,6 +452,34 @@ describe('updateChit', () => {
     expect(updated.fields.task.assignee).toBe('backend');
   });
 
+  it('deep-merges fields.<type> — updating one sub-field preserves the rest', () => {
+    const created = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: {
+        task: {
+          title: 'keep me',
+          priority: 'normal',
+          assignee: 'backend',
+          acceptanceCriteria: ['ship', 'test'],
+        },
+      },
+      createdBy: 'ceo',
+    });
+
+    // Partial update — only change priority. Title, assignee,
+    // acceptanceCriteria must survive.
+    const updated = updateChit(corpRoot, 'corp', 'task', created.id, {
+      fields: { task: { priority: 'high' } } as never,
+      updatedBy: 'ceo',
+    });
+
+    expect(updated.fields.task.priority).toBe('high');
+    expect(updated.fields.task.title).toBe('keep me');
+    expect(updated.fields.task.assignee).toBe('backend');
+    expect(updated.fields.task.acceptanceCriteria).toEqual(['ship', 'test']);
+  });
+
   it('rejects field updates that fail validation', () => {
     const created = createChit(corpRoot, {
       type: 'task',
