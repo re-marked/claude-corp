@@ -62,6 +62,17 @@ The single biggest structural change. Today, every agent is treated as a persist
 - **Dredge already exists — activate it, don't reinvent.** Claude Corp has a Dredge fragment (`packages/daemon/src/fragments/dredge.ts`) that reads the agent's WORKLOG.md and injects its `## Session Summary` section into the new session's system prompt. This is exactly the session-handoff mechanism Project 1.6 needs. Why it's underused today: agents don't reliably write session summaries, and there's no discipline forcing them to. Project 1.6 should: (a) formalize that sessions MUST write a structured summary before handoff, (b) verify Dredge reads it on the next boot, (c) rewrite Dredge to parse structured XML instead of free markdown. Example of the refactor thesis in action — take existing concept, make it load-bearing, delete the "optional" quality.
 - **Structured XML for machine-to-machine handoffs.** Session summaries (for Dredge), Contract-level reviews (self-witnessing layer), and any other place one agent-session leaves info for another use tagged XML, not prose. Tags: `<handoff><current-step/><completed/><next-action/><open-question/><sandbox-state/><notes/></handoff>` or similar, refined per handoff type. Benefits: predictable parsing, clearer prompts ("fill these slots"), selective injection (next session can read just `<next-action>` first, other tags on demand), detectable malformed handoffs. Claude models fill tagged slots more reliably than they write summary paragraphs — this is mechanical alignment with how the models actually work.
 - **Pre-BRAIN full auto-load for v1, summarize later.** YAGNI. At current corp scale, pre-BRAIN is small; full auto-load is fine. When pre-BRAIN gets big enough to degrade session quality (hundreds of entries, multi-MB), ship summarization — probably in Project 4 where distillation mechanics already live (dreams-that-distill extends naturally to pre-BRAIN distillation). Ship simple now; measure before optimizing.
+- **Chits — unified record primitive (Project 0 prerequisite).** We kept inventing new file shapes across Projects 1-6: handoff markers, dispatch contexts, pre-BRAIN entries, step logs, wisp-like ephemerals, structured observations. On top of Claude Corp's existing bespoke formats (tasks, observations, contracts, messages), that's ~12 separate conventions doing variations of the same thing. Gas Town's "Beads" is their unified answer. We build our own — **Chits** — corporate-themed, Claude-Corp-native. A Chit is a structured markdown record that can be any of: task, observation, contract, casket pointer, handoff, dispatch-context, pre-BRAIN entry, wisp, step log. One primitive, many types, shared core schema + type-specific frontmatter fields. Becomes Project 0 — the foundation everything else sits on. Tasks/Contracts/Observations get migrated to Chits before Project 1's sub-projects start. Old formats die; no parallel paths.
+- **From the research gems — accepted for future projects:**
+  - Compaction hooks (`PreCompact` + `SessionStart { source: "compact" }`) — Project 1.7 uses these natively for context renewal on Partners
+  - Blockable `Stop` hook as native critic loop — consider for Project 2.4 (self-witnessing meta-layer) as an implementation option
+  - `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3` silent-disable is a real claude-code behavior — Project 1.7 compact-trigger must detect and handle this (likely triggers fallback handoff path from 1.6)
+  - Sleep-time Memory Steward agent on Haiku model — becomes Project 4.4 or an extension to Project 4.2 (dreams-that-distill); runs during SLUMBER, rewrites Partner BRAIN without competing with Partner's response loop
+  - Three subagent isolation models (Fork/Teammate/Worktree) — inform Project 2.4 and Project 3 design choices
+  - 15-second blocking budget — Project 1.8 Deacon / Project 3.3 auto-recovery enforce this for autoemon ticks
+  - atomicfile pattern (tempfile + rename for crash-safe writes) — Project 0.1 uses this for all Chit writes
+  - Wisp 4-signal promotion — Project 0.6 implements this for ephemeral Chits
+  - Handoff-as-tool in Claude Corp terms = `cc-cli escalate --to <partner> --reason "..."` — Project 1.4 extends sling with escalate semantics
 
 ---
 
@@ -87,20 +98,226 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
-| 1 | Foundation | Employee/Partner split, Casket, Hand, CLAUDE.md migration | Fix the root problem: sessions stop being identity carriers | 15-20 |
+| 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 |
+| 1 | Foundation | Employee/Partner split, Casket, Hand, CLAUDE.md migration | Fix the root problem: sessions stop being identity carriers | 12-16 (some sub-projects simpler once Chits exist) |
 | 2 | Workflow Substrate | Blueprint-as-molecule, Deacon, self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 10-12 |
 | 3 | Autonomous Operations | Witness, Refinery, auto-recovery | Corp heals itself without human intervention | 10-12 |
-| 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism | Soul becomes load-bearing, not decorative | 8-10 |
+| 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
 | 5 | Culture Transmission | Feedback-propagation, CULTURE.md made load-bearing | Culture actually shapes behavior | 5-7 |
 | 6 | Cleanup & UX | Delete dead concepts, rewrite docs, TUI updates, v3.0 release | Ship the peacock | 8-10 |
 
-Total: ~55-75 PRs across 6 projects. Rough estimate.
+Total: ~70-90 PRs across 7 projects. Rough estimate.
+
+---
+
+## Project 0: Chits — the unified record primitive
+
+*Everything else sits on this. Nothing in Project 1 onward can land until Chits exist.*
+
+### Context — why Project 0 exists
+
+As we designed Projects 1-6, we kept inventing new file shapes: handoff markers, dispatch contexts, pre-BRAIN entries, step logs, wisp-like ephemeral records, structured observations. Each invention needed its own read/write code, its own frontmatter schema, its own query pattern. On top of Claude Corp's existing bespoke formats (tasks, observations, contracts, messages), that's ~12 separate conventions doing variations of the same thing.
+
+Gas Town's "Beads" is the same insight applied to Go projects. We don't adopt Beads directly — it's an external project with its own opinions — but the **pattern** is right: one unified record primitive, many types, shared schema core + type-specific frontmatter. Build our own, Claude-Corp-native: **Chits**.
+
+Every work-record in Claude Corp becomes a Chit. Old bespoke formats die in migration. No parallel paths.
+
+### Shape of a Chit
+
+A Chit is a markdown file with YAML frontmatter:
+
+```yaml
+---
+id: chit-abc123
+type: task | observation | contract | casket | handoff | dispatch-context | pre-brain-entry | step-log | ...
+status: draft | active | review | completed | rejected | failed | closed | burning
+ephemeral: false                 # true for wisp-like, auto-expires unless promoted
+ttl: 2026-04-28T00:00:00Z        # optional, only meaningful when ephemeral=true
+created_by: member-id
+updated_at: 2026-04-21T15:30:00Z
+tags: [feedback, mark, preference]
+references: [chit-xyz]           # loose pointers to related Chits
+depends_on: [chit-111]           # strong dependency edges (chain semantics)
+fields:
+  # type-specific, validated against the type's schema
+  task: { priority: high, assignee: ceo, acceptance_criteria: [...] }
+  observation: { category: FEEDBACK, subject: mark, importance: 4 }
+  casket: { current_step: chit-42 }
+  handoff: { predecessor_session: ..., current_step: ..., open_question: ..., next_action: ... }
+---
+
+# Human-readable title
+
+Markdown body. Any Chit type can have content; some types (like `casket`) barely use it.
+```
+
+**File path convention:** `<scope>/chits/<type>/<id>.md` — scope determines ownership.
+- Corp-level: `~/.claudecorp/<corp>/chits/contract/abc.md`
+- Agent-level: `~/.claudecorp/<corp>/agents/<slug>/chits/observation/def.md`
+- Project-level: `~/.claudecorp/<corp>/projects/<name>/chits/task/xyz.md`
+
+### Per-type lifecycle rules (Type Registry)
+
+Each type registers its configuration:
+
+- `task` — non-ephemeral, lifecycle `draft → active → completed | rejected | failed`, Warden reviews at Contract level.
+- `contract` — non-ephemeral, lifecycle `draft → active → review → completed | rejected | failed`, Warden signs off.
+- `observation` — **ephemeral by default**, 4-signal promotion to permanent (see 0.6): (a) referenced by permanent Chit, (b) commented on, (c) tagged `keep`, (d) aged past TTL without resolution (failure path, not promotion).
+- `casket` — non-ephemeral, one per agent (`id: casket-<agent-slug>`), only `fields.casket.current_step` matters functionally.
+- `handoff` — ephemeral always, destroyed once read by successor session (Dredge consumes it and burns it).
+- `dispatch-context` — ephemeral, tracks an in-flight dispatch (Gas Town's sling-context pattern); burns on dispatch completion.
+- `pre-brain-entry` — ephemeral by default at the role level; auto-promotes to permanent via 4-signal rule and becomes part of the role's distilled pre-BRAIN library.
+- `step-log` — non-ephemeral (Temporal memoization pattern), one per Task-execution phase, used for crash recovery.
+
+### Sub-projects
+
+### 0.1 — Chit core: schema, type registry, read/write primitives
+
+**Problem.** Need the foundational record type every other Project relies on.
+
+**Scope.** Define `Chit` type with common fields + type-specific frontmatter slots. Type registry with per-type configuration (lifecycle, default ephemeral, TTL defaults, frontmatter schema validators). CRUD primitives: `createChit`, `readChit`, `updateChit`, `closeChit`, `queryChits`. All writes go through `atomicfile` pattern (tempfile + rename) for crash-safe persistence (borrowed from Gas Town Gem 10).
+
+**File paths:**
+- `packages/shared/src/types/chit.ts` (new — `Chit<T>` generic over type, common fields, per-type field types)
+- `packages/shared/src/chits.ts` (new — CRUD primitives, query API)
+- `packages/shared/src/chit-types.ts` (new — type registry with per-type config)
+- `packages/shared/src/atomic-write.ts` (new — 60-line leaf helper for crash-safe writes)
+- `packages/shared/src/index.ts` (export Chit APIs)
+
+**Test strategy:**
+- Unit: schema validation per type (valid/invalid frontmatter rejection).
+- Unit: atomic write leaves no partial files on simulated crash (interrupt mid-write, verify either full-file-old or full-file-new, never half).
+- Unit: round-trip tests for each type (create → read → update → close).
+- Unit: query API (by type, tag, status, since, references).
+- Property test: 1000 random Chits round-trip without drift.
+
+**Depends on:** nothing — this is the foundation.
+**PRs:** 3-4
+
+### 0.2 — cc-cli chit commands
+
+**Problem.** Founders and agents need a unified CLI for work-record operations. Eliminates bespoke commands like separate `cc-cli task`, `cc-cli observe`, etc.
+
+**Scope.** `cc-cli chit create|read|update|close|list|promote` with flags for type, tags, status, references. The `promote` subcommand flips `ephemeral: true → false` (manual wisp promotion by founder).
+
+**File paths:**
+- `packages/cli/src/commands/chit.ts` (new)
+- `packages/cli/src/index.ts` (register command)
+
+**Test strategy:**
+- Integration: end-to-end create → query → update → close via cc-cli subprocess calls.
+- Integration: promote subcommand flips ephemeral correctly, updates updated_at.
+
+**Depends on:** 0.1
+**PRs:** 2
+
+### 0.3 — Migrate Tasks to Chits
+
+**Problem.** Existing tasks are in bespoke format; become Chits of `type: task`.
+
+**Scope.** Migration script reads existing `<scope>/tasks/<id>.md` files, rewrites as `<scope>/chits/task/<id>.md` under the Chit schema. Task-reading code paths rewrite as thin wrappers over Chit query API. Old task format code deleted, not deprecated.
+
+**File paths:**
+- `packages/shared/src/tasks.ts` (rewrite — becomes thin wrapper around `queryChits({type: 'task'})` etc.)
+- `packages/shared/src/types/task.ts` (mark deprecated; task-specific fields move to Chit's `fields.task`)
+- `scripts/migrate-tasks-to-chits.ts` (new — migration tool)
+- `packages/cli/src/commands/task*.ts` (rewrite to use Chit API)
+
+**Test strategy:**
+- Migration test: snapshot of existing task corpus migrates cleanly; all task operations still work through the Chit API.
+- Regression: existing task tests pass against new implementation.
+
+**Depends on:** 0.1, 0.2
+**PRs:** 2-3
+
+### 0.4 — Migrate Contracts to Chits
+
+**Problem.** Existing Contracts are bespoke; become Chits of `type: contract`.
+
+**Scope.** Contract's `taskIds[]` becomes references to Chits of type=task. Contract lifecycle (draft → active → review → completed) maps to Chit status. Warden review stays as a distinct Chit-review step.
+
+**File paths:**
+- `packages/shared/src/contracts.ts` (rewrite as Chit-wrapper)
+- `packages/shared/src/types/contract.ts` (deprecate; fields move to `fields.contract`)
+- `scripts/migrate-contracts-to-chits.ts`
+
+**Test strategy:** existing contract tests pass against new implementation; contract-to-task reference integrity preserved across migration.
+
+**Depends on:** 0.1, 0.3
+**PRs:** 2
+
+### 0.5 — Migrate Observations to Chits (structured)
+
+**Problem.** Observations are free prose in daily markdown; they become structured Chits of `type: observation` with categorized frontmatter (from Project 4.1 — advanced here into Project 0 since it's a migration, not a new feature).
+
+**Scope.** Each observation becomes a Chit with `fields.observation = { category, subject, object, importance, context }`. Migration script parses existing daily observation files where possible (lossy; structured-from-prose is hard, so some observations convert to "category: NOTE, content: original prose"). Agents prompted to write new observations via `cc-cli chit create --type observation --category FEEDBACK --subject mark ...`.
+
+**File paths:**
+- `packages/shared/src/observations.ts` (rewrite as Chit-wrapper; `cc-cli observe` aliased from `cc-cli chit create --type observation`)
+- `scripts/migrate-observations-to-chits.ts`
+- `packages/shared/src/templates/fragments/observations.md` (update: agents learn to write structured observations)
+
+**Test strategy:** structured observation query returns categorized results; legacy-prose observations migrate with best-effort categorization (NOTE as default).
+
+**Depends on:** 0.1, 0.2
+**PRs:** 2-3
+
+### 0.6 — Wisp lifecycle: ephemeral Chits + 4-signal promotion
+
+**Problem.** Some Chit types are ephemeral (observation, handoff, dispatch-context, pre-brain-entry at role level). They need auto-expiration AND promotion mechanics — otherwise valuable ephemeral content is lost, and garbage accumulates forever.
+
+**Scope.** Daemon-side scanner runs periodically (e.g., every 5 min) over all ephemeral Chits. For each, checks 4 promotion signals from Gas Town:
+- (a) **referenced:** a permanent Chit references this one
+- (b) **commented:** a related Chit or message cites this
+- (c) **tagged keep:** `keep` in tags
+- (d) **aged past TTL:** this is the FAILURE path — if none of a/b/c fired and TTL passed, destroy the Chit (logged)
+
+Promotion flips `ephemeral: true → false`, clears TTL. Destruction writes a one-line log entry and removes the file.
+
+**File paths:**
+- `packages/daemon/src/chit-lifecycle.ts` (new — promotion scanner)
+- `packages/daemon/src/daemon.ts` (register lifecycle tick)
+- `packages/shared/src/chit-promotion.ts` (new — signal-detection helpers, pure functions for testability)
+
+**Test strategy:**
+- Unit: each signal detector tested in isolation with fixtures.
+- Integration: create ephemeral Chit with TTL, add each signal in turn, verify promotion; verify non-promoted Chit at TTL gets destroyed with log entry.
+
+**Depends on:** 0.1
+**PRs:** 2
+
+### 0.7 — Agent tooling: Chit fragment, CLAUDE.md template updates, SOUL/AGENTS guidance
+
+**Problem.** Agents need to know how to create, read, query, close Chits naturally. This is the behavioral/prompting layer that makes the substrate load-bearing.
+
+**Scope.**
+- New Chit fragment `packages/shared/src/templates/fragments/chits.md` — explains the primitive, lists key cc-cli commands, shows examples by type.
+- CLAUDE.md template updated to `@import` the Chit fragment.
+- SOUL/AGENTS/TOOLS templates updated with Chit-first patterns: "when you notice X, write a Chit of type=observation via `cc-cli chit create --type observation ...`. Don't write free prose to daily files — that's deprecated."
+
+**File paths:**
+- `packages/shared/src/templates/fragments/chits.md` (new)
+- `packages/shared/src/templates/claude-md.ts` (add @import)
+- `packages/shared/src/templates/agents.ts` (update: Chit-first patterns)
+- `packages/shared/src/templates/tools.ts` (update: cc-cli chit reference)
+- `packages/shared/src/templates/soul.ts` (no change — soul is substrate-agnostic)
+
+**Test strategy:** agent in a test dispatch creates, reads, queries, and closes a Chit via cc-cli; verify successful round-trip via the daemon log.
+
+**Depends on:** 0.1, 0.2
+**PRs:** 2
+
+---
+
+**Project 0 ship criterion:** Chits exist as the unified work-record primitive. Tasks, Contracts, Observations are all Chits now; old file formats are deleted. Agents use `cc-cli chit` for all work-record operations. Ephemeral Chits (observations, handoffs, dispatch-contexts) expire or promote via the 4-signal rule. Atomic writes prevent corruption. The substrate Projects 1-6 depend on is live and honest.
+
+**Project 0 total:** ~15-20 PRs.
 
 ---
 
 ## Project 1: Foundation (Session/Role Split)
 
-*This is the big one. Nothing else can land until this does.*
+*Builds on Project 0. Every new primitive in this Project is a Chit of a specific type — Casket is `type: casket`, handoff via Dredge reads `type: handoff` Chits, dispatch-contexts for bacteria scaling are ephemeral Chits. The file-path specs below use the old bespoke-file language where reasonable, but at implementation time everything translates to Chit operations on the primitive from Project 0.*
 
 ### 1.1 — Introduce Employee vs Partner distinction
 
@@ -738,7 +955,9 @@ Still being discussed: the two remaining open questions (Partner demotion, voice
 - Project 1 sub-projects (1.1 through 1.9) have concrete file paths, test strategy, and dependencies spelled out. Ready to pick up and execute.
 - Projects 2 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
 
-**Immediate next step:** start Project 1.1 (Employee/Partner distinction in data model). Claude (not the corp) drives the build — the corp hasn't earned that trust yet. Eventually, once the corp works well on this new substrate, future refactors can be corp-driven. But not this one.
+**Immediate next step:** start Project 0.1 (Chit core — schema, type registry, read/write primitives, atomic-write helper). Project 0 ships before any of Project 1's sub-projects begin, because Casket, Chain semantics, Hand-slinging, Dredge handoff, pre-BRAIN accumulation all become Chit types rather than bespoke file formats. Project 1's scope shrinks somewhat because much of what it would have built (new file shapes, new read/write code paths) disappears into "add a type to the Chit registry."
+
+Claude (not the corp) drives the build — the corp hasn't earned that trust yet. Eventually, once the corp works well on this new substrate, future refactors can be corp-driven. But not this one.
 
 ---
 
