@@ -156,6 +156,36 @@ Markdown body. Any Chit type can have content; some types (like `casket`) barely
 - Agent-level: `~/.claudecorp/<corp>/agents/<slug>/chits/observation/def.md`
 - Project-level: `~/.claudecorp/<corp>/projects/<name>/chits/task/xyz.md`
 
+### Conventions (answer the audit gaps)
+
+**ID generation.** Chit IDs are short readable hashes: `chit-<type-prefix>-<8-hex>`. Type prefix lets you eyeball a reference (`chit-t-a1b2c3d4` is obviously a task). Generated with `crypto.randomUUID()` truncated; collision probability at our scale is zero. Displayed short in log lines; full id only matters for file paths.
+
+**`references` vs `depends_on` semantics.**
+- `references` = loose pointers. "This Chit relates to that one." No cascade behavior. Closing/deleting a referenced Chit does nothing to the referrer.
+- `depends_on` = hard edges. "This Chit can't become current until all depends_on are closed with terminal success status." Chain semantics in 1.3 uses this. On Chit close, the daemon scans all Chits with `depends_on: [<this-id>]` and checks if they're now `ready` — if yes, they're eligible for dispatch, casket-advancement, etc. Closing a `depends_on` Chit with terminal-failure status (rejected/failed) flags dependents as `blocked` (they become non-ready until the failure is re-opened or replaced).
+
+**Concurrency.** Optimistic concurrency with content-hash. Every Chit file carries (implicitly, in the rename path) its write generation. Write protocol:
+1. Read Chit, note its `updated_at`.
+2. Compute new content.
+3. Read Chit file again; if `updated_at` changed between step 1 and 3, abort — caller must re-read and retry.
+4. Otherwise write via atomicfile (tempfile + rename).
+5. On rename, if a previous writer's file exists with a newer `updated_at`, abort and retry.
+
+This is not full ACID but is sufficient for file-first coordination where conflicts are rare and retries are cheap. Cross-platform: works on Windows, Mac, Linux without native locks.
+
+**Permissions.** Scope owns write authority; read is universal within the corp.
+- Corp-level Chits (`<corp>/chits/<type>/<id>.md`): writable by Partners with appropriate authority (CEO, HR, etc.); readable by anyone in the corp.
+- Project/team Chits: writable by project/team members (leader + workers); readable by anyone.
+- Agent Chits (`agents/<slug>/chits/...`): writable by that agent; readable by anyone.
+
+Enforcement is at the cc-cli command layer (`--from` flag asserts identity; command refuses writes outside the caller's authority). Filesystem-level enforcement isn't attempted — agents on the same machine can technically bypass via direct file writes, but the prompting layer discourages this and the post-hoc audit trail (`updated_by` in frontmatter) catches deviations. This matches Claude Corp's existing trust model (file-first, permissions by convention + prompting, not by OS ACLs).
+
+**Deletion policy.** Non-ephemeral Chits never delete; they close. Terminal statuses: `completed` (goal met), `rejected` (Warden/founder rejected), `failed` (abandoned), `closed` (benign retirement — superseded, no longer relevant). All terminal states keep the file in place with `updated_at` reflecting the close. Rationale: git history already makes delete irreversible in practice, and closed Chits are useful as audit trail + future pattern-detection data.
+
+Ephemeral Chits do delete: if no promotion signal fires before TTL, the daemon's lifecycle scanner (0.6) removes the file. A one-line destruction log is written to `<corp>/chits/_log/burns.jsonl` so agents can later ask "what wisps did we have that never promoted" — useful diagnostic, not a graveyard.
+
+Archival: `cc-cli chit archive <id>` moves a closed non-ephemeral Chit to `<scope>/chits/_archive/<type>/<id>.md`. Queries by default don't scan `_archive/`; pass `--include-archive` to search there. This keeps working-set queries fast when history grows.
+
 ### Per-type lifecycle rules (Type Registry)
 
 Each type registers its configuration:
@@ -198,18 +228,68 @@ Each type registers its configuration:
 
 **Problem.** Founders and agents need a unified CLI for work-record operations. Eliminates bespoke commands like separate `cc-cli task`, `cc-cli observe`, etc.
 
-**Scope.** `cc-cli chit create|read|update|close|list|promote` with flags for type, tags, status, references. The `promote` subcommand flips `ephemeral: true → false` (manual wisp promotion by founder).
+**Scope.** Full command surface:
+
+```
+# Create
+cc-cli chit create --type <type> [--scope corp|project:<name>|team:<name>|agent:<slug>]
+                   [--title "..."]  [--content-file <path>|--content "..."]
+                   [--tag <tag>]*  [--ref <chit-id>]*  [--depends-on <chit-id>]*
+                   [--field <key>=<value>]*  [--ephemeral] [--ttl <duration>]
+                   [--from <member-id>]  # required for agents; founder implied otherwise
+
+# Read
+cc-cli chit read <id> [--json]
+cc-cli chit read <id> --field <key>        # just the field value
+
+# Update
+cc-cli chit update <id> [--status <status>] [--add-tag <tag>]* [--remove-tag <tag>]*
+                         [--add-ref <id>]*  [--set-field <key>=<value>]*
+                         [--append-content "..."]
+
+# Close (sets terminal status, runs close-hooks if type has them)
+cc-cli chit close <id> [--status completed|rejected|failed|closed]
+
+# List (query)
+cc-cli chit list [--type <type>]*  [--status <status>]*  [--tag <tag>]*
+                 [--scope <scope>]*  [--since <duration>]  [--until <duration>]
+                 [--ref <id>]*  [--depends-on <id>]*  [--assignee <slug>]
+                 [--ephemeral|--no-ephemeral] [--json] [--limit <n>] [--sort <field>]
+
+# Promote (flip ephemeral → permanent; manual wisp promotion)
+cc-cli chit promote <id> [--reason "..."]
+
+# Close + archive (one-shot for when a Chit truly is done-and-gone)
+cc-cli chit archive <id>
+```
+
+Query examples agents and founders actually run:
+
+```
+cc-cli chit list --type observation --tag feedback --since 7d --limit 20
+cc-cli chit list --type task --status active --assignee backend-engineer
+cc-cli chit list --type handoff --ephemeral --since 1h
+cc-cli chit list --type contract --status review
+cc-cli chit list --ref chit-abc123                    # everything that references abc123
+cc-cli chit list --depends-on chit-abc123 --status '!=completed'  # what's blocked on abc123
+```
+
+Multiple `--type`, `--status`, `--tag`, `--scope` flags are OR'd within the same flag and AND'd across different flags. `--since` accepts `7d`, `1h`, `30m`. Default `--limit 50`.
 
 **File paths:**
-- `packages/cli/src/commands/chit.ts` (new)
-- `packages/cli/src/index.ts` (register command)
+- `packages/cli/src/commands/chit.ts` (new — subcommand dispatcher)
+- `packages/cli/src/commands/chit/create.ts`, `read.ts`, `update.ts`, `close.ts`, `list.ts`, `promote.ts`, `archive.ts`
+- `packages/cli/src/index.ts` (register `chit` command group)
+- Legacy aliases: `cc-cli task create` → `cc-cli chit create --type task`, `cc-cli observe` → `cc-cli chit create --type observation` (thin wrappers for muscle memory during migration)
 
 **Test strategy:**
 - Integration: end-to-end create → query → update → close via cc-cli subprocess calls.
-- Integration: promote subcommand flips ephemeral correctly, updates updated_at.
+- Integration: promote subcommand flips ephemeral correctly, clears TTL.
+- Integration: query with every filter combination returns correct subset.
+- Shell completion: argument completers for `--type` (known types), `--tag` (existing tags in corp), `--id` (recent Chits).
 
 **Depends on:** 0.1
-**PRs:** 2
+**PRs:** 2-3
 
 ### 0.3 — Migrate Tasks to Chits
 
@@ -343,68 +423,82 @@ Data model change. Add `kind: "employee" | "partner"` to Member record. Update m
 
 ### 1.2 — Casket: durable hook
 
-Per-agent `CASKET.md` (or `.casket.json` — decide at implementation time; markdown preferred for agent-readability). One field that matters: `currentStep` — pointer to a task id. When agent dispatches, they read Casket first. When they complete, they close the step; system advances currentStep to next in chain.
+**Implemented as Chit of `type: casket`.** Per agent, exactly one Chit with `id: casket-<agent-slug>`, `ephemeral: false`. The only functional field is `fields.casket.current_step: chit-id | null` — the pointer to the agent's current Task Chit. Content body can carry a short "recent activity" log agents append to as they work, but the pointer is the substrate's load-bearing part.
 
-**Scope:** record type, read/write primitives, per-agent workspace setup, integration into hire flow.
+When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, reads that Task Chit, executes. When they complete a step, close the Task Chit; the chain walker (1.3) updates the Casket's `current_step` to the next ready Task in chain — or to null if the Contract is done.
+
+**Scope:** register `casket` type in Chit registry with lifecycle (always non-ephemeral, one per agent, `current_step` frontmatter validated), write Casket Chit during agent workspace init, helper functions for reading "an agent's current step Task Chit."
+
 **File paths:**
-- `packages/shared/src/types/casket.ts` (new: `CasketRecord` type)
-- `packages/shared/src/casket.ts` (new: read/write primitives, traversal helpers)
-- `packages/shared/src/templates/casket.ts` (new: default CASKET.md template with empty currentStep)
-- `packages/shared/src/agent-setup.ts` (update: write CASKET.md during workspace init)
-- `packages/shared/src/index.ts` (export Casket primitives)
+- `packages/shared/src/chit-types.ts` (update: register `casket` type with per-type schema + validator)
+- `packages/shared/src/casket.ts` (new: thin wrapper `getCurrentStep(agentSlug)`, `advanceCurrentStep(agentSlug, nextChitId | null)`)
+- `packages/shared/src/agent-setup.ts` (update: call `createChit({type: 'casket', id: 'casket-<slug>', scope: 'agent:<slug>'})` during workspace init)
+- `packages/shared/src/index.ts` (export)
 
 **Test strategy:**
-- Unit: read/write primitives round-trip cleanly; traversal helpers compute next-step correctly.
-- Integration: spin up a fresh agent workspace; CASKET.md exists and is readable.
+- Unit: Casket type enforces single-per-agent; rejects creation of a second Casket for the same agent.
+- Integration: hire an agent, verify Casket Chit exists with null current_step; simulate a Task Chit being slung, verify Casket updates.
 
-**Depends on:** 1.1
+**Depends on:** 0.1 (Chit primitive), 1.1 (Employee/Partner kind — kind-specific Casket defaults may differ)
+**PRs:** 1-2 (simpler because Chit infrastructure already exists)
+
+### 1.3 — Chain semantics on Task Chits
+
+**Implemented on Chit primitives.** `depends_on` and `references` already exist on every Chit's frontmatter (from 0.1). Acceptance criteria live in `fields.task.acceptance_criteria: string[]`. This sub-project adds the *traversal logic* — nothing about the data model changes because Chits already have these fields.
+
+**Chain walker:**
+- `isReady(chitId)` → true if all `depends_on` Chits are status=completed.
+- `nextReadyTask(contractChitId, currentStepId)` → the first Chit in the Contract's `fields.contract.task_ids` with all deps satisfied and status=draft/active, after the current step.
+- `advanceChain(closedChitId)` → on close of a Task Chit, scan Chits where `depends_on includes closedChitId`; for each, if now ready AND there's a Casket pointing at its chain, advance that Casket.
+
+**Scope:** chain-walker module, close-hook integration, terminal-failure propagation (rejected/failed deps block downstream).
+
+**File paths:**
+- `packages/shared/src/chain.ts` (new — pure functions, test-friendly)
+- `packages/daemon/src/chit-close-hook.ts` (new — or integrated into existing `task-events.ts`; triggers advanceChain on close)
+- `packages/daemon/src/task-events.ts` (update: on Task Chit close, invoke advanceChain)
+
+**Test strategy:**
+- Unit: chain walker handles fan-out (one Chit → N next), fan-in (N depends_on → one Chit), cycles (reject at validation time).
+- Unit: `isReady` returns true only when all depends_on Chits are terminal-success.
+- Unit: terminal-failure (rejected/failed) of a dep flags dependents as `blocked`.
+- Integration: close a Task Chit, verify the Casket of the owning agent advances to next ready Chit in the same Contract.
+
+**Depends on:** 0.1 (Chit), 1.2 (Casket)
 **PRs:** 2
-
-### 1.3 — Chain semantics in tasks
-
-Task frontmatter gets `depends_on: [taskId]`, `next: [taskId]`, `acceptance_criteria: string[]`. Chain traversal logic (when can a task become current?). Close semantics (closing a task auto-advances Caskets pointing at it).
-
-**Scope:** Task type extension, chain walker, close logic.
-**File paths:**
-- `packages/shared/src/types/task.ts` (add `dependsOn`, `next`, `acceptanceCriteria` fields; all optional for back-compat during migration)
-- `packages/shared/src/tasks.ts` (update read/write; add `isReady(taskId)` — checks if all depends_on are closed)
-- `packages/shared/src/chain.ts` (new: chain-walker helpers — `nextReadyTask(contract, currentStep)`, `advanceChain(taskId)`)
-- `packages/daemon/src/task-events.ts` (on task close, traverse chain and advance Caskets pointing at it)
-
-**Test strategy:**
-- Unit: chain walker handles fan-out (one task → N next), fan-in (N depends_on → one task), cycles (reject).
-- Unit: `isReady` returns true only when all depends_on are status=completed.
-- Integration: close a task, verify Casket currentStep advances, next task now ready.
-
-**Depends on:** 1.2
-**PRs:** 2-3
 
 ### 1.4 — Hand: real slinging (incl. role-level slinging)
 
-`cc-cli sling --target <slug-or-role> --task <id>` puts a task onto the target's Casket. Durable file write. No chat delivery required. The DM can announce "you got slung task-X" for founder visibility, but the *work* lives in Casket, not the message.
+`cc-cli sling --target <slug-or-role> --chit <id>` assigns a Chit (task, contract, or any work-Chit type) to the target. Durable via Chit operations — no chat delivery required.
+
+**What sling actually does.** For a slot target (named Employee or Partner), update the target's Casket Chit: `fields.casket.current_step = <slung-chit-id>`. For a role target, resolve to an Employee slot via role-resolver and do the same. All operations are Chit updates, not bespoke file writes. The DM can announce "you got slung chit-X" for founder visibility (a message Chit of type=message, or a plain channel message), but the *work* lives in the Casket Chit.
 
 **Two target modes:**
-- **Slot slinging:** `--target toast` — direct to a specific named Employee or Partner. Task lands on their Casket.
-- **Role slinging:** `--target backend-engineer` — daemon resolves to the role's Employee pool:
+- **Slot slinging:** `--target toast` — direct to a specific named Employee or Partner. Chit lands on their Casket.
+- **Role slinging:** `--target backend-engineer` — daemon resolves via role-resolver to the role's Employee pool:
   - If exactly one Employee of that role is idle → land on their Casket.
   - If all Employees of that role are busy but queue depth still OK → land on the least-loaded one's Casket (bacteria-split triggers when threshold crossed, per 1.9).
-  - If no Employees of that role exist yet → bacteria spawns the first one and lands the task.
-- Partners-by-role (Engineering Lead of a team) are slot targets, not role targets. Slinging to a Partner is always named.
+  - If no Employees of that role exist yet → bacteria spawns the first one and lands the Chit.
+- Partners-by-role are slot targets, not role targets. Slinging to a Partner is always named.
 
-**Scope:** sling command, Casket write, role resolution, announcement pattern.
+**Related: `cc-cli escalate --to <partner> --reason "..."`** — Employee-only shortcut. Creates a Chit of type=escalation (ephemeral, references the current work Chit), slings it to the named Partner. Replaces the Swarm-style "handoff-as-function-return" with a cc-cli command Employees invoke when they hit something above their pay grade.
+
+**Scope:** sling command, Casket-Chit update, role resolution, escalate command, announcement pattern.
+
 **File paths:**
-- `packages/cli/src/commands/sling.ts` (new command)
-- `packages/cli/src/index.ts` (register command)
-- `packages/shared/src/casket.ts` (sling writer that updates Casket)
-- `packages/daemon/src/api.ts` (new `/sling` endpoint for daemon-internal + CLI-to-daemon)
-- `packages/daemon/src/role-resolver.ts` (new: resolve role name → Employee slot using members.json + load data)
+- `packages/cli/src/commands/sling.ts` (new)
+- `packages/cli/src/commands/escalate.ts` (new)
+- `packages/cli/src/index.ts` (register both)
+- `packages/daemon/src/api.ts` (new `/sling` and `/escalate` endpoints for CLI-to-daemon + daemon-internal)
+- `packages/daemon/src/role-resolver.ts` (new: resolve role name → Employee slot via members.json + Casket query)
 
 **Test strategy:**
-- Unit: role resolver picks idle Employee over busy one; picks least-loaded when all busy.
-- Integration: sling to role with zero Employees triggers bacteria spawn; task lands on new Employee.
-- Integration: sling to named Partner lands on their Casket; DM announcement posted.
+- Unit: role resolver picks idle Employee over busy one; picks least-loaded when all busy; returns null when role has zero Employees (triggers bacteria spawn at caller).
+- Integration: sling to role with zero Employees triggers bacteria spawn; Chit lands on new Employee.
+- Integration: sling to named Partner updates their Casket; DM announcement posted.
+- Integration: Employee invokes `cc-cli escalate`; escalation Chit created, target Partner's Casket updated.
 
-**Depends on:** 1.2, 1.3
+**Depends on:** 0.1 (Chit), 1.2 (Casket), 1.3 (chain)
 **PRs:** 3-4
 
 ### 1.5 — Fragment → CLAUDE.md migration
@@ -428,30 +522,33 @@ Pull fragment render outputs into .md files in agent workspaces. Update CLAUDE.m
 **Depends on:** nothing (can run parallel to 1.1-1.4)
 **PRs:** 3-4
 
-### 1.6 — Per-step session cycling for Employees (activate Dredge)
+### 1.6 — Per-step session cycling for Employees (activate Dredge, Chit-ify handoffs)
 
-Employee finishes a step → writes structured XML summary → kills own session. New session spawns at next step. Dredge (existing fragment!) reads the summary and seeds the new session's context.
+**Handoffs become Chits of `type: handoff` (ephemeral, always).** Each handoff is a Chit written by the dying session that gets read and burned by the successor session via Dredge. No free-prose WORKLOG.md appending — handoff content is structured Chit frontmatter (from the XML schema in Decisions Made).
 
-**Use Dredge, don't invent.** `packages/daemon/src/fragments/dredge.ts` already reads WORKLOG.md's `## Session Summary` and injects it into the system prompt. Phase 1.6 activates and formalizes it:
+**Use Dredge, evolve it.** `packages/daemon/src/fragments/dredge.ts` currently reads WORKLOG.md's `## Session Summary`. Evolved behavior:
+- On dispatch, Dredge queries for the latest unread handoff Chit scoped to this agent (`cc-cli chit list --type handoff --scope agent:<slug> --status active --limit 1`).
+- If found, injects its structured fields into the system prompt: `current_step`, `completed`, `next_action`, `open_question`, `sandbox_state`, `notes`.
+- On injection, Dredge updates the handoff Chit's status to `closed` (consumed). Ephemeral expiry cleans it up shortly after (0.6 lifecycle scanner — but since it's already closed, it falls out of working-set queries immediately).
+- Legacy `## Session Summary` in WORKLOG.md becomes deprecated, deleted in 6.1.
 
-- Dying session MUST write a structured XML handoff block (schema defined in Decisions Made section).
-- The block gets appended to WORKLOG.md under a `## Session Summary` header (or whatever heading Dredge currently parses).
-- Dredge gets a small rewrite to parse the XML structure, not free prose.
+**Session-exit protocol.** Employee calls `cc-cli handoff --current-step <chit-id> --completed "..." --next-action "..." --open-question "..." --sandbox-state "..." --notes "..."`. This creates the handoff Chit as `type: handoff`, `ephemeral: true`, scope=`agent:<slug>`, `references: [<current-step-chit-id>]`. Then signals session exit cleanly.
 
-**Scope:** handoff command, summary-writer with XML structure, Dredge rewrite for structured parsing, session-exit protocol.
+**Scope:** handoff command, Dredge evolution, session-exit protocol, handoff Chit type registration.
+
 **File paths:**
-- `packages/cli/src/commands/handoff.ts` (new: agents call it to formally close their session with structured summary)
-- `packages/daemon/src/fragments/dredge.ts` (rewrite: parse XML, validate required tags, inject structured context into system prompt)
-- `packages/shared/src/templates/worklog.ts` (update: WORKLOG.md template includes the handoff-section convention)
-- `packages/daemon/src/harness/claude-code-harness.ts` (handoff triggers session exit cleanly; new session reads Casket + Dredge-injected handoff)
-- `packages/shared/src/handoff.ts` (new: XML schema types + validators)
+- `packages/shared/src/chit-types.ts` (register `handoff` type with schema: current_step, completed, next_action, open_question, sandbox_state, notes)
+- `packages/cli/src/commands/handoff.ts` (new; convenience wrapper around `cc-cli chit create --type handoff ...`)
+- `packages/daemon/src/fragments/dredge.ts` (rewrite: query latest handoff Chit, inject structured context, close Chit on read)
+- `packages/daemon/src/harness/claude-code-harness.ts` (handoff signals session exit cleanly; new session reads Casket Chit + Dredge-injected handoff content)
+- `packages/shared/src/templates/worklog.ts` (update: mark `## Session Summary` as deprecated)
 
 **Test strategy:**
-- Unit: handoff XML parser accepts valid, rejects malformed.
-- Integration: simulate a 3-step Task chain for an Employee; session dies between each step; next session resumes at correct step with handoff context visible.
-- Regression: existing Dredge tests (if any) still pass for agents that continue writing free-prose summaries during migration window.
+- Unit: handoff Chit type schema validates required fields; rejects malformed.
+- Integration: simulate a 3-step Task chain for an Employee; session dies between each step, writes a handoff Chit; next session reads it, resumes at correct step with handoff context visible in the dispatch logs.
+- Regression: existing Dredge behavior for free-prose WORKLOG.md falls through during migration window (non-breaking coexistence for one version cycle).
 
-**Depends on:** 1.2, 1.3, 1.5
+**Depends on:** 0.1 (Chit + handoff type registration), 1.2 (Casket Chit), 1.3 (chain), 1.5 (CLAUDE.md)
 **PRs:** 2-3
 
 ### 1.7 — Compaction for Partner sessions
@@ -476,43 +573,55 @@ Partner sessions don't handoff per-step. They run `/compact` at a threshold (~70
 
 ### 1.8 — Deacon / nudge replacement for Pulse
 
-Pulse today is a liveness check — "HEARTBEAT: check your inbox." That's noise. Replace with Deacon: only wakes agents who have work on their Casket. Nudge says "execute your current step," not "check your inbox." If there's nothing, no wake. Idle = silent.
+Pulse today is a liveness check — "HEARTBEAT: check your inbox." That's noise. Replace with Deacon: only wakes agents who have work on their Casket Chit. Nudge message references the current step ("execute chit-X"), not a generic inbox prompt. If the Casket's `current_step` is null, no wake. Idle = silent.
 
-**Scope:** pulse.ts rewrite (or new deacon.ts), work-aware nudge, new prompt shape.
+**Implementation reads Casket Chits.** Every Deacon tick: `cc-cli chit list --type casket --field-not-null current_step` (or equivalent query API call). For each result, check if the referenced Task Chit is `status: active` and the agent's last dispatch was more than N minutes ago. If yes, dispatch a nudge message that names the current step Chit. No work → no dispatch.
+
+**15-second blocking budget** (from research gems): each Deacon tick must decide whether to wake each agent within 15s total. If the tick is still reasoning at 15s, it yields and tries again next cycle. Prevents stuck autoemon-style lockups.
+
+**Scope:** pulse.ts rewrite (or new deacon.ts), work-aware nudge via Casket Chit queries, 15-second budget enforcement.
+
 **File paths:**
-- `packages/daemon/src/pulse.ts` (rewrite: check each agent's Casket before nudging; skip if empty; change nudge message to reference currentStep)
-- `packages/daemon/src/deacon.ts` (new, if we'd rather rename the file; pulse.ts can then be a small shim for backwards compat during migration, to be removed in 6.1)
-- `packages/daemon/src/fragments/inbox.ts` (the inbox fragment may need updating to reflect that the inbox isn't the coordination surface anymore)
+- `packages/daemon/src/deacon.ts` (new; pulse.ts becomes a deprecation shim removed in 6.1)
+- `packages/daemon/src/tick-budget.ts` (new; 15-second budget helper with AbortSignal, reusable for other ticks)
+- `packages/daemon/src/fragments/inbox.ts` (update: inbox isn't the coordination surface anymore; point agents at Casket)
 - STATUS.md / docs (update heartbeat references)
 
 **Test strategy:**
-- Unit: Deacon's decision-to-nudge returns false for agents with empty Casket.
-- Integration: set up an agent with no Casket work; confirm Deacon does not dispatch. Sling work to them; confirm Deacon dispatches with the right prompt.
-- Observability: daemon log shows "[deacon] skipped X agents with empty hook" per cycle — visible proof that noise is gone.
+- Unit: Deacon's decision-to-nudge returns false for Caskets with null current_step.
+- Unit: 15-second budget enforces yield; timeout test simulates slow tick, verifies it releases.
+- Integration: agent with no Casket work → Deacon does not dispatch. Sling work to them → Deacon dispatches with the right prompt (mentions the Task Chit id + title).
+- Observability: daemon log shows "[deacon] tick complete: awake=N skipped=M budget_remaining=Xs" per cycle.
 
-**Depends on:** 1.2
+**Depends on:** 0.1, 1.2
 **PRs:** 2
 
 ### 1.9 — Auto-scaling Employee pool (bacteria)
 
-Self-organizing, no Witness in Project 1. An Employee's hook crossing a queue-depth threshold triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Full Witness role arrives in Project 3.
+Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Full Witness role arrives in Project 3.
 
-**Scope:** bacteria logic, queue-depth monitoring, spawn/collapse primitives, name recycling.
+**Queue depth via Chit queries.** Instead of maintaining a separate in-memory queue data structure, bacteria reads Chit state: `cc-cli chit list --type task --status active --assignee-role backend-engineer` returns active Task Chits for a role; `cc-cli chit list --type casket --scope 'agent:backend-engineer/*' --field-has current_step` tells us how many Employees of that role are busy. Split when active Chit count > idle Employee count by threshold. Collapse when idle Employees > 1 and all idle for > N minutes.
+
+**First-session self-naming.** When bacteria spawns a new Employee, the role-resolver allocates a slot without a name; first dispatch prompts the Employee to choose a name (as per Decisions Made section). Name persists to the Employee's Member record + attribution.
+
+**Scope:** bacteria logic driven by Chit queries, spawn/collapse primitives, name self-choice flow, role-pool bookkeeping.
+
 **File paths:**
-- `packages/daemon/src/bacteria.ts` (new: watches Employees' Caskets; on threshold crossing triggers split)
+- `packages/daemon/src/bacteria.ts` (new: reads Chit state for queue depth, decides split/collapse)
 - `packages/daemon/src/role-resolver.ts` (from 1.4 — extended to handle auto-spawn triggers)
-- `packages/shared/src/types/member.ts` (add role-pool metadata if needed — e.g. max-pool-size though we're not enforcing cap v1)
-- `packages/tui/src/components/member-sidebar.tsx` (aggregate Employees by role, show counts)
+- `packages/shared/src/types/member.ts` (add role-pool metadata if needed; name=null state for freshly-spawned Employees)
+- `packages/tui/src/components/member-sidebar.tsx` (aggregate Employees by role, show counts; use Chit query for live data)
 - `packages/daemon/src/process-manager.ts` (spawn/decommission lifecycle hooks)
+- Employee first-session prompt extension (via SOUL template or dedicated first-dispatch fragment): "welcome — pick your name in the spirit of your role"
 
 **Test strategy:**
-- Unit: bacteria decision logic — "2 tasks queued → split? yes; 0 tasks → collapse? yes after idle-timeout."
-- Unit: name self-choice — first dispatch of new Employee prompts for name, persists to slot.
-- Integration: sling 3 tasks to a single-Employee role; verify second Employee spawns; verify tasks distributed.
-- Integration: after work completes, verify one of two idle Employees decommissions after the idle-timeout.
-- Edge cases: race-condition test — two slings arrive near-simultaneously; one Employee handles both or a split happens cleanly, not both.
+- Unit: bacteria decision logic — queue-depth threshold test, idle-collapse threshold test.
+- Unit: name self-choice — first dispatch of new Employee captures chosen name, persists; subsequent dispatches use the name.
+- Integration: sling 3 Task Chits to a single-Employee role; verify second Employee spawns; verify Task Chits distributed to two Caskets.
+- Integration: after work completes, verify one of two idle Employees decommissions after idle-timeout.
+- Edge cases: race-condition test — two slings arrive near-simultaneously; one Employee handles both or split happens cleanly, no Chit assigned to two Caskets.
 
-**Depends on:** 1.1, 1.2, 1.4 (role slinging), 1.8
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role slinging), 1.8 (Deacon for wake)
 **PRs:** 3
 
 **Project 1 ship criterion:** an Employee can be slung a 5-step task, execute each step in its own fresh session, cycle between steps, complete the task, return to idle with sandbox preserved. A Partner can hold a 2-hour conversation with the founder, compact at threshold, continue uninterrupted.
