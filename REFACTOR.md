@@ -10,7 +10,7 @@ Today Mark and Claude diagnosed what's actually wrong with Claude Corp, not just
 
 The surface problems: agents silent-exit, sessions overflow, CEO loses its place mid-task, Backend Engineer marks incomplete work as done, chains break, nobody restarts anything except the human, CEO needs to be babysat, the coding team needs to be babysat, nothing is self-healing.
 
-The real problem: **Claude Corp has the vocabulary of a peacock and the substance of a sparrow.** We named the right primitives (Casket, Hand, Blueprint, SOUL, Witness, Culture), but none of them deliver what their names promise. Casket is a folder of four files to scan, not a hook to a current step. Hand is a slightly nicer @mention, not durable slinging. Blueprints are runbooks the CEO reads, not executable workflow chains. SOUL.md is a template installed on every hire — which means no agent has ever *grown* a soul.
+The real problem: **Claude Corp has the vocabulary of a peacock and the substance of a sparrow.** We named the right primitives (Casket, Hand, Blueprint, SOUL, Witness, Culture), but none of them deliver what their names promise. Casket is a folder of four files to scan, not a hook to a current step. Hand is a slightly nicer @mention, not durable forwarding. Blueprints are runbooks the CEO reads, not executable workflow chains. SOUL.md is a template installed on every hire — which means no agent has ever *grown* a soul.
 
 The deepest realization: **philosophy can't be installed, it has to be earned.** The current system hands every agent a soul at birth, which is exactly why those souls are hollow. Real philosophy lives in accumulated witnessed experience, compounded into durable memory, cited in future decisions. That mechanism doesn't exist yet.
 
@@ -72,7 +72,7 @@ The single biggest structural change. Today, every agent is treated as a persist
   - 15-second blocking budget — Project 1.8 Deacon / Project 3.3 auto-recovery enforce this for autoemon ticks
   - atomicfile pattern (tempfile + rename for crash-safe writes) — Project 0.1 uses this for all Chit writes
   - Wisp 4-signal promotion — Project 0.6 implements this for ephemeral Chits
-  - Handoff-as-tool in Claude Corp terms = `cc-cli escalate --to <partner> --reason "..."` — Project 1.4 extends sling with escalate semantics
+  - Handoff-as-tool in Claude Corp terms = `cc-cli escalate --to <partner> --reason "..."` — Project 1.4 extends hand with escalate semantics
 
 ---
 
@@ -195,7 +195,7 @@ Each type registers its configuration:
 - `observation` — **ephemeral by default**, 4-signal promotion to permanent (see 0.6): (a) referenced by permanent Chit, (b) commented on, (c) tagged `keep`, (d) aged past TTL without resolution (failure path, not promotion).
 - `casket` — non-ephemeral, one per agent (`id: casket-<agent-slug>`), only `fields.casket.current_step` matters functionally.
 - `handoff` — ephemeral always, destroyed once read by successor session (Dredge consumes it and burns it).
-- `dispatch-context` — ephemeral, tracks an in-flight dispatch (Gas Town's sling-context pattern); burns on dispatch completion.
+- `dispatch-context` — ephemeral, tracks an in-flight dispatch between agents; burns on dispatch completion.
 - `pre-brain-entry` — ephemeral by default at the role level; auto-promotes to permanent via 4-signal rule and becomes part of the role's distilled pre-BRAIN library.
 - `step-log` — non-ephemeral (Temporal memoization pattern), one per Task-execution phase, used for crash recovery.
 
@@ -577,36 +577,42 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit), 1.2 (Casket)
 **PRs:** 2
 
-### 1.4 — Hand: real slinging (incl. role-level slinging)
+### 1.4 — Hand: full rewrite for durable chit forwarding
 
-`cc-cli sling --target <slug-or-role> --chit <id>` assigns a Chit (task, contract, or any work-Chit type) to the target. Durable via Chit operations — no chat delivery required.
+**Hand is not a new primitive — it's the name we already have, for the mechanism that failed. The old Hand was chat delivery: a slightly nicer @mention, routed by the daemon but still just a channel message, with no durable target state, no guarantee the recipient ever saw it, no way to inspect the queue without scrolling. The name was right; the mechanism was wrong. This sub-project keeps the name and rewrites the mechanism from scratch on top of Chits + Casket. The old Hand code path dies when this ships — no parallel paths.**
 
-**What sling actually does.** For a slot target (named Employee or Partner), update the target's Casket Chit: `fields.casket.current_step = <slung-chit-id>`. For a role target, resolve to an Employee slot via role-resolver and do the same. All operations are Chit updates, not bespoke file writes. The DM can announce "you got slung chit-X" for founder visibility (a message Chit of type=message, or a plain channel message), but the *work* lives in the Casket Chit.
+`cc-cli hand --to <slug-or-role> --chit <id>` assigns a Chit (task, contract, or any work-Chit type) to the target. Durable via Chit operations — no chat delivery required.
+
+**What hand actually does.** For a slot target (named Employee or Partner), update the target's Casket Chit: `fields.casket.current_step = <handed-chit-id>`. For a role target, resolve to an Employee slot via role-resolver and do the same. All operations are Chit updates, not bespoke file writes. A channel/DM announcement can post "chit-X is on your hand now" for founder visibility, but the *work* lives in the Casket Chit — the announcement is optional observability, not the delivery mechanism.
 
 **Two target modes:**
-- **Slot slinging:** `--target toast` — direct to a specific named Employee or Partner. Chit lands on their Casket.
-- **Role slinging:** `--target backend-engineer` — daemon resolves via role-resolver to the role's Employee pool:
-  - If exactly one Employee of that role is idle → land on their Casket.
-  - If all Employees of that role are busy but queue depth still OK → land on the least-loaded one's Casket (bacteria-split triggers when threshold crossed, per 1.9).
-  - If no Employees of that role exist yet → bacteria spawns the first one and lands the Chit.
-- Partners-by-role are slot targets, not role targets. Slinging to a Partner is always named.
+- **Slot hand:** `--to toast` — direct to a specific named Employee or Partner. Chit lands on their Casket.
+- **Role hand:** `--to backend-engineer` — daemon resolves via role-resolver to the role's Employee pool:
+  - If exactly one Employee of that role is idle → lands on their Casket.
+  - If all Employees of that role are busy but queue depth still OK → lands on the least-loaded one's Casket (bacteria-split triggers when threshold crossed, per 1.9).
+  - If no Employees of that role exist yet → bacteria spawns the first one and the Chit lands on that new Casket.
+- Partners-by-role are slot targets, not role targets. Handing to a Partner is always named.
 
-**Related: `cc-cli escalate --to <partner> --reason "..."`** — Employee-only shortcut. Creates a Chit of type=escalation (ephemeral, references the current work Chit), slings it to the named Partner. Replaces the Swarm-style "handoff-as-function-return" with a cc-cli command Employees invoke when they hit something above their pay grade.
+**Related: `cc-cli escalate --to <partner> --reason "..."`** — Employee-only shortcut. Creates a Chit of type=escalation (ephemeral, references the current work Chit), hands it to the named Partner. Replaces the Swarm-style "handoff-as-function-return" with a cc-cli command Employees invoke when they hit something above their pay grade.
 
-**Scope:** sling command, Casket-Chit update, role resolution, escalate command, announcement pattern.
+**Delete parallel paths.** The old Hand (chat @mention dispatch, special-cased routing, whatever legacy "hand" commands exist in cc-cli or the daemon) dies as part of this sub-project. Not deprecated — deleted. Refactor principle: no vocabulary without capacity, and no two mechanisms under one name.
+
+**Scope:** hand command, Casket-Chit update, role resolution, escalate command, announcement pattern, removal of legacy Hand path.
 
 **File paths:**
-- `packages/cli/src/commands/sling.ts` (new)
+- `packages/cli/src/commands/hand.ts` (new — full rewrite; any legacy file at this path gets replaced in its entirety)
 - `packages/cli/src/commands/escalate.ts` (new)
-- `packages/cli/src/index.ts` (register both)
-- `packages/daemon/src/api.ts` (new `/sling` and `/escalate` endpoints for CLI-to-daemon + daemon-internal)
+- `packages/cli/src/index.ts` (register both; remove any legacy Hand registration)
+- `packages/daemon/src/api.ts` (new `/hand` and `/escalate` endpoints for CLI-to-daemon + daemon-internal; remove any legacy Hand endpoints)
 - `packages/daemon/src/role-resolver.ts` (new: resolve role name → Employee slot via members.json + Casket query)
+- `packages/daemon/src/router.ts` (remove legacy Hand-as-@mention routing if that codepath exists)
 
 **Test strategy:**
 - Unit: role resolver picks idle Employee over busy one; picks least-loaded when all busy; returns null when role has zero Employees (triggers bacteria spawn at caller).
-- Integration: sling to role with zero Employees triggers bacteria spawn; Chit lands on new Employee.
-- Integration: sling to named Partner updates their Casket; DM announcement posted.
+- Integration: hand to role with zero Employees triggers bacteria spawn; Chit lands on new Employee.
+- Integration: hand to named Partner updates their Casket; DM announcement posted.
 - Integration: Employee invokes `cc-cli escalate`; escalation Chit created, target Partner's Casket updated.
+- Regression: legacy Hand @mention path does NOT respond — it's been removed, not coexisting. Grep confirms zero references to the old codepath outside changelog/migration notes.
 
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.3 (chain)
 **PRs:** 3-4
@@ -700,7 +706,7 @@ Pulse today is a liveness check — "HEARTBEAT: check your inbox." That's noise.
 **Test strategy:**
 - Unit: Deacon's decision-to-nudge returns false for Caskets with null current_step.
 - Unit: 15-second budget enforces yield; timeout test simulates slow tick, verifies it releases.
-- Integration: agent with no Casket work → Deacon does not dispatch. Sling work to them → Deacon dispatches with the right prompt (mentions the Task Chit id + title).
+- Integration: agent with no Casket work → Deacon does not dispatch. Hand work to them → Deacon dispatches with the right prompt (mentions the Task Chit id + title).
 - Observability: daemon log shows "[deacon] tick complete: awake=N skipped=M budget_remaining=Xs" per cycle.
 
 **Depends on:** 0.1, 1.2
@@ -727,11 +733,11 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 **Test strategy:**
 - Unit: bacteria decision logic — queue-depth threshold test, idle-collapse threshold test.
 - Unit: name self-choice — first dispatch of new Employee captures chosen name, persists; subsequent dispatches use the name.
-- Integration: sling 3 Task Chits to a single-Employee role; verify second Employee spawns; verify Task Chits distributed to two Caskets.
+- Integration: hand 3 Task Chits to a single-Employee role; verify second Employee spawns; verify Task Chits distributed to two Caskets.
 - Integration: after work completes, verify one of two idle Employees decommissions after idle-timeout.
-- Edge cases: race-condition test — two slings arrive near-simultaneously; one Employee handles both or split happens cleanly, no Chit assigned to two Caskets.
+- Edge cases: race-condition test — two hands arrive near-simultaneously; one Employee handles both or split happens cleanly, no Chit assigned to two Caskets.
 
-**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role slinging), 1.8 (Deacon for wake)
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.8 (Deacon for wake)
 **PRs:** 3
 
 **Project 1 ship criterion:** an Employee can be slung a 5-step task, execute each step in its own fresh session, cycle between steps, complete the task, return to idle with sandbox preserved. A Partner can hold a 2-hour conversation with the founder, compact at threshold, continue uninterrupted.
@@ -751,7 +757,7 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 - Blueprint parser in `packages/shared/src/blueprints/` — validates structure, checks DAG (no cycles).
 - "Cooking" logic: `cc-cli blueprint cook --blueprint <name> --project <id>` instantiates a blueprint into a real Contract with real Task records. Variable substitution at cook time (template `{feature}` → "fire-command").
 - Existing blueprint files (`packages/shared/src/blueprints/onboard-agent.md` and co.) get migrated to the new structured format.
-- CEO command: `cc-cli contract start --blueprint ship-feature --vars feature=fire` creates the Contract + Tasks and optionally slings to an assigned role.
+- CEO command: `cc-cli contract start --blueprint ship-feature --vars feature=fire` creates the Contract + Tasks and optionally hands to an assigned role.
 
 **Acceptance criteria.**
 - Run `cc-cli blueprint cook ship-feature --project test --vars feature=fire` → produces a Contract with 5-10 Tasks in the DAG defined by the blueprint.
@@ -866,7 +872,7 @@ Each blueprint tested against a real use case before landing.
 - Refinery processes queue serially: read top-scored queued Chit → checkout branch → rebase onto main → run tests → merge if clean → flip Chit to `status: merged` → close the referenced Contract.
 - Conflict handling:
   - Simple conflict (false positive — files touched by one side only) → resolve automatically, retain `status: processing`.
-  - Real conflict → flip Chit to `status: conflict`, create a conflict-resolution Task Chit on the Contract's assigned Employee's Casket (via standard sling from 1.4), move on to next submission. When Employee closes conflict-resolution, Refinery flips the submission Chit back to `status: queued` with incremented retry counter.
+  - Real conflict → flip Chit to `status: conflict`, create a conflict-resolution Task Chit on the Contract's assigned Employee's Casket (via standard hand from 1.4), move on to next submission. When Employee closes conflict-resolution, Refinery flips the submission Chit back to `status: queued` with incremented retry counter.
 - Refinery is a Partner, has its own workspace, compacts like any Partner.
 - TUI shows the merge queue as a live Chit-query view (Project 6.3 wires `cc-cli chit list --type merge-submission --status queued` into the sidebar).
 
@@ -1068,7 +1074,7 @@ Each blueprint tested against a real use case before landing.
 - Old Blueprint runbook reader / `cc-cli blueprints run` (replaced by blueprint-as-molecule cooking in 2.1)
 - Fragment injection call for claude-code agents (removed in 1.5); keep fragments for OpenClaw
 - Old Casket-as-four-files structure if migrated to single-pointer hook
-- Old Hand-as-chat-announcement if migrated to durable sling
+- Old Hand-as-chat-announcement (the legacy chat-delivery path; replaced by durable chit-based Hand in 1.4)
 - Dead code paths: Jack mode if it became redundant with Casket-hooked dispatch
 - Dead fragments not migrated to CLAUDE.md
 - Old SOUL-as-template hiring code if replaced by earned-soul via promotion
@@ -1180,7 +1186,7 @@ Still being discussed: the two remaining open questions (Partner demotion, voice
 - Project 1 sub-projects (1.1 through 1.9) have concrete file paths, test strategy, and dependencies spelled out. Ready to pick up and execute.
 - Projects 2 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
 
-**Immediate next step:** start Project 0.1 (Chit core — schema, type registry, read/write primitives, atomic-write helper). Project 0 ships before any of Project 1's sub-projects begin, because Casket, Chain semantics, Hand-slinging, Dredge handoff, pre-BRAIN accumulation all become Chit types rather than bespoke file formats. Project 1's scope shrinks somewhat because much of what it would have built (new file shapes, new read/write code paths) disappears into "add a type to the Chit registry."
+**Immediate next step:** start Project 0.1 (Chit core — schema, type registry, read/write primitives, atomic-write helper). Project 0 ships before any of Project 1's sub-projects begin, because Casket, Chain semantics, Hand, Dredge handoff, pre-BRAIN accumulation all become Chit types rather than bespoke file formats. Project 1's scope shrinks somewhat because much of what it would have built (new file shapes, new read/write code paths) disappears into "add a type to the Chit registry."
 
 Claude (not the corp) drives the build — the corp hasn't earned that trust yet. Eventually, once the corp works well on this new substrate, future refactors can be corp-driven. But not this one.
 
