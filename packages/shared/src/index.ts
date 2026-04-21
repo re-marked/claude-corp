@@ -91,6 +91,12 @@ export {
 export type { TaskMigrationResult, TaskMigrationOpts } from './migrations/migrate-tasks.js';
 
 export {
+  migrateContractsToChits,
+  contractToChit,
+} from './migrations/migrate-contracts.js';
+export type { ContractMigrationResult, ContractMigrationOpts } from './migrations/migrate-contracts.js';
+
+export {
   chitId,
   casketChitId,
   isChitIdFormat,
