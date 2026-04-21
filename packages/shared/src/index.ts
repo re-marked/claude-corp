@@ -61,6 +61,7 @@ export {
   tempSuffix,
 } from './id.js';
 export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
+export { atomicWriteSync } from './atomic-write.js';
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 
