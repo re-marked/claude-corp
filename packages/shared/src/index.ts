@@ -92,6 +92,8 @@ export {
   readChit,
   updateChit,
   closeChit,
+  promoteChit,
+  archiveChit,
   queryChits,
   findChitById,
   checkConcurrentModification,

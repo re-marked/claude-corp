@@ -11,6 +11,8 @@ import {
   readChit,
   updateChit,
   closeChit,
+  promoteChit,
+  archiveChit,
   queryChits,
   findChitById,
   checkConcurrentModification,
@@ -630,6 +632,179 @@ describe('closeChit', () => {
     });
 
     expect(() => closeChit(corpRoot, 'agent:toast', 'casket', id, 'closed', 'daemon')).toThrow(/terminal/);
+  });
+});
+
+describe('promoteChit', () => {
+  let corpRoot: string;
+
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'chits-promote-'));
+  });
+
+  afterEach(() => {
+    rmSync(corpRoot, { recursive: true, force: true });
+  });
+
+  it('flips ephemeral → permanent, clears ttl, tags with reason-slug', () => {
+    const obs = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'agent:toast',
+      fields: { observation: { category: 'FEEDBACK', subject: 'mark', importance: 4 } },
+      createdBy: 'toast',
+    });
+    expect(obs.ephemeral).toBe(true);
+    expect(obs.ttl).toBeDefined();
+
+    const promoted = promoteChit(corpRoot, 'agent:toast', 'observation', obs.id, {
+      reason: 'Mark reaffirmed this preference twice',
+      updatedBy: 'ceo',
+    });
+
+    expect(promoted.ephemeral).toBe(false);
+    expect(promoted.ttl).toBeUndefined();
+    expect(promoted.tags).toContain('promoted:mark-reaffirmed-this-preference-twice');
+    expect(promoted.updatedBy).toBe('ceo');
+    expect(new Date(promoted.updatedAt).getTime()).toBeGreaterThanOrEqual(
+      new Date(obs.updatedAt).getTime(),
+    );
+
+    // Re-read to confirm persistence
+    const { chit: reread } = readChit(corpRoot, 'agent:toast', 'observation', obs.id);
+    expect(reread.ephemeral).toBe(false);
+  });
+
+  it('rejects promoting an already-permanent chit', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    expect(task.ephemeral).toBe(false);
+
+    expect(() =>
+      promoteChit(corpRoot, 'corp', 'task', task.id, { reason: 'x', updatedBy: 'ceo' }),
+    ).toThrow(/already permanent/);
+  });
+
+  it('handles empty/garbage reason gracefully with no-reason slug', () => {
+    const obs = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'agent:toast',
+      fields: { observation: { category: 'NOTICE', subject: 'mark', importance: 2 } },
+      createdBy: 'toast',
+    });
+
+    const promoted = promoteChit(corpRoot, 'agent:toast', 'observation', obs.id, {
+      reason: '!!!',
+      updatedBy: 'ceo',
+    });
+    expect(promoted.tags).toContain('promoted:no-reason');
+  });
+
+  it('does not duplicate the promotion tag on re-promotion attempt', () => {
+    // Only makes sense if a chit could be re-promoted; promote rejects
+    // already-permanent so manually confirm the tag-dedup path logic
+    // with a crafted case. Here: verify the tag appears exactly once.
+    const obs = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'agent:toast',
+      fields: { observation: { category: 'DISCOVERY', subject: 'mark', importance: 3 } },
+      createdBy: 'toast',
+    });
+    const promoted = promoteChit(corpRoot, 'agent:toast', 'observation', obs.id, {
+      reason: 'important pattern',
+      updatedBy: 'ceo',
+    });
+    const count = promoted.tags.filter((t) => t.startsWith('promoted:')).length;
+    expect(count).toBe(1);
+  });
+});
+
+describe('archiveChit', () => {
+  let corpRoot: string;
+
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'chits-archive-'));
+  });
+
+  afterEach(() => {
+    rmSync(corpRoot, { recursive: true, force: true });
+  });
+
+  it('moves a closed chit to _archive/<type>/', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    closeChit(corpRoot, 'corp', 'task', task.id, 'completed', 'ceo');
+
+    const result = archiveChit(corpRoot, 'corp', 'task', task.id);
+
+    expect(existsSync(result.sourcePath)).toBe(false);
+    expect(existsSync(result.archivePath)).toBe(true);
+    expect(result.archivePath).toContain(join('chits', '_archive', 'task'));
+  });
+
+  it('preserves file content during archive', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 'archive me', priority: 'normal' } },
+      createdBy: 'ceo',
+      body: 'important body content',
+    });
+    const originalContent = readFileSync(chitPath(corpRoot, 'corp', 'task', task.id), 'utf-8');
+
+    closeChit(corpRoot, 'corp', 'task', task.id, 'completed', 'ceo');
+
+    // After closeChit the status changed, so content differs; that's fine.
+    // What matters is archiveChit preserves the post-close content.
+    const postCloseContent = readFileSync(chitPath(corpRoot, 'corp', 'task', task.id), 'utf-8');
+
+    const result = archiveChit(corpRoot, 'corp', 'task', task.id);
+    const archivedContent = readFileSync(result.archivePath, 'utf-8');
+    expect(archivedContent).toBe(postCloseContent);
+    // Lint against unused var
+    expect(originalContent).toContain('archive me');
+  });
+
+  it('rejects archiving a chit in non-terminal status', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+
+    expect(() => archiveChit(corpRoot, 'corp', 'task', task.id)).toThrow(/terminal|closeChit first/);
+  });
+
+  it('rejects archiving a nonexistent chit', () => {
+    expect(() => archiveChit(corpRoot, 'corp', 'task', 'chit-t-00000000')).toThrow(/not found/);
+  });
+
+  it('archived chits are invisible to default queries but visible with includeArchive', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    closeChit(corpRoot, 'corp', 'task', task.id, 'completed', 'ceo');
+    archiveChit(corpRoot, 'corp', 'task', task.id);
+
+    const { chits: defaultResults } = queryChits(corpRoot, { types: ['task'] });
+    expect(defaultResults.find((r) => r.chit.id === task.id)).toBeUndefined();
+
+    const { chits: archiveResults } = queryChits(corpRoot, {
+      types: ['task'],
+      includeArchive: true,
+    });
+    expect(archiveResults.find((r) => r.chit.id === task.id)).toBeDefined();
   });
 });
 

@@ -17,7 +17,7 @@
  * (corp / agent:<slug> / project:<name> / team:<project>/<team>).
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -457,6 +457,125 @@ export function updateChit<T extends ChitTypeId>(
 }
 
 // ─── Close ──────────────────────────────────────────────────────────
+
+/**
+ * Promote an ephemeral chit to permanent. Flips ephemeral=true → false,
+ * clears ttl, bumps updatedAt, adds a provenance marker to tags
+ * (`promoted:<reason-slug>` so the promotion reason is queryable).
+ *
+ * Only valid on ephemeral chits — promoting a permanent chit is a
+ * caller error (nothing to promote) and throws ChitValidationError.
+ *
+ * This is the manual promotion path (founder or agent calling via
+ * cc-cli). The 4-signal automatic promotion (Project 0.6 lifecycle
+ * scanner) also uses this function when a signal fires.
+ */
+export function promoteChit<T extends ChitTypeId>(
+  corpRoot: string,
+  scope: ChitScope,
+  type: T,
+  id: string,
+  opts: { reason: string; updatedBy: string },
+): Chit<T> {
+  const { chit: current, path } = readChit(corpRoot, scope, type, id);
+
+  if (!current.ephemeral) {
+    throw new ChitValidationError(
+      `chit ${id} is already permanent — nothing to promote`,
+      'ephemeral',
+    );
+  }
+
+  // Provenance: add `promoted:<reason-slug>` tag so the promotion is queryable.
+  const reasonSlug = opts.reason
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  const promotionTag = `promoted:${reasonSlug || 'no-reason'}`;
+  const newTags = current.tags.includes(promotionTag)
+    ? current.tags
+    : [...current.tags, promotionTag];
+
+  // Manual flip bypasses the type validator (we're modifying common fields
+  // only, not fields.<type>), but we write through atomic + pre-rename check.
+  checkConcurrentModification(path, current.updatedAt);
+
+  const updated = {
+    ...current,
+    ephemeral: false,
+    ttl: undefined,
+    tags: newTags,
+    updatedBy: opts.updatedBy,
+    updatedAt: new Date().toISOString(),
+  } as Chit<T>;
+
+  const { body: currentBody } = readChit(corpRoot, scope, type, id);
+  const content = stringifyFrontmatter(updated as unknown as Record<string, unknown>, currentBody);
+  atomicWriteSync(path, content);
+
+  return updated;
+}
+
+/**
+ * Move a closed/terminal chit to `<scope>/chits/_archive/<type>/<id>.md`.
+ * Archiving keeps the corp's working-set queries fast by removing
+ * rarely-read history from the default scan, while preserving the
+ * record for audit (queries with includeArchive=true still find it).
+ *
+ * Archive validates the chit is in a terminal status — archiving
+ * active work would obscure real in-progress records. Callers should
+ * closeChit first, then archiveChit.
+ *
+ * The move is two-step: read current content, atomicWriteSync at the
+ * archive path, rmSync the source. Not transactional across the two
+ * writes, but the archive path is always the canonical record after
+ * the call succeeds (original is removed last).
+ */
+export function archiveChit<T extends ChitTypeId>(
+  corpRoot: string,
+  scope: ChitScope,
+  type: T,
+  id: string,
+): { sourcePath: string; archivePath: string } {
+  const entry = getChitType(type);
+  if (!entry) throw new ChitValidationError(`unknown chit type: ${type}`, 'type');
+
+  const sourcePath = chitPath(corpRoot, scope, type, id);
+  if (!existsSync(sourcePath)) {
+    throw new Error(`chit not found: ${sourcePath}`);
+  }
+
+  const { chit: current } = readChit(corpRoot, scope, type, id);
+  if (!entry.terminalStatuses.includes(current.status)) {
+    throw new ChitValidationError(
+      `chit ${id} is in non-terminal status '${current.status}' — call closeChit first`,
+      'status',
+    );
+  }
+
+  // Archive path mirrors the source path with _archive inserted as a
+  // sibling of the type directory (<scope>/chits/_archive/<type>/<id>.md).
+  const archivePath = join(
+    corpRoot,
+    scopeToPath(scope),
+    'chits',
+    '_archive',
+    type,
+    `${id}.md`,
+  );
+
+  // Read the source once, write to archive location atomically, then
+  // remove the source. Order matters: if the archive-write fails, the
+  // source is untouched; if the source-remove fails, the archive copy
+  // is already the canonical record.
+  const raw = readFileSync(sourcePath, 'utf-8');
+  atomicWriteSync(archivePath, raw);
+  rmSync(sourcePath);
+
+  return { sourcePath, archivePath };
+}
 
 /**
  * Transition a chit to a terminal status. Thin wrapper over updateChit
