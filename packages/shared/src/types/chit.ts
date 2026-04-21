@@ -160,6 +160,10 @@ export interface TaskFields {
   loopId?: string | null;
   /** Fine-grained workflow state (pending/assigned/in_progress/blocked/completed/failed/cancelled). Coexists with chit.status; see TaskWorkflowStatus docstring. */
   workflowStatus?: TaskWorkflowStatus | null;
+  /** Project.id the task belongs to. New tasks prefer `scope=project:<name>`; this field preserves the link for migrated tasks that pre-date scope-encoding. */
+  projectId?: string | null;
+  /** Team.id the task belongs to. Same legacy-link role as projectId. */
+  teamId?: string | null;
 }
 
 export interface ContractFields {

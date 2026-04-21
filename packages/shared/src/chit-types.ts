@@ -170,6 +170,8 @@ function validateTask(fields: unknown): void {
       'cancelled',
     ] as const);
   }
+  if (f.projectId !== undefined) requireStringOrNull(f.projectId, 'task.projectId');
+  if (f.teamId !== undefined) requireStringOrNull(f.teamId, 'task.teamId');
 }
 
 function validateContract(fields: unknown): void {

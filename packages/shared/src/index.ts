@@ -85,6 +85,12 @@ export {
 } from './chit-types.js';
 export type { ChitTypeEntry } from './chit-types.js';
 export {
+  migrateTasksToChits,
+  taskToChit,
+} from './migrations/migrate-tasks.js';
+export type { TaskMigrationResult, TaskMigrationOpts } from './migrations/migrate-tasks.js';
+
+export {
   chitId,
   casketChitId,
   isChitIdFormat,
