@@ -269,6 +269,228 @@ describe('cc-cli chit create', () => {
   });
 });
 
+describe('cc-cli chit update', () => {
+  let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
+  let taskId: string;
+
+  beforeEach(async () => {
+    env = setupTempCorp();
+    const { stdout } = await runCli(
+      [
+        'chit',
+        'create',
+        '--type',
+        'task',
+        '--scope',
+        'corp',
+        '--title',
+        'update me',
+        '--field',
+        'priority=normal',
+      ],
+      { env: env.homeEnv },
+    );
+    taskId = stdout.trim();
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('updates status and records updatedBy', async () => {
+    const { exitCode, stdout, stderr } = await runCli(
+      ['chit', 'update', taskId, '--status', 'active', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+    expect(stdout).toMatch(/updated chit-t-/);
+
+    // Verify persistence via read
+    const read = await runCli(['chit', 'read', taskId, '--json'], { env: env.homeEnv });
+    const chit = JSON.parse(read.stdout).chit;
+    expect(chit.status).toBe('active');
+    expect(chit.updatedBy).toBe('ceo');
+  });
+
+  it('partially updates fields, preserving the rest', async () => {
+    const { exitCode, stderr } = await runCli(
+      [
+        'chit',
+        'update',
+        taskId,
+        '--set-field',
+        'priority=high',
+        '--set-field',
+        'assignee=backend',
+        '--from',
+        'ceo',
+      ],
+      { env: env.homeEnv },
+    );
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+
+    const read = await runCli(['chit', 'read', taskId, '--json'], { env: env.homeEnv });
+    const chit = JSON.parse(read.stdout).chit;
+    expect(chit.fields.task.priority).toBe('high');
+    expect(chit.fields.task.assignee).toBe('backend');
+    expect(chit.fields.task.title).toBe('update me'); // preserved
+  });
+
+  it('adds and removes tags', async () => {
+    // First add two tags
+    await runCli(
+      ['chit', 'update', taskId, '--add-tag', 'alpha', '--add-tag', 'beta', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    // Then remove one, add another
+    await runCli(
+      ['chit', 'update', taskId, '--add-tag', 'gamma', '--remove-tag', 'alpha', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    const read = await runCli(['chit', 'read', taskId, '--json'], { env: env.homeEnv });
+    const chit = JSON.parse(read.stdout).chit;
+    expect(chit.tags).toContain('beta');
+    expect(chit.tags).toContain('gamma');
+    expect(chit.tags).not.toContain('alpha');
+  });
+
+  it('appends body content with a separator', async () => {
+    // First set an initial body via replace-content
+    await runCli(
+      ['chit', 'update', taskId, '--replace-content', 'line one', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    // Then append
+    await runCli(
+      ['chit', 'update', taskId, '--append-content', 'line two', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    const read = await runCli(['chit', 'read', taskId, '--json'], { env: env.homeEnv });
+    const payload = JSON.parse(read.stdout);
+    expect(payload.body).toContain('line one');
+    expect(payload.body).toContain('line two');
+  });
+
+  it('rejects missing --from with non-zero exit', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'update', taskId, '--status', 'active'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/--from is required/);
+  });
+
+  it('surfaces concurrent modification with exit 4', async () => {
+    // Get current updatedAt, then call update with a stale expected value
+    const read = await runCli(['chit', 'read', taskId, '--json'], { env: env.homeEnv });
+    const chit = JSON.parse(read.stdout).chit;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    void chit.updatedAt; // sanity: it exists
+
+    const { exitCode, stderr } = await runCli(
+      [
+        'chit',
+        'update',
+        taskId,
+        '--status',
+        'active',
+        '--from',
+        'ceo',
+        '--expected-updated-at',
+        '2020-01-01T00:00:00.000Z',
+      ],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(4);
+    expect(stderr).toMatch(/concurrent modification/);
+  });
+
+  it('rejects --replace-content and --append-content together', async () => {
+    const { exitCode, stderr } = await runCli(
+      [
+        'chit',
+        'update',
+        taskId,
+        '--replace-content',
+        'x',
+        '--append-content',
+        'y',
+        '--from',
+        'ceo',
+      ],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/mutually exclusive/);
+  });
+});
+
+describe('cc-cli chit close', () => {
+  let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
+  let taskId: string;
+
+  beforeEach(async () => {
+    env = setupTempCorp();
+    const { stdout } = await runCli(
+      [
+        'chit',
+        'create',
+        '--type',
+        'task',
+        '--scope',
+        'corp',
+        '--title',
+        'close me',
+        '--field',
+        'priority=normal',
+      ],
+      { env: env.homeEnv },
+    );
+    taskId = stdout.trim();
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('closes a task with default status=completed', async () => {
+    const { exitCode, stdout, stderr } = await runCli(
+      ['chit', 'close', taskId, '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+    expect(stdout).toContain(`closed ${taskId}`);
+    expect(stdout).toContain('status=completed');
+  });
+
+  it('closes with a custom terminal status', async () => {
+    const { exitCode, stdout, stderr } = await runCli(
+      ['chit', 'close', taskId, '--status', 'failed', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+    expect(stdout).toContain('status=failed');
+  });
+
+  it('rejects non-terminal status (exit 2 from validator)', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'close', taskId, '--status', 'active', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(2);
+    expect(stderr).toMatch(/terminal/);
+  });
+
+  it('rejects missing --from', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'close', taskId],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/--from is required/);
+  });
+});
+
 describe('cc-cli chit read', () => {
   let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
   let taskId: string;

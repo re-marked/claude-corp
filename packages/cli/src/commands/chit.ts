@@ -30,6 +30,16 @@ export async function cmdChit(rawArgs: string[]): Promise<void> {
       await cmdChitRead(subArgs);
       break;
     }
+    case 'update': {
+      const { cmdChitUpdate } = await import('./chit/update.js');
+      await cmdChitUpdate(subArgs);
+      break;
+    }
+    case 'close': {
+      const { cmdChitClose } = await import('./chit/close.js');
+      await cmdChitClose(subArgs);
+      break;
+    }
     default: {
       console.error(`Unknown chit subcommand: ${subcommand}`);
       console.error('');
@@ -47,8 +57,8 @@ Usage: cc-cli chit <subcommand> [options]
 Subcommands:
   create    Create a new chit of a given type
   read      Read a chit by id (resolves scope automatically)
-  update    Update status, tags, fields, or body (coming)
-  close     Transition to a terminal status (coming)
+  update    Patch status, tags, links, fields, or body
+  close     Transition a chit to a terminal status
   list      Query chits with filters (coming)
   promote   Flip ephemeral → permanent (coming)
   archive   Move a closed chit to _archive/ (coming)
