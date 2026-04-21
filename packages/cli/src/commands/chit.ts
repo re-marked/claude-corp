@@ -40,6 +40,21 @@ export async function cmdChit(rawArgs: string[]): Promise<void> {
       await cmdChitClose(subArgs);
       break;
     }
+    case 'list': {
+      const { cmdChitList } = await import('./chit/list.js');
+      await cmdChitList(subArgs);
+      break;
+    }
+    case 'promote': {
+      const { cmdChitPromote } = await import('./chit/promote.js');
+      await cmdChitPromote(subArgs);
+      break;
+    }
+    case 'archive': {
+      const { cmdChitArchive } = await import('./chit/archive.js');
+      await cmdChitArchive(subArgs);
+      break;
+    }
     default: {
       console.error(`Unknown chit subcommand: ${subcommand}`);
       console.error('');
@@ -59,9 +74,9 @@ Subcommands:
   read      Read a chit by id (resolves scope automatically)
   update    Patch status, tags, links, fields, or body
   close     Transition a chit to a terminal status
-  list      Query chits with filters (coming)
-  promote   Flip ephemeral → permanent (coming)
-  archive   Move a closed chit to _archive/ (coming)
+  list      Query chits with filters (type, status, tag, scope, date)
+  promote   Flip an ephemeral chit to permanent
+  archive   Move a closed chit to _archive/
 
 Common flags:
   --from <member-id>     Author (required for agents; founder implied otherwise)

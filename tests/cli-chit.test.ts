@@ -491,6 +491,306 @@ describe('cc-cli chit close', () => {
   });
 });
 
+describe('cc-cli chit list', () => {
+  let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
+
+  beforeEach(async () => {
+    env = setupTempCorp();
+    // Seed a small corpus across scopes
+    await runCli(
+      ['chit', 'create', '--type', 'task', '--scope', 'corp', '--title', 't1', '--field', 'priority=high', '--tag', 'alpha'],
+      { env: env.homeEnv },
+    );
+    await runCli(
+      ['chit', 'create', '--type', 'task', '--scope', 'project:fire', '--title', 't2', '--field', 'priority=normal', '--tag', 'beta'],
+      { env: env.homeEnv },
+    );
+    await runCli(
+      ['chit', 'create', '--type', 'observation', '--scope', 'agent:toast', '--field', 'category=FEEDBACK', '--field', 'subject=mark', '--field', 'importance=4', '--tag', 'alpha'],
+      { env: env.homeEnv },
+    );
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('returns aligned table by default with header row', async () => {
+    const { exitCode, stdout, stderr } = await runCli(['chit', 'list'], { env: env.homeEnv });
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+    expect(stdout).toContain('ID');
+    expect(stdout).toContain('TYPE');
+    expect(stdout).toContain('STATUS');
+    expect(stdout).toContain('task');
+    expect(stdout).toContain('observation');
+    expect(stdout).toMatch(/3 chits/);
+  });
+
+  it('returns structured JSON with --json', async () => {
+    const { exitCode, stdout } = await runCli(['chit', 'list', '--json'], { env: env.homeEnv });
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(stdout);
+    expect(Array.isArray(payload.chits)).toBe(true);
+    expect(Array.isArray(payload.malformed)).toBe(true);
+    expect(payload.chits.length).toBe(3);
+    expect(payload.malformed.length).toBe(0);
+  });
+
+  it('filters by --type', async () => {
+    const { exitCode, stdout } = await runCli(
+      ['chit', 'list', '--type', 'task', '--json'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(stdout);
+    expect(payload.chits.length).toBe(2);
+    expect(payload.chits.every((c: { chit: { type: string } }) => c.chit.type === 'task')).toBe(true);
+  });
+
+  it('filters by --tag', async () => {
+    const { exitCode, stdout } = await runCli(
+      ['chit', 'list', '--tag', 'alpha', '--json'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(stdout);
+    expect(payload.chits.length).toBe(2); // t1 + observation
+  });
+
+  it('filters by --scope', async () => {
+    const { exitCode, stdout } = await runCli(
+      ['chit', 'list', '--scope', 'agent:toast', '--json'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(stdout);
+    expect(payload.chits.length).toBe(1);
+    expect(payload.chits[0].chit.type).toBe('observation');
+  });
+
+  it('respects --limit', async () => {
+    const { exitCode, stdout } = await runCli(
+      ['chit', 'list', '--limit', '2', '--json'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(stdout);
+    expect(payload.chits.length).toBe(2);
+  });
+
+  it('rejects invalid --sort value', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'list', '--sort', 'bogus'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/sort/);
+  });
+
+  it('rejects invalid --since duration', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'list', '--since', 'yesterday'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/since duration/);
+  });
+
+  it('rejects unknown --type', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'list', '--type', 'notreal'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/unknown chit type/);
+  });
+
+  it('surfaces malformed chits to stderr even on successful list', async () => {
+    // Drop a garbage file into the task scope that will fail parsing
+    const badPath = join(env.corpRoot, 'chits', 'task', 'chit-t-deadbeef.md');
+    writeFileSync(badPath, 'completely invalid', 'utf-8');
+
+    const { exitCode, stdout, stderr } = await runCli(
+      ['chit', 'list', '--type', 'task'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0); // list succeeds, just reports malformed
+    expect(stdout).toContain('task'); // valid tasks shown
+    expect(stderr).toMatch(/malformed/);
+    expect(stderr).toContain('chit-t-deadbeef.md');
+  });
+
+  it('shows a friendly message when nothing matches', async () => {
+    const { exitCode, stdout } = await runCli(
+      ['chit', 'list', '--tag', 'nonexistent-tag'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('(no chits match)');
+  });
+});
+
+describe('cc-cli chit promote', () => {
+  let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
+  let obsId: string;
+
+  beforeEach(async () => {
+    env = setupTempCorp();
+    const { stdout } = await runCli(
+      [
+        'chit',
+        'create',
+        '--type',
+        'observation',
+        '--scope',
+        'agent:toast',
+        '--field',
+        'category=FEEDBACK',
+        '--field',
+        'subject=mark',
+        '--field',
+        'importance=4',
+      ],
+      { env: env.homeEnv },
+    );
+    obsId = stdout.trim();
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('promotes an ephemeral observation to permanent', async () => {
+    const { exitCode, stdout, stderr } = await runCli(
+      ['chit', 'promote', obsId, '--reason', 'confirmed twice', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+    expect(stdout).toContain(`promoted ${obsId}`);
+    expect(stdout).toMatch(/promoted:confirmed-twice/);
+
+    // Verify via read
+    const read = await runCli(['chit', 'read', obsId, '--json'], { env: env.homeEnv });
+    const chit = JSON.parse(read.stdout).chit;
+    expect(chit.ephemeral).toBe(false);
+    expect(chit.tags).toContain('promoted:confirmed-twice');
+  });
+
+  it('rejects promoting an already-permanent chit (exit 2)', async () => {
+    await runCli(
+      ['chit', 'promote', obsId, '--reason', 'first', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'promote', obsId, '--reason', 'again', '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(2);
+    expect(stderr).toMatch(/already permanent/);
+  });
+
+  it('rejects missing --reason', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'promote', obsId, '--from', 'ceo'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/--reason is required/);
+  });
+
+  it('rejects missing --from', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'promote', obsId, '--reason', 'x'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/--from is required/);
+  });
+});
+
+describe('cc-cli chit archive', () => {
+  let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
+  let taskId: string;
+
+  beforeEach(async () => {
+    env = setupTempCorp();
+    const { stdout } = await runCli(
+      [
+        'chit',
+        'create',
+        '--type',
+        'task',
+        '--scope',
+        'corp',
+        '--title',
+        'archive me',
+        '--field',
+        'priority=normal',
+      ],
+      { env: env.homeEnv },
+    );
+    taskId = stdout.trim();
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('archives a closed chit, moves it to _archive/', async () => {
+    // First close
+    await runCli(['chit', 'close', taskId, '--from', 'ceo'], { env: env.homeEnv });
+
+    const { exitCode, stdout, stderr } = await runCli(
+      ['chit', 'archive', taskId],
+      { env: env.homeEnv },
+    );
+    expect(exitCode, `stderr: ${stderr}`).toBe(0);
+    expect(stdout).toContain(`archived ${taskId}`);
+    expect(stdout).toContain('_archive');
+
+    // Source should be gone
+    const sourcePath = join(env.corpRoot, 'chits', 'task', `${taskId}.md`);
+    expect(existsSync(sourcePath)).toBe(false);
+    // Archive should exist
+    const archivePath = join(env.corpRoot, 'chits', '_archive', 'task', `${taskId}.md`);
+    expect(existsSync(archivePath)).toBe(true);
+  });
+
+  it('archived chits are hidden from default list, visible with --include-archive', async () => {
+    await runCli(['chit', 'close', taskId, '--from', 'ceo'], { env: env.homeEnv });
+    await runCli(['chit', 'archive', taskId], { env: env.homeEnv });
+
+    const defaultList = await runCli(['chit', 'list', '--type', 'task', '--json'], { env: env.homeEnv });
+    const defaultPayload = JSON.parse(defaultList.stdout);
+    expect(defaultPayload.chits.find((c: { chit: { id: string } }) => c.chit.id === taskId)).toBeUndefined();
+
+    const archiveList = await runCli(
+      ['chit', 'list', '--type', 'task', '--include-archive', '--json'],
+      { env: env.homeEnv },
+    );
+    const archivePayload = JSON.parse(archiveList.stdout);
+    expect(archivePayload.chits.find((c: { chit: { id: string } }) => c.chit.id === taskId)).toBeDefined();
+  });
+
+  it('rejects archiving a non-terminal chit (exit 2)', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'archive', taskId],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(2);
+    expect(stderr).toMatch(/terminal|closeChit first/);
+  });
+
+  it('rejects archiving nonexistent chit', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['chit', 'archive', 'chit-t-00000000'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/not found/);
+  });
+});
+
 describe('cc-cli chit read', () => {
   let env: { corpRoot: string; homeEnv: Record<string, string>; cleanup: () => void };
   let taskId: string;
