@@ -91,6 +91,12 @@ export {
 export type { TaskMigrationResult, TaskMigrationOpts } from './migrations/migrate-tasks.js';
 
 export {
+  migrateContractsToChits,
+  contractToChit,
+} from './migrations/migrate-contracts.js';
+export type { ContractMigrationResult, ContractMigrationOpts } from './migrations/migrate-contracts.js';
+
+export {
   chitId,
   casketChitId,
   isChitIdFormat,
@@ -298,7 +304,7 @@ export type { HierarchyNode } from './hierarchy.js';
 
 // Projects
 export { createProject, listProjects, getProject, getProjectByName } from './projects.js';
-export { createContract, readContract, updateContract, listContracts, listAllContracts, contractPath, getContractProgress } from './contracts.js';
+export { createContract, readContract, updateContract, listContracts, listAllContracts, contractPath, getContractProgress, findContractById } from './contracts.js';
 export type { CreateContractOpts, ContractFilter, ContractWithBody } from './contracts.js';
 export { listBlueprints, getBlueprint, installDefaultBlueprints } from './blueprints.js';
 export type { BlueprintMeta, Blueprint } from './blueprints.js';

@@ -189,6 +189,8 @@ export interface ContractFields {
   reviewNotes?: string | null;
   /** How many times the Warden rejected this contract before approval. Non-negative integer. */
   rejectionCount?: number;
+  /** Project.id the contract belongs to. Contracts always live under a project; this preserves the link through migration and for callers that reverse-resolve to Contract.projectId. The contract's scope (project:<name>) encodes the project name in path; this field carries the id. */
+  projectId?: string | null;
 }
 
 export interface ObservationFields {

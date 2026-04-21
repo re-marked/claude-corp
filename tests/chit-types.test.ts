@@ -222,7 +222,20 @@ describe('validator: contract', () => {
         reviewedBy: null,
         reviewNotes: null,
         rejectionCount: 0,
+        projectId: 'proj-fire',
       }),
+    ).not.toThrow();
+  });
+
+  it('rejects non-string projectId', () => {
+    expect(() =>
+      entry.validate({ title: 'x', goal: 'y', taskIds: [], projectId: 42 }),
+    ).toThrow(/projectId/);
+  });
+
+  it('accepts null projectId (corp-level contract)', () => {
+    expect(() =>
+      entry.validate({ title: 'x', goal: 'y', taskIds: [], projectId: null }),
     ).not.toThrow();
   });
 

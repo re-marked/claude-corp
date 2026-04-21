@@ -189,6 +189,7 @@ function validateContract(fields: unknown): void {
   if (f.reviewedBy !== undefined) requireStringOrNull(f.reviewedBy, 'contract.reviewedBy');
   if (f.reviewNotes !== undefined) requireStringOrNull(f.reviewNotes, 'contract.reviewNotes');
   optionalNonNegativeInteger(f.rejectionCount, 'contract.rejectionCount');
+  if (f.projectId !== undefined) requireStringOrNull(f.projectId, 'contract.projectId');
 }
 
 function validateObservation(fields: unknown): void {
