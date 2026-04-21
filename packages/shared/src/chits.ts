@@ -144,6 +144,24 @@ function validateChitLinks(field: 'references' | 'dependsOn', ids: readonly stri
 }
 
 /**
+ * Verify the chit at `path` still has the expected updatedAt — if it
+ * advanced, a concurrent writer has landed and the caller must abort
+ * and retry. Extracted as an exported helper so multi-step operations
+ * (e.g., cc-cli pipelines reading many chits, computing updates, then
+ * writing a batch) can re-verify each target before their writes. Also
+ * what updateChit uses for its pre-rename safety net.
+ *
+ * Throws ChitConcurrentModificationError on mismatch; silent on match.
+ */
+export function checkConcurrentModification(path: string, expectedUpdatedAt: string): void {
+  const raw = readFileSync(path, 'utf-8');
+  const { meta } = parseFrontmatter<Chit>(raw);
+  if (meta.updatedAt !== expectedUpdatedAt) {
+    throw new ChitConcurrentModificationError(path, expectedUpdatedAt, meta.updatedAt);
+  }
+}
+
+/**
  * Casket chits have deterministic ids of the form `casket-<agent-slug>`
  * — one per agent, reachable without a query. Agent slugs must be
  * kebab-case to keep filesystem paths clean on Windows (no colons,
@@ -375,13 +393,29 @@ export function updateChit<T extends ChitTypeId>(
 
   const { chit: current, body: currentBody, path } = readChit(corpRoot, scope, type, id);
 
+  // Optimistic concurrency — caller-supplied expected version
   if (updates.expectedUpdatedAt !== undefined && current.updatedAt !== updates.expectedUpdatedAt) {
     throw new ChitConcurrentModificationError(path, updates.expectedUpdatedAt, current.updatedAt);
   }
 
+  // Status validity: must be in the type's validStatuses set
   if (updates.status !== undefined && !entry.validStatuses.includes(updates.status)) {
     throw new ChitValidationError(
       `status '${updates.status}' not valid for type '${type}' (valid: ${entry.validStatuses.join(', ')})`,
+      'status',
+    );
+  }
+
+  // Terminal lock: once a chit is in a terminal status, status can't change.
+  // The legitimate path to terminal is closeChit. Re-opening from terminal
+  // requires an explicit future mechanism (not v1).
+  if (
+    updates.status !== undefined &&
+    updates.status !== current.status &&
+    entry.terminalStatuses.includes(current.status)
+  ) {
+    throw new ChitValidationError(
+      `chit is in terminal status '${current.status}' and cannot transition to '${updates.status}' (re-opening requires explicit mechanism)`,
       'status',
     );
   }
@@ -406,6 +440,14 @@ export function updateChit<T extends ChitTypeId>(
     updatedBy: updates.updatedBy,
     updatedAt: new Date().toISOString(),
   } as Chit<T>;
+
+  // Pre-rename recheck: between our initial read and this point, another
+  // writer could have landed. If the on-disk updatedAt advanced past what
+  // we started with, abort. Narrows the concurrency race window to the
+  // few milliseconds between this check and the rename — a true race-free
+  // guarantee would need OS-level file locking, out of scope for v1 and
+  // cross-platform complex. This is REFACTOR.md Shape-of-a-Chit step 5.
+  checkConcurrentModification(path, current.updatedAt);
 
   const body = updates.body ?? currentBody;
   const content = stringifyFrontmatter(updated as unknown as Record<string, unknown>, body);

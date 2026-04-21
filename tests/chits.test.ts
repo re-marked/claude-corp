@@ -13,6 +13,7 @@ import {
   closeChit,
   queryChits,
   findChitById,
+  checkConcurrentModification,
   ChitConcurrentModificationError,
 } from '../packages/shared/src/chits.js';
 import { ChitValidationError } from '../packages/shared/src/chit-types.js';
@@ -436,6 +437,95 @@ describe('updateChit', () => {
         updatedBy: 'ceo',
       }),
     ).toThrow(ChitValidationError);
+  });
+
+  it('rejects status change out of terminal status (terminal lock)', () => {
+    const created = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    // First move it to a terminal status via closeChit
+    closeChit(corpRoot, 'corp', 'task', created.id, 'completed', 'ceo');
+
+    // Now try to transition back to active — must be rejected
+    expect(() =>
+      updateChit(corpRoot, 'corp', 'task', created.id, {
+        status: 'active',
+        updatedBy: 'ceo',
+      }),
+    ).toThrow(/terminal/);
+  });
+
+  it('allows non-status updates on terminal chits (notes, tags)', () => {
+    const created = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    closeChit(corpRoot, 'corp', 'task', created.id, 'completed', 'ceo');
+
+    // Updating tags without changing status should still work — terminal
+    // lock only blocks status transitions, not metadata updates.
+    expect(() =>
+      updateChit(corpRoot, 'corp', 'task', created.id, {
+        tags: ['retrospective'],
+        updatedBy: 'ceo',
+      }),
+    ).not.toThrow();
+  });
+
+  it('allows re-setting the same terminal status (idempotent)', () => {
+    const created = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    closeChit(corpRoot, 'corp', 'task', created.id, 'completed', 'ceo');
+
+    // Setting status to the same terminal status is a no-op, not a violation
+    expect(() =>
+      updateChit(corpRoot, 'corp', 'task', created.id, {
+        status: 'completed',
+        updatedBy: 'ceo',
+      }),
+    ).not.toThrow();
+  });
+
+  it('checkConcurrentModification passes when the file matches expected updatedAt', () => {
+    const created = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    const path = chitPath(corpRoot, 'corp', 'task', created.id);
+
+    expect(() => checkConcurrentModification(path, created.updatedAt)).not.toThrow();
+  });
+
+  it('checkConcurrentModification throws when on-disk updatedAt differs', () => {
+    const created = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    const path = chitPath(corpRoot, 'corp', 'task', created.id);
+
+    // Simulate a concurrent writer by mutating the file's updatedAt directly
+    const mutated = readFileSync(path, 'utf-8').replace(
+      /^updatedAt:.*$/m,
+      `updatedAt: '2099-01-01T00:00:00.000Z'`,
+    );
+    writeFileSync(path, mutated, 'utf-8');
+
+    expect(() => checkConcurrentModification(path, created.updatedAt)).toThrow(
+      ChitConcurrentModificationError,
+    );
   });
 
   it('replaces body when provided; preserves when undefined', () => {

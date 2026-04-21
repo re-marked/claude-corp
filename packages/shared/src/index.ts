@@ -94,6 +94,7 @@ export {
   closeChit,
   queryChits,
   findChitById,
+  checkConcurrentModification,
   ChitConcurrentModificationError,
   ChitMalformedError,
 } from './chits.js';
