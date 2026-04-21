@@ -10,6 +10,8 @@ import {
   readChit,
   updateChit,
   closeChit,
+  queryChits,
+  findChitById,
   ChitConcurrentModificationError,
 } from '../packages/shared/src/chits.js';
 import { ChitValidationError } from '../packages/shared/src/chit-types.js';
@@ -235,6 +237,19 @@ describe('readChit', () => {
     expect(() => readChit(corpRoot, 'corp', 'task', 'chit-t-nonexist')).toThrow(/not found/);
   });
 
+  it('throws ChitMalformedError when the file exists but is unparseable', async () => {
+    const { ChitMalformedError } = await import('../packages/shared/src/chits.js');
+    const badPath = join(corpRoot, 'chits', 'task', 'chit-t-bogus.md');
+    mkdirSync(dirname(badPath), { recursive: true });
+    writeFileSync(badPath, 'no frontmatter at all', 'utf-8');
+
+    expect(() => readChit(corpRoot, 'corp', 'task', 'chit-t-bogus')).toThrow(ChitMalformedError);
+
+    // Malformed event also written to audit log
+    const logPath = join(corpRoot, 'chits', '_log', 'malformed.jsonl');
+    expect(existsSync(logPath)).toBe(true);
+  });
+
   it('reads chits from different scopes independently', () => {
     const corpChit = createChit(corpRoot, {
       type: 'contract',
@@ -438,6 +453,371 @@ describe('closeChit', () => {
     });
 
     expect(() => closeChit(corpRoot, 'agent:toast', 'casket', id, 'closed', 'daemon')).toThrow(/terminal/);
+  });
+});
+
+describe('queryChits', () => {
+  let corpRoot: string;
+
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'chits-query-'));
+  });
+
+  afterEach(() => {
+    rmSync(corpRoot, { recursive: true, force: true });
+  });
+
+  function seed(): {
+    taskA: string;
+    taskB: string;
+    obsA: string;
+    obsB: string;
+    contract: string;
+  } {
+    const taskA = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 'alpha', priority: 'high' } },
+      createdBy: 'ceo',
+      tags: ['urgent', 'backend'],
+    }).id;
+    const taskB = createChit(corpRoot, {
+      type: 'task',
+      scope: 'project:fire',
+      fields: { task: { title: 'beta', priority: 'normal' } },
+      createdBy: 'engineering-lead',
+      status: 'active',
+      tags: ['frontend'],
+    }).id;
+    const obsA = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'agent:toast',
+      fields: { observation: { category: 'FEEDBACK', subject: 'mark', importance: 4 } },
+      createdBy: 'toast',
+      tags: ['mark-preference'],
+    }).id;
+    const obsB = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'agent:toast',
+      fields: { observation: { category: 'NOTICE', subject: 'corp', importance: 2 } },
+      createdBy: 'toast',
+    }).id;
+    const contract = createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      fields: { contract: { title: 'ship fire', goal: 'launch', taskIds: [taskA, taskB] } },
+      createdBy: 'ceo',
+    }).id;
+    return { taskA, taskB, obsA, obsB, contract };
+  }
+
+  it('returns empty array on empty corp', () => {
+    expect(queryChits(corpRoot).chits).toEqual([]);
+  });
+
+  it('returns all chits across scopes without filters', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot);
+    expect(results).toHaveLength(5);
+  });
+
+  it('filters by single type', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { types: ['task'] });
+    expect(results).toHaveLength(2);
+    for (const r of results) expect(r.chit.type).toBe('task');
+  });
+
+  it('filters by multiple types (OR within filter)', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { types: ['task', 'observation'] });
+    expect(results).toHaveLength(4);
+  });
+
+  it('filters by status', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { statuses: ['active'] });
+    // taskB, obsA, obsB, contract (task defaults 'draft', contract defaults 'draft' — so only taskB is active)
+    expect(results.map((r) => r.chit.id)).toContain(
+      queryChits(corpRoot, { types: ['task'], statuses: ['active'] }).chits[0].chit.id,
+    );
+  });
+
+  it('filters by tag (OR within tags)', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { tags: ['urgent', 'frontend'] });
+    expect(results).toHaveLength(2); // taskA (urgent) + taskB (frontend)
+  });
+
+  it('filters by scope (single)', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { scopes: ['agent:toast'] });
+    expect(results).toHaveLength(2); // obsA, obsB
+    for (const r of results) expect(r.chit.type).toBe('observation');
+  });
+
+  it('filters by scope (multiple)', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { scopes: ['agent:toast', 'project:fire'] });
+    expect(results).toHaveLength(3);
+  });
+
+  it('combines filters with AND semantics', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, {
+      types: ['task'],
+      tags: ['urgent'],
+    });
+    expect(results).toHaveLength(1);
+    expect(results[0].chit.fields.task.title).toBe('alpha');
+  });
+
+  it('filters by createdBy', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { createdBy: 'toast' });
+    expect(results).toHaveLength(2); // both observations
+  });
+
+  it('filters by references', () => {
+    const { taskA } = seed();
+    // Create a chit that references taskA
+    createChit(corpRoot, {
+      type: 'observation',
+      scope: 'agent:toast',
+      fields: { observation: { category: 'DISCOVERY', subject: taskA, importance: 3 } },
+      createdBy: 'toast',
+      references: [taskA],
+    });
+    const { chits: results } = queryChits(corpRoot, { references: [taskA] });
+    expect(results).toHaveLength(1);
+  });
+
+  it('filters by dependsOn', () => {
+    const { taskA } = seed();
+    createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 'follow-up', priority: 'normal' } },
+      createdBy: 'ceo',
+      dependsOn: [taskA],
+    });
+    const { chits: results } = queryChits(corpRoot, { dependsOn: [taskA] });
+    expect(results).toHaveLength(1);
+    expect(results[0].chit.fields.task.title).toBe('follow-up');
+  });
+
+  it('filters by ephemeral true', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { ephemeral: true });
+    // observations are ephemeral by default
+    expect(results).toHaveLength(2);
+    for (const r of results) expect(r.chit.ephemeral).toBe(true);
+  });
+
+  it('filters by ephemeral false', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { ephemeral: false });
+    // task, task, contract
+    expect(results).toHaveLength(3);
+    for (const r of results) expect(r.chit.ephemeral).toBe(false);
+  });
+
+  it('sorts by updatedAt desc by default', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot);
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i - 1].chit.updatedAt >= results[i].chit.updatedAt).toBe(true);
+    }
+  });
+
+  it('sorts asc when requested', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { sortOrder: 'asc' });
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i - 1].chit.updatedAt <= results[i].chit.updatedAt).toBe(true);
+    }
+  });
+
+  it('sorts by id', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { sortBy: 'id', sortOrder: 'asc' });
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i - 1].chit.id <= results[i].chit.id).toBe(true);
+    }
+  });
+
+  it('respects limit', () => {
+    seed();
+    const { chits: results } = queryChits(corpRoot, { limit: 2 });
+    expect(results).toHaveLength(2);
+  });
+
+  it('respects offset', () => {
+    seed();
+    const { chits: all } = queryChits(corpRoot);
+    const { chits: offset } = queryChits(corpRoot, { offset: 2 });
+    expect(offset).toHaveLength(all.length - 2);
+    expect(offset[0].chit.id).toBe(all[2].chit.id);
+  });
+
+  it('limit=0 means unlimited', () => {
+    seed();
+    // Create many more
+    for (let i = 0; i < 60; i++) {
+      createChit(corpRoot, {
+        type: 'task',
+        scope: 'corp',
+        fields: { task: { title: `bulk-${i}`, priority: 'low' } },
+        createdBy: 'ceo',
+      });
+    }
+    const { chits: results } = queryChits(corpRoot, { limit: 0 });
+    expect(results.length).toBeGreaterThan(50);
+  });
+
+  it('skips archive subtree by default', () => {
+    const { taskA } = seed();
+    // Simulate an archived chit by placing a file in the _archive subtree
+    const archiveDir = join(corpRoot, 'chits', '_archive', 'task');
+    mkdirSync(archiveDir, { recursive: true });
+    const archivedPath = join(archiveDir, 'chit-t-archived.md');
+    writeFileSync(
+      archivedPath,
+      readFileSync(chitPath(corpRoot, 'corp', 'task', taskA), 'utf-8'),
+    );
+    // default query doesn't see archived
+    const { chits: defaultResults } = queryChits(corpRoot, { types: ['task'] });
+    expect(defaultResults.every((r) => !r.path.includes('_archive'))).toBe(true);
+    // includeArchive picks it up
+    const { chits: archiveResults } = queryChits(corpRoot, { types: ['task'], includeArchive: true });
+    expect(archiveResults.some((r) => r.path.includes('_archive'))).toBe(true);
+  });
+
+  it('surfaces malformed chit files in the result + writes them to the audit log', () => {
+    seed();
+    // A file that won't parse as valid chit frontmatter (no id/type).
+    const badPath = join(corpRoot, 'chits', 'task', 'chit-t-bogus.md');
+    mkdirSync(dirname(badPath), { recursive: true });
+    writeFileSync(badPath, 'not valid frontmatter content', 'utf-8');
+
+    const result = queryChits(corpRoot, { types: ['task'] });
+
+    // Matches still contain only the valid tasks (2 from seed), bogus is filtered out
+    expect(result.chits.map((r) => r.chit.id).every((id) => id !== 'chit-t-bogus')).toBe(true);
+    expect(result.chits.length).toBeGreaterThanOrEqual(2);
+
+    // Malformed is surfaced in the return value
+    expect(result.malformed).toHaveLength(1);
+    expect(result.malformed[0].path).toBe(badPath);
+    expect(result.malformed[0].error).toMatch(/missing required chit frontmatter|frontmatter/i);
+    expect(result.malformed[0].timestamp).toMatch(/^\d{4}-/);
+
+    // Malformed is also written to the audit log
+    const logPath = join(corpRoot, 'chits', '_log', 'malformed.jsonl');
+    expect(existsSync(logPath)).toBe(true);
+    const logLines = readFileSync(logPath, 'utf-8').trim().split('\n');
+    expect(logLines).toHaveLength(1);
+    const logEntry = JSON.parse(logLines[0]);
+    expect(logEntry.path).toBe(badPath);
+  });
+
+  it('appends multiple malformed entries to the audit log', () => {
+    const bad1 = join(corpRoot, 'chits', 'task', 'chit-t-bad1.md');
+    const bad2 = join(corpRoot, 'chits', 'task', 'chit-t-bad2.md');
+    mkdirSync(dirname(bad1), { recursive: true });
+    writeFileSync(bad1, 'totally bogus', 'utf-8');
+    writeFileSync(bad2, 'also bogus', 'utf-8');
+
+    const result = queryChits(corpRoot);
+    expect(result.malformed).toHaveLength(2);
+
+    const logPath = join(corpRoot, 'chits', '_log', 'malformed.jsonl');
+    const logLines = readFileSync(logPath, 'utf-8').trim().split('\n');
+    expect(logLines).toHaveLength(2);
+  });
+
+  it('returns empty malformed when no corruption found', () => {
+    seed();
+    const result = queryChits(corpRoot);
+    expect(result.malformed).toEqual([]);
+  });
+});
+
+describe('findChitById', () => {
+  let corpRoot: string;
+
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'chits-find-'));
+  });
+
+  afterEach(() => {
+    rmSync(corpRoot, { recursive: true, force: true });
+  });
+
+  it('finds a task by id across scopes', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'project:fire',
+      fields: { task: { title: 't', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+    const found = findChitById(corpRoot, task.id);
+    expect(found).not.toBeNull();
+    expect(found!.chit.id).toBe(task.id);
+  });
+
+  it('finds an observation in agent scope', () => {
+    const obs = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'agent:toast',
+      fields: { observation: { category: 'NOTICE', subject: 'mark', importance: 3 } },
+      createdBy: 'toast',
+    });
+    const found = findChitById(corpRoot, obs.id);
+    expect(found).not.toBeNull();
+    expect(found!.chit.type).toBe('observation');
+  });
+
+  it('finds a casket by its deterministic id', () => {
+    const id = casketChitId('toast');
+    createChit(corpRoot, {
+      type: 'casket',
+      scope: 'agent:toast',
+      id,
+      fields: { casket: { currentStep: null } },
+      createdBy: 'daemon',
+    });
+    const found = findChitById(corpRoot, id);
+    expect(found).not.toBeNull();
+    expect(found!.chit.type).toBe('casket');
+    expect(found!.chit.id).toBe('casket-toast');
+  });
+
+  it('returns null for unrecognizable id prefix', () => {
+    expect(findChitById(corpRoot, 'notachit')).toBeNull();
+    expect(findChitById(corpRoot, 'chit-xyz')).toBeNull();
+  });
+
+  it('returns null when the chit file does not exist', () => {
+    expect(findChitById(corpRoot, 'chit-t-00000000')).toBeNull();
+  });
+
+  it('throws ChitMalformedError when file exists but is unparseable', async () => {
+    const { ChitMalformedError } = await import('../packages/shared/src/chits.js');
+    // Filename must match the strict chit-<prefix>-<8hex> regex so
+    // parseChitIdType resolves it before findChitById tries to read.
+    const badId = 'chit-t-abcdef01';
+    const badPath = join(corpRoot, 'chits', 'task', `${badId}.md`);
+    mkdirSync(dirname(badPath), { recursive: true });
+    writeFileSync(badPath, 'bogus content no frontmatter', 'utf-8');
+
+    expect(() => findChitById(corpRoot, badId)).toThrow(ChitMalformedError);
+
+    // Malformed event logged to audit trail
+    const logPath = join(corpRoot, 'chits', '_log', 'malformed.jsonl');
+    expect(existsSync(logPath)).toBe(true);
+    const logEntry = JSON.parse(readFileSync(logPath, 'utf-8').trim());
+    expect(logEntry.path).toBe(badPath);
   });
 });
 

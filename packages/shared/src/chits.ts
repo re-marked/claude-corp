@@ -17,8 +17,8 @@
  * (corp / agent:<slug> / project:<name> / team:<project>/<team>).
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
   Chit,
@@ -27,7 +27,7 @@ import type {
   ChitTypeId,
   FieldsForType,
 } from './types/chit.js';
-import { ChitValidationError, getChitType } from './chit-types.js';
+import { CHIT_TYPES, ChitValidationError, getChitType } from './chit-types.js';
 import { atomicWriteSync } from './atomic-write.js';
 import { parse as parseFrontmatter, stringify as stringifyFrontmatter } from './parsers/frontmatter.js';
 
@@ -46,6 +46,61 @@ export class ChitConcurrentModificationError extends Error {
   ) {
     super(`concurrent modification on ${path}: expected updatedAt=${expected}, found=${actual}`);
     this.name = 'ChitConcurrentModificationError';
+  }
+}
+
+/**
+ * Thrown when a chit file exists but cannot be parsed as a valid chit
+ * — bad YAML frontmatter, missing required fields, or corrupted
+ * content. Distinct from "not found" so callers can distinguish
+ * absence from corruption. readChit and findChitById throw this;
+ * queryChits collects malformed files into its result without throwing.
+ */
+export class ChitMalformedError extends Error {
+  constructor(
+    public readonly path: string,
+    public readonly cause: string,
+  ) {
+    super(`malformed chit at ${path}: ${cause}`);
+    this.name = 'ChitMalformedError';
+  }
+}
+
+/** A single malformed-chit observation returned alongside queryChits results. */
+export interface MalformedChit {
+  path: string;
+  error: string;
+  timestamp: string;
+}
+
+/**
+ * Append a malformed-chit entry to the corp's audit log. Best-effort —
+ * log write failures don't propagate, because the malformed detection
+ * itself is already surfaced via the return value of the calling function.
+ * The log gives persistence across sessions for diagnostic queries.
+ */
+function logMalformed(corpRoot: string, entry: MalformedChit): void {
+  const logPath = join(corpRoot, 'chits', '_log', 'malformed.jsonl');
+  try {
+    mkdirSync(dirname(logPath), { recursive: true });
+    appendFileSync(logPath, JSON.stringify(entry) + '\n', 'utf-8');
+  } catch {
+    // best-effort; the primary surfacing path is the return value
+  }
+}
+
+function parseChitFile(path: string): { chit: Chit; body: string } {
+  const raw = readFileSync(path, 'utf-8');
+  try {
+    const parsed = parseFrontmatter<Chit>(raw);
+    // Minimal validity check — a parseable-but-empty frontmatter would
+    // leave meta as an empty object and silently pass later filters.
+    if (!parsed.meta || typeof parsed.meta !== 'object' || !parsed.meta.id || !parsed.meta.type) {
+      throw new Error('missing required chit frontmatter (id, type)');
+    }
+    return { chit: parsed.meta, body: parsed.body };
+  } catch (err) {
+    throw new ChitMalformedError(path, (err as Error).message);
   }
 }
 
@@ -226,7 +281,9 @@ export interface ChitWithBody<T extends ChitTypeId = ChitTypeId> {
 /**
  * Read a chit by scope+type+id. Returns frontmatter + body + resolved
  * path so callers can pass `path` back to update functions without
- * re-computing. Throws if the chit doesn't exist.
+ * re-computing. Throws Error if not found, ChitMalformedError if the
+ * file exists but can't be parsed as a chit (logs the malformed event
+ * to the audit trail).
  */
 export function readChit<T extends ChitTypeId = ChitTypeId>(
   corpRoot: string,
@@ -238,9 +295,19 @@ export function readChit<T extends ChitTypeId = ChitTypeId>(
   if (!existsSync(path)) {
     throw new Error(`chit not found: ${path}`);
   }
-  const raw = readFileSync(path, 'utf-8');
-  const { meta, body } = parseFrontmatter<Chit<T>>(raw);
-  return { chit: meta, body, path };
+  try {
+    const { chit, body } = parseChitFile(path);
+    return { chit: chit as Chit<T>, body, path };
+  } catch (err) {
+    if (err instanceof ChitMalformedError) {
+      logMalformed(corpRoot, {
+        path: err.path,
+        error: err.cause,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    throw err;
+  }
 }
 
 // ─── Update ─────────────────────────────────────────────────────────
@@ -345,4 +412,310 @@ export function closeChit<T extends ChitTypeId>(
   }
 
   return updateChit(corpRoot, scope, type, id, { status, updatedBy });
+}
+
+// ─── Query ──────────────────────────────────────────────────────────
+
+export interface QueryChitsOpts {
+  /** Match ANY of these types. Omit to accept all types. */
+  types?: readonly ChitTypeId[];
+  /** Match ANY of these statuses. Omit to accept all statuses. */
+  statuses?: readonly ChitStatus[];
+  /** Match ANY of these tags. Omit to not filter on tags. */
+  tags?: readonly string[];
+  /** Match ANY of these scopes. Omit to walk every discoverable scope. */
+  scopes?: readonly ChitScope[];
+  /** Match chits whose createdBy equals this. */
+  createdBy?: string;
+  /** Chits with updatedAt >= this ISO timestamp. */
+  updatedSince?: string;
+  /** Chits with updatedAt <= this ISO timestamp. */
+  updatedUntil?: string;
+  /** Match chits that reference ANY of these ids. */
+  references?: readonly string[];
+  /** Match chits that depend_on ANY of these ids. */
+  dependsOn?: readonly string[];
+  /** true = only ephemeral; false = only non-ephemeral; undefined = both. */
+  ephemeral?: boolean;
+  /** Include <scope>/chits/_archive/<type>/ subtrees. Default false. */
+  includeArchive?: boolean;
+  /** Sort field. Default 'updatedAt'. */
+  sortBy?: 'updatedAt' | 'createdAt' | 'id';
+  /** Sort direction. Default 'desc'. */
+  sortOrder?: 'asc' | 'desc';
+  /** Max results. Default 50; pass 0 for unlimited. */
+  limit?: number;
+  /** Pagination offset into the sorted result set. Default 0. */
+  offset?: number;
+}
+
+interface ScopeBase {
+  scope: ChitScope;
+  basePath: string;
+}
+
+/**
+ * Discover scopes to visit for a query. When scopeFilter is provided,
+ * translate each scope value to its filesystem path. When absent,
+ * enumerate the corp's scope tree by walking agents/, projects/, and
+ * projects/<p>/teams/ subtrees.
+ */
+function resolveScopesToVisit(
+  corpRoot: string,
+  scopeFilter: readonly ChitScope[] | undefined,
+): ScopeBase[] {
+  if (scopeFilter && scopeFilter.length > 0) {
+    return scopeFilter.map((scope) => ({
+      scope,
+      basePath: join(corpRoot, scopeToPath(scope)),
+    }));
+  }
+
+  const all: ScopeBase[] = [{ scope: 'corp', basePath: corpRoot }];
+
+  const agentsDir = join(corpRoot, 'agents');
+  if (existsSync(agentsDir)) {
+    for (const entry of readdirSync(agentsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        all.push({
+          scope: `agent:${entry.name}`,
+          basePath: join(agentsDir, entry.name),
+        });
+      }
+    }
+  }
+
+  const projectsDir = join(corpRoot, 'projects');
+  if (existsSync(projectsDir)) {
+    for (const pEntry of readdirSync(projectsDir, { withFileTypes: true })) {
+      if (!pEntry.isDirectory()) continue;
+      const projectName = pEntry.name;
+      const projectBase = join(projectsDir, projectName);
+      all.push({
+        scope: `project:${projectName}`,
+        basePath: projectBase,
+      });
+      const teamsDir = join(projectBase, 'teams');
+      if (existsSync(teamsDir)) {
+        for (const tEntry of readdirSync(teamsDir, { withFileTypes: true })) {
+          if (tEntry.isDirectory()) {
+            all.push({
+              scope: `team:${projectName}/${tEntry.name}`,
+              basePath: join(teamsDir, tEntry.name),
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return all;
+}
+
+/**
+ * Collect candidate chit file paths for the given scopes and type filter.
+ * Archive subtrees are skipped unless includeArchive is true.
+ */
+function findChitFiles(
+  scopesToVisit: ScopeBase[],
+  typeFilter: readonly ChitTypeId[] | undefined,
+  includeArchive: boolean,
+): string[] {
+  const paths: string[] = [];
+
+  for (const { basePath } of scopesToVisit) {
+    const chitsRoot = join(basePath, 'chits');
+    if (!existsSync(chitsRoot)) continue;
+
+    const typeSubdirs = typeFilter
+      ? (typeFilter as readonly string[])
+      : readdirSync(chitsRoot, { withFileTypes: true })
+          .filter((e) => e.isDirectory() && e.name !== '_archive' && e.name !== '_log')
+          .map((e) => e.name);
+
+    for (const typeName of typeSubdirs) {
+      const typeDir = join(chitsRoot, typeName);
+      if (existsSync(typeDir)) {
+        for (const file of readdirSync(typeDir)) {
+          if (file.endsWith('.md')) paths.push(join(typeDir, file));
+        }
+      }
+
+      if (includeArchive) {
+        const archiveDir = join(chitsRoot, '_archive', typeName);
+        if (existsSync(archiveDir)) {
+          for (const file of readdirSync(archiveDir)) {
+            if (file.endsWith('.md')) paths.push(join(archiveDir, file));
+          }
+        }
+      }
+    }
+  }
+
+  return paths;
+}
+
+/**
+ * Apply non-type filters to a chit. Type filtering happens at the
+ * directory walk to avoid reading files we won't keep.
+ */
+function matchesFilter(chit: Chit, opts: QueryChitsOpts): boolean {
+  if (opts.statuses && opts.statuses.length > 0 && !opts.statuses.includes(chit.status)) {
+    return false;
+  }
+  if (opts.tags && opts.tags.length > 0 && !opts.tags.some((t) => chit.tags.includes(t))) {
+    return false;
+  }
+  if (opts.createdBy !== undefined && chit.createdBy !== opts.createdBy) {
+    return false;
+  }
+  if (opts.updatedSince !== undefined && chit.updatedAt < opts.updatedSince) {
+    return false;
+  }
+  if (opts.updatedUntil !== undefined && chit.updatedAt > opts.updatedUntil) {
+    return false;
+  }
+  if (
+    opts.references &&
+    opts.references.length > 0 &&
+    !opts.references.some((r) => chit.references.includes(r))
+  ) {
+    return false;
+  }
+  if (
+    opts.dependsOn &&
+    opts.dependsOn.length > 0 &&
+    !opts.dependsOn.some((d) => chit.dependsOn.includes(d))
+  ) {
+    return false;
+  }
+  if (opts.ephemeral !== undefined && chit.ephemeral !== opts.ephemeral) {
+    return false;
+  }
+  return true;
+}
+
+/** Result of a queryChits call — matches plus any malformed files encountered during the walk. */
+export interface QueryChitsResult {
+  chits: ChitWithBody[];
+  malformed: MalformedChit[];
+}
+
+/**
+ * Query chits across scopes with filter composition.
+ *
+ * Multi-value filters (types, statuses, tags, scopes, references,
+ * dependsOn) are OR within the filter and AND across different filters.
+ * Example: `{ types: ['task'], statuses: ['active', 'draft'] }` means
+ * "task AND (active OR draft)".
+ *
+ * Sort defaults to updatedAt desc; limit defaults to 50 (0 = unlimited).
+ *
+ * Malformed chit files (bad YAML, missing required frontmatter, corrupted
+ * content) are NOT silently skipped — they're collected into the result's
+ * `malformed` field and appended to the corp's audit log at
+ * `<corpRoot>/chits/_log/malformed.jsonl`. Callers that don't care about
+ * malformed can ignore `result.malformed`; callers that do (TUI health
+ * views, daemon monitors, admin commands) surface them directly.
+ */
+export function queryChits(corpRoot: string, opts: QueryChitsOpts = {}): QueryChitsResult {
+  const scopesToVisit = resolveScopesToVisit(corpRoot, opts.scopes);
+  const paths = findChitFiles(scopesToVisit, opts.types, opts.includeArchive ?? false);
+
+  const matches: ChitWithBody[] = [];
+  const malformed: MalformedChit[] = [];
+
+  for (const path of paths) {
+    let chit: Chit;
+    let body: string;
+    try {
+      const parsed = parseChitFile(path);
+      chit = parsed.chit;
+      body = parsed.body;
+    } catch (err) {
+      const entry: MalformedChit = {
+        path,
+        error: (err as Error).message,
+        timestamp: new Date().toISOString(),
+      };
+      malformed.push(entry);
+      logMalformed(corpRoot, entry);
+      continue;
+    }
+
+    if (!matchesFilter(chit, opts)) continue;
+    matches.push({ chit, body, path });
+  }
+
+  // Sort
+  const sortBy = opts.sortBy ?? 'updatedAt';
+  const sortOrder = opts.sortOrder ?? 'desc';
+  matches.sort((a, b) => {
+    const av = (a.chit as unknown as Record<string, string>)[sortBy] ?? '';
+    const bv = (b.chit as unknown as Record<string, string>)[sortBy] ?? '';
+    if (av < bv) return sortOrder === 'asc' ? -1 : 1;
+    if (av > bv) return sortOrder === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  // Paginate
+  const offset = opts.offset ?? 0;
+  const limit = opts.limit ?? 50;
+  const paginated = limit === 0 ? matches.slice(offset) : matches.slice(offset, offset + limit);
+
+  return { chits: paginated, malformed };
+}
+
+// ─── Lookup by id ───────────────────────────────────────────────────
+
+/**
+ * Parse the chit type from an id's prefix. Chit ids follow the
+ * `chit-<prefix>-<hex>` pattern; caskets follow `casket-<slug>`.
+ * Returns null for unrecognizable ids.
+ */
+function parseChitIdType(id: string): ChitTypeId | null {
+  if (id.startsWith('casket-')) return 'casket';
+  const match = /^chit-([a-z-]+)-[0-9a-f]+$/.exec(id);
+  if (!match) return null;
+  const prefix = match[1];
+  const entry = CHIT_TYPES.find((t) => t.idPrefix === prefix);
+  return entry?.id ?? null;
+}
+
+/**
+ * Find a chit by id without caller-supplied scope. Parses the type from
+ * the id prefix, then checks the predicted path (<scope>/chits/<type>/
+ * <id>.md) across every scope in the corp. O(scopes) direct lookups,
+ * no directory enumeration of type contents.
+ *
+ * Returns null when the id isn't recognizable (bad prefix) or the file
+ * doesn't exist at any scope. Throws ChitMalformedError (and logs to
+ * the audit trail) when a file is found but can't be parsed — that's
+ * a different outcome than "not found" and callers benefit from the
+ * distinction.
+ */
+export function findChitById(corpRoot: string, id: string): ChitWithBody | null {
+  const type = parseChitIdType(id);
+  if (!type) return null;
+
+  const scopesToVisit = resolveScopesToVisit(corpRoot, undefined);
+  for (const { basePath } of scopesToVisit) {
+    const path = join(basePath, 'chits', type, `${id}.md`);
+    if (existsSync(path)) {
+      try {
+        const { chit, body } = parseChitFile(path);
+        return { chit, body, path };
+      } catch (err) {
+        if (err instanceof ChitMalformedError) {
+          logMalformed(corpRoot, {
+            path: err.path,
+            error: err.cause,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        throw err;
+      }
+    }
+  }
+  return null;
 }
