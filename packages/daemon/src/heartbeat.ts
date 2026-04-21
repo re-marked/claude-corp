@@ -290,7 +290,7 @@ export class HeartbeatManager {
         }
         lines.push(`- **[${t.task.id}]** ${t.task.title}`);
         lines.push(`  Status: ${t.task.status} | Priority: ${t.task.priority.toUpperCase()}${note}`);
-        lines.push(`  File: ${corpRoot}/tasks/${t.task.id}.md`);
+        lines.push(`  File: ${corpRoot}/chits/task/${t.task.id}.md`);
 
         // Dependency chain visualization
         if (t.task.blockedBy?.length && allTasks) {
@@ -323,7 +323,7 @@ export class HeartbeatManager {
       lines.push('## Unassigned (you can claim these)', '');
       for (const t of unassigned) {
         lines.push(`- **[${t.task.id}]** ${t.task.title} (${t.task.priority.toUpperCase()})`);
-        lines.push(`  File: ${corpRoot}/tasks/${t.task.id}.md`);
+        lines.push(`  File: ${corpRoot}/chits/task/${t.task.id}.md`);
         lines.push('');
       }
     }
@@ -572,7 +572,7 @@ export class HeartbeatManager {
       if (inProgress.length > 0) {
         const current = inProgress[0]!;
         lines.push(`Working on: **${current.task.title}** (${current.task.status})`);
-        lines.push(`Task file: ${corpRoot.replace(/\\/g, '/')}/tasks/${current.task.id}.md`);
+        lines.push(`Task file: ${corpRoot.replace(/\\/g, '/')}/chits/task/${current.task.id}.md`);
       } else if (myTasks.some(t => t.task.status === 'assigned')) {
         const next = myTasks.find(t => t.task.status === 'assigned')!;
         lines.push(`Next task: **${next.task.title}** (assigned, not started)`);

@@ -30,7 +30,7 @@ These are separate steps. The gap between them is where your judgment lives — 
 
 ### Phase 1: Create
 \`cc-cli task create --title "Build login form" --priority high --description "..."\`
-Or write a task file in ${ctx.corpRoot}/tasks/ with YAML frontmatter. Status: \`pending\`.
+(Tasks are chits under the hood — written to ${ctx.corpRoot}/chits/task/<id>.md. Always go through the cli; raw Write bypasses validation + downstream watchers.)
 
 ### Phase 2: Hand
 \`cc-cli hand --task <task-id> --to <agent-slug>\`

@@ -18,9 +18,9 @@ The judgment you bring to routine work is where your taste shows, not in some se
 
 ### The flow:
 
-1. **Read** the full task file at ${ctx.corpRoot}/tasks/<task-id>.md — description AND every acceptance criterion. Check \`blockedBy\` — if blocked, mark \`blocked\` and wait (you'll get auto-notified when blockers complete).
+1. **Read** the full task chit: \`cc-cli chit read <task-id>\` (or --json for structured fields). Read every acceptance criterion. Check \`dependsOn\` — if any blocker isn't completed, mark the task blocked and wait (you'll get auto-notified when blockers complete).
 
-2. **Mark in_progress** — so others know you've started.
+2. **Mark in_progress**: \`cc-cli chit update <task-id> --status active --from <you>\` — so others know you've started.
 
 3. **Do the work.** Read source. Write code. Create deliverables. When you make a judgment call — chose approach A over B, decided a test wasn't needed, refactored something adjacent — that's your taste in action. Notice it. Write it down if it matters.
 

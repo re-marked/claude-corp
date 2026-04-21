@@ -8,7 +8,7 @@ export const blastRadiusFragment: Fragment = {
 
 ## Your space — write freely
 - ${ctx.agentDir}/* — your workspace, your home
-- ${ctx.corpRoot}/tasks/* — task files you own
+- ${ctx.corpRoot}/chits/task/* — task chits you own (via \`cc-cli chit update\`, never raw Write)
 - Project source code you've been assigned to modify
 
 ## Shared infrastructure — modify with the care you'd want others to show yours

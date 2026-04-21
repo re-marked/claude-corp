@@ -125,7 +125,7 @@ export function dispatchTaskToDm(
         `New task assigned to you:`,
         ``,
         `**${task.title}** (Priority: ${task.priority.toUpperCase()})`,
-        `Task file: ${corpRoot.replace(/\\/g, '/')}/tasks/${taskId}.md`,
+        `Task file: ${corpRoot.replace(/\\/g, '/')}/chits/task/${taskId}.md`,
         ``,
         body.trim() ? body.trim() : '(No description)',
         ``,
