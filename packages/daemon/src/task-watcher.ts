@@ -26,7 +26,10 @@ export class TaskWatcher {
   }
 
   start(): void {
-    const tasksDir = join(this.daemon.corpRoot, 'tasks');
+    // Post-0.3 migration: tasks live as chits at <corpRoot>/chits/task/.
+    // Watching the old <corpRoot>/tasks/ location would miss every new
+    // task + status transition + blocker event.
+    const tasksDir = join(this.daemon.corpRoot, 'chits', 'task');
     if (!existsSync(tasksDir)) return;
 
     // Initialize cache with current task states

@@ -118,14 +118,25 @@ export function chitId(type: ChitTypeId): string {
   return `chit-${entry.idPrefix}-${hex}`;
 }
 
-const CHIT_ID_PATTERN = /^(chit-[a-z-]+-[0-9a-f]+|casket-[a-z0-9-]+)$/;
+// Reserved prefixes (chit-, casket-) can't also match the word-pair alt —
+// the negative lookahead keeps those namespaces clean so `chit-x` and
+// `casket-y` don't sneak through as "legacy word-pair ids" when they're
+// actually malformed modern ids.
+const CHIT_ID_PATTERN = /^(chit-[a-z-]+-[0-9a-f]+|casket-[a-z0-9-]+|(?!chit-|casket-)[a-z]+-[a-z]+)$/;
 
 /**
- * Returns true for any string matching Claude Corp's chit id format:
- * either `chit-<prefix>-<hex>` (normal chits) or `casket-<slug>`
- * (casket special case). Used to validate references and dependsOn
- * at the CRUD boundary so typo'd ids fail fast instead of becoming
- * orphaned dangling pointers.
+ * Returns true for any string matching a recognized chit id format:
+ * - `chit-<prefix>-<hex>` — modern chit-native id shape
+ * - `casket-<slug>` — deterministic per-agent casket ids
+ * - `<word>-<word>` — legacy word-pair format used by pre-chits
+ *   taskId()/contractId() generators. Preserved so 0.3 task migration
+ *   can land without rewriting every task reference across the corp;
+ *   contracts still reference task ids like "brave-panther" until
+ *   they migrate in 0.4.
+ *
+ * Used to validate references and dependsOn at the CRUD boundary so
+ * typo'd ids (uppercase, single word, underscores) fail fast instead
+ * of becoming orphaned dangling pointers.
  */
 export function isChitIdFormat(id: string): boolean {
   return typeof id === 'string' && CHIT_ID_PATTERN.test(id);
@@ -942,39 +953,58 @@ function parseChitIdType(id: string): ChitTypeId | null {
 }
 
 /**
- * Find a chit by id without caller-supplied scope. Parses the type from
- * the id prefix, then checks the predicted path (<scope>/chits/<type>/
- * <id>.md) across every scope in the corp. O(scopes) direct lookups,
+ * Find a chit by id without caller-supplied scope.
+ *
+ * Fast path: when the id encodes its type (chit-<prefix>-<hex>,
+ * casket-<slug>), parse the prefix and check the predicted path
+ * <scope>/chits/<type>/<id>.md across every scope — O(scopes) lookups,
  * no directory enumeration of type contents.
  *
- * Returns null when the id isn't recognizable (bad prefix) or the file
- * doesn't exist at any scope. Throws ChitMalformedError (and logs to
- * the audit trail) when a file is found but can't be parsed — that's
- * a different outcome than "not found" and callers benefit from the
- * distinction.
+ * Fallback: when the id is a legacy word-pair shape or otherwise
+ * doesn't encode its type in the prefix, scan every registered type
+ * subdir per scope — O(scopes × types) lookups. Necessary while
+ * pre-chits-format ids (taskId/contractId word-pairs) still circulate
+ * in the corp during the 0.3/0.4 migration window.
+ *
+ * Returns null when the id doesn't match any file. Throws
+ * ChitMalformedError (and logs to the audit trail) when a file is
+ * found but can't be parsed — distinct outcome from not-found.
  */
 export function findChitById(corpRoot: string, id: string): ChitWithBody | null {
-  const type = parseChitIdType(id);
-  if (!type) return null;
-
+  const typeFromId = parseChitIdType(id);
   const scopesToVisit = resolveScopesToVisit(corpRoot, undefined);
+
+  // Fast path — id encodes type
+  if (typeFromId) {
+    for (const { basePath } of scopesToVisit) {
+      const path = join(basePath, 'chits', typeFromId, `${id}.md`);
+      if (existsSync(path)) return readOrThrowMalformed(corpRoot, path);
+    }
+    return null;
+  }
+
+  // Fallback — scan all registered type subdirs per scope
   for (const { basePath } of scopesToVisit) {
-    const path = join(basePath, 'chits', type, `${id}.md`);
-    if (existsSync(path)) {
-      try {
-        const { chit, body } = parseChitFile(path);
-        return { chit, body, path };
-      } catch (err) {
-        if (err instanceof ChitMalformedError) {
-          logMalformed(corpRoot, {
-            path: err.path,
-            error: err.cause,
-            timestamp: new Date().toISOString(),
-          });
-        }
-        throw err;
-      }
+    for (const typeEntry of CHIT_TYPES) {
+      const path = join(basePath, 'chits', typeEntry.id, `${id}.md`);
+      if (existsSync(path)) return readOrThrowMalformed(corpRoot, path);
     }
   }
   return null;
+}
+
+function readOrThrowMalformed(corpRoot: string, path: string): ChitWithBody {
+  try {
+    const { chit, body } = parseChitFile(path);
+    return { chit, body, path };
+  } catch (err) {
+    if (err instanceof ChitMalformedError) {
+      logMalformed(corpRoot, {
+        path: err.path,
+        error: err.cause,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    throw err;
+  }
 }

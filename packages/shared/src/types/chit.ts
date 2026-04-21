@@ -122,6 +122,23 @@ export type Chit<T extends ChitTypeId = ChitTypeId> = T extends ChitTypeId
 // TaskFields / ContractFields / ObservationFields to match what the
 // existing bespoke types (Task, Contract, Observation) currently carry.
 
+/**
+ * Fine-grained task workflow state. Distinct from chit.status (which is
+ * the coarse universal lifecycle — draft/active/terminal). This enum
+ * preserves the richer task-workflow vocabulary from the pre-chits Task
+ * type so call sites that check e.g. `task.status === 'blocked'` keep
+ * working. The chit-layer query surface filters on chit.status; task-
+ * specific logic filters on fields.task.workflowStatus.
+ */
+export type TaskWorkflowStatus =
+  | 'pending'
+  | 'assigned'
+  | 'in_progress'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
 export interface TaskFields {
   /** Human-readable task title. Queryable in frontmatter rather than only as body H1. */
   title: string;
@@ -141,6 +158,12 @@ export interface TaskFields {
   dueAt?: string | null;
   /** Chit id of the Loop driving this task (auto-advance tasks tied to recurring work). Null for standalone tasks. */
   loopId?: string | null;
+  /** Fine-grained workflow state (pending/assigned/in_progress/blocked/completed/failed/cancelled). Coexists with chit.status; see TaskWorkflowStatus docstring. */
+  workflowStatus?: TaskWorkflowStatus | null;
+  /** Project.id the task belongs to. New tasks prefer `scope=project:<name>`; this field preserves the link for migrated tasks that pre-date scope-encoding. */
+  projectId?: string | null;
+  /** Team.id the task belongs to. Same legacy-link role as projectId. */
+  teamId?: string | null;
 }
 
 export interface ContractFields {

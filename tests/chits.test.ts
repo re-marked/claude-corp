@@ -65,12 +65,21 @@ describe('chit id generation', () => {
       expect(isChitIdFormat('casket-backend-engineer')).toBe(true);
     });
 
+    it('accepts legacy word-pair ids (pre-chits task/contract generators)', () => {
+      expect(isChitIdFormat('brave-panther')).toBe(true);
+      expect(isChitIdFormat('swift-oak')).toBe(true);
+      expect(isChitIdFormat('blue-wave')).toBe(true);
+    });
+
     it('rejects typos and garbage', () => {
-      expect(isChitIdFormat('random-string')).toBe(false);
-      expect(isChitIdFormat('chit-x')).toBe(false);
+      expect(isChitIdFormat('chit-x')).toBe(false); // reserved prefix, not a legacy word-pair
+      expect(isChitIdFormat('casket-with-hyphens')).toBe(true); // casket allows internal hyphens
       expect(isChitIdFormat('chit-t-ZZZZZZZZ')).toBe(false); // non-hex
       expect(isChitIdFormat('')).toBe(false);
       expect(isChitIdFormat('CHIT-T-ABCDEF01')).toBe(false); // uppercase
+      expect(isChitIdFormat('singleword')).toBe(false);
+      expect(isChitIdFormat('three-word-parts-no')).toBe(false);
+      expect(isChitIdFormat('snake_case_id')).toBe(false);
     });
   });
 });
@@ -87,25 +96,27 @@ describe('references + dependsOn id validation at CRUD boundary', () => {
   });
 
   it('createChit rejects references with invalid chit id format', () => {
+    // Reference with internal whitespace — fails regex
     expect(() =>
       createChit(corpRoot, {
         type: 'task',
         scope: 'corp',
         fields: { task: { title: 't', priority: 'normal' } },
         createdBy: 'ceo',
-        references: ['chit-t-abcdef01', 'typo-not-a-chit'],
+        references: ['chit-t-abcdef01', 'typo not a chit'],
       }),
     ).toThrow(ChitValidationError);
   });
 
   it('createChit rejects dependsOn with invalid chit id format', () => {
+    // Uppercase + underscore — fails regex
     expect(() =>
       createChit(corpRoot, {
         type: 'task',
         scope: 'corp',
         fields: { task: { title: 't', priority: 'normal' } },
         createdBy: 'ceo',
-        dependsOn: ['not-a-chit-id'],
+        dependsOn: ['BAD_CHIT_ID'],
       }),
     ).toThrow(ChitValidationError);
   });
@@ -118,9 +129,10 @@ describe('references + dependsOn id validation at CRUD boundary', () => {
       createdBy: 'ceo',
     });
 
+    // 'not valid' has a space — fails the regex (no internal whitespace)
     expect(() =>
       updateChit(corpRoot, 'corp', 'task', task.id, {
-        references: ['not-valid'],
+        references: ['not valid'],
         updatedBy: 'ceo',
       }),
     ).toThrow(ChitValidationError);
@@ -1223,6 +1235,28 @@ describe('findChitById', () => {
 
   it('returns null when the chit file does not exist', () => {
     expect(findChitById(corpRoot, 'chit-t-00000000')).toBeNull();
+  });
+
+  it('resolves a legacy word-pair task id via type-scan fallback', () => {
+    // Simulate a pre-chits migrated task with word-pair id
+    const legacyId = 'brave-panther';
+    createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      id: legacyId,
+      fields: { task: { title: 'legacy', priority: 'normal' } },
+      createdBy: 'ceo',
+    });
+
+    const found = findChitById(corpRoot, legacyId);
+    expect(found).not.toBeNull();
+    expect(found!.chit.id).toBe(legacyId);
+    expect(found!.chit.type).toBe('task');
+  });
+
+  it('returns null for well-formed ids that have no file anywhere', () => {
+    // Format is valid (word-pair), but no chit exists
+    expect(findChitById(corpRoot, 'fake-ghost')).toBeNull();
   });
 
   it('throws ChitMalformedError when file exists but is unparseable', async () => {

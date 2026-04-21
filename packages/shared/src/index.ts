@@ -37,6 +37,7 @@ export type {
   ChitCommon,
   FieldsForType,
   TaskFields,
+  TaskWorkflowStatus,
   ContractFields,
   ObservationFields,
   CasketFields,
@@ -83,6 +84,12 @@ export {
   isKnownChitType,
 } from './chit-types.js';
 export type { ChitTypeEntry } from './chit-types.js';
+export {
+  migrateTasksToChits,
+  taskToChit,
+} from './migrations/migrate-tasks.js';
+export type { TaskMigrationResult, TaskMigrationOpts } from './migrations/migrate-tasks.js';
+
 export {
   chitId,
   casketChitId,
@@ -306,7 +313,7 @@ export { getTheme, getAllThemes, rankLabel } from './themes.js';
 export type { Theme, ThemeId } from './themes.js';
 
 // Tasks
-export { createTask, readTask, updateTask, listTasks, taskPath } from './tasks.js';
+export { createTask, readTask, updateTask, listTasks, taskPath, findTaskById } from './tasks.js';
 export type { CreateTaskOpts, TaskFilter, TaskWithBody } from './tasks.js';
 
 // Models

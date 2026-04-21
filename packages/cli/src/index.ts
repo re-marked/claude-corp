@@ -101,6 +101,7 @@ Commands:
   dogfood    Set up dogfood project + dev team + task
   chit       Unified work-record primitive (create/read/update/close/list/promote/archive)
   observe    Capture an observation — alias for 'chit create --type observation'
+  migrate    Corp data migrations (migrate tasks: pre-chits Tasks → Chits)
 
 Feedback pipeline:
   feedback                              Corp overview — pending, BRAIN, CULTURE candidates
@@ -210,6 +211,13 @@ async function run() {
       // 'observe', the alias handler injects --type and delegates.
       const { cmdObserve } = await import('./commands/observe.js');
       await cmdObserve(process.argv.slice(3));
+      break;
+    }
+    case 'migrate': {
+      // Corp data migrations. First target: `migrate tasks` (0.3).
+      // Each migration is idempotent; safe to re-run.
+      const { cmdMigrate } = await import('./commands/migrate.js');
+      await cmdMigrate(process.argv.slice(3));
       break;
     }
     case 'start': {
