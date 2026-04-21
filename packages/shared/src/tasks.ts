@@ -29,6 +29,7 @@ import {
   readChit,
   updateChit,
   queryChits,
+  findChitById,
   chitPath,
 } from './chits.js';
 import { taskId } from './id.js';
@@ -136,12 +137,37 @@ function parseTaskFilePath(filePath: string): { corpRoot: string; id: string } {
 }
 
 /**
- * Filesystem path for a task by id. Returns the chit-based path since
- * that's where tasks live post-migration. Callers that cache this path
- * and pass it back to readTask/updateTask later will still work.
+ * Filesystem path for a task by id at corp scope. Returns the chit-based
+ * path since that's where tasks live post-migration. For tasks that
+ * might live under project scope, use findTaskById which resolves across
+ * all scopes automatically.
  */
 export function taskPath(corpRoot: string, id: string): string {
   return chitPath(corpRoot, 'corp', 'task', id);
+}
+
+/**
+ * Look up a task by id across every scope (corp + agents + projects +
+ * teams). Returns null if no task with that id exists anywhere. Uses
+ * findChitById under the hood, which handles both modern chit-format
+ * ids and legacy word-pair ids via scan-fallback.
+ *
+ * Replaces the manual "try corp/, fall back to project/" path
+ * construction that was scattered across contract-watcher, contracts.ts,
+ * and heartbeat.ts. Those call sites should migrate to this helper.
+ */
+export function findTaskById(
+  corpRoot: string,
+  id: string,
+): { task: Task; body: string; path: string } | null {
+  const found = findChitById(corpRoot, id);
+  if (!found) return null;
+  if (found.chit.type !== 'task') return null;
+  return {
+    task: chitToTask(found.chit as Chit<'task'>),
+    body: found.body,
+    path: found.path,
+  };
 }
 
 // ─── CRUD wrappers ──────────────────────────────────────────────────

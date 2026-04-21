@@ -129,10 +129,21 @@ export function taskToChit(task: Task): Chit<'task'> {
 }
 
 /**
- * Walk `<corpRoot>/tasks/` and migrate every Task file to a Chit at
- * `<corpRoot>/chits/task/<id>.md`. Corp-scoped migration — the existing
- * task layout is flat under corpRoot, so tasks land at corp scope with
- * projectId/teamId preserved as fields for cross-reference.
+ * Walk the corp and migrate every pre-chits Task file to a Chit.
+ *
+ * Two source locations covered:
+ *   1. `<corpRoot>/tasks/<id>.md` (corp-flat, common case) →
+ *      `<corpRoot>/chits/task/<id>.md`
+ *   2. `<corpRoot>/projects/<name>/tasks/<id>.md` (project-scoped,
+ *      created when a contract's tasks live inside a project) →
+ *      `<corpRoot>/projects/<name>/chits/task/<id>.md`
+ *
+ * Scope encoding: corp-flat tasks migrate to corp scope. Project-scoped
+ * tasks migrate to `project:<name>` scope so their filesystem location
+ * still matches the chit primitive's scope semantics. Contract-watcher,
+ * contracts.ts, and heartbeat — all of which previously manually scanned
+ * project-scoped task paths — now find these via findTaskById /
+ * listTasks which query across all scopes.
  *
  * Returns a structured result so callers (cc-cli migrate tasks, test
  * fixtures) can report success/skipped/errors without parsing stderr.
@@ -148,8 +159,36 @@ export function migrateTasksToChits(
     planned: [],
   };
 
-  const tasksDir = join(corpRoot, 'tasks');
-  if (!existsSync(tasksDir)) return result;
+  // Phase 1 — corp-flat <corpRoot>/tasks/
+  migrateTasksAtDir(corpRoot, join(corpRoot, 'tasks'), 'corp', opts, result);
+
+  // Phase 2 — project-scoped <corpRoot>/projects/<name>/tasks/
+  const projectsDir = join(corpRoot, 'projects');
+  if (existsSync(projectsDir)) {
+    for (const projEntry of readdirSync(projectsDir, { withFileTypes: true })) {
+      if (!projEntry.isDirectory()) continue;
+      const projectName = projEntry.name;
+      const projTasksDir = join(projectsDir, projectName, 'tasks');
+      migrateTasksAtDir(corpRoot, projTasksDir, `project:${projectName}`, opts, result);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Inner helper: walk a single tasks/ directory, convert each Task to
+ * a Chit at the given scope. Mutates `result` so the outer caller can
+ * aggregate across multiple scope dirs.
+ */
+function migrateTasksAtDir(
+  corpRoot: string,
+  tasksDir: string,
+  scope: 'corp' | `project:${string}` | `agent:${string}` | `team:${string}`,
+  opts: TaskMigrationOpts,
+  result: TaskMigrationResult,
+): void {
+  if (!existsSync(tasksDir)) return;
 
   const files = readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
 
@@ -165,7 +204,7 @@ export function migrateTasksToChits(
       }
 
       const chit = taskToChit(meta);
-      const targetPath = chitPath(corpRoot, 'corp', 'task', chit.id);
+      const targetPath = chitPath(corpRoot, scope, 'task', chit.id);
 
       if (existsSync(targetPath) && !opts.overwrite) {
         // Idempotent skip — already migrated.
@@ -188,6 +227,4 @@ export function migrateTasksToChits(
       result.errors.push({ sourcePath, error: (err as Error).message });
     }
   }
-
-  return result;
 }
