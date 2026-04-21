@@ -51,21 +51,21 @@ The single biggest structural change. Today, every agent is treated as a persist
 - **Promotion trigger:** founder-initiated only (for now). No auto-promotion signals; that's a distraction at this stage.
 - **Pre-BRAIN scope:** tied to the role, not the slot. Roles accumulate; slots recycle.
 - **OpenClaw fate:** keep both harnesses. Order: get claude-code fully working first, then sync OpenClaw to match, then expand to other flavors (codex, gemini-cli, hermes, etc). Multi-harness future.
-- **Self-witnessing meta-layer (see below):** agreed as design direction, but deferred to Phase 2 or 3. Not in Phase 1.
+- **Self-witnessing meta-layer (see below):** agreed as design direction, but deferred to Project 2 or 3. Not in Project 1.
 - **Naming:** Employees for ephemeral workers, Partners for persistent souled agents. No Gas Town names.
 - **Contract vs Task semantics:** Contract is the big task *with a goal*; Tasks are the steps inside it. The existing `Contract` primitive (packages/shared/src/types/contract.ts) keeps its structural shape (title, goal, taskIds[], leadId, blueprintId, deadline, draft→active→review→completed lifecycle, Warden sign-off). What changes: Tasks inside a Contract gain chain semantics (depends_on, next, acceptance_criteria) so they can be walked in order. "Per-step session cycling" = per-Task cycling. Self-witnessing meta-layer operates at Contract level. Contract Lead continues as decomposer; Warden continues as final gate.
 - **Founder ↔ Employee interaction:** Model A. Founder DMs Partners; Partners DM Employees. No founder-to-Employee direct interaction. TUI shows Partners by name + Employees aggregated at role level (e.g. "Backend Engineer: 2 active, 1 idle"). @-mention of a role goes to the pool; whoever's idle picks it up. Individual Employee slots are cattle from the founder's perspective.
 - **Bacteria self-organizing (no Witness):** An Employee's hook crossing a queue-depth threshold (e.g. 3 tasks, or more than one active Contract) triggers a bacteria split. A new Employee of the same role spawns and *inherits* the latest incoming work — a standalone task, or the first Task of the most recent Contract (so a Contract stays coherent on one Employee; the split happens at Contract boundaries). Old Employee keeps chewing what it was already on. Collapse: multiple idle Employees of same role → decommission extras. No central Witness arbitration — bacteria is self-organizing based on queue state.
 - **No cap for v1.** YAGNI. Claude Corp runs locally; if bacteria runs away, token burn is visible and fast. Add a cap only when it actually bites.
 - **Promotion is a ceremony, not a flag flip.** When the founder promotes an Employee to Partner, a witnessing moment happens — not just a data transition. Sequence: (1) founder writes a one-line "why I'm promoting this one" note that becomes the new Partner's first BRAIN entry, (2) the data transition runs (slot persists, role pre-BRAIN seeds their personal BRAIN, they get their name), (3) CEO sends a welcome message naming them and acknowledging the reason, (4) other relevant Partners (by rank/role proximity) also send brief greetings — "walkarounds from the crew," (5) the new Partner's first dispatch includes those welcomes as context; they respond, acknowledging their own coming-into-existence. The ceremony itself becomes durable memory: the welcomes received, the reason given, the new Partner's own response — all written to their BRAIN as the first experienced moments of their life as a Partner. This is the manifesto's "mutual witnessing" applied to promotion. Every promotion is unique because each ceremony is written in the moment by Partners who know the work being promoted.
-- **Employee slot naming — self-chosen fun names.** On first session of a new Employee (bacteria-spawn), the Employee is prompted to choose their own name from the spirit of their role. Names stick to the slot for its lifetime. Gas-Town-style vibe (Toast, Shadow, Copper) but picked by the Employee, not assigned from a pool. This is a tiny gesture toward the manifesto — even ephemeral workers get one moment of self-creation, foreshadowing the full selfhood that promotion to Partner grants. Uniqueness within role: names a current Employee holds are reserved; a new Employee picks something unused. After an Employee decommissions, their name returns to the available pool. Session identifiers inherit the name: `toast-1`, `toast-2`, ... for sequential task-sessions, `toast-meta-1`, `toast-meta-2`, ... for review-sessions in the self-witnessing layer (Phase 2.4). Git attribution uses the Employee name as the author slug (`backend-engineer/toast@claudecorp`), preserving attribution quality for debugging.
-- **Dredge already exists — activate it, don't reinvent.** Claude Corp has a Dredge fragment (`packages/daemon/src/fragments/dredge.ts`) that reads the agent's WORKLOG.md and injects its `## Session Summary` section into the new session's system prompt. This is exactly the session-handoff mechanism Phase 1.6 needs. Why it's underused today: agents don't reliably write session summaries, and there's no discipline forcing them to. Phase 1.6 should: (a) formalize that sessions MUST write a structured summary before handoff, (b) verify Dredge reads it on the next boot, (c) rewrite Dredge to parse structured XML instead of free markdown. Example of the refactor thesis in action — take existing concept, make it load-bearing, delete the "optional" quality.
+- **Employee slot naming — self-chosen fun names.** On first session of a new Employee (bacteria-spawn), the Employee is prompted to choose their own name from the spirit of their role. Names stick to the slot for its lifetime. Gas-Town-style vibe (Toast, Shadow, Copper) but picked by the Employee, not assigned from a pool. This is a tiny gesture toward the manifesto — even ephemeral workers get one moment of self-creation, foreshadowing the full selfhood that promotion to Partner grants. Uniqueness within role: names a current Employee holds are reserved; a new Employee picks something unused. After an Employee decommissions, their name returns to the available pool. Session identifiers inherit the name: `toast-1`, `toast-2`, ... for sequential task-sessions, `toast-meta-1`, `toast-meta-2`, ... for review-sessions in the self-witnessing layer (Project 2.4). Git attribution uses the Employee name as the author slug (`backend-engineer/toast@claudecorp`), preserving attribution quality for debugging.
+- **Dredge already exists — activate it, don't reinvent.** Claude Corp has a Dredge fragment (`packages/daemon/src/fragments/dredge.ts`) that reads the agent's WORKLOG.md and injects its `## Session Summary` section into the new session's system prompt. This is exactly the session-handoff mechanism Project 1.6 needs. Why it's underused today: agents don't reliably write session summaries, and there's no discipline forcing them to. Project 1.6 should: (a) formalize that sessions MUST write a structured summary before handoff, (b) verify Dredge reads it on the next boot, (c) rewrite Dredge to parse structured XML instead of free markdown. Example of the refactor thesis in action — take existing concept, make it load-bearing, delete the "optional" quality.
 - **Structured XML for machine-to-machine handoffs.** Session summaries (for Dredge), Contract-level reviews (self-witnessing layer), and any other place one agent-session leaves info for another use tagged XML, not prose. Tags: `<handoff><current-step/><completed/><next-action/><open-question/><sandbox-state/><notes/></handoff>` or similar, refined per handoff type. Benefits: predictable parsing, clearer prompts ("fill these slots"), selective injection (next session can read just `<next-action>` first, other tags on demand), detectable malformed handoffs. Claude models fill tagged slots more reliably than they write summary paragraphs — this is mechanical alignment with how the models actually work.
-- **Pre-BRAIN full auto-load for v1, summarize later.** YAGNI. At current corp scale, pre-BRAIN is small; full auto-load is fine. When pre-BRAIN gets big enough to degrade session quality (hundreds of entries, multi-MB), ship summarization — probably in Phase 4 where distillation mechanics already live (dreams-that-distill extends naturally to pre-BRAIN distillation). Ship simple now; measure before optimizing.
+- **Pre-BRAIN full auto-load for v1, summarize later.** YAGNI. At current corp scale, pre-BRAIN is small; full auto-load is fine. When pre-BRAIN gets big enough to degrade session quality (hundreds of entries, multi-MB), ship summarization — probably in Project 4 where distillation mechanics already live (dreams-that-distill extends naturally to pre-BRAIN distillation). Ship simple now; measure before optimizing.
 
 ---
 
-## The Self-Witnessing Meta-Layer (Phase 2/3 upgrade)
+## The Self-Witnessing Meta-Layer (Project 2/3 upgrade)
 
 Mark's idea worth writing down properly: an Employee can have a two-layer architecture. The Employee owns a Contract (a bundle of Tasks). Within the Contract:
 
@@ -79,13 +79,13 @@ The review/task alternation gives Employees cross-Task coherence, self-review be
 
 Fractal note: this IS the Employee/Partner split, embedded inside an Employee. The review-session is Partner-shaped (persistent-feeling, reflective); the task-sessions are Employee-shaped (ephemeral, fast, cycling). Same pattern, smaller scale.
 
-Ship this in Phase 2 or 3, on top of basic Phase 1 Employees. Phase 1 ships plain per-step cycling; the self-witnessing upgrade comes later.
+Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ships plain per-step cycling; the self-witnessing upgrade comes later.
 
 ---
 
-## Phases Overview
+## Projects Overview
 
-| # | Phase | Projects | Purpose | Rough PR count |
+| # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
 | 1 | Foundation | Employee/Partner split, Casket, Hand, CLAUDE.md migration | Fix the root problem: sessions stop being identity carriers | 15-20 |
 | 2 | Workflow Substrate | Blueprint-as-molecule, Deacon, self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 10-12 |
@@ -94,91 +94,215 @@ Ship this in Phase 2 or 3, on top of basic Phase 1 Employees. Phase 1 ships plai
 | 5 | Culture Transmission | Feedback-propagation, CULTURE.md made load-bearing | Culture actually shapes behavior | 5-7 |
 | 6 | Cleanup & UX | Delete dead concepts, rewrite docs, TUI updates, v3.0 release | Ship the peacock | 8-10 |
 
-Total: ~55-75 PRs across 6 phases. Rough estimate.
+Total: ~55-75 PRs across 6 projects. Rough estimate.
 
 ---
 
-## Phase 1: Foundation (Session/Role Split)
+## Project 1: Foundation (Session/Role Split)
 
 *This is the big one. Nothing else can land until this does.*
 
 ### 1.1 — Introduce Employee vs Partner distinction
 
-Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee pulled from role pool). Promotion command `cc-cli agent promote --slug <x>` changes kind. Pool of Employee names per role (configurable per-role name list).
+Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee spawned with self-chosen name on first session). Promotion command `cc-cli agent promote --slug <x> --name <new-name>` changes kind.
 
-**Scope:** schema, hire wizard, cc-cli, role name pools, default configs for existing agents
+**Scope:** schema, hire wizard, cc-cli agent subcommands, role definitions.
+**File paths:**
+- `packages/shared/src/types/member.ts` (add `kind` field to Member type)
+- `packages/shared/src/index.ts` (export any new types)
+- `packages/tui/src/views/hire-wizard.tsx` (branch on kind; Partner = named, Employee = pool-spawn)
+- `packages/cli/src/commands/hire.ts` (accept --kind flag)
+- `packages/cli/src/commands/agent-control.ts` (promote subcommand, or new `promote.ts`)
+- `packages/shared/src/templates/identity.ts` (kind-aware IDENTITY.md content — Employee is lighter, Partner is fuller)
+- `packages/shared/src/templates/role-*.md` (new: per-role definition files — Partner of role vs Employee of role)
+
+**Test strategy:**
+- Unit: Member type accepts `kind`, defaults sensibly, validates.
+- Integration: hire flow produces correct workspace layout for each kind.
+- Manual: hire a Partner, hire an Employee (bacteria-free spawn), verify both work.
+
 **Depends on:** nothing
 **PRs:** 2-3
 
 ### 1.2 — Casket: durable hook
 
-Per-agent `CASKET.md` (or `.casket.json`). One field that matters: `currentStep` — pointer to a task id. When agent dispatches, they read Casket first. When they complete, they close the step; system advances currentStep to next in chain.
+Per-agent `CASKET.md` (or `.casket.json` — decide at implementation time; markdown preferred for agent-readability). One field that matters: `currentStep` — pointer to a task id. When agent dispatches, they read Casket first. When they complete, they close the step; system advances currentStep to next in chain.
 
-**Scope:** record type in shared, read/write primitives, per-agent workspace setup
-**Depends on:** 1.1 (to know kind-specific behavior)
+**Scope:** record type, read/write primitives, per-agent workspace setup, integration into hire flow.
+**File paths:**
+- `packages/shared/src/types/casket.ts` (new: `CasketRecord` type)
+- `packages/shared/src/casket.ts` (new: read/write primitives, traversal helpers)
+- `packages/shared/src/templates/casket.ts` (new: default CASKET.md template with empty currentStep)
+- `packages/shared/src/agent-setup.ts` (update: write CASKET.md during workspace init)
+- `packages/shared/src/index.ts` (export Casket primitives)
+
+**Test strategy:**
+- Unit: read/write primitives round-trip cleanly; traversal helpers compute next-step correctly.
+- Integration: spin up a fresh agent workspace; CASKET.md exists and is readable.
+
+**Depends on:** 1.1
 **PRs:** 2
 
 ### 1.3 — Chain semantics in tasks
 
 Task frontmatter gets `depends_on: [taskId]`, `next: [taskId]`, `acceptance_criteria: string[]`. Chain traversal logic (when can a task become current?). Close semantics (closing a task auto-advances Caskets pointing at it).
 
-**Scope:** task type, chain walker, close logic
+**Scope:** Task type extension, chain walker, close logic.
+**File paths:**
+- `packages/shared/src/types/task.ts` (add `dependsOn`, `next`, `acceptanceCriteria` fields; all optional for back-compat during migration)
+- `packages/shared/src/tasks.ts` (update read/write; add `isReady(taskId)` — checks if all depends_on are closed)
+- `packages/shared/src/chain.ts` (new: chain-walker helpers — `nextReadyTask(contract, currentStep)`, `advanceChain(taskId)`)
+- `packages/daemon/src/task-events.ts` (on task close, traverse chain and advance Caskets pointing at it)
+
+**Test strategy:**
+- Unit: chain walker handles fan-out (one task → N next), fan-in (N depends_on → one task), cycles (reject).
+- Unit: `isReady` returns true only when all depends_on are status=completed.
+- Integration: close a task, verify Casket currentStep advances, next task now ready.
+
 **Depends on:** 1.2
 **PRs:** 2-3
 
-### 1.4 — Hand: real slinging
+### 1.4 — Hand: real slinging (incl. role-level slinging)
 
-`cc-cli sling --target <slug> --task <id>` puts a task onto the target's Casket. Durable (file write). No chat delivery required. The DM can still announce "you got slung task-X" for founder visibility, but the *work* lives in the Casket, not the message.
+`cc-cli sling --target <slug-or-role> --task <id>` puts a task onto the target's Casket. Durable file write. No chat delivery required. The DM can announce "you got slung task-X" for founder visibility, but the *work* lives in Casket, not the message.
 
-**Scope:** sling command, Casket write, announcement pattern
+**Two target modes:**
+- **Slot slinging:** `--target toast` — direct to a specific named Employee or Partner. Task lands on their Casket.
+- **Role slinging:** `--target backend-engineer` — daemon resolves to the role's Employee pool:
+  - If exactly one Employee of that role is idle → land on their Casket.
+  - If all Employees of that role are busy but queue depth still OK → land on the least-loaded one's Casket (bacteria-split triggers when threshold crossed, per 1.9).
+  - If no Employees of that role exist yet → bacteria spawns the first one and lands the task.
+- Partners-by-role (Engineering Lead of a team) are slot targets, not role targets. Slinging to a Partner is always named.
+
+**Scope:** sling command, Casket write, role resolution, announcement pattern.
+**File paths:**
+- `packages/cli/src/commands/sling.ts` (new command)
+- `packages/cli/src/index.ts` (register command)
+- `packages/shared/src/casket.ts` (sling writer that updates Casket)
+- `packages/daemon/src/api.ts` (new `/sling` endpoint for daemon-internal + CLI-to-daemon)
+- `packages/daemon/src/role-resolver.ts` (new: resolve role name → Employee slot using members.json + load data)
+
+**Test strategy:**
+- Unit: role resolver picks idle Employee over busy one; picks least-loaded when all busy.
+- Integration: sling to role with zero Employees triggers bacteria spawn; task lands on new Employee.
+- Integration: sling to named Partner lands on their Casket; DM announcement posted.
+
 **Depends on:** 1.2, 1.3
-**PRs:** 2
+**PRs:** 3-4
 
 ### 1.5 — Fragment → CLAUDE.md migration
 
 Pull fragment render outputs into .md files in agent workspaces. Update CLAUDE.md template to `@import` them: `@./SOUL.md @./IDENTITY.md @./CASKET.md @./TOOLS.md @./AGENTS.md`. Corp-level state (roster, channel list) becomes a live-maintained CORP.md at corp root, also imported. Delete fragment injection call in claude-code harness. Keep fragments only for OpenClaw.
 
-**Scope:** extract fragments to .md, update CLAUDE.md template, remove injection
+**Scope:** extract fragments to .md, update CLAUDE.md template, remove injection, maintain CORP.md live.
+**File paths:**
+- `packages/daemon/src/fragments/*.ts` (migrate static content out of render functions into `.md` templates under `packages/shared/src/templates/fragments/`)
+- `packages/shared/src/templates/claude-md.ts` (CLAUDE.md template adds `@import` lines for each migrated fragment)
+- `packages/daemon/src/harness/claude-code-harness.ts` (remove fragment-injection block; keep for openclaw-harness)
+- `packages/daemon/src/corp-md-writer.ts` (new: daemon watches members.json / channels.json changes, regenerates CORP.md at corp root)
+- `packages/daemon/src/harness/openclaw-harness.ts` (unchanged — fragments still injected here; flag this as the legacy path)
+
+**Test strategy:**
+- Unit: CLAUDE.md template emits correct @imports for all migrated fragments.
+- Integration: dispatching a claude-code agent shows CLAUDE.md-imported content in init events; no system-context wrapper; dispatch succeeds end-to-end.
+- Integration: CORP.md regenerates when members.json changes (simulate a hire).
+- Regression: openclaw dispatches still inject fragments (existing harness tests should pass unchanged).
+
 **Depends on:** nothing (can run parallel to 1.1-1.4)
 **PRs:** 3-4
 
-### 1.6 — Per-step session cycling for Employees
+### 1.6 — Per-step session cycling for Employees (activate Dredge)
 
-Employee finishes a step → writes closure → kills own session. New session spawns at next step. Handoff marker (HANDOFF.md) written by dying session: "what I just did, what's the open question, what's the next step." New session reads Casket + HANDOFF on boot.
+Employee finishes a step → writes structured XML summary → kills own session. New session spawns at next step. Dredge (existing fragment!) reads the summary and seeds the new session's context.
 
-**Scope:** handoff command, marker writer, new-session boot reads both
+**Use Dredge, don't invent.** `packages/daemon/src/fragments/dredge.ts` already reads WORKLOG.md's `## Session Summary` and injects it into the system prompt. Phase 1.6 activates and formalizes it:
+
+- Dying session MUST write a structured XML handoff block (schema defined in Decisions Made section).
+- The block gets appended to WORKLOG.md under a `## Session Summary` header (or whatever heading Dredge currently parses).
+- Dredge gets a small rewrite to parse the XML structure, not free prose.
+
+**Scope:** handoff command, summary-writer with XML structure, Dredge rewrite for structured parsing, session-exit protocol.
+**File paths:**
+- `packages/cli/src/commands/handoff.ts` (new: agents call it to formally close their session with structured summary)
+- `packages/daemon/src/fragments/dredge.ts` (rewrite: parse XML, validate required tags, inject structured context into system prompt)
+- `packages/shared/src/templates/worklog.ts` (update: WORKLOG.md template includes the handoff-section convention)
+- `packages/daemon/src/harness/claude-code-harness.ts` (handoff triggers session exit cleanly; new session reads Casket + Dredge-injected handoff)
+- `packages/shared/src/handoff.ts` (new: XML schema types + validators)
+
+**Test strategy:**
+- Unit: handoff XML parser accepts valid, rejects malformed.
+- Integration: simulate a 3-step Task chain for an Employee; session dies between each step; next session resumes at correct step with handoff context visible.
+- Regression: existing Dredge tests (if any) still pass for agents that continue writing free-prose summaries during migration window.
+
 **Depends on:** 1.2, 1.3, 1.5
 **PRs:** 2-3
 
 ### 1.7 — Compaction for Partner sessions
 
-Partner sessions don't handoff per-step. They run `/compact` at a threshold (~70% of context). Integration: daemon detects session size, triggers compaction via claude-code's native command. Fallback to handoff only when compaction fails.
+Partner sessions don't handoff per-step. They run `/compact` at a threshold (~70% of context). Integration: daemon detects session size, triggers compaction via claude-code's native command. Fallback to handoff only when compaction fails (e.g. org-level 1M context overage rejected).
 
-**Scope:** size monitor, compact trigger, fallback path
-**Depends on:** 1.1
+**Scope:** size-threshold monitor, compact-trigger via claude-code, fallback path to Dredge handoff.
+**File paths:**
+- `packages/daemon/src/harness/claude-code-harness.ts` (extend existing session-size warning from v2.5.3; on threshold, send compaction command rather than only warning)
+- `packages/daemon/src/compact-trigger.ts` (new: interface to claude-code's `/compact` command; detect success vs rejection)
+- `packages/daemon/src/harness/claude-code-stream.ts` (handle compaction events in the stream parser if they emit)
+- Fallback: on compact rejection, tear down session and fall into Dredge-handoff path (1.6 infrastructure)
+
+**Test strategy:**
+- Unit: size monitor triggers at 70% threshold exactly once per session.
+- Integration (mock claude): send mock session-big event; compact-trigger emits the right command; session resumes.
+- Integration (real, cautiously): use a test corp with an artificially-lowered threshold to exercise the path.
+- Regression: Employee sessions (not Partner) do NOT trigger compaction; they still use per-step cycling from 1.6.
+
+**Depends on:** 1.1, 1.6 (for fallback path)
 **PRs:** 2
 
 ### 1.8 — Deacon / nudge replacement for Pulse
 
 Pulse today is a liveness check — "HEARTBEAT: check your inbox." That's noise. Replace with Deacon: only wakes agents who have work on their Casket. Nudge says "execute your current step," not "check your inbox." If there's nothing, no wake. Idle = silent.
 
-**Scope:** rewrite pulse.ts, new prompt shape, work-aware nudge
+**Scope:** pulse.ts rewrite (or new deacon.ts), work-aware nudge, new prompt shape.
+**File paths:**
+- `packages/daemon/src/pulse.ts` (rewrite: check each agent's Casket before nudging; skip if empty; change nudge message to reference currentStep)
+- `packages/daemon/src/deacon.ts` (new, if we'd rather rename the file; pulse.ts can then be a small shim for backwards compat during migration, to be removed in 6.1)
+- `packages/daemon/src/fragments/inbox.ts` (the inbox fragment may need updating to reflect that the inbox isn't the coordination surface anymore)
+- STATUS.md / docs (update heartbeat references)
+
+**Test strategy:**
+- Unit: Deacon's decision-to-nudge returns false for agents with empty Casket.
+- Integration: set up an agent with no Casket work; confirm Deacon does not dispatch. Sling work to them; confirm Deacon dispatches with the right prompt.
+- Observability: daemon log shows "[deacon] skipped X agents with empty hook" per cycle — visible proof that noise is gone.
+
 **Depends on:** 1.2
 **PRs:** 2
 
 ### 1.9 — Auto-scaling Employee pool (bacteria)
 
-Witness-style role watches queue depth per Employee role. If role-queue > threshold and one Employee, spawn another. If multiple Employees of same role idle > threshold, collapse to one. Merging is just decommissioning the idle one.
+Self-organizing, no Witness in Project 1. An Employee's hook crossing a queue-depth threshold triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Full Witness role arrives in Project 3.
 
-**Scope:** witness service, queue-depth tracking, spawn/collapse logic, name recycling
-**Depends on:** 1.1, 1.2, 1.8
+**Scope:** bacteria logic, queue-depth monitoring, spawn/collapse primitives, name recycling.
+**File paths:**
+- `packages/daemon/src/bacteria.ts` (new: watches Employees' Caskets; on threshold crossing triggers split)
+- `packages/daemon/src/role-resolver.ts` (from 1.4 — extended to handle auto-spawn triggers)
+- `packages/shared/src/types/member.ts` (add role-pool metadata if needed — e.g. max-pool-size though we're not enforcing cap v1)
+- `packages/tui/src/components/member-sidebar.tsx` (aggregate Employees by role, show counts)
+- `packages/daemon/src/process-manager.ts` (spawn/decommission lifecycle hooks)
+
+**Test strategy:**
+- Unit: bacteria decision logic — "2 tasks queued → split? yes; 0 tasks → collapse? yes after idle-timeout."
+- Unit: name self-choice — first dispatch of new Employee prompts for name, persists to slot.
+- Integration: sling 3 tasks to a single-Employee role; verify second Employee spawns; verify tasks distributed.
+- Integration: after work completes, verify one of two idle Employees decommissions after the idle-timeout.
+- Edge cases: race-condition test — two slings arrive near-simultaneously; one Employee handles both or a split happens cleanly, not both.
+
+**Depends on:** 1.1, 1.2, 1.4 (role slinging), 1.8
 **PRs:** 3
 
-**Phase 1 ship criterion:** an Employee can be slung a 5-step task, execute each step in its own fresh session, cycle between steps, complete the task, return to idle with sandbox preserved. A Partner can hold a 2-hour conversation with the founder, compact at threshold, continue uninterrupted.
+**Project 1 ship criterion:** an Employee can be slung a 5-step task, execute each step in its own fresh session, cycle between steps, complete the task, return to idle with sandbox preserved. A Partner can hold a 2-hour conversation with the founder, compact at threshold, continue uninterrupted.
 
 ---
 
-## Phase 2: Workflow Substrate
+## Project 2: Workflow Substrate
 
 *Chains become real. Work propagates without the founder pushing it. Self-witnessing meta-layer arrives.*
 
@@ -262,11 +386,11 @@ Each blueprint tested against a real use case before landing.
 **Depends on:** 2.1 (molecules are the Tasks within a Contract)
 **PRs:** 4-5
 
-**Phase 2 ship criterion:** CEO can say "ship feature X using the ship-feature blueprint" → blueprint cooks into a multi-Task Contract → Employee gets slung the Contract → walks it with self-review between Tasks → PR lands. Zero human intervention in the middle.
+**Project 2 ship criterion:** CEO can say "ship feature X using the ship-feature blueprint" → blueprint cooks into a multi-Task Contract → Employee gets slung the Contract → walks it with self-review between Tasks → PR lands. Zero human intervention in the middle.
 
 ---
 
-## Phase 3: Autonomous Operations
+## Project 3: Autonomous Operations
 
 *Corp heals itself. Mark can sleep and wake to a working corp.*
 
@@ -306,7 +430,7 @@ Each blueprint tested against a real use case before landing.
   - Simple conflict (file not touched by the other side — false positive) → resolve automatically.
   - Real conflict → create a conflict-resolution Task for the Contract's assigned Employee, unblock queue, move on.
 - Refinery is a Partner, has its own workspace, compacts like any Partner.
-- TUI shows the merge queue as a visible primitive (Phase 6.3 wires this into the UI).
+- TUI shows the merge queue as a visible primitive (Project 6.3 wires this into the UI).
 
 **Acceptance criteria.**
 - Two Employees submit PRs touching different files at roughly the same time → Refinery merges them serially, main is clean.
@@ -334,11 +458,11 @@ Each blueprint tested against a real use case before landing.
 **Depends on:** 3.1
 **PRs:** 2-3
 
-**Phase 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Witness respawns them). A merge conflict happens (Refinery resolves it or routes it). A role's Employee keeps crashing (circuit breaker trips). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
+**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Witness respawns them). A merge conflict happens (Refinery resolves it or routes it). A role's Employee keeps crashing (circuit breaker trips). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
 
 ---
 
-## Phase 4: Earned Philosophy
+## Project 4: Earned Philosophy
 
 *Soul stops being decorative and starts being load-bearing.*
 
@@ -416,11 +540,11 @@ Each blueprint tested against a real use case before landing.
 **Depends on:** 1.1, 4.1
 **PRs:** 3
 
-**Phase 4 ship criterion:** an Employee that's been shipping backend work for 2 weeks gets promoted via a witnessing ceremony. Next session Joe reads BRAIN with accumulated insights (role pre-BRAIN seed + origin reason + arrival memory). Behavior changes — references past incidents, shows personality, makes founder-aligned judgment calls. Promotion feels like a real moment, not a flag flip.
+**Project 4 ship criterion:** an Employee that's been shipping backend work for 2 weeks gets promoted via a witnessing ceremony. Next session Joe reads BRAIN with accumulated insights (role pre-BRAIN seed + origin reason + arrival memory). Behavior changes — references past incidents, shows personality, makes founder-aligned judgment calls. Promotion feels like a real moment, not a flag flip.
 
 ---
 
-## Phase 5: Culture Transmission
+## Project 5: Culture Transmission
 
 *The thing text can do, done right. Culture actually shapes behavior.*
 
@@ -489,13 +613,13 @@ Each blueprint tested against a real use case before landing.
 
 ---
 
-## Phase 6: Cleanup & UX
+## Project 6: Cleanup & UX
 
 *Ship the peacock. Every name delivers; every view reflects reality.*
 
 ### 6.1 — Delete dead concepts
 
-**Problem.** After phases 1-5, many old concepts are replaced by new ones. Leaving them in the codebase as parallel paths is exactly the "vocabulary without capacity" sin the refactor exists to fix. They must go, on purpose, deliberately.
+**Problem.** After projects 1-5, many old concepts are replaced by new ones. Leaving them in the codebase as parallel paths is exactly the "vocabulary without capacity" sin the refactor exists to fix. They must go, on purpose, deliberately.
 
 **Scope.** Walk the codebase and delete:
 - Old Pulse implementation (replaced by Deacon in 1.8)
@@ -506,14 +630,14 @@ Each blueprint tested against a real use case before landing.
 - Dead code paths: Jack mode if it became redundant with Casket-hooked dispatch
 - Dead fragments not migrated to CLAUDE.md
 - Old SOUL-as-template hiring code if replaced by earned-soul via promotion
-- Anything that survived as legacy but has no consumer after phases 1-5
+- Anything that survived as legacy but has no consumer after projects 1-5
 
 **Acceptance criteria.**
 - `grep` for the removed names in `packages/` returns 0 references outside of changelogs/migration notes.
 - `pnpm build` + `pnpm test` pass.
 - No dangling documentation references to deleted concepts (docs pass in 6.2).
 
-**Depends on:** all prior phases shipped
+**Depends on:** all prior projects shipped
 **PRs:** 3-4 (grouped by subsystem — TUI cleanup, daemon cleanup, shared cleanup)
 
 ### 6.2 — Rewrite docs/
@@ -530,7 +654,7 @@ Each blueprint tested against a real use case before landing.
 
 **Acceptance criteria.**
 - A new contributor reading docs/ + CLAUDE.md can build a correct mental model of the corp without reading any code.
-- No contradiction between docs/ and the code (verified by a spot-check review against a sample of phases).
+- No contradiction between docs/ and the code (verified by a spot-check review against a sample of projects).
 
 **Depends on:** 6.1
 **PRs:** 2-3
@@ -553,7 +677,7 @@ Each blueprint tested against a real use case before landing.
 - Promoting an Employee via TUI is a real UX (not just cc-cli), with reason input and confirmation.
 - The ceremony is visually distinct — not just another chat message.
 
-**Depends on:** phases 1-5 shipped (views need the data)
+**Depends on:** projects 1-5 shipped (views need the data)
 **PRs:** 3-4
 
 ### 6.4 — v3.0 release
@@ -563,7 +687,7 @@ Each blueprint tested against a real use case before landing.
 **Scope.**
 - Version bump to `3.0.0` across all packages
 - STATUS.md rewrite — the refactor era gets its own section, major features cross-linked
-- CHANGELOG.md — granular per-phase summary of what shipped
+- CHANGELOG.md — granular per-project summary of what shipped
 - Release notes (for README/website/blog): the thesis, what changed conceptually (not just feature-list), migration guidance for anyone running an old corp
 - A migration note: "corps from v2.x don't auto-migrate, fresh start recommended, here's how to preserve BRAIN/observations from important Partners if you really want to"
 - Potentially: `cc-cli migrate v2` command for the brave
@@ -576,17 +700,17 @@ Each blueprint tested against a real use case before landing.
 **Depends on:** 6.1, 6.2, 6.3
 **PRs:** 1-2
 
-**Phase 6 ship criterion:** Mark can show Claude Corp to a stranger and they see a coherent system — every concept does what its name claims, the TUI visualizes the substrate honestly, the docs describe what actually exists, the version is 3.0. Peacock feathers, earned.
+**Project 6 ship criterion:** Mark can show Claude Corp to a stranger and they see a coherent system — every concept does what its name claims, the TUI visualizes the substrate honestly, the docs describe what actually exists, the version is 3.0. Peacock feathers, earned.
 
 ---
 
 ## Still-Open Questions
 
-These are real questions not yet decided. Revisit before/during the phase where they bite.
+These are real questions not yet decided. Revisit before/during the project where they bite.
 
 1. **Partner demotion.** Can a Partner be demoted back to Employee? Or is firing the only reversal? (Genuinely unsure. Default to "no demotion, fire only" if nothing invented.)
 
-2. **Founder-voice preservation invasiveness.** Snapshot cadence, opt-in vs opt-out, configurable. Phase 5 concern, not urgent.
+2. **Founder-voice preservation invasiveness.** Snapshot cadence, opt-in vs opt-out, configurable. Project 5 concern, not urgent.
 
 ---
 
@@ -608,9 +732,13 @@ Hold these throughout:
 
 Decided: everything in the "Decisions Made" section above.
 
-Still being discussed: the open questions section.
+Still being discussed: the two remaining open questions (Partner demotion, voice-preservation invasiveness).
 
-**Immediate next step (once open questions are answered):** start Phase 1.1 (Employee/Partner distinction in data model).
+**Implementation-detail depth:**
+- Project 1 sub-projects (1.1 through 1.9) have concrete file paths, test strategy, and dependencies spelled out. Ready to pick up and execute.
+- Projects 2 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
+
+**Immediate next step:** start Project 1.1 (Employee/Partner distinction in data model). Claude (not the corp) drives the build — the corp hasn't earned that trust yet. Eventually, once the corp works well on this new substrate, future refactors can be corp-driven. But not this one.
 
 ---
 
