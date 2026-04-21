@@ -30,6 +30,20 @@ export type {
   Contract,
   ContractStatus,
   ContractProgress,
+  Chit,
+  ChitTypeId,
+  ChitStatus,
+  ChitScope,
+  ChitCommon,
+  FieldsForType,
+  TaskFields,
+  ContractFields,
+  ObservationFields,
+  CasketFields,
+  HandoffFields,
+  DispatchContextFields,
+  PreBrainEntryFields,
+  StepLogFields,
 } from './types/index.js';
 
 // Parsers
@@ -61,6 +75,40 @@ export {
   tempSuffix,
 } from './id.js';
 export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
+export { atomicWriteSync } from './atomic-write.js';
+export {
+  CHIT_TYPES,
+  ChitValidationError,
+  getChitType,
+  isKnownChitType,
+} from './chit-types.js';
+export type { ChitTypeEntry } from './chit-types.js';
+export {
+  chitId,
+  casketChitId,
+  isChitIdFormat,
+  chitPath,
+  chitScopeFromPath,
+  createChit,
+  readChit,
+  updateChit,
+  closeChit,
+  promoteChit,
+  archiveChit,
+  queryChits,
+  findChitById,
+  checkConcurrentModification,
+  ChitConcurrentModificationError,
+  ChitMalformedError,
+} from './chits.js';
+export type {
+  CreateChitOpts,
+  UpdateChitOpts,
+  ChitWithBody,
+  QueryChitsOpts,
+  QueryChitsResult,
+  MalformedChit,
+} from './chits.js';
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 
