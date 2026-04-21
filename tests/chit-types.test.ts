@@ -96,6 +96,12 @@ describe('CHIT_TYPES registry invariants', () => {
       }
     }
   });
+
+  it('defaultStatus is always in validStatuses', () => {
+    for (const entry of CHIT_TYPES) {
+      expect(entry.validStatuses).toContain(entry.defaultStatus);
+    }
+  });
 });
 
 describe('validator: task', () => {

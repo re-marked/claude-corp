@@ -83,6 +83,17 @@ export {
   isKnownChitType,
 } from './chit-types.js';
 export type { ChitTypeEntry } from './chit-types.js';
+export {
+  chitId,
+  casketChitId,
+  chitPath,
+  createChit,
+  readChit,
+  updateChit,
+  closeChit,
+  ChitConcurrentModificationError,
+} from './chits.js';
+export type { CreateChitOpts, UpdateChitOpts, ChitWithBody } from './chits.js';
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 

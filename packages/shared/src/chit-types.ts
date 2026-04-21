@@ -53,6 +53,8 @@ export interface ChitTypeEntry {
   defaultEphemeral: boolean;
   /** Duration string for auto-TTL when ephemeral=true (e.g. "7d", "24h", "1h"). Null when non-ephemeral or no default. */
   defaultTTL: string | null;
+  /** Status a newly-created chit of this type gets when the caller doesn't specify one. Must be in validStatuses — invariant test enforces. */
+  defaultStatus: ChitStatus;
   /** Statuses that represent terminal (closed/done) states for this type. Entering one disables further updates except re-opening via explicit override. */
   terminalStatuses: readonly ChitStatus[];
   /** All statuses valid for this type. status transitions outside this set are rejected at the cc-cli boundary. */
@@ -222,6 +224,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     idPrefix: 't',
     defaultEphemeral: false,
     defaultTTL: null,
+    defaultStatus: 'draft',
     validStatuses: ['draft', 'active', 'completed', 'rejected', 'failed', 'closed'],
     terminalStatuses: ['completed', 'rejected', 'failed', 'closed'],
     validate: validateTask,
@@ -231,6 +234,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     idPrefix: 'c',
     defaultEphemeral: false,
     defaultTTL: null,
+    defaultStatus: 'draft',
     validStatuses: ['draft', 'active', 'review', 'completed', 'rejected', 'failed', 'closed'],
     terminalStatuses: ['completed', 'rejected', 'failed', 'closed'],
     validate: validateContract,
@@ -240,6 +244,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     idPrefix: 'o',
     defaultEphemeral: true,
     defaultTTL: '7d',
+    defaultStatus: 'active',
     validStatuses: ['active', 'closed', 'burning'],
     terminalStatuses: ['closed', 'burning'],
     validate: validateObservation,
@@ -249,6 +254,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     idPrefix: 'cask',
     defaultEphemeral: false,
     defaultTTL: null,
+    defaultStatus: 'active',
     validStatuses: ['active'],
     terminalStatuses: [],
     validate: validateCasket,
@@ -258,6 +264,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     idPrefix: 'h',
     defaultEphemeral: true,
     defaultTTL: '24h',
+    defaultStatus: 'active',
     validStatuses: ['active', 'closed', 'burning'],
     terminalStatuses: ['closed', 'burning'],
     validate: validateHandoff,
@@ -267,6 +274,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     idPrefix: 'dc',
     defaultEphemeral: true,
     defaultTTL: '1h',
+    defaultStatus: 'active',
     validStatuses: ['active', 'closed', 'burning'],
     terminalStatuses: ['closed', 'burning'],
     validate: validateDispatchContext,
@@ -276,6 +284,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     idPrefix: 'pbe',
     defaultEphemeral: true,
     defaultTTL: '7d',
+    defaultStatus: 'active',
     validStatuses: ['active', 'closed', 'burning'],
     terminalStatuses: ['closed', 'burning'],
     validate: validatePreBrainEntry,
@@ -285,6 +294,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     idPrefix: 'sl',
     defaultEphemeral: false,
     defaultTTL: null,
+    defaultStatus: 'active',
     validStatuses: ['active', 'completed', 'failed', 'closed'],
     terminalStatuses: ['completed', 'failed', 'closed'],
     validate: validateStepLog,
