@@ -61,7 +61,11 @@ export class ContractWatcher {
   }
 
   private watchProjectContracts(projectName: string): void {
-    const contractsDir = join(this.daemon.corpRoot, 'projects', projectName, 'contracts');
+    // Post-0.4 migration: contracts live as chits at
+    // <corpRoot>/projects/<name>/chits/contract/. Watching the old
+    // <corpRoot>/projects/<name>/contracts/ would miss every new contract
+    // + status transition + warden-review trigger.
+    const contractsDir = join(this.daemon.corpRoot, 'projects', projectName, 'chits', 'contract');
     if (!existsSync(contractsDir)) return;
     if (this.watchers.has(projectName)) return;
 

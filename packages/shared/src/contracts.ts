@@ -10,8 +10,8 @@
  * Internal storage moves to chits; same field semantics end-to-end.
  */
 
-import { basename, dirname } from 'node:path';
-import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import type { Contract, ContractStatus, ContractProgress } from './types/contract.js';
 import type { TaskPriority } from './types/task.js';
 import type { Chit, ContractFields } from './types/chit.js';
@@ -186,6 +186,17 @@ export function createContract(corpRoot: string, opts: CreateContractOpts): Cont
     tags: [],
     body,
   });
+
+  // Scratchpad: per-contract shared workspace for Coordinator Mode
+  // (cross-worker knowledge sharing). Kept at the pre-migration location
+  // (<corpRoot>/projects/<name>/contracts/<id>/scratchpad/) because it's
+  // free-form agent workspace, not a chit. Fragments/scratchpad.ts and
+  // fragments/coordinator.ts reference this path; keeping it intact
+  // preserves those agent instructions without template churn.
+  mkdirSync(
+    join(corpRoot, 'projects', opts.projectName, 'contracts', id, 'scratchpad'),
+    { recursive: true },
+  );
 
   return chitToContract(createdChit);
 }
