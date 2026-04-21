@@ -30,6 +30,20 @@ export type {
   Contract,
   ContractStatus,
   ContractProgress,
+  Chit,
+  ChitTypeId,
+  ChitStatus,
+  ChitScope,
+  ChitCommon,
+  FieldsForType,
+  TaskFields,
+  ContractFields,
+  ObservationFields,
+  CasketFields,
+  HandoffFields,
+  DispatchContextFields,
+  PreBrainEntryFields,
+  StepLogFields,
 } from './types/index.js';
 
 // Parsers
