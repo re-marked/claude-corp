@@ -99,6 +99,7 @@ Commands:
   logs       Show daemon logs
   refresh    Refresh SOUL.md + AGENTS.md from current templates (--all, --force, --dry-run)
   dogfood    Set up dogfood project + dev team + task
+  chit       Unified work-record primitive (create/read/update/close/list/promote/archive)
 
 Feedback pipeline:
   feedback                              Corp overview — pending, BRAIN, CULTURE candidates
@@ -192,6 +193,14 @@ async function run() {
         user: values.user as string,
         theme: (values.theme as string) ?? 'corporate',
       });
+      break;
+    }
+    case 'chit': {
+      // Each chit subcommand parses its own args to keep the main
+      // dispatcher from needing to know every chit-specific flag.
+      // process.argv.slice(3) = everything after `node cc-cli chit`.
+      const { cmdChit } = await import('./commands/chit.js');
+      await cmdChit(process.argv.slice(3));
       break;
     }
     case 'start': {
