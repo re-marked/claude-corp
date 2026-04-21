@@ -53,6 +53,7 @@ export type {
   ChitCommon,
   FieldsForType,
   TaskFields,
+  TaskWorkflowStatus,
   ContractFields,
   ObservationFields,
   CasketFields,

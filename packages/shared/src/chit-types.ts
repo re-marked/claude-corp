@@ -159,6 +159,17 @@ function validateTask(fields: unknown): void {
   optionalIsoTimestamp(f.handedAt, 'task.handedAt');
   optionalIsoTimestamp(f.dueAt, 'task.dueAt');
   if (f.loopId !== undefined) requireStringOrNull(f.loopId, 'task.loopId');
+  if (f.workflowStatus !== undefined && f.workflowStatus !== null) {
+    requireEnum(f.workflowStatus, 'task.workflowStatus', [
+      'pending',
+      'assigned',
+      'in_progress',
+      'blocked',
+      'completed',
+      'failed',
+      'cancelled',
+    ] as const);
+  }
 }
 
 function validateContract(fields: unknown): void {

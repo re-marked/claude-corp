@@ -123,7 +123,28 @@ describe('validator: task', () => {
         handedAt: '2026-04-21T14:32:17Z',
         dueAt: '2026-04-28T00:00:00Z',
         loopId: 'chit-t-aabbccdd',
+        workflowStatus: 'in_progress',
       }),
+    ).not.toThrow();
+  });
+
+  it('accepts all workflow status enum values', () => {
+    for (const s of ['pending', 'assigned', 'in_progress', 'blocked', 'completed', 'failed', 'cancelled']) {
+      expect(() =>
+        entry.validate({ title: 'x', priority: 'normal', workflowStatus: s }),
+      ).not.toThrow();
+    }
+  });
+
+  it('rejects invalid workflowStatus enum value', () => {
+    expect(() =>
+      entry.validate({ title: 'x', priority: 'normal', workflowStatus: 'frobnicating' }),
+    ).toThrow(/workflowStatus/);
+  });
+
+  it('accepts null workflowStatus', () => {
+    expect(() =>
+      entry.validate({ title: 'x', priority: 'normal', workflowStatus: null }),
     ).not.toThrow();
   });
 
