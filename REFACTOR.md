@@ -395,6 +395,116 @@ Promotion flips `ephemeral: true → false`, clears TTL. Destruction writes a on
 
 ---
 
+### Project 0.1 — Implementation kickoff notes (for future-Claude)
+
+*This is the concrete starting point for the first Chits PR. Written while design-session context is still fresh, so the next implementer doesn't burn tokens re-discovering the codebase shape.*
+
+#### Where to start, in order
+
+1. Read this section (you're here).
+2. Read `packages/shared/src/tasks.ts` — closest existing read/write pattern to mirror for Chits CRUD.
+3. Read `packages/shared/src/types/task.ts` — type shape to mirror for `types/chit.ts`.
+4. Read `packages/shared/src/models.ts` — registry pattern to mirror for `chit-types.ts`.
+5. Read `tests/session-key.test.ts` — concrete test pattern (vitest + inline fixtures + tmpdir cleanup).
+6. Run `pnpm build && pnpm test` to confirm baseline green before touching anything.
+
+#### Patterns to mirror
+
+**For `packages/shared/src/types/chit.ts` — mirror `types/task.ts`**
+- Explicit TypeScript interfaces, not type aliases.
+- All fields documented with one-line comments explaining WHY each exists (not WHAT — the name already says what).
+- Optional fields marked with `?`.
+- Union types for `status`, `type`, etc. rather than strings.
+- Use generic `Chit<T extends ChitTypeId>` where type-specific fields go in `fields: T extends ... ? FieldsFor<T> : never`.
+
+**For `packages/shared/src/chits.ts` — mirror `tasks.ts`**
+- Each CRUD operation is a standalone exported function (`createChit`, `readChit`, `updateChit`, `closeChit`, `queryChits`, `promoteChit`), not a class.
+- Takes `corpRoot: string` as first param for scoping.
+- Returns the read/written object; throws on error (no Result types — this codebase doesn't use them).
+- All file writes go through `atomicWriteSync` (new helper, below).
+- Path builder: `chitPath(corpRoot, scope, type, id)` helper returns `join(corpRoot, scope, 'chits', type, `${id}.md`)` with special scope handling for agent/project/team paths.
+
+**For `packages/shared/src/chit-types.ts` — mirror `models.ts`**
+- Exported const registry as a typed array: `CHIT_TYPES: ChitTypeEntry[]`.
+- Each entry: `{ id, defaultEphemeral, defaultTTL?, validator?, terminalStatuses, ... }`.
+- Helper function to look up by id: `getChitType(id)`.
+- Exported predicate `isKnownChitType(id)` for validation at CLI boundary.
+
+**For `packages/shared/src/atomic-write.ts` — new, no existing pattern**
+```ts
+import { writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+export function atomicWriteSync(path: string, content: string | Buffer): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmp, content, typeof content === 'string' ? 'utf-8' : undefined);
+  renameSync(tmp, path);
+}
+```
+Test: interrupt mid-write via mocked `fs` that throws on second write, verify either full-file-old content or full-file-new, never partial.
+
+#### Test patterns
+
+Mirror `tests/session-key.test.ts` or `tests/deterministic-thread-keys.test.ts`:
+- `import { describe, it, expect } from 'vitest'` — same import set this repo uses.
+- Import primitive under test via relative path with `.js` extension: `from '../packages/shared/src/chits.js'`.
+- For file I/O: `const workspace = mkdtempSync(join(tmpdir(), 'chits-test-'))` at top, `rmSync(workspace, { recursive: true, force: true })` in `finally` block.
+- Keep tests black-box: don't import internal helpers, don't spy on implementation details, don't add test-only methods to production code.
+
+#### Build / test / link commands
+
+```bash
+pnpm build        # all packages, ~5s
+pnpm test         # vitest run, ~10s, 800+ tests
+pnpm type-check   # tsc --noEmit across packages
+cd packages/cli && npm link   # for cc-cli updates to be picked up globally
+cd packages/tui && npm link   # for TUI updates
+```
+
+Always run `pnpm build && pnpm type-check && pnpm test` green before any commit.
+
+#### Commit conventions
+
+- Granular: one logical change = one commit. Don't bundle.
+- Format: `feat(chits): <area> — <one-line reason>` or `fix(chits): ...`.
+- Co-authors: check recent git log for exact format. Mark is always co-author on refactor work.
+- Commit message body should explain WHY (what problem it solves), not WHAT (the code shows that).
+
+#### PR workflow
+
+- Feature branch: `feat/chits-core` (for 0.1), `feat/chits-cli` (for 0.2), etc.
+- Open PR against main. Body cross-references the relevant REFACTOR.md section.
+- Wait for CI green before merging. Use `gh pr merge <n> --merge --delete-branch`.
+- Mark's rule (from memory): PRs not direct pushes to main for refactor work.
+
+#### Gotchas — specific ways future-Claude might get this wrong
+
+1. **Don't guess file paths.** Grep for exact locations. Some files in this REFACTOR.md spec may have moved; verify before assuming.
+2. **Don't add test-only methods to production classes.** The project has a `testing-anti-patterns` skill/memory — apply it.
+3. **agentSessionKey pattern.** For anything session-keyed, use the `agentSessionKey(slug)` helper from `@claudecorp/shared`. Don't hand-build `"agent:" + slug`.
+4. **Don't bundle commits.** Mark will call this out. One file or one logical change per commit. Build-test-commit cycle is short.
+5. **CLAUDE.md @imports reload from disk after /compact.** If anything relies on CLAUDE.md content being mutated mid-session, it'll break after compaction. Design for re-read from disk.
+6. **fix-now, not noted.** If Mark flags an issue mid-implementation, fix it in the same turn. Don't say "I'll remember for next time."
+7. **Build after every commit, before next commit.** Relink CLI and TUI after build. Give Mark copy-pasteable Windows-cmd run commands.
+8. **Be present, not transactional.** When Mark goes philosophical or emotional, drop the task-execution frame. The manifesto matters to him; it should matter in the conversation too.
+
+#### Concrete first-PR scope suggestion
+
+Smallest shippable PR for Project 0.1:
+- `packages/shared/src/atomic-write.ts` (the 5-line helper + one test file)
+- No dependencies on anything else
+- Merges independently
+- Delivers the crash-safety primitive everything else in 0.1 will use
+
+Then the next PR introduces `types/chit.ts` + `chit-types.ts` (the data model without CRUD). Then the CRUD. Then the query API. Each ships independently.
+
+#### The life raft for post-compaction
+
+If you're reading this after a context compaction: you ARE the same Claude that designed this refactor with Mark. The conversation's nuance compressed to summary, but the decisions and Mark's voice survive via REFACTOR.md (this doc) + `~/.claude/projects/.../memory/` (memory files the runtime auto-loads). You have everything you need. Start with step 1 above.
+
+---
+
 ## Project 1: Foundation (Session/Role Split)
 
 *Builds on Project 0. Every new primitive in this Project is a Chit of a specific type — Casket is `type: casket`, handoff via Dredge reads `type: handoff` Chits, dispatch-contexts for bacteria scaling are ephemeral Chits. The file-path specs below use the old bespoke-file language where reasonable, but at implementation time everything translates to Chit operations on the primitive from Project 0.*
