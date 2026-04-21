@@ -184,152 +184,399 @@ Witness-style role watches queue depth per Employee role. If role-queue > thresh
 
 ### 2.1 — Blueprint as molecule
 
-Blueprints stop being runbooks-the-CEO-reads. They become executable state-machine definitions: TOML or markdown frontmatter with step declarations, dependencies, acceptance criteria per step. At runtime, a blueprint "cooks" into a chain of tasks that an agent walks via Casket.
+**Problem.** Blueprints today are markdown runbooks-the-CEO-reads. They're prose for humans. They can't be executed mechanically, so chains of work rely on the CEO manually tracking position. When CEO's context drifts, the chain breaks.
 
-**Scope:** blueprint parser, cooking logic, task generation from blueprint, blueprint catalog
-**Depends on:** 1.2, 1.3
+**Scope.**
+- Define Blueprint format: TOML-frontmatter markdown, with a `steps:` array. Each step: `{ id, title, description, depends_on, acceptance_criteria, assignee_role }`.
+- Blueprint parser in `packages/shared/src/blueprints/` — validates structure, checks DAG (no cycles).
+- "Cooking" logic: `cc-cli blueprint cook --blueprint <name> --project <id>` instantiates a blueprint into a real Contract with real Task records. Variable substitution at cook time (template `{feature}` → "fire-command").
+- Existing blueprint files (`packages/shared/src/blueprints/onboard-agent.md` and co.) get migrated to the new structured format.
+- CEO command: `cc-cli contract start --blueprint ship-feature --vars feature=fire` creates the Contract + Tasks and optionally slings to an assigned role.
+
+**Acceptance criteria.**
+- Run `cc-cli blueprint cook ship-feature --project test --vars feature=fire` → produces a Contract with 5-10 Tasks in the DAG defined by the blueprint.
+- Tasks have `depends_on` and `acceptance_criteria` populated from the blueprint.
+- An Employee slung the Contract's first Task can walk the chain via Casket without any human re-dispatching at boundaries.
+
+**Depends on:** 1.2 (Casket), 1.3 (chain semantics in tasks)
 **PRs:** 4-5
 
 ### 2.2 — Deacon patrol mechanism
 
-The Deacon role doesn't just nudge — it runs patrols. A patrol is a small workflow the Deacon walks in a loop: check agent health, check stuck tasks, check merge queue, clean up stale sandboxes. Uses the same molecule mechanism from 2.1.
+**Problem.** The Deacon (from 1.8) wakes agents on-demand via Casket. But the Deacon also needs to run its own workflows — check corp health, detect stuck work, clean up — and these are themselves chains that benefit from the same molecule mechanism.
 
-**Scope:** Deacon role, patrol definitions, patrol-walker
+**Scope.**
+- Patrol definitions: small Blueprints meant for Deacon, not agent-workers. Examples: `patrol/health-check`, `patrol/cleanup-stale-sandboxes`, `patrol/merge-queue-status`.
+- Patrol scheduler: the Deacon runs a patrol on a cadence (configurable per-patrol). Patrol completion triggers the next cycle.
+- Patrol primitives (small step implementations): check-agent-health, check-stuck-tasks, check-merge-queue-depth, cleanup-stale-branches, report-metrics.
+- Patrol outputs: observations written to `daemon/observations/` for later dream compounding.
+
+**Acceptance criteria.**
+- Deacon runs `patrol/health-check` every 5 minutes.
+- When an Employee silent-exits, health-check detects it within one cycle, writes an observation, and creates a recovery Task (picked up later by Witness from 3.1).
+- When a sandbox is idle > 24h, cleanup patrol removes its branch.
+
 **Depends on:** 2.1
 **PRs:** 3
 
 ### 2.3 — Built-in blueprint library
 
-Ship 5-10 core blueprints: ship-feature, fix-bug, refactor-module, hire-agent, onboard-agent, release, sprint-review, merge-conflict-resolve.
+**Problem.** Blueprint-as-molecule is useless without tested blueprints for common work. CEO needs a library to compose from.
 
-**Scope:** blueprint files, documentation, testing against real tasks
+**Scope.** Ship these blueprints as structured markdown in `packages/shared/src/blueprints/`:
+- `ship-feature` — design → plan → implement → test → PR → review
+- `fix-bug` — repro → root-cause → fix → verify → PR
+- `refactor-module` — define-scope → plan → implement-small-steps → tests → PR
+- `hire-employee` — define-role → allocate-slot → first-dispatch-self-naming → onboard
+- `promote-employee` — founder-reason → data-transition → ceremony-welcomes → first-dispatch
+- `release` — version-bump → changelog → tag → publish → announce
+- `sprint-review` — collect-activity → synthesize → present-to-founder
+- `merge-conflict-resolve` — inspect → decide-strategy → resolve → verify
+
+Each blueprint tested against a real use case before landing.
+
+**Acceptance criteria.**
+- Each blueprint can be cooked without error.
+- For each, an Employee walks the resulting Contract end-to-end on a test project without human intervention.
+
 **Depends on:** 2.1
-**PRs:** 2-3
+**PRs:** 2-3 (one per batch)
 
-### 2.4 — Self-witnessing meta-layer (the trippy idea)
+### 2.4 — Self-witnessing meta-layer (the "trippy idea")
 
-Upgrade Employees from flat per-step cycling to Contract-level self-review. An Employee holds a Contract (multi-task). Between Tasks, a review-session alternates with task-sessions. Review-session checks acceptance criteria, coheres with prior Tasks in the Contract, gates quality before passing to external QA. See "The Self-Witnessing Meta-Layer" section above for structural details.
+**Problem.** Flat per-step cycling (from 1.6) gives Employees no cross-Task coherence. Step 2 might ignore decisions made in step 1. No one reviews the Contract as a whole until Warden at the very end — by then it's hard to unwind bad choices.
 
-**Scope:** Contract data type, two-session lifecycle within an Employee, review prompt, gate logic
+**Scope.**
+- Two session tiers per Employee working a multi-Task Contract:
+  - **task-session** — spawned per Task, executes the Task, writes output, exits
+  - **review-session** — spawned between Tasks, reads the Contract + the just-completed Task's output + prior Tasks, reviews, decides: accept & dispatch next, redo, flag-for-founder
+- Review prompts are distinct from execution prompts: "you are reviewing your own work against the Contract's goal and acceptance criteria."
+- Review output schema (XML): `<review><verdict/>(accept|redo|flag)<reasoning/><notes-for-next-task/></review>` written to the Contract's review-log.
+- Integration with Warden: Warden still does final Contract-level review, but Employee-level self-review catches obvious issues early.
+
+**Acceptance criteria.**
+- Multi-Task Contract slung to an Employee walks with review-sessions between each Task.
+- A review-session detects an obviously wrong Task output (e.g. Task said "write test" but output has no test) and flags `redo`.
+- Self-reviewed Contract has measurably fewer Warden rejections than a flat-walked one.
+
 **Depends on:** 2.1 (molecules are the Tasks within a Contract)
 **PRs:** 4-5
 
-**Phase 2 ship criterion:** CEO can say "ship feature X using the ship-feature blueprint" → blueprint cooks into a multi-task Contract → Employee gets slung the Contract → walks it with self-review between Tasks → PR lands. No human intervention in the middle.
+**Phase 2 ship criterion:** CEO can say "ship feature X using the ship-feature blueprint" → blueprint cooks into a multi-Task Contract → Employee gets slung the Contract → walks it with self-review between Tasks → PR lands. Zero human intervention in the middle.
 
 ---
 
 ## Phase 3: Autonomous Operations
 
-*Corp heals itself.*
+*Corp heals itself. Mark can sleep and wake to a working corp.*
 
 ### 3.1 — Witness role (full version)
 
-Already partially started in 1.9. Full version: Witness monitors all agents continuously. Detects stuck Employees (hook set but no session). Detects stalled work (step hasn't advanced in X time). Auto-respawns silent-exited sessions. Creates recovery tasks when it can't unstick automatically. Patrols for stale sandboxes, orphaned beads, broken chains.
+**Problem.** 1.9 ships basic bacteria self-scaling (Employees spawn/collapse by queue depth). But when things go wrong — silent-exits, stuck Employees, stalled chains — no one notices until Mark checks. Claude Corp today needs Mark to be the Witness. He shouldn't be.
 
-**Scope:** Witness agent role + code, detection heuristics, recovery actions
+**Scope.**
+- Witness as a Partner-level role (corp-sacred, can't be fired).
+- Continuous monitoring loop (patrol from 2.2): for each agent, check last-activity timestamp + Casket state + session state.
+- Stuck detection: Casket has a current step, no active session, last-activity > N minutes → agent is stuck.
+- Stalled detection: Casket current step has been current > M minutes → agent isn't progressing.
+- Recovery actions:
+  - Silent-exit detected → respawn session automatically, log incident.
+  - Stalled Employee detected → try once more, then escalate (create a recovery Task for another Employee or a Partner).
+  - Crash-looping Employee (repeated silent-exits) → pause it, circuit-breaker, escalate to founder.
+  - Orphan Tasks (depends_on closed but no one's picked them up) → route via Casket to an idle Employee.
+- Witness writes observations for every intervention — audit trail of what it did and why.
+
+**Acceptance criteria.**
+- Simulate: kill an Employee's session mid-step. Within 1-2 minutes, Witness detects, respawns, Employee resumes from Casket + Dredge. Zero manual steps.
+- Simulate: mark a Task's depends_on as closed without dispatching the next. Within a cycle, Witness routes the next Task to an Employee.
+- Simulate: an Employee silent-exits three times in 5 minutes. Witness circuit-breaks it, creates an escalation observation, doesn't infinite-retry.
+
 **Depends on:** 1.9, 2.2
 **PRs:** 4-5
 
 ### 3.2 — Refinery (merge coordinator)
 
-Parallel Employees producing PRs collide on merges. Refinery role owns the merge queue. Serializes merges, handles rebases, resolves simple conflicts, escalates complex ones. Protects main from race conditions.
+**Problem.** Bacteria scaling + parallel Employees = multiple PRs landing against main concurrently. They collide on rebases, step on each other's changes, leave main in a mess. Today this requires a human to serialize. Refinery is the Partner who owns the merge queue.
 
-**Scope:** Refinery role, merge queue data structure, rebase/merge logic, conflict handling
-**Depends on:** 1.1, 1.9
+**Scope.**
+- Merge queue data structure: ordered list of submitted PRs (branch name, Contract id, submitted-at, submitter).
+- `cc-cli refinery submit --branch <name> --contract <id>` — Employees call this after pushing, instead of directly merging.
+- Refinery processes the queue serially: checkout branch → rebase onto main → run tests → merge if clean → close Contract.
+- Conflict handling:
+  - Simple conflict (file not touched by the other side — false positive) → resolve automatically.
+  - Real conflict → create a conflict-resolution Task for the Contract's assigned Employee, unblock queue, move on.
+- Refinery is a Partner, has its own workspace, compacts like any Partner.
+- TUI shows the merge queue as a visible primitive (Phase 6.3 wires this into the UI).
+
+**Acceptance criteria.**
+- Two Employees submit PRs touching different files at roughly the same time → Refinery merges them serially, main is clean.
+- Two Employees submit PRs touching the same file, non-overlapping regions → Refinery auto-resolves, merges cleanly.
+- Two Employees submit PRs with a real conflict → Refinery creates a conflict-resolution Task on the Contract, merges the first, leaves the second for the Employee to resolve.
+
+**Depends on:** 1.1, 1.9, 3.1
 **PRs:** 4
 
 ### 3.3 — Auto-recovery machinery
 
-Beyond Witness. Daemon-level circuit breakers. Silent-exit detection. Budget limits. Crash-loop prevention.
+**Problem.** Witness catches what it can see. Some failures happen below its level — a daemon crash, a gateway timeout, an agent process that Node can't respawn. Need daemon-level safety rails.
 
-**Scope:** daemon hooks, circuit breakers, budget enforcement
+**Scope.**
+- Silent-exit enrichment: the claude-exit diagnostics from v2.5.2 logs argv + stderr. Extend: if the same sessionKey silent-exits N times in M minutes, daemon pauses dispatches for that sessionKey and creates an observation.
+- Budget limits per agent per hour: no more than `N` dispatches. Config per-role in role definition.
+- Crash-loop prevention at the bacteria layer: if a new Employee of role X crashes within 60s of first dispatch, and the same happened to the previous Employee, pause bacteria spawning for that role.
+- Daemon-restart survival: on daemon restart, read Casket state for all agents; resume Witness patrols; don't lose in-flight Contracts.
+
+**Acceptance criteria.**
+- An Employee with a bug that crashes on a specific input gets circuit-broken after 3 silent-exits within 5 minutes.
+- Daemon restarts mid-Contract; agents resume walking the chain without human action.
+- Budget exhaustion for a role pauses dispatches until the hour rolls over; Mark is notified.
+
 **Depends on:** 3.1
 **PRs:** 2-3
 
-**Phase 3 ship criterion:** Mark goes to sleep with 3 parallel features being built. Employees silent-exit twice, get auto-respawned. A merge conflict gets resolved by Refinery. Mark wakes to 3 opened PRs, zero manual intervention.
+**Phase 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Witness respawns them). A merge conflict happens (Refinery resolves it or routes it). A role's Employee keeps crashing (circuit breaker trips). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
 
 ---
 
 ## Phase 4: Earned Philosophy
 
-*Soul becomes load-bearing instead of decorative.*
+*Soul stops being decorative and starts being load-bearing.*
 
 ### 4.1 — Structured observations
 
-Observations today are free prose. Upgrade: observations have categories (NOTICE, PREFERENCE, FEEDBACK, DECISION, DISCOVERY), subject/object/context fields, importance weight. Queryable.
+**Problem.** Observations today are free prose in `observations/YYYY-MM-DD.md`. They can't be queried, aggregated, or distilled mechanically. Patterns across observations are invisible. Dreams have nothing to distill *from* because everything is unstructured paragraph.
 
-**Scope:** observation schema, write API, query API, migration of existing observations
+**Scope.**
+- Observation schema (XML-tagged, structured):
+  - `<observation>` with child tags: `<category>` (one of NOTICE, PREFERENCE, FEEDBACK, DECISION, DISCOVERY, CORRECTION), `<subject>` (who/what is observed), `<object>` (what's said about them), `<context>` (when/where — channel, task, incident), `<importance>` (1-5), `<timestamp>`.
+- File format: observations get written as XML blocks in `observations/YYYY-MM-DD.md`; daily file groups them chronologically; agents still read the file as markdown but the structured data is inside.
+- Write API: `cc-cli observe --category FEEDBACK --subject mark --object "prefers terse commits" --context "2026-04-21 session" --importance 4`
+- Query API: `cc-cli observations --category FEEDBACK --subject mark --since 7d` returns structured results.
+- Migration: existing free-prose observations stay readable (not mandatory to restructure), but new observations written in structured form.
+- Agents prompted in their SOUL/AGENTS guidance: "when you notice X, write an observation via `cc-cli observe` — don't freeform."
+
+**Acceptance criteria.**
+- An Employee makes a FEEDBACK observation via the command; it's queryable by category + subject.
+- Dream process (4.2) can read the structured observation and reason about patterns across them.
+
+**Depends on:** nothing
 **PRs:** 2-3
 
 ### 4.2 — Dreams that actually distill
 
-Dreams produce load-bearing memory, not restatement. Identify patterns across observations, surface contradictions, compound insights.
+**Problem.** Dreams today re-summarize observations. That's not distillation — it's compression. The result is shorter but no more load-bearing. For BRAIN entries to matter, dreams need to *compound* — find repeated patterns, surface contradictions, promote stable rules.
 
-**Scope:** dream prompt rewrite, pattern-detection logic, BRAIN update semantics
+**Scope.**
+- Dream prompt rewrite: "find patterns (same observation-category + subject appearing N times), surface contradictions (new observation contradicts existing BRAIN rule), compound insights (multiple DISCOVERY observations combining)."
+- Pattern detection logic (can be done in prompt with structured input from 4.1):
+  - 3+ FEEDBACK observations about same subject → promote to a BRAIN rule
+  - 2+ DISCOVERY observations linked by common subject → compound into an insight
+  - New observation directly contradicts an existing BRAIN rule → flag for review (founder or Partner decides which wins)
+- BRAIN update semantics:
+  - Rules have provenance: cite the originating observation ids
+  - Rules have confidence: N observations back it, confidence N/5
+  - Contradicting rules get both marked as "needs-resolution" — don't silently overwrite
+- Dream output: list of BRAIN updates with citations, not a re-summary paragraph.
+
+**Acceptance criteria.**
+- An agent makes 3 similar FEEDBACK observations ("mark prefers X") across 3 days.
+- Next dream consolidates them into a single BRAIN rule: "Mark prefers X (provenance: obs-123, obs-145, obs-201, confidence 3/5)."
+- Next agent dispatch reads BRAIN and references the rule when acting.
+- A later observation contradicting the rule gets flagged, not silently applied.
+
 **Depends on:** 4.1
 **PRs:** 3-4
 
-### 4.3 — Promotion mechanism (Employee → Partner)
+### 4.3 — Promotion mechanism (Employee → Partner, with ceremony)
 
-Founder-initiated for now. Command: `cc-cli agent promote --slug <x>`. On promotion: Employee's role-level pre-BRAIN becomes their seed BRAIN, slot becomes persistent, observations start accumulating at slot level. Optional future: automated promotion signals.
+**Problem.** Promotion is defined (see Decisions Made section — it's a ceremony) but not built. Today there's no way for Mark to say "this Employee becomes a Partner" and have the corp ceremony run.
 
-**Scope:** promote command, pre-BRAIN → BRAIN migration, kind transition
+**Scope.**
+- Command: `cc-cli agent promote <employee-slug> --name <new-partner-name> --reason "..."`
+- Data transition:
+  - `Member.kind` changes from `employee` to `partner`
+  - Slot made persistent (excluded from bacteria-collapse)
+  - New Partner's workspace expanded: SOUL.md + IDENTITY.md + BRAIN/ + MEMORY.md created from role's pre-BRAIN as seed
+  - Name in members.json gets updated to new Partner name
+- Ceremony sequence (orchestrated by daemon or CEO):
+  1. Founder's `--reason` note written as the first BRAIN/ entry: `BRAIN/01-origin.md`
+  2. CEO receives prompt to welcome the new Partner by name, reference the reason
+  3. Relevant Partners (Engineering Lead if a dev Employee is promoted, etc.) also prompted to welcome briefly
+  4. Messages posted in corp-wide channel (maybe `#announcements` or `#general`)
+  5. New Partner's first dispatch includes those welcomes in context + their seeded BRAIN + an instruction: "acknowledge your own becoming, thank those who welcomed you."
+  6. The new Partner's first reply is written to their BRAIN as `BRAIN/02-arrival.md`.
+- Role adjustment: Employee pool for the role loses this slot; role pre-BRAIN continues accumulating from other Employees.
+
+**Acceptance criteria.**
+- Promote an Employee named "toast" to Partner "Joe" with reason "shipped 12 clean PRs over 3 weeks."
+- Next dispatch: Joe has `IDENTITY.md` (role = Partner, name = Joe), `BRAIN/01-origin.md` (the reason), `BRAIN/02-arrival.md` (their arrival response), seeded MEMORY.md pointing at both.
+- Joe references the promotion reason in a later dispatch when making a judgment call aligned with it.
+- Joe is listed as a Partner in `cc-cli agents`, not an Employee in a pool.
+
 **Depends on:** 1.1, 4.1
-**PRs:** 2-3
+**PRs:** 3
 
-**Phase 4 ship criterion:** An Employee that's been shipping backend work for 2 weeks gets promoted by the founder. That Employee's next session reads their freshly-formed BRAIN with real accumulated insights (from the role-level pre-BRAIN plus their own continuation). Behavior changes — references past incidents, shows personality, makes founder-aligned judgment calls.
+**Phase 4 ship criterion:** an Employee that's been shipping backend work for 2 weeks gets promoted via a witnessing ceremony. Next session Joe reads BRAIN with accumulated insights (role pre-BRAIN seed + origin reason + arrival memory). Behavior changes — references past incidents, shows personality, makes founder-aligned judgment calls. Promotion feels like a real moment, not a flag flip.
 
 ---
 
 ## Phase 5: Culture Transmission
 
-*The thing text can do, done right.*
+*The thing text can do, done right. Culture actually shapes behavior.*
 
 ### 5.1 — Feedback propagation
 
-Feedback-detector exists but isn't load-bearing. Upgrade: when feedback is detected, it flows to agent's observations AND triggers a cultural update (propagates to CULTURE.md if corp-wide, or to agent's BRAIN if agent-specific). Agents read CULTURE.md as part of their @imports.
+**Problem.** The feedback-detector (already shipped) captures feedback from Mark's messages but it sits in observations as one data point among many. It doesn't *shape* corp behavior. Agents don't read feedback-observations on dispatch; they rediscover preferences over and over.
 
+**Scope.**
+- Feedback-detector upgrade: on detecting FEEDBACK from founder, write the observation (as in 4.1) AND trigger a cultural update:
+  - If the feedback is *corp-wide* (applies to anyone's work — "ship granular commits"): append to CULTURE.md as a candidate rule.
+  - If the feedback is *agent-specific* (applies to one agent — "Joe, your code reviews need to be sharper"): append to that agent's BRAIN as a candidate rule.
+- Candidate rules become real rules after a threshold (2+ mentions, or 1 mention + 7 days without contradiction). Promotion is automatic via dream distillation (4.2).
+- All rules carry provenance: the incident that earned them (quote + timestamp + context).
+
+**Acceptance criteria.**
+- Mark gives corp-wide feedback in #general → feedback-detector fires → observation written → candidate added to CULTURE.md with citation back to Mark's message.
+- Mark gives agent-specific feedback to Joe → appears as candidate in Joe's BRAIN, cited.
+- Next dispatch of any agent reads CULTURE.md (via @imports); Joe additionally reads his BRAIN.
+- Candidate becomes a real rule after the threshold; agents reference it in subsequent judgment.
+
+**Depends on:** 4.1, 4.2
 **PRs:** 2
 
 ### 5.2 — CULTURE.md as living document
 
-CULTURE.md at corp root. Imported by every agent's CLAUDE.md. Updated automatically when feedback/patterns are detected. Contains the corp's earned rules: specific, incident-linked, load-bearing.
+**Problem.** The CEO already writes a CULTURE.md sometimes, but it's free prose and not load-bearing. Agents don't really read it, and even if they did, it wouldn't help — it's aspirational, not specific.
 
+**Scope.**
+- CULTURE.md at corp root, structured format:
+  - Each rule is an XML block: `<rule id="..." confidence="..."><claim/><reason/><incident-ref/><applies-to/></rule>`
+  - `applies-to` = "all" | specific role
+  - Rules added automatically by 5.1, manually by founder via `cc-cli culture add`, removed or updated via explicit command
+- CULTURE.md imported by every agent's CLAUDE.md template (`@./CULTURE.md` from repo root — or from corp root, via a symbolic-ish mechanism)
+- Rules visible in TUI under a /culture view — Mark can skim what the corp believes
+- Cultural contradictions (two rules claiming opposite things) surfaced in TUI + flagged to founder
+
+**Acceptance criteria.**
+- CULTURE.md has ≥3 auto-generated rules with incident provenance after a few days of normal corp activity.
+- An agent in a new dispatch cites a CULTURE.md rule when making a judgment call.
+- Founder can view, add, remove, resolve cultural rules via cc-cli.
+
+**Depends on:** 5.1
 **PRs:** 2
 
 ### 5.3 — Founder-voice preservation
 
-Periodic "voice snapshot" from recent founder messages → stored in USER.md with provenance. Agents read USER.md as part of @imports. Prompt guidance on matching voice without mimicking sycophantically.
+**Problem.** Agents don't reliably model Mark's voice. They drift toward generic professional-Claude tone — formal, slightly sycophantic, overly explanatory. Mark's actual voice (lowercase, direct, no sugarcoating, dry humor) has to be re-discovered every agent session.
 
+**Scope.**
+- Voice snapshot mechanism: a daemon-level task runs weekly (or on-demand), samples the last N founder messages across all channels, distills:
+  - Stylistic markers (capitalization, punctuation, common phrases, tone indicators)
+  - Current preferences (phrases like "don't X", "yeah", "bro" patterns)
+  - Recency-weighted — last week matters more than two months ago
+- Output: USER.md at corp root, structured (XML like CULTURE.md) with `<voice>`, `<preferences>`, `<current-focus>` sections.
+- USER.md imported by every agent's CLAUDE.md.
+- Agent prompt guidance (in SOUL/AGENTS) specifically addresses voice: "match Mark's style without mimicking sycophantically — lowercase and direct when appropriate, but don't copy phrases."
+- Configurable: founder can opt-out per-channel (sensitive stuff), can force-regenerate, can manually edit.
+
+**Acceptance criteria.**
+- USER.md exists and reflects actual recent Mark-voice patterns (verified by reading it and confirming it captures lowercase, no sugarcoat, dry humor).
+- New agent in a fresh dispatch speaks with recognizable Mark-voice alignment (not mimicry — alignment).
+- Mark can regenerate or edit manually via cc-cli.
+
+**Depends on:** 4.1
 **PRs:** 2
 
 ---
 
 ## Phase 6: Cleanup & UX
 
+*Ship the peacock. Every name delivers; every view reflects reality.*
+
 ### 6.1 — Delete dead concepts
 
-Every named concept that didn't survive the refactor gets deleted. Remove old Pulse (replaced by Deacon). Remove old Blueprint runbook reader. Remove dead fragments. Clean slate on vocabulary that doesn't match capacity.
+**Problem.** After phases 1-5, many old concepts are replaced by new ones. Leaving them in the codebase as parallel paths is exactly the "vocabulary without capacity" sin the refactor exists to fix. They must go, on purpose, deliberately.
 
-**PRs:** 3-4
+**Scope.** Walk the codebase and delete:
+- Old Pulse implementation (replaced by Deacon in 1.8)
+- Old Blueprint runbook reader / `cc-cli blueprints run` (replaced by blueprint-as-molecule cooking in 2.1)
+- Fragment injection call for claude-code agents (removed in 1.5); keep fragments for OpenClaw
+- Old Casket-as-four-files structure if migrated to single-pointer hook
+- Old Hand-as-chat-announcement if migrated to durable sling
+- Dead code paths: Jack mode if it became redundant with Casket-hooked dispatch
+- Dead fragments not migrated to CLAUDE.md
+- Old SOUL-as-template hiring code if replaced by earned-soul via promotion
+- Anything that survived as legacy but has no consumer after phases 1-5
+
+**Acceptance criteria.**
+- `grep` for the removed names in `packages/` returns 0 references outside of changelogs/migration notes.
+- `pnpm build` + `pnpm test` pass.
+- No dangling documentation references to deleted concepts (docs pass in 6.2).
+
+**Depends on:** all prior phases shipped
+**PRs:** 3-4 (grouped by subsystem — TUI cleanup, daemon cleanup, shared cleanup)
 
 ### 6.2 — Rewrite docs/
 
-The docs/ private design spec updated to match the new reality. Manifesto untouched. Architecture, flows, concepts all updated for Employee/Partner split, Casket-as-hook, molecules, Witness, Refinery, Deacon, earned philosophy.
+**Problem.** The docs/ private design spec currently describes the pre-refactor corp. If someone (founder, future-Claude, outside contributor) reads docs/, they get a wrong mental model. Also CLAUDE.md at repo root needs updating to reflect the new reality.
 
+**Scope.** Update:
+- `docs/architecture/` — describe Employee/Partner split, Casket-as-hook, molecules, Witness, Refinery, Deacon
+- `docs/flows/` — onboarding flow updated (mutual witnessing still central, but now framed as the promotion ceremony, not hire-time)
+- `docs/concepts/glossary.md` — all terms: Employee, Partner, Casket, Contract, Task, Molecule, Witness, Refinery, Deacon, bacteria, pre-BRAIN, ceremony
+- `docs/next-steps.md` — cross off what's shipped, point forward to next work
+- Manifesto, lineage, vision/ — UNTOUCHED. Those are philosophical origin and stay.
+- Repo-root `CLAUDE.md` (project instructions) — rewritten to reflect new architecture
+
+**Acceptance criteria.**
+- A new contributor reading docs/ + CLAUDE.md can build a correct mental model of the corp without reading any code.
+- No contradiction between docs/ and the code (verified by a spot-check review against a sample of phases).
+
+**Depends on:** 6.1
 **PRs:** 2-3
 
 ### 6.3 — TUI / founder UX
 
-TUI updates. Show corp state with new model: list Partners separately from Employees. Show Employee pool utilization. Show chains in progress per Partner. Promotion proposals surfaced. Merge queue visible. Witness health visible.
+**Problem.** Current TUI shows every agent as a uniform member — no visible distinction between Partners and Employees, no visibility into the bacteria scaling, no merge queue view, no Contract-chain visualization. The founder's mental model depends on the TUI matching the substrate; mismatch means Mark can't verify what's happening.
 
+**Scope.**
+- Member sidebar: Partners listed by name (with status), Employees aggregated per role ("Backend Engineer: 2 active, 1 idle, role pre-BRAIN 47 obs")
+- Contract view: for a selected Contract, show its Task chain with progress, current step, who's working
+- Merge queue view: ordered list of pending merges with submitter and status
+- Promotion view: when an Employee is a candidate for promotion, surface it; founder confirms with reason
+- Ceremony rendering: when a promotion happens, render the welcomes as a distinct visual moment in the channel
+- Corp-level views: Witness health summary, cultural rules, bacteria activity
+- Keyboard shortcuts to jump between these views
+
+**Acceptance criteria.**
+- Founder can, at a glance in the TUI, see: who the Partners are, how many Employees exist, what Contracts are active, what's in the merge queue.
+- Promoting an Employee via TUI is a real UX (not just cc-cli), with reason input and confirmation.
+- The ceremony is visually distinct — not just another chat message.
+
+**Depends on:** phases 1-5 shipped (views need the data)
 **PRs:** 3-4
 
 ### 6.4 — v3.0 release
 
-Version bump. STATUS.md rewrite. CHANGELOG.md. Release notes that match the scale of the shift.
+**Problem.** This refactor is a major version bump. v2.x was the "peacock in the costume" era; v3.x is the "justified peacock." Needs to be packaged as a release, not a silent upgrade.
 
+**Scope.**
+- Version bump to `3.0.0` across all packages
+- STATUS.md rewrite — the refactor era gets its own section, major features cross-linked
+- CHANGELOG.md — granular per-phase summary of what shipped
+- Release notes (for README/website/blog): the thesis, what changed conceptually (not just feature-list), migration guidance for anyone running an old corp
+- A migration note: "corps from v2.x don't auto-migrate, fresh start recommended, here's how to preserve BRAIN/observations from important Partners if you really want to"
+- Potentially: `cc-cli migrate v2` command for the brave
+
+**Acceptance criteria.**
+- `cc-cli --version` shows 3.0.0.
+- Release notes read true — someone reading them understands why the refactor happened and what's different.
+- Old-corp migration path documented, even if the official stance is "clean start preferred."
+
+**Depends on:** 6.1, 6.2, 6.3
 **PRs:** 1-2
+
+**Phase 6 ship criterion:** Mark can show Claude Corp to a stranger and they see a coherent system — every concept does what its name claims, the TUI visualizes the substrate honestly, the docs describe what actually exists, the version is 3.0. Peacock feathers, earned.
 
 ---
 
