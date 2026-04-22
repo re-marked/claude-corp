@@ -289,7 +289,7 @@ export function chitScopeFromPath(corpRoot: string, path: string): ChitScope {
 
 const TTL_PATTERN = /^(\d+)([dhm])$/;
 
-function computeTTL(duration: string | null): string | undefined {
+export function computeTTL(duration: string | null): string | undefined {
   if (!duration) return undefined;
   const match = TTL_PATTERN.exec(duration);
   if (!match) throw new ChitValidationError(`invalid TTL duration: ${duration}`, 'ttl');

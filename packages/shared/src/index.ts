@@ -153,6 +153,15 @@ export {
   incrementSessionCount,
 } from './casket.js';
 
+// Inbox helper — single funnel for all inbox-item chit creation (router
+// on @mention, hand on dispatch, escalate on escalation, system-event
+// emitters). Tier-specific TTL + destructionPolicy rules centralized.
+export { createInboxItem, TIER_TTL } from './inbox.js';
+export type { CreateInboxItemOpts } from './inbox.js';
+// Re-export computeTTL now that it's public (inbox.ts consumes it; other
+// inbox-like helpers may too).
+export { computeTTL } from './chits.js';
+
 // Audit Gate — the 0.7.3 pure decision engine + transcript parser +
 // evidence scanner + prompt template. The cc-cli audit command wires
 // these together at the hook boundary; everything below is pure
