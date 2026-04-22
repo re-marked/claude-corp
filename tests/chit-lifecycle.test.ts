@@ -309,6 +309,78 @@ describe('scanChitLifecycle — integration', () => {
   });
 });
 
+describe('queryChits — cold default filter (0.6 T3)', () => {
+  let corpRoot: string;
+
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'chit-lifecycle-q-'));
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(corpRoot, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  });
+
+  async function cooledObservation() {
+    const obs = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'corp',
+      createdBy: 'ceo',
+      ephemeral: true,
+      ttl: '2026-04-22T10:00:00.000Z',
+      fields: { observation: { category: 'NOTICE', subject: 'mark', importance: 2 } },
+    });
+    scanChitLifecycle(corpRoot, { now: new Date('2026-04-22T11:00:00.000Z') });
+    return obs;
+  }
+
+  it('excludes cold chits from default queries', async () => {
+    await cooledObservation();
+    const { chits } = queryChits(corpRoot, { types: ['observation'] });
+    expect(chits).toHaveLength(0);
+  });
+
+  it('includes cold chits when includeCold: true is passed', async () => {
+    const obs = await cooledObservation();
+    const { chits } = queryChits(corpRoot, { types: ['observation'], includeCold: true });
+    expect(chits).toHaveLength(1);
+    expect(chits[0]!.chit.id).toBe(obs.id);
+    expect(chits[0]!.chit.status).toBe('cold');
+  });
+
+  it('includes cold chits when the caller explicitly lists "cold" in statuses', async () => {
+    const obs = await cooledObservation();
+    const { chits } = queryChits(corpRoot, {
+      types: ['observation'],
+      statuses: ['cold'],
+    });
+    expect(chits).toHaveLength(1);
+    expect(chits[0]!.chit.id).toBe(obs.id);
+  });
+
+  it('mix of active + cold: default returns only active, includeCold returns both', async () => {
+    // Fresh active observation
+    const active = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'corp',
+      createdBy: 'ceo',
+      ephemeral: true,
+      ttl: '2099-01-01T00:00:00.000Z',
+      fields: { observation: { category: 'NOTICE', subject: 'mark', importance: 2 } },
+    });
+    const cold = await cooledObservation();
+
+    const defaultQuery = queryChits(corpRoot, { types: ['observation'] });
+    expect(defaultQuery.chits.map((c) => c.chit.id)).toEqual([active.id]);
+
+    const withCold = queryChits(corpRoot, { types: ['observation'], includeCold: true });
+    expect(withCold.chits.map((c) => c.chit.id).sort()).toEqual([active.id, cold.id].sort());
+  });
+});
+
 describe('buildReferenceIndex', () => {
   let corpRoot: string;
 

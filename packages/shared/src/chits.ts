@@ -707,6 +707,21 @@ export interface QueryChitsOpts {
   dependsOn?: readonly string[];
   /** true = only ephemeral; false = only non-ephemeral; undefined = both. */
   ephemeral?: boolean;
+  /**
+   * Include chits with `status: 'cold'` in the results. Default false:
+   * cold chits are filtered out of the standard query surface so active-
+   * work views (`cc-cli chit list`, dashboard panels, agent task queues)
+   * aren't flooded with historical observations that aged out.
+   *
+   * Pass `true` for archival/audit queries (founder asking "what did the
+   * CEO notice last month?"), and for the dream distillation pass which
+   * intentionally reads cold observations so compression still works on
+   * historical soul material.
+   *
+   * Listing `'cold'` explicitly in `statuses` also opts the caller in,
+   * regardless of this flag — explicit intent beats the default.
+   */
+  includeCold?: boolean;
   /** Include <scope>/chits/_archive/<type>/ subtrees. Default false. */
   includeArchive?: boolean;
   /** Sort field. Default 'updatedAt'. */
@@ -831,6 +846,16 @@ function findChitFiles(
  */
 function matchesFilter(chit: Chit, opts: QueryChitsOpts): boolean {
   if (opts.statuses && opts.statuses.length > 0 && !opts.statuses.includes(chit.status)) {
+    return false;
+  }
+  // Cold default-filter: exclude chits with status:'cold' unless the caller
+  // either passed includeCold:true OR explicitly named 'cold' in statuses.
+  // Keeps active-work queries clean without destroying historical material.
+  if (
+    chit.status === 'cold' &&
+    opts.includeCold !== true &&
+    !(opts.statuses && opts.statuses.includes('cold'))
+  ) {
     return false;
   }
   if (opts.tags && opts.tags.length > 0 && !opts.tags.some((t) => chit.tags.includes(t))) {
