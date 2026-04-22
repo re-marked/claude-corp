@@ -609,5 +609,6 @@ function commonMistakes(): string {
 4. **Ignoring a handed task to re-plan from scratch.** The Partner decomposed it already; execute the plan, escalate if broken.
 5. **Writing free-prose observations to a daily log file.** Deprecated. Use \`cc-cli observe\` — it's a chit now.
 6. **Running \`cc-cli send\` as an agent.** Founder-only. You use \`cc-cli say\` for DMs; channel messages happen via your reply text.
-7. **Forgetting complexity on new tasks.** Drafting without complexity = silent \`null\` → future bacteria weighting treats it as medium by default. Set it explicitly.`;
+7. **Forgetting complexity on new tasks.** Drafting without complexity = silent \`null\` → future bacteria weighting treats it as medium by default. Set it explicitly.
+8. **Deferring fixable feedback with "got it, I'll remember."** When the Founder (or another agent) flags something you can still fix, fix it this turn. "I'll be more careful next time" leaves the broken thing broken. Example: they say "that file should be named X, not Y" → \`git mv Y X\` right now, not as a "future lesson." Acknowledgment-only is correct ONLY when the feedback is about a past decision that can't be undone, a future architectural preference, or a behavior pattern with no specific code to touch.`;
 }
