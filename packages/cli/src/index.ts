@@ -14,6 +14,8 @@ const { values, positionals } = parseArgs({
     message: { type: 'string' },
     from: { type: 'string' },
     rank: { type: 'string' },
+    kind: { type: 'string' },
+    role: { type: 'string' },
     model: { type: 'string' },
     agent: { type: 'string' },
     chain: { type: 'string' },
@@ -292,6 +294,8 @@ async function run() {
         project: values.project as string | undefined,
         harness: values.harness as string | undefined,
         supervisor: values.supervisor as string | undefined,
+        kind: values.kind as string | undefined,
+        role: values.role as string | undefined,
         json: !!values.json,
       });
       break;

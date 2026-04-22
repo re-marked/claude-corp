@@ -76,6 +76,20 @@ export interface AgentSetupOpts {
    * typically resolve it from corp-level defaults before calling.
    */
   harness?: string;
+  /**
+   * Structural agent kind (Project 1.1). When omitted, resolveKind
+   * infers from rank at read-time (pre-1.1 compat). New hires should
+   * pass this explicitly so post-1.1 consumers read the structural
+   * truth instead of the rank heuristic.
+   */
+  kind?: Member['kind'];
+  /**
+   * Role slot identifier (Project 1.1). References an entry in the
+   * role registry. Optional for backwards-compat; pre-1.1 agents have
+   * no role field and the registry lookup returns undefined when
+   * needed, which callers handle gracefully.
+   */
+  role?: string;
 }
 
 export interface AgentSetupResult {
@@ -322,7 +336,10 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     );
   }
 
-  // Member entry
+  // Member entry. Kind + role are written when the caller passed them
+  // explicitly; absence means pre-1.1 call site (e.g. legacy hire path
+  // that hasn't migrated yet) or intentional "infer later" semantics.
+  // resolveKind() at read-time handles missing kind via rank fallback.
   const member: Member = {
     id: memberId,
     displayName,
@@ -337,6 +354,8 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     ...(opts.supervisorId ? { supervisorId: opts.supervisorId } : {}),
     createdAt: now,
     ...(opts.harness ? { harness: opts.harness } : {}),
+    ...(opts.kind ? { kind: opts.kind } : {}),
+    ...(opts.role ? { role: opts.role } : {}),
   };
 
   // Casket chit — the durable work-pointer read by `cc-cli wtf` (0.7.1)

@@ -184,6 +184,8 @@ export function createApi(daemon: Daemon): Server {
           provider: (body.provider as string) ?? undefined,
           harness: (body.harness as string) ?? undefined,
           supervisorId: (body.supervisorId as string) ?? undefined,
+          kind: (body.kind as 'employee' | 'partner' | undefined) ?? undefined,
+          role: (body.role as string) ?? undefined,
         });
         json(res, { ok: true, member: result.member, dmChannel: result.dmChannel });
         return;

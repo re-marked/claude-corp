@@ -1,6 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { getClient, getCorpRoot, getFounder, getCeo } from '../client.js';
-import { resolveModelAlias, getProjectByName } from '@claudecorp/shared';
+import {
+  resolveModelAlias,
+  getProjectByName,
+  getRole,
+  isKnownRole,
+  roleIds,
+  inferKind,
+  type AgentKind,
+} from '@claudecorp/shared';
 
 export async function cmdHire(opts: {
   name: string;
@@ -10,6 +18,8 @@ export async function cmdHire(opts: {
   project?: string;
   harness?: string;
   supervisor?: string;
+  kind?: string;
+  role?: string;
   json: boolean;
 }) {
   if (!opts.name) {
@@ -19,6 +29,49 @@ export async function cmdHire(opts: {
   if (!opts.rank) {
     console.error('--rank is required (leader, worker, subagent)');
     process.exit(1);
+  }
+
+  // --kind validation (Project 1.1). Optional flag; when given it must
+  // be 'employee' or 'partner'. When omitted we pass through undefined
+  // and the daemon infers from rank via resolveKind — matches pre-1.1
+  // behavior so existing hire scripts continue working.
+  let kind: AgentKind | undefined;
+  if (opts.kind !== undefined) {
+    if (opts.kind !== 'employee' && opts.kind !== 'partner') {
+      console.error(`--kind must be 'employee' or 'partner' (got: ${opts.kind})`);
+      process.exit(1);
+    }
+    kind = opts.kind;
+  }
+
+  // --role validation (Project 1.1). Optional, but when given must
+  // match a registry entry. If --role is set without --kind we can
+  // suggest the registry default, but we DON'T override explicit kind
+  // — the founder may deliberately hire a Partner into a role whose
+  // default is Employee (e.g. taming via direct hire rather than
+  // earned promotion).
+  let role: string | undefined;
+  if (opts.role !== undefined) {
+    if (!isKnownRole(opts.role)) {
+      console.error(
+        `--role must be a known role id. Got: ${opts.role}. Known: ${roleIds().join(', ')}`,
+      );
+      process.exit(1);
+    }
+    role = opts.role;
+    if (!kind) {
+      // Infer kind from the role's default when the caller didn't
+      // specify either. Founder can still override with explicit --kind.
+      kind = getRole(role)!.defaultKind;
+    }
+  }
+
+  // As a last resort, fall back to rank-based kind inference so the
+  // Member record always carries an explicit kind post-1.1. The daemon
+  // would do this anyway; doing it here makes the value visible in
+  // the CLI confirmation output below.
+  if (!kind) {
+    kind = inferKind(opts.rank);
   }
 
   const client = getClient();
@@ -61,6 +114,8 @@ export async function cmdHire(opts: {
     scopeId,
     ...(harness ? { harness } : {}),
     ...(opts.supervisor ? { supervisorId: opts.supervisor } : {}),
+    kind,
+    ...(role ? { role } : {}),
   } as any);
 
   if (opts.json) {
@@ -68,6 +123,9 @@ export async function cmdHire(opts: {
   } else {
     const projectInfo = opts.project ? ` into project "${opts.project}"` : '';
     const harnessInfo = harness ? ` on harness "${harness}"` : '';
-    console.log(`Hired ${opts.name} (${opts.rank}) as ${agentName}${model ? ` on ${model}` : ''}${harnessInfo}${projectInfo}.`);
+    const kindInfo = ` [${kind}${role ? ` · ${role}` : ''}]`;
+    console.log(
+      `Hired ${opts.name} (${opts.rank})${kindInfo} as ${agentName}${model ? ` on ${model}` : ''}${harnessInfo}${projectInfo}.`,
+    );
   }
 }
