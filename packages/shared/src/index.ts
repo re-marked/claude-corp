@@ -313,6 +313,13 @@ export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './te
 export { defaultHeartbeat } from './templates/heartbeat.js';
 export { buildClaudeMd, type ClaudeMdTemplateOpts } from './templates/claude-md.js';
 export { buildCorpMd, type CorpMdOpts, type CorpMdKind } from './templates/corp-md.js';
+export {
+  buildWtfHeader,
+  type WtfHeaderOpts,
+  type WtfCurrentTask,
+  type WtfInboxPeek,
+  type WtfInboxSummary,
+} from './templates/wtf-header.js';
 
 // Ranks
 export { canHire } from './ranks.js';
