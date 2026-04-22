@@ -131,6 +131,55 @@ describe('setupAgentWorkspace', () => {
       const agentAbs = join(corpRoot, agentDir);
       expect(existsSync(join(agentAbs, '.claude', 'settings.json'))).toBe(false);
     });
+  });
+
+  describe('0.7.2 workspace file initialization (both kinds)', () => {
+    it('creates STATUS.md placeholder so thin CLAUDE.md @import resolves', () => {
+      const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot, { harness: 'claude-code' }));
+      const agentAbs = join(corpRoot, agentDir);
+      expect(existsSync(join(agentAbs, 'STATUS.md'))).toBe(true);
+      const content = readFileSync(join(agentAbs, 'STATUS.md'), 'utf-8');
+      // Placeholder is agent-rewriteable — just assert it's non-empty and
+      // carries the "update me" intent so agents know what to do.
+      expect(content.length).toBeGreaterThan(0);
+      expect(content.toLowerCase()).toMatch(/status|focus|update/);
+    });
+
+    it('creates TASKS.md placeholder that points at cc-cli task list', () => {
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, { harness: 'claude-code', agentName: 'toast' }),
+      );
+      const agentAbs = join(corpRoot, agentDir);
+      expect(existsSync(join(agentAbs, 'TASKS.md'))).toBe(true);
+      const content = readFileSync(join(agentAbs, 'TASKS.md'), 'utf-8');
+      // Points the agent at the live query source
+      expect(content).toContain('cc-cli task list');
+      // Interpolates the agent slug into the query hint
+      expect(content).toContain('--assigned toast');
+    });
+
+    it('writes .gitignore excluding CORP.md (regenerated every dispatch; would otherwise churn git)', () => {
+      const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot, { harness: 'claude-code' }));
+      const agentAbs = join(corpRoot, agentDir);
+      const gitignorePath = join(agentAbs, '.gitignore');
+      expect(existsSync(gitignorePath)).toBe(true);
+      const content = readFileSync(gitignorePath, 'utf-8');
+      expect(content).toContain('CORP.md');
+      // Intentional NOT: .claude/ — settings.json is deterministic +
+      // needs to survive clones so Claude Code hooks work.
+      expect(content).not.toContain('.claude/');
+    });
+
+    it('STATUS.md + TASKS.md + .gitignore exist for OpenClaw agents too', () => {
+      // OpenClaw doesn't @import these files but the agent can still
+      // read them via tools; writing them unconditionally keeps the
+      // workspace shape consistent across harnesses.
+      const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot, { harness: 'openclaw' }));
+      const agentAbs = join(corpRoot, agentDir);
+      expect(existsSync(join(agentAbs, 'STATUS.md'))).toBe(true);
+      expect(existsSync(join(agentAbs, 'TASKS.md'))).toBe(true);
+      expect(existsSync(join(agentAbs, '.gitignore'))).toBe(true);
+    });
 
     it('does NOT write CLAUDE.md when harness=openclaw', () => {
       const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot, { harness: 'openclaw' }));
