@@ -19,6 +19,7 @@ import { findChitById, queryChits } from './chits.js';
 import type { Chit } from './types/chit.js';
 import type { Member } from './types/member.js';
 import { buildCorpMd, type CorpMdKind, type CorpMdOpts } from './templates/corp-md.js';
+import { getRole } from './roles.js';
 import {
   buildWtfHeader,
   type WtfCurrentTask,
@@ -220,7 +221,7 @@ export interface WtfOutputOpts {
   agentSlug: string;
   /** Display name — founder-given for Partners, self-chosen for Employees. */
   displayName: string;
-  /** MemberRank string — used for kind inference + role display. */
+  /** MemberRank string — used for kind inference fallback + role display when roleId is absent. */
   rank: string;
   /** Absolute workspace path for this agent (from member.agentDir). */
   workspacePath: string;
@@ -228,6 +229,21 @@ export interface WtfOutputOpts {
   generatedAt: string;
   /** Current time (caller-provided — used for inbox age labels). */
   now: Date;
+  /**
+   * Structural agent kind (Project 1.1). When set, takes precedence
+   * over the rank-based inferKind heuristic. Callers with a Member in
+   * hand should pass `resolveKind(member)` here for the honest value.
+   * Legacy callers that only have a rank string keep the inferred
+   * fallback.
+   */
+  kind?: import('./types/member.js').AgentKind;
+  /**
+   * Role registry id (Project 1.1). When set, CORP.md renders the
+   * "Your Role" section from the registry entry. Callers with a
+   * Member pass `member.role` verbatim; absent means the section
+   * is skipped (graceful for pre-1.1 agents without role set).
+   */
+  roleId?: string;
 }
 
 export interface WtfOutput {
@@ -246,7 +262,9 @@ export interface WtfOutput {
  * emitting the system-reminder.
  */
 export function buildWtfOutput(opts: WtfOutputOpts): WtfOutput {
-  const kind = inferKind(opts.rank);
+  // Prefer explicit kind (post-1.1 callers with Member.kind set);
+  // fall back to rank-based inference for legacy callers.
+  const kind = opts.kind ?? inferKind(opts.rank);
   const corpMdPath = join(opts.workspacePath, 'CORP.md');
 
   const currentTask = resolveCurrentTask(opts.corpRoot, opts.agentSlug);
@@ -257,11 +275,19 @@ export function buildWtfOutput(opts: WtfOutputOpts): WtfOutput {
     kind,
     agentSlug: opts.agentSlug,
     displayName: opts.displayName,
-    role: opts.rank,
+    // `role` is the human-readable display label (shown in heading);
+    // `roleId` is the registry key (drives the dynamic "Your Role"
+    // section). When opts.roleId is set we derive a nice display
+    // label from the registry; otherwise fall back to opts.rank as
+    // the old pre-1.1 stand-in.
+    role: opts.roleId ? (getRole(opts.roleId)?.displayName ?? opts.rank) : opts.rank,
+    roleId: opts.roleId,
     corpName: opts.corpName,
     workspacePath: opts.workspacePath,
     rolePreBrainPath:
-      kind === 'employee' ? join(opts.corpRoot, 'roles', opts.rank, 'pre-brain') : undefined,
+      kind === 'employee'
+        ? join(opts.corpRoot, 'roles', opts.roleId ?? opts.rank, 'pre-brain')
+        : undefined,
   };
 
   const corpMd = buildCorpMd(corpOpts);
