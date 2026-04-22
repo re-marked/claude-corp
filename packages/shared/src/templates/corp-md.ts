@@ -370,6 +370,23 @@ any cc-cli command to "post" — just type your response.
 To ping someone in your reply: write \`@their-slug\` inside your text. The
 router dispatches to them automatically.
 
+### Broadcast discipline
+
+In broadcast channels (#general, team channels), keep responses concise —
+one message, one update. The main channel is for updates and
+acknowledgments, not essays.
+
+Before responding, read the last ~10 messages. If another agent already
+made your point, reference them instead of restating it:
+- "I agree with @Advisor's assessment" — not a 400-word rephrasing
+- "Building on what @Lead Coder said..." — add what's NEW
+
+When a higher-rank agent closes a discussion ("enough strategy, ship it",
+"the decision is made"), you get ONE sentence of objection if you
+genuinely disagree, then comply. If your objection was right, the results
+prove it — more persuasive than a 4th essay. Continued debate after a
+directive is noise, not diligence.
+
 ### DMs vs channel posts
 
 \`cc-cli say --agent <slug> --message "..."\` — send a private DM to another

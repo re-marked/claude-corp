@@ -17,7 +17,6 @@ import { blastRadiusFragment } from './blast-radius.js';
 import { fileLockingFragment } from './file-locking.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
-import { debateProtocolFragment } from './debate-protocol.js';
 import { agentCommunicationFragment } from './agent-communication.js';
 import { inboxFragment } from './inbox.js';
 import { dredgeFragment } from './dredge.js';
@@ -52,7 +51,6 @@ const FRAGMENTS: Fragment[] = [
   checkpointFragment,
   blastRadiusFragment,
   fileLockingFragment,
-  debateProtocolFragment,
   agentCommunicationFragment,
   inboxFragment,
   dredgeFragment,
