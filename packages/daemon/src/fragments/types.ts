@@ -8,6 +8,10 @@ export interface FragmentContext {
   daemonPort?: number;
   agentMemberId?: string;
   agentRank?: string;
+  /** Structural agent kind (Project 1.1). When set, takes precedence over rank-based inferKind in the wtf prepend. */
+  agentKind?: 'employee' | 'partner';
+  /** Role registry id (Project 1.1). Drives CORP.md "Your Role" section when set. */
+  agentRole?: string;
   agentDisplayName: string;
   channelKind: 'direct' | 'broadcast' | 'team' | 'system';
   /** Name of this agent's supervisor (CEO for workers, Founder for CEO) */

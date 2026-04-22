@@ -63,6 +63,12 @@ export function composeSystemMessage(ctx: FragmentContext): string {
         workspacePath: ctx.agentDir,
         generatedAt: now.toISOString(),
         now,
+        // Project 1.1 — explicit kind + role when the dispatch
+        // context resolver populates them from the Member record.
+        // Legacy contexts without these fields fall back to rank
+        // inference + the role-is-rank display stand-in.
+        ...(ctx.agentKind ? { kind: ctx.agentKind } : {}),
+        ...(ctx.agentRole ? { roleId: ctx.agentRole } : {}),
       });
 
       // Write CORP.md so the agent can re-read cheaply via Read tool.

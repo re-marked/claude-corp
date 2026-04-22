@@ -754,6 +754,8 @@ export function createApi(daemon: Daemon): Server {
           daemonPort: daemon.getPort(),
           agentMemberId: target.id,
           agentRank: target.rank,
+          agentKind: target.kind,
+          agentRole: target.role,
           agentDisplayName: target.displayName,
           channelKind: 'direct' as const,
           supervisorName,

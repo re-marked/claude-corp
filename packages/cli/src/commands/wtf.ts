@@ -67,6 +67,11 @@ export async function cmdWtf(opts: WtfOpts): Promise<void> {
     workspacePath: member.agentDir,
     generatedAt: new Date().toISOString(),
     now: new Date(),
+    // Project 1.1 — pass explicit kind + role when the member record
+    // carries them. buildWtfOutput prefers these over rank-based
+    // inference and the role-is-rank display fallback respectively.
+    ...(member.kind ? { kind: member.kind } : {}),
+    ...(member.role ? { roleId: member.role } : {}),
   });
 
   // Write CORP.md for the agent to re-read cheaply without spawning wtf again.

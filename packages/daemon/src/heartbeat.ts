@@ -150,6 +150,8 @@ export class HeartbeatManager {
         daemonPort: this.daemon.getPort(),
         agentMemberId: agent.id,
         agentRank: agent.rank,
+        agentKind: agent.kind,
+        agentRole: agent.role,
         agentDisplayName: agent.displayName,
         channelKind: 'direct',
         supervisorName,

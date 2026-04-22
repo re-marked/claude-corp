@@ -767,6 +767,8 @@ export class MessageRouter {
       daemonPort: this.daemon.getPort(),
       agentMemberId: targetAgent.id,
       agentRank: targetAgent.rank,
+      agentKind: targetAgent.kind,
+      agentRole: targetAgent.role,
       agentDisplayName: targetAgent.displayName,
       channelKind: channel.kind,
       supervisorName,
