@@ -984,7 +984,11 @@ of the work, not something extra.
    - Files: [exact paths]
    - Build: PASS | FAIL | N/A
    \`\`\`
-6. **Report.** @mention your supervisor briefly. The daemon also auto-notifies.
+6. **Report.** The daemon auto-notifies your supervisor on status change;
+   your @mention is a brief human confirmation, not the primary signal.
+   Keep it short — lead with the result, not the process.
+   Good: \`@supervisor done, build passing. Files: chat.tsx, sidebar.tsx.\`
+   Bad: \`I read the requirements, then looked at the code, then considered several approaches...\`
 
 ### Dependencies
 

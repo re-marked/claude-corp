@@ -2,7 +2,6 @@ import type { Fragment, FragmentContext } from './types.js';
 import { atomicWriteSync, buildWtfOutput } from '@claudecorp/shared';
 import { join } from 'node:path';
 import { workspaceFragment } from './workspace.js';
-import { backReportingFragment } from './back-reporting.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { inboxFragment } from './inbox.js';
@@ -14,7 +13,6 @@ const FRAGMENTS: Fragment[] = [
   autoemonFragment,
   cultureFragment,
   workspaceFragment,
-  backReportingFragment,
   inboxFragment,
   dredgeFragment,
   contextFragment,
