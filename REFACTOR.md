@@ -421,6 +421,16 @@ The scanner reads these; the policy per type is pinned in one place. Future chan
 
 **Status vocabulary change.** Adding `'cold'` to `ChitStatus`. Cold is reached only by the scanner's TTL-aged + keep-forever path; it's not a manual state. All current ChitStatus consumers need a pass to make sure they either handle cold or explicitly filter it out.
 
+**Re-warming cold chits.** Cold chits stay cold by default — the scanner does NOT re-check them every tick (that would defeat the work-list bound). If a founder or agent explicitly wants to re-warm one (they realized an old observation matters after all), they do it manually: `cc-cli chit update <id> --status active`. The scanner then picks it up again on its next tick. Auto-rewarm on late-arriving signal is a later refinement if ever needed; v1 keeps the model simple.
+
+**Null-TTL ephemeral chits** (dispatch-contexts). `defaultTtlMs: null` means the chit has no time-based destruction. The scanner still visits it every tick but only the promotion signals can close it — never the TTL-aged path. Dispatch-contexts close when the work chit they narrate completes (a separate completion hook flips them, analogous to the contract-watcher pattern from 0.4). Expressed in scanner logic as: `if (ttl === null) skip TTL-aged branch; only run promotion checks`.
+
+**Non-ephemeral chit types.** The registry carries `destructionPolicy` on every type for uniformity, but the scanner only visits chits with `ephemeral: true`. Tasks, contracts, casket, step-log are created with `ephemeral: false` and are never seen by the scanner regardless of their registry policy. Their registry entries use `destructionPolicy: 'keep-forever'` + `defaultTtlMs: null` as sensible-default no-ops.
+
+**Definition of the "commented" signal (b).** Ambiguous in the original Gas Town spec — 0.6 pins it concretely: a chit is "commented on" when any other chit (any type, any scope) has the target chit's id in its `references` or `dependsOn` arrays, OR when any channel message has the target chit's id in its body (regex match on the chit-id format). Falls back to (a) "referenced" in most practical cases, but captures the weaker "someone mentioned it in chat" case the original spec was reaching for.
+
+**Ship criterion.** 0.6 is done when: handoffs created an hour ago with no signal are gone; observations from last month still exist but query-list them only if you ask (`--includeCold`); the scanner's per-tick work stays bounded as the corp ages; dreams still see historical observations for distillation; a founder running `cc-cli chit list --type handoff` sees only the live ones.
+
 **File paths:**
 - `packages/shared/src/types/chit.ts` (add `'cold'` to ChitStatus union)
 - `packages/shared/src/chit-types.ts` (add `destructionPolicy` + `defaultTtlMs` per type; observations → `keep-forever` + 24h; handoffs → `destroy-if-not-promoted` + 1h; dispatch-contexts → `destroy-if-not-promoted` + event-driven null; pre-brain-entries → `destroy-if-not-promoted` + 7d)
