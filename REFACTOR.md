@@ -431,6 +431,15 @@ The scanner reads these; the policy per type is pinned in one place. Future chan
 
 **Ship criterion.** 0.6 is done when: handoffs created an hour ago with no signal are gone; observations from last month still exist but query-list them only if you ask (`--includeCold`); the scanner's per-tick work stays bounded as the corp ages; dreams still see historical observations for distillation; a founder running `cc-cli chit list --type handoff` sees only the live ones.
 
+**Operational notes (implementation-critical).**
+
+- **TTL math.** "Aged past TTL" means `chit.createdAt + chit.ttl < now`. The `updatedAt` stamp is NOT used for TTL — promotion signals extend via the `ephemeral: true → false` flip, not by bumping TTL.
+- **Default TTL injection at creation.** `createChit` reads `defaultTtlMs` from the type registry: if the caller passes `ephemeral: true` with no `ttl`, inject `createdAt + defaultTtlMs`. If both caller-`ttl` and `defaultTtlMs` are null but `ephemeral: true`, the chit is ephemeral-no-expiry (only promotion signals can close it — matches dispatch-context semantics).
+- **Scanner backlog (daemon-down recovery).** After a long downtime, the first tick may hit thousands of eligible chits at once. No per-tick cap in v1 — process the whole backlog, log each decision. If operability suffers (unlikely at local-corp scale), add a batch cap later. The log is grepable + the outcome is idempotent, so a batch run is safe.
+- **"Commented" signal — cheap definition.** Drop the channel-message scan from round 2; scanning JSONL across every channel on every tick is expensive and (b) is largely subsumed by (a) in practice. Redefine: (b) holds when another chit mentions this id anywhere in its body text (single fs read per candidate during the scanner pass, cached per-tick). Channel-message case can be added later if we ever observe "someone talked about this chit but nothing referenced it" happening.
+- **Scope agnostic.** A reference signal counts across scopes — a permanent chit at `project:platform` scope referencing an observation at `agent:ceo` scope promotes the observation. The signal is about the edge, not the locality.
+- **Corrupted chit files.** If the scanner hits a parse error on a chit, skip it and log `"scanner skipped <path>: parse error"`. Never crash the scanner pass on one bad file — other chits still need servicing.
+
 **File paths:**
 - `packages/shared/src/types/chit.ts` (add `'cold'` to ChitStatus union)
 - `packages/shared/src/chit-types.ts` (add `destructionPolicy` + `defaultTtlMs` per type; observations → `keep-forever` + 24h; handoffs → `destroy-if-not-promoted` + 1h; dispatch-contexts → `destroy-if-not-promoted` + event-driven null; pre-brain-entries → `destroy-if-not-promoted` + 7d)
