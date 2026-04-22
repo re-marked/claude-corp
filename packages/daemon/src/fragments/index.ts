@@ -13,12 +13,10 @@ import { inboxFragment } from './inbox.js';
 import { dredgeFragment } from './dredge.js';
 import { coordinatorFragment } from './coordinator.js';
 import { autoemonFragment } from './autoemon.js';
-import { brainFragment } from './brain.js';
 import { cultureFragment } from './culture.js';
 
 const FRAGMENTS: Fragment[] = [
   autoemonFragment,
-  brainFragment,
   cultureFragment,
   workspaceFragment,
   taskExecutionFragment,

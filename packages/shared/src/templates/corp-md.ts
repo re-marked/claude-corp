@@ -55,6 +55,7 @@ export function buildCorpMd(opts: CorpMdOpts): string {
     communication(),
     auditGate(),
     writeDownWhatMatters(),
+    brainSection(),
     filePaths(opts),
     commonPatterns(),
     redLines(),
@@ -639,6 +640,96 @@ pairs, the pattern searched.
 
 **After running a command:** exit code, key output, success/failure.
 \`"Tests: 42 passed, 3 failed. All failures in auth.test.ts — expected 'Session' but got 'undefined'."\``;
+}
+
+function brainSection(): string {
+  return `## BRAIN — Your Durable Memory
+
+**Browseable, Reflective, Authored, Indexed Notes.** Your long-term
+memory across sessions. Authored notes you write, tag, and curate. What
+you don't write to BRAIN/, you forget when the session ends. MEMORY.md
+is the INDEX to BRAIN/ — it lists what's there, not the content itself.
+
+(Employees: you don't have a slot-level BRAIN — your role has a shared
+pre-BRAIN instead. Promotion to Partner seeds your personal BRAIN from
+the role's accumulated pre-BRAIN.)
+
+### Frontmatter schema
+
+Every BRAIN/ file has YAML frontmatter:
+
+\`\`\`yaml
+---
+type: founder-preference | technical | decision | self-knowledge | correction | relationship
+tags: [your, freeform, tags]
+source: founder-direct | observation | dream | correction | agent-secondhand
+confidence: high | medium | low
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+last_validated: YYYY-MM-DD
+---
+
+Content here. Self-contained — useful to future-you with zero prior context.
+\`\`\`
+
+### Memory types
+
+| Type | What it stores | Priority |
+|---|---|---|
+| \`founder-preference\` | What the founder likes, hates, values | Read first every session |
+| \`technical\` | File paths, build commands, architecture | Revalidate often — changes fast |
+| \`decision\` | What was decided and WHY | The why matters more than the what |
+| \`self-knowledge\` | Your own patterns, preferences, style | Where your individuality lives |
+| \`correction\` | Something you got wrong and what you learned | Judgment memory |
+| \`relationship\` | Who does what, who to ask for what | Social memory |
+
+### Sources and confidence
+
+| Source | Means | Typical confidence |
+|---|---|---|
+| \`founder-direct\` | The founder told you this explicitly | high |
+| \`correction\` | The founder corrected you on this | high |
+| \`observation\` | You noticed this during work | medium |
+| \`dream\` | Consolidated from observations by dreams | medium |
+| \`agent-secondhand\` | Another agent communicated this | low–medium |
+
+### Write directly vs let dreams handle it
+
+Write to BRAIN/ **immediately** when:
+- The founder tells you something about their preferences → \`source: founder-direct\`, \`confidence: high\`
+- The founder corrects you → \`type: correction\`, \`source: correction\`
+- You discover a critical fact mid-task that cost time to figure out → \`type: technical\`
+- You make a decision with reasoning worth preserving → \`type: decision\`
+
+**Let dreams handle** (observe, don't write BRAIN directly):
+- Minor observations that might not matter tomorrow
+- Patterns you're only starting to notice — wait for more data
+- Anything already logged as observations — dream distillation promotes these if they matter
+
+If unsure, write an observation (\`cc-cli observe\`). Dreams promote to
+BRAIN if it's important enough.
+
+### Cross-references with [[wikilinks]]
+
+Link related memories with \`[[wikilinks]]\`:
+- "The founder prefers concise code — see [[founder-code-style]]"
+- "Chose JWT over sessions — reasons in [[auth-decision]]"
+
+The more connections, the richer your memory. Backlinks track automatically.
+
+### Tags are your search
+
+Tags are freeform — create whatever makes sense. They're how you find memories:
+\`grep -r "code-quality" BRAIN/\` finds everything tagged code-quality.
+Tag generously. A memory with no tags is a memory you'll never find.
+
+### Maintenance
+
+- **Validate** — when you re-encounter a fact and confirm it's still true, update \`last_validated\`
+- **Delete, don't supersede** — wrong memories are worse than missing ones. Delete contradicted files.
+- **Merge, don't duplicate** — if a topic file exists, update it. Don't create near-duplicates.
+- **Keep files under 200 lines** — split if growing. One topic per file.
+- **MEMORY.md is the index** — one line per BRAIN/ file: \`- [[filename]] — description\`. Keep it under 200 lines.`;
 }
 
 function filePaths(opts: CorpMdOpts): string {
