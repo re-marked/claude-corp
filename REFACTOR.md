@@ -705,9 +705,19 @@ tells you, you get from \`cc-cli wtf\`.
 **CLAUDE.local.md variant for Employees in rigs:** when an Employee's sandbox is inside a project rig that has its own tracked CLAUDE.md, write to CLAUDE.local.md instead so the project's git diff stays clean. Dedup via sentinel string in file (Gas Town pattern).
 
 **OpenClaw harness dispatch-prepend (the OpenClaw equivalent of hooks).** OpenClaw agents don't have Claude Code's SessionStart/PreCompact hooks, but they have the same shell access. The unification:
-- At dispatch, the OpenClaw harness shells out to `cc-cli wtf --agent <slug>` and prepends the stdout to the agent's composed system prompt. Same content both substrates receive; the trigger differs (CLI hook vs harness preamble), not the payload.
-- This replaces the old "daemon fragment" scheme for both chits content AND most static-reference fragments. The fragments pipeline stays for the *situation-specific* content that wtf's header doesn't cover (rare — dredge is subsumed, inbox subsumed, most others too), which in practice means almost nothing.
-- Static-reference fragments (workspace, cc-cli, anti-rationalization, brain, culture, inbox, etc.) are deleted in 0.7.2 along with AGENTS.md/TOOLS.md — their content already lives in CORP.md rendered by wtf. One pass through the fragment registry, removing any fragment whose content is now in CORP.md.
+- At dispatch, the OpenClaw-side path calls `buildWtfOutput` (shared) directly from within `composeSystemMessage`, prepending the result to the composed system prompt. Same content as Claude Code's hook gets; trigger differs (CLI hook vs in-process function call) but payload is identical. The original plan to shell out to `cc-cli wtf` via subprocess was rejected during 0.7.2 implementation in favor of direct function call — zero subprocess overhead, same shared code path.
+- This replaces the old "daemon fragment" scheme for both chits content AND most static-reference fragments. The fragments pipeline stays for the *situation-specific* content that wtf's header doesn't cover (rare — dredge is subsumed, inbox subsumed, most others too).
+
+**Fragment cleanup — DEFERRED to a dedicated follow-up PR (0.7.2.1).** The 0.7.2 spec originally called for "one pass through the fragment registry, removing any fragment whose content is now in CORP.md." During 0.7.2 implementation we audited several candidates and found most static-reference fragments carry UNIQUE content CORP.md doesn't fully cover (fix-now has specific git-mv/git-reset patterns; output-efficiency has concrete "not worth sending" lists; blast-radius has tiered boundaries). A naive delete pass would lose content; a careful port-and-delete pass requires per-fragment CORP.md beef-up + test updates — worth its own focused review.
+
+**0.7.2.1 sub-scope (dedicated follow-up PR, post-0.7.2):**
+- Per-fragment content audit — compare each fragment's render output against CORP.md sections, identify unique content.
+- Port unique content into CORP.md sections (extending The Audit Gate / Common Mistakes / Red Lines / Communication / File Paths as needed).
+- Update CORP.md tests to assert the ported content lives in the expected section.
+- Delete the now-fully-subsumed fragment file + its index.ts import + FRAGMENTS array entry.
+- Repeat per fragment until the fragment registry is empty (or contains only genuinely dynamic fragments that DO require runtime state — e.g., workspace.ts's skills loading, culture.ts's CULTURE.md injection).
+
+0.7.2 ships 2 of ~20 fragments deleted (cc-cli.ts + anti-rationalization.ts — unambiguous matches). Interim state: CORP.md + remaining fragments coexist for OpenClaw dispatches (some token duplication where content overlaps — wasteful but correct). Claude Code agents see only CORP.md via the SessionStart hook (no fragments, since composeSystemMessage is gated by harness).
 
 **File paths:**
 - `packages/shared/src/templates/claude-md.ts` (shrink)
@@ -715,8 +725,8 @@ tells you, you get from \`cc-cli wtf\`.
 - `packages/shared/src/templates/tools.ts` (delete — content in corp-md)
 - `packages/shared/src/agent-setup.ts` (update: stop writing AGENTS.md/TOOLS.md; write settings.json with hook entries)
 - `packages/shared/src/templates/settings-json.ts` (new — generates `.claude/settings.json` with SessionStart/PreCompact/Stop/UserPromptSubmit hooks wired to cc-cli)
-- `packages/daemon/src/harness/openclaw-harness.ts` (update: prepend `cc-cli wtf --agent <slug>` stdout at dispatch — the OpenClaw equivalent of SessionStart hook)
-- `packages/daemon/src/fragments/*.ts` + `packages/daemon/src/fragments/index.ts` (delete fragments whose content is now in CORP.md: workspace, cc-cli, anti-rationalization, brain, culture, inbox, blast-radius, fix-now, output-efficiency, debate-protocol, failure-recovery, file-locking, delegation, receiving-delegation, back-reporting, ceo-reporting, channel-etiquette, task-execution, tool-result-management, context-persistence, scratchpad, checkpoint, coordinator, escalation-chain, blocker-escalation, agent-communication, history, context. Keep: dredge — it's purely dispatch-time handoff injection and wtf's situational header doesn't talk to WORKLOG for openclaw, only for claude-code. Actually on closer inspection dredge IS subsumed — wtf's Employee path reads WORKLOG handoff. Delete dredge too. Net: fragments/ subdirectory becomes essentially empty after 0.7.2.)
+- `packages/daemon/src/fragments/index.ts` (update `composeSystemMessage` to prepend `buildWtfOutput` for non-claude-code harness — OpenClaw's equivalent of SessionStart hook)
+- `packages/daemon/src/fragments/cc-cli.ts` + `anti-rationalization.ts` (delete — unambiguous matches against CORP.md sections. Rest of fragments deferred to 0.7.2.1 per the deferred-cleanup note above.)
 
 **Hook settings.json shape:**
 ```json
