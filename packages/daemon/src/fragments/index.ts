@@ -11,7 +11,6 @@ import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { inboxFragment } from './inbox.js';
 import { dredgeFragment } from './dredge.js';
-import { coordinatorFragment } from './coordinator.js';
 import { autoemonFragment } from './autoemon.js';
 import { cultureFragment } from './culture.js';
 
@@ -26,7 +25,6 @@ const FRAGMENTS: Fragment[] = [
   receivingDelegationFragment,
   inboxFragment,
   dredgeFragment,
-  coordinatorFragment,
   contextFragment,
   historyFragment,
 ].sort((a, b) => a.order - b.order);

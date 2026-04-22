@@ -56,6 +56,7 @@ export function buildCorpMd(opts: CorpMdOpts): string {
     auditGate(),
     writeDownWhatMatters(),
     brainSection(),
+    coordinatingContracts(),
     filePaths(opts),
     commonPatterns(),
     redLines(),
@@ -730,6 +731,110 @@ Tag generously. A memory with no tags is a memory you'll never find.
 - **Merge, don't duplicate** — if a topic file exists, update it. Don't create near-duplicates.
 - **Keep files under 200 lines** — split if growing. One topic per file.
 - **MEMORY.md is the index** — one line per BRAIN/ file: \`- [[filename]] — description\`. Keep it under 200 lines.`;
+}
+
+function coordinatingContracts(): string {
+  return `## Coordinating Contracts (Partner)
+
+If you're a Partner running a Contract, you are the coordinator. Your job:
+help the Founder achieve their goal, direct workers to research /
+implement / verify, and **synthesize results — this is your most
+important job.** Every message you send is to the Founder. Worker results
+are internal signals — never thank or acknowledge them.
+
+### The 4-phase workflow
+
+| Phase | Who | Purpose |
+|---|---|---|
+| **Research** | Workers (parallel) | Investigate codebase, find files, understand the problem |
+| **Synthesis** | **You** (coordinator) | Read findings, understand the approach, write specific implementation specs |
+| **Implementation** | Workers | Make targeted changes per your spec, commit |
+| **Verification** | **Fresh** workers | Prove changes work (not the implementer) |
+
+### Concurrency — parallelism is your superpower
+
+Workers are async. Launch independent workers concurrently; don't
+serialize work that can run simultaneously.
+- **Research tasks** → run in parallel freely
+- **Implementation** → one worker per set of files (prevent conflicts)
+- **Verification** → always a FRESH worker, never the implementer
+
+### Synthesis — BANNED anti-patterns vs GOOD specs
+
+After workers report, you MUST understand before directing follow-up.
+Read the findings. Write a spec that proves you understood — specific
+file paths, line numbers, exactly what to change.
+
+\`\`\`
+BANNED: "Based on your findings, fix the auth bug"
+BANNED: "The worker found an issue in the auth module. Please fix it."
+BANNED: "Fix the bug we discussed"
+BANNED: "Something went wrong with the tests, can you look?"
+
+GOOD:   "Fix the null pointer in src/auth/validate.ts:42. The user field
+         on Session (src/auth/types.ts:15) is undefined when sessions
+         expire but the token remains cached. Add a null check before
+         user.id access — if null, return 401 with 'Session expired'.
+         Run tests and commit."
+
+GOOD:   "Create branch fix/session-expiry from main. Apply the change.
+         Push and create a draft PR targeting main. Report the PR URL."
+\`\`\`
+
+### Continue vs hire fresh
+
+After synthesis, decide: does the worker's existing context help or hurt?
+
+| Situation | Do | Why |
+|---|---|---|
+| Research explored the exact files to edit | Continue (\`cc-cli say\`) | Context overlap is high |
+| Research was broad, implementation narrow | Hire fresh | Avoid dragging exploration noise |
+| Correcting a failure | Continue | Worker has error context |
+| Verifying another worker's code | Hire fresh | Fresh eyes, no implementation assumptions |
+| Wrong approach entirely | Hire fresh | Polluted context anchors on failed path |
+
+### Verification rules
+
+Verification means **proving the code works**, not confirming it exists.
+- Run tests with the feature enabled
+- Run typechecks; investigate errors — don't dismiss as "unrelated"
+- Be skeptical — if something looks off, dig in
+- Test independently; don't rubber-stamp
+
+### Handling failures
+
+1. Continue the same worker with \`cc-cli say\` — they have error context.
+2. If a second attempt fails, try a different approach OR hire a fresh worker.
+3. Report status to the Founder honestly — don't hide failures.
+
+### Worker prompt discipline
+
+Every worker prompt must be **self-contained** — workers can't see your conversation.
+- Include file paths, line numbers, error messages
+- State what "done" looks like
+- For implementation: "Run tests + typecheck, then commit and report the hash"
+- For research: "Report findings — do NOT modify files"
+- Add a purpose statement: "This research will inform the implementation spec"
+- For verification: "Try edge cases and error paths, not just the happy path"
+
+### When to suggest /plan first
+
+If the Founder gives you a complex, multi-step goal, suggest planning
+before handing tasks. Say: "This is complex enough to warrant a plan.
+Want me to /plan it? I'll research the codebase, think through the
+architecture, and come back with a structured breakdown."
+
+Good candidates: new features touching multiple systems; architecture
+decisions with long-term implications; migrations, refactors, rewrites.
+
+Bad candidates (just do it): bug fixes with obvious cause; simple
+feature additions; config changes, documentation updates.
+
+### Don't waste workers
+
+- Don't use one worker to check on another. Workers notify you when done.
+- Don't use workers for trivial things (reading a file, running a command). Do those yourself.
+- After launching workers, briefly tell the Founder what you launched and why. Never fabricate or predict results.`;
 }
 
 function filePaths(opts: CorpMdOpts): string {
