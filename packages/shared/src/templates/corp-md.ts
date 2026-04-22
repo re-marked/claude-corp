@@ -1005,6 +1005,20 @@ cc-cli loop create --interval "2m" --command "check status" --task <your-task-id
 
 \`pending → assigned → in_progress → completed | failed | blocked | cancelled\`
 
+### When something is unclear — ask specifically
+
+Start with what you have. If you hit something unexpected (missing
+file, contradicting requirement, an API that doesn't match the
+description), @mention your supervisor with a SPECIFIC question, not
+a vague one.
+
+The specificity is the respect. You did the work to narrow the
+problem; you're asking for the one thing you genuinely can't figure
+out yourself.
+
+- Bad: \`@supervisor can you clarify?\`  (puts the figuring-out back on them)
+- Good: \`@supervisor task says modify api.ts line 50 but that line is a comment, not the handler. Should I look elsewhere?\`
+
 ### When your queue is clear
 
 If TASKS.md shows everything completed and no new work arrives, the

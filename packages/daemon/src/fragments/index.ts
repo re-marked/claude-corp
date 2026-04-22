@@ -3,7 +3,6 @@ import { atomicWriteSync, buildWtfOutput } from '@claudecorp/shared';
 import { join } from 'node:path';
 import { workspaceFragment } from './workspace.js';
 import { backReportingFragment } from './back-reporting.js';
-import { receivingDelegationFragment } from './receiving-delegation.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { inboxFragment } from './inbox.js';
@@ -16,7 +15,6 @@ const FRAGMENTS: Fragment[] = [
   cultureFragment,
   workspaceFragment,
   backReportingFragment,
-  receivingDelegationFragment,
   inboxFragment,
   dredgeFragment,
   contextFragment,
