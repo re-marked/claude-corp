@@ -172,7 +172,13 @@ export function scanChitLifecycle(corpRoot: string, opts: ScanOpts = {}): ScanRe
       continue;
     }
 
-    const verdict = computeVerdict(chit, index, now, typeEntry.destructionPolicy);
+    // Per-instance destructionPolicy takes precedence over registry default
+    // when present. Load-bearing for inbox-item chits where Tier 1 sets
+    // 'destroy-if-not-promoted' while Tier 2/3 inherit the type default
+    // 'keep-forever'. Absent field = inherit default, which is the shape
+    // every pre-0.7.4 chit on disk will have (forward compatible).
+    const effectivePolicy = chit.destructionPolicy ?? typeEntry.destructionPolicy;
+    const verdict = computeVerdict(chit, index, now, effectivePolicy);
     const entry = applyVerdict(corpRoot, chit, path, verdict, now);
     if (entry) {
       result.entries.push(entry);

@@ -105,6 +105,25 @@ export interface ChitCommon {
   dependsOn: string[];
   /** Free-form cross-cutting labels. The Postel's-law seam — strict schema + loose tags. */
   tags: string[];
+  /**
+   * Per-instance override of the type's registry `destructionPolicy`.
+   * When present, the chit-lifecycle scanner uses this instead of the
+   * registry default on the TTL-aged tie-breaker.
+   *
+   * Load-bearing for `inbox-item` chits where policy varies by tier:
+   * Tier 1 ambients override to `destroy-if-not-promoted` (auto-clear
+   * noise); Tier 2/3 inherit the registry default `keep-forever` (go
+   * cold on TTL-age, preserve audit trail). Other types with
+   * instance-by-instance policy variation can use the same hook —
+   * registry default is the per-type baseline, this field is the
+   * escape valve.
+   *
+   * Undefined = inherit registry default. Intentionally optional so
+   * chits that don't need the override don't have to think about it
+   * (the vast majority — tasks, contracts, caskets never age out, so
+   * the field is a no-op on their types regardless).
+   */
+  destructionPolicy?: 'destroy-if-not-promoted' | 'keep-forever';
 }
 
 /**

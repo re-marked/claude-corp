@@ -289,7 +289,7 @@ export function chitScopeFromPath(corpRoot: string, path: string): ChitScope {
 
 const TTL_PATTERN = /^(\d+)([dhm])$/;
 
-function computeTTL(duration: string | null): string | undefined {
+export function computeTTL(duration: string | null): string | undefined {
   if (!duration) return undefined;
   const match = TTL_PATTERN.exec(duration);
   if (!match) throw new ChitValidationError(`invalid TTL duration: ${duration}`, 'ttl');
@@ -323,6 +323,13 @@ export interface CreateChitOpts<T extends ChitTypeId> {
   tags?: string[];
   /** Markdown body content. Defaults to empty string. */
   body?: string;
+  /**
+   * Per-instance override of the type's registry destructionPolicy.
+   * Load-bearing for inbox-item chits (Tier 1 sets
+   * 'destroy-if-not-promoted'; Tier 2/3 inherit the registry default).
+   * Undefined = inherit registry default — the common case.
+   */
+  destructionPolicy?: 'destroy-if-not-promoted' | 'keep-forever';
 }
 
 /**
@@ -370,6 +377,12 @@ export function createChit<T extends ChitTypeId>(
     references: opts.references ?? [],
     dependsOn: opts.dependsOn ?? [],
     tags: opts.tags ?? [],
+    // Only emit destructionPolicy when the caller explicitly set an
+    // override — inheriting the registry default is expressed by
+    // ABSENCE of the field, not presence of a redundant value. Keeps
+    // the frontmatter noise-free for the vast majority of chits
+    // (tasks, contracts, caskets) whose policy is a no-op anyway.
+    ...(opts.destructionPolicy ? { destructionPolicy: opts.destructionPolicy } : {}),
     fields: opts.fields,
   } as Chit<T>;
 
