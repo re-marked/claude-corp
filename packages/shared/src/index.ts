@@ -312,6 +312,7 @@ export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarne
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
 export { buildClaudeMd, type ClaudeMdTemplateOpts } from './templates/claude-md.js';
+export { buildCorpMd, type CorpMdOpts, type CorpMdKind } from './templates/corp-md.js';
 
 // Ranks
 export { canHire } from './ranks.js';
