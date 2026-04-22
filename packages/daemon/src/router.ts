@@ -13,6 +13,7 @@ import {
   generateId,
   detectFeedback,
   agentSessionKey,
+  createInboxItem,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -269,6 +270,43 @@ export class MessageRouter {
     if (targetIds.length === 0) return;
 
     log(`[router] @mentions in msg ${msg.id}: ${targetIds.join(', ')} (from ${senderOrSystem.displayName})`);
+
+    // Emit inbox-item chits for each target BEFORE dispatch. Runs
+    // regardless of online/offline status so the chit-store always
+    // reflects "who was notified about what," and 0.7.3's audit gate
+    // can read the same data. Per REFACTOR.md 0.7.4:
+    //   - DM channel from the founder → Tier 3 (critical)
+    //   - DM channel from an agent    → Tier 2 (direct)
+    //   - @mention in shared channel  → Tier 2 (peer-level, by convention)
+    //   - 'all'-mode broadcasts       → skip (would spam every agent's
+    //                                   inbox on every channel chatter)
+    // Failures are non-fatal — dispatch continues even if chit creation
+    // throws, so one bad write never blocks an @mention from reaching
+    // its target.
+    if (channelMode !== 'all') {
+      for (const targetId of targetIds) {
+        try {
+          const isFounder = senderOrSystem.type === 'user';
+          const isDmChannel = channelMode === 'dm';
+          const tier = isFounder && isDmChannel ? 3 : 2;
+          const subject = (msg.content ?? '').split(/\r?\n/)[0]!.slice(0, 80) || '(no content)';
+          createInboxItem({
+            corpRoot: this.daemon.corpRoot,
+            recipient: targetId,
+            tier,
+            from: senderOrSystem.id,
+            subject,
+            source: isDmChannel ? 'dm' : 'channel',
+            sourceRef: channel.name,
+            references: [`${channel.name}:${msg.id}`],
+          });
+        } catch (err) {
+          logError(
+            `[router] inbox-item chit creation failed for ${targetId}: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
 
     // ALL @mentions → immediate dispatch, regardless of sender type.
     // Previously agent→agent mentions were routed to the inbox to wait
