@@ -19,7 +19,9 @@ import { USER_TEMPLATE } from './templates/user.js';
 import { defaultEnvironment } from './templates/environment.js';
 import { defaultHeartbeat as heartbeatTemplate } from './templates/heartbeat.js';
 import { defaultRules as rulesTemplate } from './templates/rules.js';
-import { buildClaudeMd } from './templates/claude-md.js';
+import { buildThinClaudeMd } from './templates/claude-md.js';
+import { buildHookSettings } from './templates/hook-settings.js';
+import { inferKind } from './wtf-state.js';
 
 export interface AgentSetupOpts {
   corpRoot: string;
@@ -114,15 +116,50 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     harness: templateHarness,
   }), 'utf-8');
 
-  // CLAUDE.md — only for agents on the claude-code harness. Claude Code
-  // auto-discovers this file in cwd and inlines its @path imports on
-  // every dispatch, so it's how the agent's identity + current state
-  // reach the system prompt. OpenClaw agents skip it — OpenClaw's own
-  // bootstrap loader reads the same workspace files natively.
+  // CLAUDE.md — only for agents on the claude-code harness. Project 0.7
+  // architecture: thin survival-anchor shell, no @import of AGENTS.md or
+  // TOOLS.md. The corp manual + situational context come dynamically
+  // via `cc-cli wtf` fired by the SessionStart / PreCompact hooks
+  // configured in .claude/settings.json (written below).
+  //
+  // OpenClaw agents skip CLAUDE.md — the OpenClaw harness will prepend
+  // wtf output at dispatch time instead (same content, different trigger).
+  // That harness integration lands in a follow-up PR; for now OpenClaw
+  // agents still boot via the legacy fragments pipeline.
+  //
+  // AGENTS.md + TOOLS.md writes above remain unchanged — their files
+  // still get created on disk for backward compatibility with system
+  // agents composed via buildCeoAgents + defaultRules that haven't been
+  // migrated yet. The thin CLAUDE.md simply doesn't @import them, so
+  // they're stale-but-harmless until 0.7.5 rewire cleans them up on
+  // existing workspaces.
   if (templateHarness === 'claude-code') {
+    const kind = inferKind(rank);
+    const corpName = corpRoot.split(/[/\\]/).pop() ?? 'corp';
     writeFileSync(
       join(agentAbsDir, 'CLAUDE.md'),
-      buildClaudeMd({ displayName }),
+      buildThinClaudeMd({
+        kind,
+        displayName,
+        role: rank,
+        corpName,
+        workspacePath: agentAbsDir,
+      }),
+      'utf-8',
+    );
+
+    // .claude/settings.json — hook wiring. SessionStart + Stop for
+    // both kinds; PreCompact + UserPromptSubmit for Partners only.
+    // Until 0.7.3 ships `cc-cli audit`, the Stop hook command will
+    // fail to find the subcommand and exit non-zero — but Claude
+    // Code hooks tolerate missing commands (they log + continue), so
+    // this is safe to ship ahead of 0.7.3.
+    const claudeDir = join(agentAbsDir, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const settings = buildHookSettings({ kind, agentSlug: agentName });
+    writeFileSync(
+      join(claudeDir, 'settings.json'),
+      JSON.stringify(settings, null, 2) + '\n',
       'utf-8',
     );
   }
