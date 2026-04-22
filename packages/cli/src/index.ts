@@ -16,6 +16,7 @@ const { values, positionals } = parseArgs({
     rank: { type: 'string' },
     kind: { type: 'string' },
     role: { type: 'string' },
+    slug: { type: 'string' },
     model: { type: 'string' },
     agent: { type: 'string' },
     chain: { type: 'string' },
@@ -89,6 +90,7 @@ Commands:
   audit      Session-end audit gate (Stop / PreCompact hook invokes this). --override --reason "..." for founder bypass.
   done       Employee "I'm done with this task" signal. Writes pending handoff; audit promotes on approve.
   inbox      Tiered inbox management. cc-cli inbox <list|respond|dismiss|carry-forward|check>.
+  tame       Promote an Employee to Partner. --slug <id> --reason "..." [--name <new-name>].
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -226,6 +228,18 @@ async function run() {
       // Same pass-through pattern as chit — each subcommand owns its flags.
       const { cmdInbox } = await import('./commands/inbox.js');
       await cmdInbox(process.argv.slice(3));
+      break;
+    }
+    case 'tame': {
+      const { cmdTame } = await import('./commands/tame.js');
+      await cmdTame({
+        slug: values.slug as string | undefined,
+        reason: values.reason as string | undefined,
+        name: values.name as string | undefined,
+        from: values.from as string | undefined,
+        corp: values.corp as string | undefined,
+        json: !!values.json,
+      });
       break;
     }
     case 'observe': {
