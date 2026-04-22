@@ -661,8 +661,11 @@ the corp manual + your situational context.
 You live at <workspace-path>. Stay here. Other agents' workspaces are off-limits.
 
 ## The single critical rule
-[ONE lifecycle rule — e.g., Employees: "Run \`cc-cli hand-complete\` when your
-task is done. The Stop hook will audit first." Partners: similar analog.]
+Employees: "Your task ends with \`cc-cli hand-complete\`. The Stop hook will
+audit your work first — you cannot exit a session until it passes."
+Partners: "Your context ends with \`/compact\`. The PreCompact hook audits
+first — you cannot compact until it passes. Never push to main directly,
+ever. That's corp-breaking."
 
 ## Your soul files (agent-authored, @imported)
 @./SOUL.md
@@ -758,18 +761,40 @@ it passes, your session will end.
 - Inbox: Tier 3 items must have `status != active` by the time Stop hook re-runs.
 - Unreferenced: the audit is a loop until the agent's state reaches a provable DONE shape. Mechanical.
 
+**`cc-cli hand-complete` command (Employee completion signal).** Employees invoke this when they believe their task is done. It:
+1. Triggers the Stop hook via Claude Code's session termination path (which fires `cc-cli audit`).
+2. If audit blocks, the Stop is rejected, Claude Code keeps the session alive, and the agent sees the audit prompt injected.
+3. If audit approves, the Stop proceeds and the session ends cleanly. The command closes the Casket's `current_step` chit as completed, then exits.
+
+There is no analogous `partner-compact-start` command — Partners trigger PreCompact via Claude Code's native `/compact` slash command, and the PreCompact hook (wired to `cc-cli audit`) runs identically.
+
+**`cc-cli audit` command shape:**
+```
+cc-cli audit --agent <slug> [--hook-context <json>]
+```
+Exits with a JSON decision object on stdout (Claude Code reads this from the hook return):
+```json
+{"decision": "approve"}                 // session may end / compact may proceed
+{"decision": "block", "reason": "..."}  // Claude Code blocks the stop/compact; reason injected as system-reminder
+```
+
+**Claude Code blocking-hook format — verify before implementing.** The Stop + PreCompact hooks blocking pattern (decision object on stdout) is what Gas Town's research showed works for their Stop hook. Before 0.7.3 implementation starts, build a minimal probe: write a Stop hook that returns `{"decision": "block", "reason": "test"}` and confirm Claude Code actually rejects the stop + injects the reason. If the exact format differs, adjust the audit.ts output accordingly. (Claude Code's hook docs are the authoritative reference — we're relying on a documented feature, not an assumption.)
+
 **File paths:**
 - `packages/cli/src/commands/audit.ts` (new — the command the Stop hook invokes)
+- `packages/cli/src/commands/hand-complete.ts` (new — Employee completion signal)
 - `packages/daemon/src/audit-engine.ts` (optional: pulled-out prompt-rendering logic; keeps cc-cli thin)
 
 **Test strategy:**
 - Unit: audit blocks when acceptance criteria look unaddressed.
 - Unit: audit approves when all criteria have evidence references in recent turns.
+- Unit: audit JSON output shape matches Claude Code's expected hook format.
 - Integration: simulate Stop hook → audit blocks → agent responds with evidence → Stop re-runs → audit approves → session ends.
 - Integration: Tier 3 inbox unresolved → audit blocks → agent resolves → audit approves.
+- Integration: live-probe test — end-to-end Stop hook in a sandbox Claude Code session verifies the block actually blocks (catches any Claude Code hook-format drift early).
 
 **Depends on:** 0.7.1, 0.7.2
-**PRs:** 2
+**PRs:** 2-3 (extra PR absorbs the live-probe verification)
 
 #### 0.7.4 — The Tiered Inbox (inbox-item CLI commands)
 
@@ -782,6 +807,14 @@ cc-cli inbox respond <id>        # routes based on source (reply DM, close task,
 cc-cli inbox dismiss <id> [--not-important | --reason "text"]
 cc-cli inbox check [--inject]    # UserPromptSubmit hook integration
 ```
+
+**`cc-cli inbox check --inject` semantics (UserPromptSubmit hook path):**
+1. Queries open inbox-item chits for the agent at Tier 3 first, then Tier 2, created SINCE the last wtf render.
+2. If any new items, emits a `<system-reminder>` block listing them (tier + from + subject) on stdout. Claude Code captures it and prepends to the agent's next turn, so the agent sees "hey, N new items arrived since you last looked" alongside the founder's latest prompt.
+3. If no new items: emits nothing (exit 0, empty stdout). No noise, no tokens wasted.
+4. Updates a tiny `<workspace>/.inbox-last-checked` timestamp file so "since last check" is tracked per-session without needing a daemon query.
+
+This is async delivery: founder DMs a Partner mid-work → router creates Tier 3 inbox-item → on the Partner's next UserPromptSubmit tick, the hook injects a heads-up before they respond to whatever the user just typed. No polling, no message stuffing into AGENTS.md.
 
 **Discipline enforcement at CLI boundary:**
 - `inbox dismiss --not-important` on a Tier 3 item → exit with error, message: "Tier 3 items require substantive engagement. Respond, dismiss with specific reason, or justify leaving for next session."
@@ -812,6 +845,43 @@ cc-cli inbox check [--inject]    # UserPromptSubmit hook integration
 **Depends on:** 0.1, 0.2, 0.6 (scanner + per-instance destructionPolicy), 0.7.1-0.7.3
 **PRs:** 2
 
+#### 0.7.5 — Transition from existing agents
+
+**Scope.** What happens to live corps with existing agents when 0.7 ships — their workspaces still have AGENTS.md, TOOLS.md, full CLAUDE.md with `@import`s of both. A fresh 0.7 binary in an existing corp would generate conflicting state (two CORP.md sources — one from `@import` of the old schema, one from `cc-cli wtf`) unless we handle the transition explicitly.
+
+**Three options evaluated:**
+
+- **(a) No migration, new-agents-only cutover.** Existing agents keep their AGENTS.md/TOOLS.md workspace files; 0.7 applies only to hires from 0.7 onward. Cleanest code, but means existing agents never benefit from drift-protection until re-hired. Unacceptable for corps that don't churn agents often.
+- **(b) Opt-in re-hire.** `cc-cli agent rewire --agent <slug>` rewrites the agent's workspace to 0.7 shape: shrinks CLAUDE.md, deletes AGENTS.md + TOOLS.md, writes settings.json with hooks. Agent needs a fresh session after rewire (their next compaction or restart picks up new files). Preserves soul files (SOUL.md, IDENTITY.md, USER.md, MEMORY.md, BRAIN/). Founder-triggered, safe, reversible by git.
+- **(c) Auto-migrate on corp upgrade.** First boot of a 0.7-daemon against a pre-0.7 corp automatically rewires every agent. Fast cutover, but surprises. Founder might not be ready for the shift.
+
+**Lean: (b).** Matches the refactor's respect for founder control ("nothing auto-destroys soul material"). Rewire is explicit, per-agent, rollback-able via git (workspaces are git-tracked). Corps can migrate at their own pace. Provides a clean `--dry-run` path to preview the changes before committing.
+
+**`cc-cli agent rewire` behavior:**
+1. Backs up existing CLAUDE.md, AGENTS.md, TOOLS.md to `.claude-backup/<timestamp>/` in the workspace.
+2. Writes new thin CLAUDE.md from the 0.7 template.
+3. Deletes AGENTS.md and TOOLS.md (content now lives in CORP.md rendered by wtf).
+4. Writes `.claude/settings.json` with the four hook entries.
+5. Fires `cc-cli wtf --agent <slug>` once to generate initial CORP.md.
+6. Prints: "Rewired <slug>. Next session will boot with the 0.7 architecture. Backup at .claude-backup/<ts>/."
+
+**Corp-level state migration:** corps also need a new field in corp.json: `architecture_version: "0.7"` (or similar) so the daemon knows which template to use when hiring new agents. Pre-0.7 corps have no such field; daemon treats absence as pre-0.7. When `cc-cli corp upgrade` runs (explicit founder command), the version is bumped and new hires default to 0.7 shape.
+
+**File paths:**
+- `packages/cli/src/commands/agent-rewire.ts` (new)
+- `packages/cli/src/commands/corp-upgrade.ts` (new — bumps architecture_version)
+- `packages/shared/src/corp-json.ts` (add architecture_version field to Corporation type)
+- `packages/shared/src/agent-setup.ts` (update: read architecture_version, choose template variant)
+
+**Test strategy:**
+- Integration: rewire a pre-0.7 agent, confirm new files exist + old ones backed up + settings.json correct.
+- Integration: `--dry-run` prints changes without writing.
+- Regression: pre-0.7 agents with no rewire still function (their AGENTS.md/TOOLS.md are stale but not broken; they run under the old model until explicitly rewired).
+- Integration: new hire after corp upgrade gets 0.7 shape automatically.
+
+**Depends on:** 0.7.1-0.7.4
+**PRs:** 1-2
+
 ### 0.7 — Project ship criterion
 
 0.7 is done when:
@@ -827,7 +897,7 @@ cc-cli inbox check [--inject]    # UserPromptSubmit hook integration
 ### 0.7 — Dependencies and PR count
 
 **Depends on:** 0.1, 0.2, 0.3, 0.4, 0.5, 0.5.1, 0.6 (+ 0.6 extension for per-instance destructionPolicy override)
-**PRs:** 9-12 (across four sub-tasks)
+**PRs:** 10-14 (across five sub-tasks including 0.7.5 transition)
 
 ---
 
