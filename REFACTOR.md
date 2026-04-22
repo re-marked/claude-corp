@@ -622,6 +622,14 @@ Generated: <ISO>. CORP.md at: <path>. Re-run \`cc-cli wtf\` anytime.
 - `packages/shared/src/templates/agents.ts` (delete — content moves to corp-md templates)
 - `packages/shared/src/templates/tools.ts` (delete — content moves to corp-md templates)
 
+**Failure-mode behavior for `cc-cli wtf`.** The command is on the critical path for every session start. If it fails the agent boots disoriented. Three explicit fallbacks:
+
+1. **Daemon not required.** wtf reads local files + the chit store. Does NOT talk to the daemon. Works when daemon is down — the whole point is surviving disorientation including "why isn't the daemon up?"
+2. **Missing member record.** If `--agent <slug>` can't be resolved in members.json, wtf prints a `<system-reminder>` explaining the failure + what the founder needs to run to fix it, then exits non-zero. Claude Code surfaces the error to the agent instead of silent failure.
+3. **Corrupted state.** If the Casket chit or other required file is malformed, wtf emits a degraded-mode context ("Your Casket is malformed, escalate to CEO. Continue with caution.") and exits zero so session-start hooks don't fail catastrophically.
+
+A silent wtf failure is the worst outcome — agent has no idea they're running blind. These three fallbacks mean every failure path produces visible agent-facing text.
+
 **Test strategy:**
 - Unit: Partner vs Employee wtf output includes kind-appropriate sections, excludes others.
 - Unit: role-specific sections rendered from role data (e.g., role pre-BRAIN pointer for Employees).
@@ -672,9 +680,14 @@ ever. That's corp-breaking."
 @./IDENTITY.md
 @./USER.md
 @./MEMORY.md
-@./STATUS.md
-@./INBOX.md
-@./TASKS.md
+
+## Your live operational state
+@./STATUS.md      # you maintain this — brief status line, current focus
+@./TASKS.md       # auto-rendered digest of your open task chits (not hand-maintained)
+
+## Your inbox
+Inbox items are chits, not a file. Run \`cc-cli inbox list\` to see open ones.
+Your wtf header shows the summary: count per tier, most-recent peek.
 
 ## What you'll get dynamically
 SessionStart auto-injects CORP.md + your situation. Don't @import AGENTS.md
@@ -761,10 +774,20 @@ it passes, your session will end.
 - Inbox: Tier 3 items must have `status != active` by the time Stop hook re-runs.
 - Unreferenced: the audit is a loop until the agent's state reaches a provable DONE shape. Mechanical.
 
+**Escape valves for blocked compaction / handoff.** The audit gate is strict, which creates real stuck-state risk for Partners mid-conversation with the founder. Two mechanisms prevent the worst jams:
+
+1. **"Carry to next session" resolution for inbox items.** An agent waiting on human input can resolve a Tier 3 item as `status: active, fields.inbox-item.carriedForward: true, fields.inbox-item.carryReason: "waiting on founder clarification on X"`. This counts as resolution for audit purposes (item has an explicit "I looked at this and made a call") but preserves the item as active for when the context arrives. Audit accepts it; agent proceeds. The `carriedForward` flag is visible in the next wtf so the agent doesn't lose track.
+2. **`cc-cli audit --override --reason "text"` (founder-only).** If the agent is truly stuck and the founder is present to unblock, the founder can bypass the audit gate with a reason. Written to `chits/_log/audit-overrides.jsonl` so overrides are always traceable post-hoc. The override is rare by design — if it becomes common, the audit criteria are wrong and need fixing, not bypassing.
+
+These exist to keep the mechanism strict without being a trap. A Partner with legitimate "I need human input first" is not the failure mode audit is preventing; audit is preventing "I'm done even though tests fail."
+
 **`cc-cli hand-complete` command (Employee completion signal).** Employees invoke this when they believe their task is done. It:
-1. Triggers the Stop hook via Claude Code's session termination path (which fires `cc-cli audit`).
-2. If audit blocks, the Stop is rejected, Claude Code keeps the session alive, and the agent sees the audit prompt injected.
-3. If audit approves, the Stop proceeds and the session ends cleanly. The command closes the Casket's `current_step` chit as completed, then exits.
+1. Writes the session summary to `WORKLOG.md` in the Employee's sandbox — structured XML with `<handoff>` tags (current_step, completed, next_action, open_question, sandbox_state, notes) per the Decisions-Made XML schema. This is what Dredge reads when the NEXT session of this slot boots (Project 1.6 consumer). The agent authors the content during their session; hand-complete commits it atomically on session end.
+2. Triggers the Stop hook via Claude Code's session termination path (which fires `cc-cli audit`).
+3. If audit blocks, the Stop is rejected, Claude Code keeps the session alive, and the agent sees the audit prompt injected. WORKLOG.md is NOT yet committed — hand-complete rolls back the write until audit passes.
+4. If audit approves, the Stop proceeds: WORKLOG.md is finalized, the Casket's `current_step` chit is closed as completed, the chit lifecycle is triggered (creates a `handoff` chit referencing the WORKLOG if another session is expected), then the session exits cleanly.
+
+**WORKLOG authoring during session:** the agent updates WORKLOG.md incrementally as they work (as they do today). hand-complete validates the XML structure + applies the final touches. If WORKLOG.md is missing or malformed at hand-complete time, audit blocks — the agent must author a valid session summary before they can exit.
 
 There is no analogous `partner-compact-start` command — Partners trigger PreCompact via Claude Code's native `/compact` slash command, and the PreCompact hook (wired to `cc-cli audit`) runs identically.
 
