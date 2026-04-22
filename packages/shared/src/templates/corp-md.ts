@@ -19,7 +19,17 @@
  * the OpenClaw daemon fragment, so both substrates see identical text.
  */
 
-export type CorpMdKind = 'partner' | 'employee';
+import type { AgentKind } from '../types/member.js';
+
+/**
+ * @deprecated Use `AgentKind` from `@claudecorp/shared` (or
+ * `./types/member.js` internally). Kept as an alias so existing
+ * imports keep working; new code should import AgentKind directly.
+ * Both types carry identical values ('employee' | 'partner') —
+ * they're structurally the same shape under two names, duplication
+ * being the tax of adding AgentKind incrementally in 1.1.
+ */
+export type CorpMdKind = AgentKind;
 
 export interface CorpMdOpts {
   /** Partner (persistent identity) vs Employee (ephemeral slot). Drives which kind-specific sections appear. */

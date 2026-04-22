@@ -400,6 +400,7 @@ export {
   resolveInboxSummary,
   formatAge,
   inferKind,
+  resolveKind,
   type WtfOutputOpts,
   type WtfOutput,
 } from './wtf-state.js';

@@ -17,6 +17,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { findChitById, queryChits } from './chits.js';
 import type { Chit } from './types/chit.js';
+import type { Member } from './types/member.js';
 import { buildCorpMd, type CorpMdKind, type CorpMdOpts } from './templates/corp-md.js';
 import {
   buildWtfHeader,
@@ -175,15 +176,37 @@ export function formatAge(createdAt: string, now: Date): string {
 }
 
 /**
- * Infer Partner vs Employee from MemberRank. Project 1.1 will add an
- * explicit `kind` field; until then this derivation lets the 0.7
- * architecture work today. Owner/master/leader → Partner; worker/
- * subagent → Employee. Unknown ranks default to Partner (safer —
- * keeps soul-file paths in play).
+ * Infer Partner vs Employee from MemberRank. Rank-based fallback for
+ * callers that only have a rank string in scope (e.g. the hire flow
+ * before a Member record exists). Owner/master/leader → Partner;
+ * worker/subagent → Employee. Unknown ranks default to Partner
+ * (safer — keeps soul-file paths in play).
+ *
+ * Prefer `resolveKind(member)` when you have a Member — it honors the
+ * explicit `Member.kind` field first and only falls back here when
+ * kind is absent (pre-1.1 agents on disk).
  */
 export function inferKind(rank: string): CorpMdKind {
   if (rank === 'worker' || rank === 'subagent') return 'employee';
   return 'partner';
+}
+
+/**
+ * Canonical kind lookup for a Member. Introduced in Project 1.1 when
+ * `Member.kind` became a structural field. Order of preference:
+ *
+ *   1. Explicit `member.kind` — the post-1.1 normal case.
+ *   2. Rank-based inference via inferKind — the pre-1.1 compat path.
+ *      Every agent that predates the split is persistent-named by
+ *      profile; ranks owner/master/leader all resolve to Partner,
+ *      matching real-world state.
+ *
+ * Use this everywhere a consumer previously called inferKind but had
+ * the full Member in hand. Migration is gradual — inferKind stays for
+ * the hire flow and other rank-only call sites.
+ */
+export function resolveKind(member: Pick<Member, 'rank' | 'kind'>): CorpMdKind {
+  return member.kind ?? inferKind(member.rank);
 }
 
 // ─── Orchestrator — the main entry both consumers call ────────────
