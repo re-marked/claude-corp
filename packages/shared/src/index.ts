@@ -159,6 +159,20 @@ export {
 // emitters). Tier-specific TTL + destructionPolicy rules centralized.
 export { createInboxItem, TIER_TTL } from './inbox.js';
 export type { CreateInboxItemOpts } from './inbox.js';
+
+// Role registry — canonical role metadata for Project 1.1's Employee/
+// Partner split. CORP.md renders role-specific sections from these
+// entries; `cc-cli hire --role` validates against them; `cc-cli tame`
+// reads defaultKind as the promotion sanity check.
+export {
+  ROLES,
+  getRole,
+  isKnownRole,
+  roleIds,
+  partnerRoles,
+  employeeRoles,
+} from './roles.js';
+export type { RoleEntry, RoleTier } from './roles.js';
 // Re-export computeTTL now that it's public (inbox.ts consumes it; other
 // inbox-like helpers may too).
 export { computeTTL } from './chits.js';
