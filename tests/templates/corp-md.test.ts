@@ -68,6 +68,10 @@ describe('buildCorpMd — required section headings', () => {
     '## Commands Quick Reference',
     '## Communication',
     '## The Audit Gate',
+    '## Write Down What Matters',
+    '## BRAIN',
+    '## Coordinating Contracts (Partner)',
+    '## Executing a Task (Worker)',
     '## File Paths',
     '## Common Patterns',
     '## Red Lines',
@@ -296,6 +300,10 @@ describe('buildCorpMd — shared sections identical across kinds', () => {
     '## Task Complexity',
     '## Communication',
     '## The Audit Gate',
+    '## Write Down What Matters',
+    '## BRAIN',
+    '## Coordinating Contracts (Partner)',
+    '## Executing a Task (Worker)',
     '## Common Patterns',
     '## Red Lines',
     '## Common Mistakes',
@@ -324,5 +332,162 @@ describe('buildCorpMd — shared sections identical across kinds', () => {
     expect(out).toContain('cc-cli hand');
     expect(out).toContain('cc-cli inbox');
     expect(out).toContain('cc-cli hand-complete');
+  });
+});
+
+describe('buildCorpMd — 0.7.2.1 fragment-port content (load-bearing pieces)', () => {
+  // These pin the specific content ported from fragments so a future edit
+  // to CORP.md can't silently drop the rules we migrated.
+
+  it('Communication/Broadcast discipline — brevity + directive compliance (from debate-protocol)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toContain('### Broadcast discipline');
+    expect(out).toMatch(/keep responses concise/);
+    // Phrase wraps across a newline in the template; match halves separately
+    expect(out).toMatch(/Continued debate after a/);
+    expect(out).toMatch(/noise, not diligence/);
+  });
+
+  it('Communication/Response shape — three-beat pattern + HIGH/LOW + worth-sending filter (from checkpoint + output-efficiency)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toContain('### Response shape');
+    expect(out).toMatch(/Acknowledge/);
+    expect(out).toMatch(/HIGH:/);
+    expect(out).toMatch(/LOW:/);
+    expect(out).toMatch(/\*\*Worth sending:\*\*/);
+    expect(out).toMatch(/\*\*Not worth sending:\*\*/);
+  });
+
+  it('Communication/Go direct — don\'t-route-through-CEO rule (from agent-communication)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toContain('### Go direct');
+    expect(out).toMatch(/don't route through a Partner/);
+    expect(out).toMatch(/peer-to-peer/);
+  });
+
+  it('Communication/Asking the founder — <askFounder> XML pattern (from channel-etiquette)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toContain('### Asking the founder a question');
+    expect(out).toContain('<askFounder>');
+    expect(out).toContain('<question>');
+    expect(out).toMatch(/type="score"/);
+    expect(out).toMatch(/type="multi"/);
+  });
+
+  it('Red Lines — three-tier structure (from blast-radius)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toContain('### Write freely');
+    expect(out).toContain('### Modify with care');
+    expect(out).toContain('### Never');
+  });
+
+  it('Red Lines/Modify with care — locks.json protocol (from file-locking)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/Lock before writing any shared file/);
+    expect(out).toContain('locks.json');
+    expect(out).toMatch(/30 min/);
+  });
+
+  it('Common Mistakes — "got it, I\'ll remember" deflection (from fix-now)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/Deferring fixable feedback/);
+    expect(out).toMatch(/got it, I'll remember/);
+  });
+
+  it('Common Mistakes — silent workarounds are hidden failures (from escalation-chain)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/Working around a problem instead of reporting it/);
+    expect(out).toMatch(/BLOCKED is honest/);
+  });
+
+  it('Common Patterns — blocker Tried/Failed/Need shape (from blocker-escalation)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/Tried:/);
+    expect(out).toMatch(/Failed:/);
+    expect(out).toMatch(/Need:/);
+  });
+
+  it('Common Patterns — review feedback loop (from failure-recovery)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/I got FAIL'd on my work/);
+    expect(out).toMatch(/Evidence decides, not hierarchy/);
+  });
+
+  it('Common Patterns — escalation chain + don\'t skip levels (from escalation-chain)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/Don't skip levels/);
+    expect(out).toMatch(/nobody between us can help/);
+  });
+
+  it('Write Down What Matters — survives/does-not-survive lists (from context-persistence)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/If you didn't write it down, it doesn't exist after compaction/);
+    expect(out).toMatch(/What survives compaction/);
+    expect(out).toMatch(/What does NOT survive/);
+  });
+
+  it('Write Down What Matters — summarize large results + per-tool extract (from tool-result-management)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toContain('### Summarize large tool results');
+    expect(out).toContain('### What to extract per tool');
+    expect(out).toMatch(/After reading a file/);
+    expect(out).toMatch(/After a build\/typecheck/);
+  });
+
+  it('Core Concepts — Scratchpad concept (from scratchpad)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/\*\*Scratchpad\*\*/);
+    expect(out).toMatch(/Channels = talking\. Scratchpad = making/);
+  });
+
+  it('BRAIN section — frontmatter schema + memory types + sources (from brain)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toContain('## BRAIN');
+    expect(out).toMatch(/Browseable, Reflective, Authored, Indexed Notes/);
+    expect(out).toMatch(/founder-preference/);
+    expect(out).toMatch(/last_validated/);
+  });
+
+  it('Coordinating Contracts (Partner) — 4-phase workflow + BANNED/GOOD synthesis (from coordinator)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toContain('## Coordinating Contracts (Partner)');
+    expect(out).toMatch(/Research/);
+    expect(out).toMatch(/Synthesis/);
+    expect(out).toMatch(/BANNED:/);
+    expect(out).toMatch(/GOOD:/);
+  });
+
+  it('Coordinating Contracts — Create→Hand workflow + blockedBy + Loops/Crons + Hiring (from delegation)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/Create → Hand workflow/);
+    expect(out).toMatch(/blockedBy/);
+    expect(out).toMatch(/\*\*Loop\*\*/);
+    expect(out).toMatch(/\*\*Cron\*\*/);
+    expect(out).toMatch(/### Hiring/);
+  });
+
+  it('Coordinating Contracts — CEO/master reporting + triage (from ceo-reporting)', () => {
+    const out = buildCorpMd(partnerOpts());
+    expect(out).toMatch(/If you're the CEO \(master rank\)/);
+    expect(out).toMatch(/What happened/);
+    expect(out).toMatch(/Proactive triage/);
+  });
+
+  it('Executing a Task (Worker) — 6-step flow (from task-execution)', () => {
+    const out = buildCorpMd(employeeOpts());
+    expect(out).toContain('## Executing a Task (Worker)');
+    expect(out).toMatch(/Read the full task chit/);
+    expect(out).toMatch(/Mark in_progress/);
+    expect(out).toMatch(/Do the work/);
+    expect(out).toMatch(/Verify/);
+    expect(out).toMatch(/Complete/);
+    expect(out).toMatch(/Report/);
+  });
+
+  it('Executing a Task — "specificity is respect" for clarifications (from receiving-delegation)', () => {
+    const out = buildCorpMd(employeeOpts());
+    expect(out).toMatch(/specificity is the respect/);
+    expect(out).toMatch(/Bad:/);
+    expect(out).toMatch(/Good:/);
   });
 });
