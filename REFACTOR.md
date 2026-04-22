@@ -62,7 +62,7 @@ The single biggest structural change. Today, every agent is treated as a persist
 - **Dredge already exists — activate it, don't reinvent.** Claude Corp has a Dredge fragment (`packages/daemon/src/fragments/dredge.ts`) that reads the agent's WORKLOG.md and injects its `## Session Summary` section into the new session's system prompt. This is exactly the session-handoff mechanism Project 1.6 needs. Why it's underused today: agents don't reliably write session summaries, and there's no discipline forcing them to. Project 1.6 should: (a) formalize that sessions MUST write a structured summary before handoff, (b) verify Dredge reads it on the next boot, (c) rewrite Dredge to parse structured XML instead of free markdown. Example of the refactor thesis in action — take existing concept, make it load-bearing, delete the "optional" quality.
 - **Structured XML for machine-to-machine handoffs.** Session summaries (for Dredge), Contract-level reviews (self-witnessing layer), and any other place one agent-session leaves info for another use tagged XML, not prose. Tags: `<handoff><current-step/><completed/><next-action/><open-question/><sandbox-state/><notes/></handoff>` or similar, refined per handoff type. Benefits: predictable parsing, clearer prompts ("fill these slots"), selective injection (next session can read just `<next-action>` first, other tags on demand), detectable malformed handoffs. Claude models fill tagged slots more reliably than they write summary paragraphs — this is mechanical alignment with how the models actually work.
 - **Pre-BRAIN full auto-load for v1, summarize later.** YAGNI. At current corp scale, pre-BRAIN is small; full auto-load is fine. When pre-BRAIN gets big enough to degrade session quality (hundreds of entries, multi-MB), ship summarization — probably in Project 4 where distillation mechanics already live (dreams-that-distill extends naturally to pre-BRAIN distillation). Ship simple now; measure before optimizing.
-- **Chits — unified record primitive (Project 0 prerequisite).** We kept inventing new file shapes across Projects 1-6: handoff markers, dispatch contexts, pre-BRAIN entries, step logs, wisp-like ephemerals, structured observations. On top of Claude Corp's existing bespoke formats (tasks, observations, contracts, messages), that's ~12 separate conventions doing variations of the same thing. Gas Town's "Beads" is their unified answer. We build our own — **Chits** — corporate-themed, Claude-Corp-native. A Chit is a structured markdown record that can be any of: task, observation, contract, casket pointer, handoff, dispatch-context, pre-BRAIN entry, wisp, step log. One primitive, many types, shared core schema + type-specific frontmatter fields. Becomes Project 0 — the foundation everything else sits on. Tasks/Contracts/Observations get migrated to Chits before Project 1's sub-projects start. Old formats die; no parallel paths.
+- **Chits — unified record primitive (Project 0 prerequisite).** We kept inventing new file shapes across Projects 1-6: handoff markers, dispatch contexts, pre-BRAIN entries, step logs, ephemeral records, structured observations. On top of Claude Corp's existing bespoke formats (tasks, observations, contracts, messages), that's ~12 separate conventions doing variations of the same thing. Gas Town's "Beads" is their unified answer. We build our own — **Chits** — corporate-themed, Claude-Corp-native. A Chit is a structured markdown record that can be any of: task, observation, contract, casket pointer, handoff, dispatch-context, pre-BRAIN entry, step log. One primitive, many types, shared core schema + type-specific frontmatter fields. Becomes Project 0 — the foundation everything else sits on. Tasks/Contracts/Observations get migrated to Chits before Project 1's sub-projects start. Old formats die; no parallel paths.
 - **From the research gems — accepted for future projects:**
   - Compaction hooks (`PreCompact` + `SessionStart { source: "compact" }`) — Project 1.7 uses these natively for context renewal on Partners
   - Blockable `Stop` hook as native critic loop — consider for Project 2.4 (self-witnessing meta-layer) as an implementation option
@@ -71,7 +71,7 @@ The single biggest structural change. Today, every agent is treated as a persist
   - Three subagent isolation models (Fork/Teammate/Worktree) — inform Project 2.4 and Project 3 design choices
   - 15-second blocking budget — Project 1.8 Deacon / Project 3.3 auto-recovery enforce this for autoemon ticks
   - atomicfile pattern (tempfile + rename for crash-safe writes) — Project 0.1 uses this for all Chit writes
-  - Wisp 4-signal promotion — Project 0.6 implements this for ephemeral Chits
+  - 4-signal promotion for ephemeral records — Project 0.6 implements this for ephemeral Chits
   - Handoff-as-tool in Claude Corp terms = `cc-cli escalate --to <partner> --reason "..."` — Project 1.4 extends hand with escalate semantics
 
 ---
@@ -116,7 +116,7 @@ Total: ~70-90 PRs across 7 projects. Rough estimate.
 
 ### Context — why Project 0 exists
 
-As we designed Projects 1-6, we kept inventing new file shapes: handoff markers, dispatch contexts, pre-BRAIN entries, step logs, wisp-like ephemeral records, structured observations. Each invention needed its own read/write code, its own frontmatter schema, its own query pattern. On top of Claude Corp's existing bespoke formats (tasks, observations, contracts, messages), that's ~12 separate conventions doing variations of the same thing.
+As we designed Projects 1-6, we kept inventing new file shapes: handoff markers, dispatch contexts, pre-BRAIN entries, step logs, ephemeral records, structured observations. Each invention needed its own read/write code, its own frontmatter schema, its own query pattern. On top of Claude Corp's existing bespoke formats (tasks, observations, contracts, messages), that's ~12 separate conventions doing variations of the same thing.
 
 Gas Town's "Beads" is the same insight applied to Go projects. We don't adopt Beads directly — it's an external project with its own opinions — but the **pattern** is right: one unified record primitive, many types, shared schema core + type-specific frontmatter. Build our own, Claude-Corp-native: **Chits**.
 
@@ -131,7 +131,7 @@ A Chit is a markdown file with YAML frontmatter:
 id: chit-abc123
 type: task | observation | contract | casket | handoff | dispatch-context | pre-brain-entry | step-log | ...
 status: draft | active | review | completed | rejected | failed | closed | burning
-ephemeral: false                 # true for wisp-like, auto-expires unless promoted
+ephemeral: false                 # true = auto-expires unless promoted (see 0.6 lifecycle)
 ttl: 2026-04-28T00:00:00Z        # optional, only meaningful when ephemeral=true
 created_by: member-id
 updated_at: 2026-04-21T15:30:00Z
@@ -182,7 +182,7 @@ Enforcement is at the cc-cli command layer (`--from` flag asserts identity; comm
 
 **Deletion policy.** Non-ephemeral Chits never delete; they close. Terminal statuses: `completed` (goal met), `rejected` (Warden/founder rejected), `failed` (abandoned), `closed` (benign retirement — superseded, no longer relevant). All terminal states keep the file in place with `updated_at` reflecting the close. Rationale: git history already makes delete irreversible in practice, and closed Chits are useful as audit trail + future pattern-detection data.
 
-Ephemeral Chits do delete: if no promotion signal fires before TTL, the daemon's lifecycle scanner (0.6) removes the file. A one-line destruction log is written to `<corp>/chits/_log/burns.jsonl` so agents can later ask "what wisps did we have that never promoted" — useful diagnostic, not a graveyard.
+Ephemeral Chits of destruction-eligible types (handoffs, dispatch-contexts, role-level pre-brain-entries) delete: if no promotion signal fires before TTL, the daemon's lifecycle scanner (0.6) removes the file. A one-line destruction log is written to `<corp>/chits/_log/burns.jsonl` so agents can later ask "what ephemeral chits did we have that never promoted" — useful diagnostic, not a graveyard. Observations, per 0.6, are `keep-forever`: they flip to `status: 'cold'` on TTL age instead of destructing — preserved as soul material, demoted out of scanner tracking so per-tick work stays bounded.
 
 Archival: `cc-cli chit archive <id>` moves a closed non-ephemeral Chit to `<scope>/chits/_archive/<type>/<id>.md`. Queries by default don't scan `_archive/`; pass `--include-archive` to search there. This keeps working-set queries fast when history grows.
 
@@ -256,7 +256,7 @@ cc-cli chit list [--type <type>]*  [--status <status>]*  [--tag <tag>]*
                  [--ref <id>]*  [--depends-on <id>]*  [--assignee <slug>]
                  [--ephemeral|--no-ephemeral] [--json] [--limit <n>] [--sort <field>]
 
-# Promote (flip ephemeral → permanent; manual wisp promotion)
+# Promote (flip ephemeral → permanent; manual promotion of an ephemeral chit)
 cc-cli chit promote <id> [--reason "..."]
 
 # Close + archive (one-shot for when a Chit truly is done-and-gone)
@@ -371,7 +371,7 @@ This is intentionally premature. 1.9 hasn't shipped; no consumer reads `complexi
 **Depends on:** 0.3 (TaskFields exists)
 **PRs:** 1
 
-### 0.6 — Wisp lifecycle: ephemeral Chits + 4-signal promotion (split by type)
+### 0.6 — Chit lifecycle: ephemeral Chits + 4-signal promotion (split by type)
 
 **Problem.** Some Chit types accumulate as pure noise (handoffs consumed by the successor; dispatch-contexts superseded by git history; unpromoted pre-brain-entry candidates). Others — observations — are the agent's diary, its self-witnessing across time. Blanket auto-destruction would solve the noise problem but destroy soul material. A blanket "keep everything" would leave the noise types growing unboundedly.
 
@@ -384,7 +384,7 @@ So 0.6 splits the rule by what the Chit actually IS, not by a flat "ephemeral" f
 - A dispatch-context is the "why this work went to this agent" breadcrumb; once the work ships, the commit + contract history carries the meaning.
 - A pre-brain-entry at role level is an explicit candidate for BRAIN; unpromoted ones are noise by the definition of the type.
 
-These get the full wisp lifecycle: ephemeral=true, TTL set at creation, scanner checks 4 promotion signals, promote-or-destroy.
+These get the full ephemeral-chit lifecycle: ephemeral=true, TTL set at creation, scanner checks 4 promotion signals, promote-or-destroy.
 
 **(B) Promotion-only (observations).** Observations are the agent's diary. Mundane ones still contribute to the texture of the agent's becoming (see the manifesto — Writing as Witnessing). Destroying them to save disk space we don't need is counter-mission.
 
