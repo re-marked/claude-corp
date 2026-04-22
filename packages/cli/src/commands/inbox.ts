@@ -39,9 +39,13 @@ export async function cmdInbox(rawArgs: string[]): Promise<void> {
       await cmdInboxRespond(subArgs);
       break;
     }
-    // dismiss / carry-forward / check arrive in follow-up commits on
-    // this branch. Until then, fall through to the unknown-subcommand
-    // path and print help.
+    case 'dismiss': {
+      const { cmdInboxDismiss } = await import('./inbox/dismiss.js');
+      await cmdInboxDismiss(subArgs);
+      break;
+    }
+    // carry-forward / check arrive in follow-up commits on this branch.
+    // Until then, fall through to the unknown-subcommand path.
     default: {
       console.error(`cc-cli inbox: unknown subcommand "${subcommand}"`);
       console.error('');
