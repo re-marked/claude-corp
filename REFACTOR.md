@@ -977,6 +977,41 @@ This is async delivery: founder DMs a Partner mid-work → router creates Tier 3
 
 ---
 
+### 0.7 — DEFERRED: migration commands (0.7.2.2 + 0.7.5) absorb into `cc-cli update` when real users appear
+
+**Status.** Not building 0.7.2.2 (`cc-cli doctor --fix-hooks`) or 0.7.5 (`cc-cli agent rewire`) right now. Claude Corp has zero production users at time of writing; the only "existing corps" are our local dogfood corps that we recreate trivially. Both commands are migration-for-legacy-users surface — load-bearing the day someone else is running Claude Corp, pure ceremony today.
+
+**The pattern we do want, when the time comes: `cc-cli update`.** One unified command that covers every "my corp is out of date, bring it up to current shape" case. Shape:
+
+```
+cc-cli update                    # audit corp; report drift (no writes)
+cc-cli update --dry-run          # same as above, explicit
+cc-cli update --apply            # fix drift in-place
+cc-cli update --agents-only      # skip corp-level files (channels, projects)
+cc-cli update --agent <slug>     # targeted to one agent
+cc-cli update --verbose          # explain each drift decision
+```
+
+**Scope of drift checks (extensible, one per class):**
+- `.claude/settings.json` shape mismatch vs. `buildHookSettings()` output (the 0.7.2.2 concern).
+- Workspace file state vs. current template (thin CLAUDE.md instead of fat fat, no AGENTS.md/TOOLS.md — the 0.7.5 concern).
+- Missing Casket chit at `agents/<slug>/chits/casket/casket-<slug>.md` — backfill via `createCasketIfMissing`.
+- Missing `.gitignore` entries for gitignored-by-0.7-agent-setup files (CORP.md etc.).
+- Future drifts: whatever schema changes after this.
+
+**Why one command instead of N narrow ones (doctor + rewire + backfill + ...):**
+- **Lower mental overhead.** "Is my corp healthy? Run `cc-cli update`." One answer to "what do I run after upgrading?" rather than a checklist of four narrow commands.
+- **Composable.** Each drift check is an independent module under the same surface; adding a new check doesn't require a new top-level command. `doctor --fix-hooks` becomes "one module that update invokes when it sees the flat-shape drift."
+- **Idempotent by design.** Running `cc-cli update --apply` twice in a row should be a no-op on the second run — the drift set emptied. Tests this easily.
+
+**Where `cc-cli doctor` still fits: narrower, diagnostic-only sibling.** Worth keeping as a distinct command focused on *reporting* without any fix surface — when a user says "something's weird, what's wrong?", `cc-cli doctor` is the read-only audit that doesn't assume they want anything changed. `cc-cli update` is the fix surface. They share the same drift-detection library; `doctor` just doesn't apply. This is the `brew doctor` / `brew upgrade` split.
+
+**When to build this.** Trigger: first external user (outside our dogfood) reports a drift bug. Or: we ship a breaking schema change that would affect real users.
+
+**Why this note in REFACTOR.md at all** (vs. just a TODO somewhere): the pattern is load-bearing for the whole refactor's "we break schema when needed, we don't gate on backwards compat" stance. When users arrive, `cc-cli update` is the answer to "how do I stay current." Locking the shape now means we're not making it up under pressure later.
+
+---
+
 **Project 0 ship criterion:** Chits exist as the unified work-record primitive. Tasks, Contracts, Observations are all Chits now; old file formats are deleted. Agents use `cc-cli chit` for all work-record operations. Ephemeral Chits (observations, handoffs, dispatch-contexts) expire or promote via the 4-signal rule. Atomic writes prevent corruption. The substrate Projects 1-6 depend on is live and honest.
 
 **Project 0 total:** ~15-20 PRs.
