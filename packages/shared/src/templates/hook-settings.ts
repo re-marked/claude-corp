@@ -82,15 +82,18 @@ export interface HookSettings {
 }
 
 /**
- * Wrap a raw command string into Claude Code's expected nested shape.
+ * Wrap raw command strings into Claude Code's expected nested shape.
  * All four events Claude Corp wires use a catch-all matcher, so we
- * factor the wrapping into a single helper instead of repeating the
- * boilerplate at every call site.
+ * factor the wrapping into one helper. Multiple commands under the
+ * same matcher land in one `hooks` array — Claude Code runs them in
+ * order, and a blocking decision from an earlier command short-
+ * circuits later ones. We rely on that for PreCompact (audit first,
+ * wtf after).
  */
-function commandEntry(command: string): HookEntry {
+function commandEntry(...commands: string[]): HookEntry {
   return {
     matcher: '',
-    hooks: [{ type: 'command', command }],
+    hooks: commands.map((command) => ({ type: 'command', command })),
   };
 }
 
@@ -119,8 +122,22 @@ export function buildHookSettings(opts: HookSettingsOpts): HookSettings {
   // PreCompact + UserPromptSubmit are Partner-only:
   //   - Employees don't compact (per-step handoff via WORKLOG instead)
   //   - Employees don't receive founder DMs mid-session (Partners broker)
+  //
+  // PreCompact gets a two-command sequence: audit first (gates
+  // compaction — if audit blocks, compact doesn't happen), then wtf
+  // (refreshes CORP.md + situational header so the post-compact
+  // summary is built against current context, not stale fragments).
+  // Order matters: audit must run before wtf so a blocked compact
+  // doesn't waste the wtf render. Claude Code executes hook entries
+  // sequentially within an event, and a block decision on audit
+  // short-circuits — wtf won't run if audit blocked.
   if (opts.kind === 'partner') {
-    hooks.PreCompact = [commandEntry(`cc-cli wtf --agent ${slug} --hook`)];
+    hooks.PreCompact = [
+      commandEntry(
+        `cc-cli audit --agent ${slug}`,
+        `cc-cli wtf --agent ${slug} --hook`,
+      ),
+    ];
     hooks.UserPromptSubmit = [commandEntry(`cc-cli inbox check --agent ${slug} --inject`)];
   }
 
