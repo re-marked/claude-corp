@@ -21,7 +21,6 @@ import { historyFragment } from './history.js';
 import { debateProtocolFragment } from './debate-protocol.js';
 import { agentCommunicationFragment } from './agent-communication.js';
 import { inboxFragment } from './inbox.js';
-import { ccCliFragment } from './cc-cli.js';
 import { dredgeFragment } from './dredge.js';
 import { coordinatorFragment } from './coordinator.js';
 import { toolResultManagementFragment } from './tool-result-management.js';
@@ -60,7 +59,6 @@ const FRAGMENTS: Fragment[] = [
   inboxFragment,
   dredgeFragment,
   coordinatorFragment,
-  ccCliFragment,
   contextFragment,
   historyFragment,
 ].sort((a, b) => a.order - b.order);
