@@ -24,6 +24,22 @@ The destination is a *justified peacock* — display that's honest specification
 
 ---
 
+## North Star: Claude Corp runs on its own
+
+Mark's dream, stated plainly: *the founder hands work to the corp, walks away, and the corp keeps working. If something breaks, the corp recovers itself. If it can't recover, it escalates cleanly. The founder comes back to working output — not a graveyard of stuck agents.*
+
+This is the test every post-Project-0 feature is measured against. Specifically:
+
+- **Work propagates.** The founder hands a Contract; it decomposes into Tasks; Tasks hand themselves to roles; done-agents advance their Casket to the next step; the whole chain walks without re-dispatching by hand.
+- **Blockers are first-class.** An agent mid-work files a blocker sub-task, exits cleanly, and auto-resumes when the blocker closes. No "I'm stuck" silence; no awkward context-lost escalations.
+- **Failures self-heal.** Silent-exits respawn. Stuck tasks escalate after N minutes. Crash-loops circuit-break. Budget overruns pause the role, not the corp.
+- **Merge discipline holds.** Agents never push directly to main. A single merge-coordinator owns the main lane and serializes concurrent work without stepping on it.
+- **Founder presence is optional.** When Mark is away, work progresses. When he comes back, he sees *what happened* (the audit trail is complete) and *what needs him* (tier-3 inbox surfaces the calls that only the founder can make) — not *what's stuck* (because the system already tried to unstick it).
+
+Project 1 ships the mechanical substrate of this (dispatch, cycling, chain-walking, watchdogs, budget governors). Projects 2 + 3 layer on the coordination primitives (blueprints, self-witnessing, refinery, deeper recovery). Project 4 makes it feel alive (earned philosophy, accumulating memory, promotion ceremony). The dream emerges from all of them together, but Project 1 is the floor.
+
+---
+
 ## Structural Shift: Employees and Partners
 
 The single biggest structural change. Today, every agent is treated as a persistent souled entity. After the refactor, agents fall into two kinds:
@@ -69,7 +85,7 @@ The single biggest structural change. Today, every agent is treated as a persist
   - `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3` silent-disable is a real claude-code behavior — Project 1.7 compact-trigger must detect and handle this (likely triggers fallback handoff path from 1.6)
   - Sleep-time Memory Steward agent on Haiku model — becomes Project 4.4 or an extension to Project 4.2 (dreams-that-distill); runs during SLUMBER, rewrites Partner BRAIN without competing with Partner's response loop
   - Three subagent isolation models (Fork/Teammate/Worktree) — inform Project 2.4 and Project 3 design choices
-  - 15-second blocking budget — Project 1.8 Deacon / Project 3.3 auto-recovery enforce this for autoemon ticks
+  - 15-second blocking budget — Project 1.8 Failsafe / Project 3.3 auto-recovery enforce this for autoemon ticks
   - atomicfile pattern (tempfile + rename for crash-safe writes) — Project 0.1 uses this for all Chit writes
   - 4-signal promotion for ephemeral records — Project 0.6 implements this for ephemeral Chits
   - Handoff-as-tool in Claude Corp terms = `cc-cli escalate --to <partner> --reason "..."` — Project 1.4 extends hand with escalate semantics
@@ -99,14 +115,14 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
 | 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 |
-| 1 | Foundation | Employee/Partner split, Casket, Hand, per-step session cycling | Fix the root problem: sessions stop being identity carriers. CLAUDE.md architecture now lives in 0.7. | 10-14 (Project 1.5 absorbed into 0.7; some sub-projects simpler once Chits exist) |
-| 2 | Workflow Substrate | Blueprint-as-molecule, Deacon, self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 10-12 |
-| 3 | Autonomous Operations | Witness, Refinery, auto-recovery | Corp heals itself without human intervention | 10-12 |
+| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Three-tier watchdog (Witness/Failsafe/Dogs), Bacteria scaling, Budget governor, Refinery (merge discipline) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, failures self-heal at agent/role level, merge lane holds. | 18-24 (moved Refinery + budget-governor + circuit-breaker in from Project 3; added dynamic-blocker + structured-I/O sub-projects) |
+| 2 | Workflow Substrate | Blueprint-as-molecule (reusable workflow templates), Failsafe patrol molecules, self-witnessing meta-layer, convoy ergonomics (fan-out + synthesis wrapping around existing chain substrate) | Agents walk chains, work propagates automatically, Employees review themselves, standard patterns ship as TOML templates | 10-12 |
+| 3 | Autonomous Operations | Advanced Witness patrols (corp-wide anomaly detection), stall/escalation routing, daemon-level auto-recovery | What's left of corp healing after Project 1's mechanical watchdogs ship — cross-agent coordination + daemon-restart survival. | 6-8 (slimmer — Refinery + circuit-breaker moved to Project 1) |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
 | 5 | Culture Transmission | Feedback-propagation, CULTURE.md made load-bearing | Culture actually shapes behavior | 5-7 |
 | 6 | Cleanup & UX | Delete dead concepts, rewrite docs, TUI updates, v3.0 release | Ship the peacock | 8-10 |
 
-Total: ~70-90 PRs across 7 projects. Rough estimate.
+Total: ~78-100 PRs across 7 projects. Rough estimate. Grew from 70-90 after the April 2026 Gas Town dive that surfaced dynamic-blocker + structured-I/O + three-tier-watchdog as genuine missing primitives rather than rebranded versions of things we already had.
 
 ---
 
@@ -1175,30 +1191,57 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit primitive), 1.1 (Employee/Partner kind — kind-specific Casket defaults may differ)
 **PRs:** 1-2 (simpler because Chit infrastructure already exists)
 
-### 1.3 — Chain semantics on Task Chits
+### 1.3 — Chain semantics on Task Chits + explicit state machine + structured I/O
 
-**Implemented on Chit primitives.** `depends_on` and `references` already exist on every Chit's frontmatter (from 0.1). Acceptance criteria live in `fields.task.acceptance_criteria: string[]`. This sub-project adds the *traversal logic* — nothing about the data model changes because Chits already have these fields.
+**Scope enriched (post-Gas Town dive):** chain-walker, PLUS an explicit Task lifecycle state machine (so `blocked` / `under-review` aren't inferred from field presence), PLUS a structured task-output field so step A's result flows into step B's input canonically. Without these, chains walk but agents don't know what to DO at each step — they re-grep the prior task's body for "what happened."
 
-**Chain walker:**
-- `isReady(chitId)` → true if all `depends_on` Chits are status=completed.
-- `nextReadyTask(contractChitId, currentStepId)` → the first Chit in the Contract's `fields.contract.task_ids` with all deps satisfied and status=draft/active, after the current step.
-- `advanceChain(closedChitId)` → on close of a Task Chit, scan Chits where `depends_on includes closedChitId`; for each, if now ready AND there's a Casket pointing at its chain, advance that Casket.
+**The primitives**
 
-**Scope:** chain-walker module, close-hook integration, terminal-failure propagation (rejected/failed deps block downstream).
+1. **Chain walker** (already spec'd, unchanged):
+   - `isReady(chitId)` → true if all `depends_on` Chits are in a `terminal-success` state.
+   - `nextReadyTask(contractChitId, currentStepId)` → the first Chit in the Contract's `taskIds` with all deps satisfied and not yet terminal, after the current step.
+   - `advanceChain(closedChitId)` → on close of a Task Chit, scan Chits where `depends_on includes closedChitId`; if now ready AND there's a Casket pointing at its chain, advance that Casket.
+
+2. **Explicit Task state machine** (new):
+   - States: `draft → queued → dispatched → in_progress → (blocked | under_review | completed | rejected | failed | cancelled)`.
+   - `TaskFields.workflowStatus` already has the enum; this sub-project makes transitions *mechanical*, not advisory.
+   - Transition rules:
+     - `draft → queued` when `assignee` is set via hand or task-create.
+     - `queued → dispatched` when the daemon actually delivers to the agent (router hands or Casket updates).
+     - `dispatched → in_progress` when the agent's session touches the task (first tool-use in-scope, or explicit `cc-cli task claim <id>`).
+     - `in_progress → blocked` when a blocker chit gets filed against it (see 1.4.1).
+     - `blocked → in_progress` when all blocker chits close.
+     - `in_progress → under_review` when agent runs `cc-cli done` (handoff pending audit).
+     - `under_review → completed` on audit approve + chain walker consumption.
+     - `under_review → in_progress` on audit block.
+     - Any state → `failed` on circuit-breaker trip (1.10).
+     - Any state → `cancelled` via `cc-cli task cancel` (founder-only escape hatch).
+   - The state is visible in `cc-cli task list` and the TUI (eventually), so Mark can see what's actually happening.
+
+3. **Structured task output** (new):
+   - New field: `TaskFields.output?: string` — prose, written by the agent as part of `cc-cli done` (captures the handoff `completed` array into a canonical task-level result field).
+   - Next task's agent reads `depends_on[i].fields.task.output` to know what prior-step produced. No grep-the-body archaeology.
+   - Larger outputs (file contents, build logs, etc.) stay in channel/commit history; `output` is the semantic summary the chain needs.
+   - Blueprint-defined Tasks (Project 2.1) can specify `expected_output` shape — typed I/O between steps. v1 is prose-only; 2.1 optionally layers schema.
+
+**Terminal-failure propagation:** rejected/failed Chits cascade. Dependents flip to `blocked` with a pointer at the failed upstream; they stay blocked until the failure is re-opened (rare) or replaced by a substitute chit (common).
 
 **File paths:**
-- `packages/shared/src/chain.ts` (new — pure functions, test-friendly)
-- `packages/daemon/src/chit-close-hook.ts` (new — or integrated into existing `task-events.ts`; triggers advanceChain on close)
-- `packages/daemon/src/task-events.ts` (update: on Task Chit close, invoke advanceChain)
+- `packages/shared/src/chain.ts` (new — pure functions)
+- `packages/shared/src/task-state-machine.ts` (new — transition validator + helpers)
+- `packages/shared/src/types/chit.ts` (TaskFields gets `output?: string`)
+- `packages/daemon/src/task-events.ts` (update: on close, invoke advanceChain + state transition)
+- `packages/daemon/src/dispatch.ts` (update: flip `dispatched → in_progress` on first tool-use observed)
 
 **Test strategy:**
-- Unit: chain walker handles fan-out (one Chit → N next), fan-in (N depends_on → one Chit), cycles (reject at validation time).
-- Unit: `isReady` returns true only when all depends_on Chits are terminal-success.
-- Unit: terminal-failure (rejected/failed) of a dep flags dependents as `blocked`.
-- Integration: close a Task Chit, verify the Casket of the owning agent advances to next ready Chit in the same Contract.
+- Unit: chain walker handles fan-out, fan-in, cycles.
+- Unit: state machine rejects invalid transitions (can't go from `completed` back to `in_progress` without explicit re-open).
+- Unit: terminal-failure cascade — fail upstream, assert downstream goes to `blocked` with pointer.
+- Integration: full chain close — Task A completes, B was blocked on A, B auto-transitions `blocked → queued → dispatched → in_progress`.
+- Integration: `output` field round-trip via `cc-cli done` → next task's context shows prior output.
 
 **Depends on:** 0.1 (Chit), 1.2 (Casket)
-**PRs:** 2
+**PRs:** 3-4
 
 ### 1.4 — Hand: full rewrite for durable chit forwarding
 
@@ -1239,6 +1282,49 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.3 (chain)
 **PRs:** 3-4
+
+### 1.4.1 — Dynamic blocker injection (`cc-cli block`)
+
+**Problem.** Today an agent mid-task realizing "I can't finish X because Y isn't done" has three bad options: (a) escalate to their supervisor and interrupt their work, (b) work around the gap and ship half-done, (c) rationalize the problem away. All three are failure modes the autonomy dream explicitly rejects. Gas Town solves this with gate-bead sub-task filing: the reviewer files a blocker chit, links it as a dependency of the current task, and exits cleanly. The daemon auto-re-dispatches the reviewer once the blocker closes.
+
+**Scope.** A first-class "file a blocker" primitive that uses the existing chit substrate. An agent mid-work runs:
+
+```
+cc-cli block --assignee <target-slug-or-role> --title "..." --description "..."
+             [--priority high|critical] [--acceptance "..."]*
+             --from <my-slug>
+```
+
+What that does:
+1. Creates a new Task chit at corp scope with `workflowStatus: queued`, `assignee: <target>`, and the supplied title/description/acceptance criteria.
+2. Adds the new chit's id to the caller's current Task chit's `depends_on` array.
+3. Transitions the caller's current Task from `in_progress` → `blocked` via the state machine (1.3).
+4. Fires `cc-cli hand` (via 1.4's role-resolver) to deliver the new blocker chit to the assignee.
+5. Emits a Tier 2 inbox-item on the caller's inbox so the wtf header shows "blocked on chit-X" and the founder can see.
+6. Returns cleanly — the agent's session can exit. Next session dispatch notices the Casket points at a `blocked` task and waits (or the agent can pick up a different task if their role has one queued).
+
+When the blocker chit closes (completed / rejected), 1.3's chain walker:
+- Re-evaluates `isReady(original-task-id)` — all depends_on terminal-success? 
+- If yes: flip original back to `queued → dispatched`; next session resumes. The agent reads the blocker's `output` field (from 1.3's structured-I/O) to know what the fixer produced.
+- If no (blocker rejected or a sibling blocker still pending): stay `blocked`.
+
+**This is the piece that makes multi-agent dependency chains actually work.** Without it, agents either interrupt their supervisors every time they hit a dep or ship around the problem. With it, work propagates even across "I need X before I can finish Y" boundaries.
+
+**File paths:**
+- `packages/cli/src/commands/block.ts` (new)
+- `packages/cli/src/index.ts` (register)
+- `packages/daemon/src/api.ts` (new `/block` endpoint, or route through `/hand` internally)
+- `packages/shared/src/chain.ts` (extend: `fileBlocker(callerTaskId, blockerTaskOpts)` pure helper)
+- `packages/daemon/src/task-events.ts` (on blocker close → check + auto-transition caller from `blocked`)
+
+**Test strategy:**
+- Integration: agent A's Task is `in_progress`; A runs `cc-cli block --assignee B --title "Z needed"`. Verify: new chit at corp scope, A's task gains `depends_on`, A's workflowStatus is `blocked`, B's Casket gains the blocker.
+- Integration: B completes the blocker chit. Verify: A's task auto-flips back to `queued`, A's next dispatch picks up with the blocker's `output` visible in their context.
+- Integration: circular-blocker detection — A filing a blocker assigned back to A is rejected at the CLI boundary (common mistake; an agent blocked on themselves goes nowhere).
+- Regression: blocker chain of depth 3 (A blocked on B blocked on C); completing C → B dispatches, completing B → A dispatches.
+
+**Depends on:** 0.1 (Chit), 1.2 (Casket), 1.3 (chain + state machine), 1.4 (hand).
+**PRs:** 2-3
 
 ### 1.5 — [ABSORBED INTO 0.7]
 
@@ -1297,30 +1383,59 @@ Partner sessions don't handoff per-step. They run `/compact` at a threshold (~70
 **Depends on:** 1.1, 1.6 (for fallback path)
 **PRs:** 2
 
-### 1.8 — Deacon / nudge replacement for Pulse
+### 1.8 — Three-tier watchdog: Witness / Failsafe / Dogs
 
-Pulse today is a liveness check — "HEARTBEAT: check your inbox." That's noise. Replace with Deacon: only wakes agents who have work on their Casket Chit. Nudge message references the current step ("execute chit-X"), not a generic inbox prompt. If the Casket's `current_step` is null, no wake. Idle = silent.
+**Scope enriched (post-GT dive).** What was a flat Pulse-replacement is now a hierarchical watchdog modeled on Gas Town's rig/town/crew pattern — but using our existing Failsafe role as the town-level layer instead of coining a new name. One layer isn't enough for the "runs on its own" dream — you need rig-level detection (per-agent health), town-level coordination (cross-agent escalation), and crew-level maintenance (the housekeeping nobody else is watching).
 
-**Implementation reads Casket Chits.** Every Deacon tick: `cc-cli chit list --type casket --field-not-null current_step` (or equivalent query API call). For each result, check if the referenced Task Chit is `status: active` and the agent's last dispatch was more than N minutes ago. If yes, dispatch a nudge message that names the current step Chit. No work → no dispatch.
+**Tier 1 — Witness (per-agent, lowest latency).** Watches a specific agent's health. Detects:
+  - Silent exit (session died, Casket still points at active task).
+  - Stall (in_progress for > N minutes with no tool-use).
+  - Looping (same tool-call pattern repeating N times in a row without state change).
+  - GUPP violation (agent has Casket work but hasn't dispatched in >5 min, and Failsafe already nudged).
 
-**15-second blocking budget** (from research gems): each Deacon tick must decide whether to wake each agent within 15s total. If the tick is still reasoning at 15s, it yields and tries again next cycle. Prevents stuck autoemon-style lockups.
+Witness actions (in order of escalation):
+  1. Nudge (post reminder in agent's DM channel).
+  2. Respawn (if silent-exit) — kill process, let process-manager restart.
+  3. Escalate to Failsafe (if Witness has tried the above and agent still bad).
 
-**Scope:** pulse.ts rewrite (or new deacon.ts), work-aware nudge via Casket Chit queries, 15-second budget enforcement.
+**Tier 2 — Failsafe (town-wide, coordination layer).** Above individual agents. Does:
+  - Dispatch work-aware nudges (agents with Casket work that haven't dispatched in >N min).
+  - Enforces 15-second blocking budget per tick (from research gems).
+  - Routes Witness escalations: "agent X is stuck, fix them" → Failsafe decides whether to respawn, hand the work to a sibling Employee in the same role, or escalate further.
+  - Coordinates cross-agent state: "chain walker says B should have dispatched 10 min ago, but B is silent" → Failsafe reconciles.
+
+Failsafe actions:
+  - Redistribute (take work from a stuck agent's Casket, hand it to a sibling in the same role via 1.4's role-resolver).
+  - Circuit-break (if an agent has been respawned N times in M minutes, pause dispatches to that slot and escalate to founder — this is the 1.10 governor integration).
+  - Page founder (tier-3 inbox-item: "I couldn't resolve X, need you").
+
+**Tier 3 — Dogs (maintenance crew).** Below Failsafe. Handle the stuff no one else is watching:
+  - Session GC (kill long-dead tmux / subprocess leftovers).
+  - Phantom cleanup (members.json entries pointing at missing workspaces, workspaces pointing at missing members).
+  - Chit store hygiene (orphan chits nothing references, malformed frontmatter, corruption).
+  - Log rotation + debug file pruning.
+  - Boot the Dog: a meta-watchdog that verifies Failsafe itself is alive every 5 min (so "who watches the watchdog" has an answer).
+
+**Scope:** daemon/src/watchdog/witness.ts + deacon.ts + dogs.ts + boot-the-dog.ts; role-aware redistribution in Failsafe; per-agent health polling in Witness; maintenance tick in Dogs.
 
 **File paths:**
-- `packages/daemon/src/deacon.ts` (new; pulse.ts becomes a deprecation shim removed in 6.1)
-- `packages/daemon/src/tick-budget.ts` (new; 15-second budget helper with AbortSignal, reusable for other ticks)
-- `packages/daemon/src/fragments/inbox.ts` (update: inbox isn't the coordination surface anymore; point agents at Casket)
-- STATUS.md / docs (update heartbeat references)
+- `packages/daemon/src/watchdog/witness.ts` (new — per-agent health loop)
+- `packages/daemon/src/watchdog/deacon.ts` (new — town-wide coordination; Pulse becomes a deprecation shim removed in 6.1)
+- `packages/daemon/src/watchdog/dogs.ts` (new — maintenance tasks)
+- `packages/daemon/src/watchdog/boot-the-dog.ts` (new — 5-min heartbeat on Failsafe itself)
+- `packages/daemon/src/tick-budget.ts` (new — shared 15-second budget helper)
+- `packages/daemon/src/fragments/inbox.ts` (update: inbox isn't coordination; point agents at Casket)
 
 **Test strategy:**
-- Unit: Deacon's decision-to-nudge returns false for Caskets with null current_step.
-- Unit: 15-second budget enforces yield; timeout test simulates slow tick, verifies it releases.
-- Integration: agent with no Casket work → Deacon does not dispatch. Hand work to them → Deacon dispatches with the right prompt (mentions the Task Chit id + title).
-- Observability: daemon log shows "[deacon] tick complete: awake=N skipped=M budget_remaining=Xs" per cycle.
+- Unit: Witness decision ladder — silent-exit → respawn; stall → nudge; looping → respawn + escalate.
+- Unit: Failsafe budget — 15s tick yields cleanly.
+- Integration: kill an agent's session mid-task. Within 1-2 min, Witness detects, respawns, agent resumes from Casket + dredged WORKLOG.
+- Integration: agent gets stuck on same tool-use for N minutes; Witness escalates to Failsafe; Failsafe redistributes to sibling Employee in same role.
+- Integration: Failsafe dies; Boot the Dog detects within 5 min; Failsafe restarted; log entry.
+- Observability: each tier's log shows "[witness:toast] nudge 1/3", "[deacon] redistribute chit-X from toast to copper", "[dogs] GC'd 3 orphan sessions".
 
-**Depends on:** 0.1, 1.2
-**PRs:** 2
+**Depends on:** 0.1, 1.2, 1.4 (role-resolver for redistribution)
+**PRs:** 3-4
 
 ### 1.9 — Auto-scaling Employee pool (bacteria)
 
@@ -1347,10 +1462,76 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 - Integration: after work completes, verify one of two idle Employees decommissions after idle-timeout.
 - Edge cases: race-condition test — two hands arrive near-simultaneously; one Employee handles both or split happens cleanly, no Chit assigned to two Caskets.
 
-**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.8 (Deacon for wake)
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.8 (Failsafe for wake)
 **PRs:** 3
 
-**Project 1 ship criterion:** an Employee can be slung a 5-step task, execute each step in its own fresh session, cycle between steps, complete the task, return to idle with sandbox preserved. A Partner can hold a 2-hour conversation with the founder, compact at threshold, continue uninterrupted.
+### 1.10 — Budget governor + circuit breaker
+
+**Problem.** Runaway agents burn tokens. An agent stuck in a loop — same tool-call pattern every turn, no state change — can spend hours of API credit before Mark notices. And silent-exit loops (agent spawns, dies, spawns, dies) are worse: the failure mode is invisible in the TUI but shows up in the billing dashboard next month. Moved up from Project 3.3 because it's prerequisite for the "walk away overnight" dream — without it, one bad agent can blow the corp's budget while Mark sleeps.
+
+**Two governors, both mandatory:**
+
+**1. Per-agent, per-hour dispatch budget.** Role-level quota: Backend Engineer Employees get N dispatches per hour; CEO Partner gets M; configurable per role in the registry. When an agent hits the cap, Failsafe pauses dispatches to that slot for the rest of the hour, posts a Tier 3 inbox-item to the founder ("agent X hit their hour budget, paused until :00"), and releases on the hour boundary. No loss of work — the agent's Casket pointer is preserved; they resume on next tick.
+
+**2. Crash-loop circuit breaker.** If an agent's session silent-exits N times within M minutes (default: 3 in 5), Failsafe pauses spawns to that slot, posts Tier 3 to the founder ("agent X has crash-looped 3× in 5 min, paused"), and does NOT auto-retry. Breaking out of the loop requires founder intervention — either `cc-cli fire --remove` if the slot is broken, or `cc-cli agent set-harness` / other recovery to restart the slot. Circuit breaker stays tripped across daemon restarts (persists as a chit — `breaker-trip-<slug>` at corp scope with `tripped_at`, `reason`, `spawn_history`).
+
+**Token cost tracking (optional v1 extension).** Per-agent per-day token spend, persisted as a chit or daemon-internal metric. Founder can `cc-cli costs` to see "who's spending what." Not governor-level — just observability — but falls naturally out of the dispatch budget work. Gas Town has this as `internal/quota`; we can mirror the design.
+
+**File paths:**
+- `packages/daemon/src/watchdog/budget.ts` (new — per-role rate limiter + tracker)
+- `packages/daemon/src/watchdog/circuit-breaker.ts` (new — crash-loop detection + breaker chit)
+- `packages/shared/src/roles.ts` (extend RoleEntry with optional `dispatchBudgetPerHour?`)
+- `packages/cli/src/commands/costs.ts` (new — observability view, optional)
+
+**Test strategy:**
+- Unit: budget tracker accepts N dispatches, rejects N+1, resets on hour boundary.
+- Unit: circuit breaker trips after 3 silent-exits in 5 min, stays tripped across simulated daemon restart.
+- Integration: simulate a crash-loop in a test corp; verify Failsafe pauses the slot within 2 cycles and posts Tier 3 to founder.
+- Regression: non-crashing agents don't trip the breaker.
+
+**Depends on:** 1.1 (Employee kind for role scoping), 1.8 (Failsafe tier-2 dispatches the pause + escalation)
+**PRs:** 2-3
+
+### 1.11 — Shipping: the merge lane + janitor Employees
+
+**Problem.** Agents write to git freely today. At 3 agents, this is fine. At 20+ it's chaos — concurrent PRs collide on rebase, step on each other's changes, leave main in a broken state. The "walk away overnight" dream breaks when agents fight over main. Moved up from Project 3.2 (was "Refinery") because it's prerequisite for parallel work — without serialized merges, multi-Employee Contracts can't actually land.
+
+**The architecture Mark named:** there's a merge-lane system called **Shipping** (placeholder name — rename when it feels right), staffed by a pool of **janitor Employees** (bacteria-scaled). No Partner-by-decree needed — merging worktrees is mechanical, no identity, no relationship. The existing Janitor Partner gets removed from the role registry; `janitor` becomes an Employee role (`defaultKind: employee`, `tier: worker`).
+
+**Mechanism:**
+- Agents open PRs via their normal git push; then run `cc-cli ship --branch <name> --contract <chit-id>`, which creates a `merge-submission` chit (new chit type — non-ephemeral, audit trail).
+- merge-submission frontmatter: `branch`, `contract` reference, `submitter`, `priority`, `retry_count`, `status: queued | processing | merged | conflict | rejected | failed`.
+- Priority scoring (Gas Town's formula, adapted): `1000 + convoy_age×10/hr + (4-priority)×100 - min(retries×50, 300) + mr_age×1/hr`. Anti-thrashing via the retry-penalty cap.
+- Shipping lock: a corp-scope `shipping-lock` chit with `held_by: <janitor-slug> | null`. Only the lock-holder processes the queue at any moment. Release happens on merge complete or on janitor session exit.
+- Janitor Employees pull from the lane (pull-based, unlike Hand's push): each janitor's Casket is the shipping-lock. When they have the lock, they take the highest-scored queued submission, rebase, run tests, merge or conflict-route, close the submission, release the lock, next janitor picks up.
+- Real conflict → janitor files a blocker chit via 1.4.1 back at the original PR author; submission goes to `conflict` state; janitor releases lock + takes next.
+- Clean merge → submission `merged`, contract referenced by the submission gets its workflow-state advanced (typically `under_review → completed`).
+
+**Bacteria scaling (from 1.9):** when `merge-submission` queue depth exceeds 1 and only 1 idle janitor exists, bacteria spawns another. Collapses to 1 idle when queue drains.
+
+**Role registry changes:**
+- Remove `janitor` Partner-by-decree entry.
+- Add `janitor` Employee role (worker tier, defaultKind: employee). Purpose: "Process the Shipping queue — rebase, test, merge or conflict-route."
+- Corp-sacred Partners drop from 6 to 5 (CEO, Herald, HR, Adviser, Failsafe).
+
+**File paths:**
+- `packages/shared/src/chit-types.ts` (register `merge-submission` type with validator)
+- `packages/shared/src/types/chit.ts` (MergeSubmissionFields shape)
+- `packages/shared/src/roles.ts` (remove janitor Partner, add janitor Employee)
+- `packages/daemon/src/shipping.ts` (new — queue processor, lock management, bacteria trigger)
+- `packages/cli/src/commands/ship.ts` (new — `cc-cli ship --branch <name> --contract <chit-id>`)
+
+**Test strategy:**
+- Unit: priority scoring formula produces expected orderings.
+- Integration: two concurrent submissions with different files → both merge serially, main is clean.
+- Integration: two submissions with real conflict → first merges, second flips to `conflict`, blocker chit filed at second's submitter, retry-on-submitter-fix flow works.
+- Integration: queue depth > idle-janitor count → bacteria spawns a second janitor.
+- Regression: solo-corp (one janitor) processes submissions serially without deadlock.
+
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing conflicts), 1.4.1 (blocker injection), 1.9 (bacteria for pool scaling)
+**PRs:** 3-4
+
+**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; other Employee picks up the blocker; original Employee resumes on blocker-close. When any Employee silent-exits or stalls, Witness/Failsafe detects + respawns (1.8). When any agent tries to push to main, they route through `cc-cli ship` → Shipping queue (1.11) → janitor Employee merges. Mark walks away; when he comes back, 4 out of 5 Tasks have landed on main via serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop needed between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path.
 
 ---
 
@@ -1377,18 +1558,18 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 **Depends on:** 1.2 (Casket), 1.3 (chain semantics in tasks)
 **PRs:** 4-5
 
-### 2.2 — Deacon patrol mechanism
+### 2.2 — Failsafe patrol mechanism
 
-**Problem.** The Deacon (from 1.8) wakes agents on-demand via Casket. But the Deacon also needs to run its own workflows — check corp health, detect stuck work, clean up — and these are themselves chains that benefit from the same molecule mechanism.
+**Problem.** The Failsafe (from 1.8) wakes agents on-demand via Casket. But the Failsafe also needs to run its own workflows — check corp health, detect stuck work, clean up — and these are themselves chains that benefit from the same molecule mechanism.
 
 **Scope.**
-- Patrol definitions: small Blueprints meant for Deacon, not agent-workers. Examples: `patrol/health-check`, `patrol/cleanup-stale-sandboxes`, `patrol/merge-queue-status`.
-- Patrol scheduler: the Deacon runs a patrol on a cadence (configurable per-patrol). Patrol completion triggers the next cycle.
+- Patrol definitions: small Blueprints meant for Failsafe, not agent-workers. Examples: `patrol/health-check`, `patrol/cleanup-stale-sandboxes`, `patrol/merge-queue-status`.
+- Patrol scheduler: the Failsafe runs a patrol on a cadence (configurable per-patrol). Patrol completion triggers the next cycle.
 - Patrol primitives (small step implementations): check-agent-health, check-stuck-tasks, check-merge-queue-depth, cleanup-stale-branches, report-metrics.
 - Patrol outputs: observations written to `daemon/observations/` for later dream compounding.
 
 **Acceptance criteria.**
-- Deacon runs `patrol/health-check` every 5 minutes.
+- Failsafe runs `patrol/health-check` every 5 minutes.
 - When an Employee silent-exits, health-check detects it within one cycle, writes an observation, and creates a recovery Task (picked up later by Witness from 3.1).
 - When a sandbox is idle > 24h, cleanup patrol removes its branch.
 
@@ -1447,72 +1628,52 @@ Each blueprint tested against a real use case before landing.
 
 *Corp heals itself. Mark can sleep and wake to a working corp.*
 
-### 3.1 — Witness role (full version)
+### 3.1 — Advanced Witness patrols (cross-agent anomaly detection)
 
-**Problem.** 1.9 ships basic bacteria self-scaling (Employees spawn/collapse by queue depth). But when things go wrong — silent-exits, stuck Employees, stalled chains — no one notices until Mark checks. Claude Corp today needs Mark to be the Witness. He shouldn't be.
+**Note.** The per-agent Witness loop + Failsafe town-level coordination + Dogs maintenance crew all ship in 1.8. What remains here is the cross-agent anomaly pattern detection that needs more state than a single agent's watchdog carries.
 
-**Scope.**
-- Witness as a Partner-level role (corp-sacred, can't be fired).
-- Continuous monitoring loop (patrol from 2.2): for each agent, check last-activity timestamp + Casket state + session state.
-- Stuck detection: Casket has a current step, no active session, last-activity > N minutes → agent is stuck.
-- Stalled detection: Casket current step has been current > M minutes → agent isn't progressing.
-- Recovery actions:
-  - Silent-exit detected → respawn session automatically, log incident.
-  - Stalled Employee detected → try once more, then escalate (create a recovery Task for another Employee or a Partner).
-  - Crash-looping Employee (repeated silent-exits) → pause it, circuit-breaker, escalate to founder.
-  - Orphan Tasks (depends_on closed but no one's picked them up) → route via Casket to an idle Employee.
-- Witness writes observations for every intervention — audit trail of what it did and why.
-
-**Acceptance criteria.**
-- Simulate: kill an Employee's session mid-step. Within 1-2 minutes, Witness detects, respawns, Employee resumes from Casket + Dredge. Zero manual steps.
-- Simulate: mark a Task's depends_on as closed without dispatching the next. Within a cycle, Witness routes the next Task to an Employee.
-- Simulate: an Employee silent-exits three times in 5 minutes. Witness circuit-breaks it, creates an escalation observation, doesn't infinite-retry.
-
-**Depends on:** 1.9, 2.2
-**PRs:** 4-5
-
-### 3.2 — Refinery (merge coordinator)
-
-**Problem.** Bacteria scaling + parallel Employees = multiple PRs landing against main concurrently. They collide on rebases, step on each other's changes, leave main in a mess. Today this requires a human to serialize. Refinery is the Partner who owns the merge queue.
+**Problem.** 1.8's watchdog catches per-agent failures: silent-exit, stall, loop, GUPP violation. It doesn't catch cross-agent patterns: "Backend Engineer pool keeps producing PRs the QA Engineer pool rejects — there's a skill gap" or "Engineering Lead has been handing impossible Tasks to Employees for 3 days." These aren't per-agent bugs; they're coordination bugs that only surface when you aggregate across roles.
 
 **Scope.**
-- **Merge queue is Chits of `type: merge-submission`.** Each submission is a Chit carrying branch name, Contract reference, submitter slug, priority, retry count. Non-ephemeral (useful audit trail). Status lifecycle: `queued → processing → merged` (terminal success) or `queued → conflict → resolved → queued → processing → merged` or terminal-failure `rejected | failed`. Query pattern for the active queue: `cc-cli chit list --type merge-submission --status queued --sort priority` returns ordered pending list. No separate queue file or in-memory data structure.
-- `cc-cli refinery submit --branch <name> --contract <chit-id>` — Employees call this after pushing. Creates the merge-submission Chit with `references: [<contract-chit-id>]`.
-- Priority scoring (from Gas Town research gem): `1000 + convoy_age×10/hr + (4-priority)×100 - min(retries×50, 300) + mr_age×1/hr` — anti-thrashing cap on retry penalty prevents permanent starvation. Stored as `fields.merge_submission.score`, recomputed on each Refinery tick.
-- Refinery processes queue serially: read top-scored queued Chit → checkout branch → rebase onto main → run tests → merge if clean → flip Chit to `status: merged` → close the referenced Contract.
-- Conflict handling:
-  - Simple conflict (false positive — files touched by one side only) → resolve automatically, retain `status: processing`.
-  - Real conflict → flip Chit to `status: conflict`, create a conflict-resolution Task Chit on the Contract's assigned Employee's Casket (via standard hand from 1.4), move on to next submission. When Employee closes conflict-resolution, Refinery flips the submission Chit back to `status: queued` with incremented retry counter.
-- Refinery is a Partner, has its own workspace, compacts like any Partner.
-- TUI shows the merge queue as a live Chit-query view (Project 6.3 wires `cc-cli chit list --type merge-submission --status queued` into the sidebar).
+- Cross-agent pattern detectors that consume chit store + observation stream: reject-rate per role-pair, task-escalation frequency, blocker-file-rate per role, merge-submission retry-rate.
+- Threshold-based alerting (not ML — explicit rules): `backend→qa reject rate > 0.5 sustained for 24h → observation + Tier 2 inbox to CEO`.
+- Orphan-task reaper: Chits that should have dispatched but didn't — route via Failsafe to an idle Employee.
+- Intervention audit trail: every anomaly + intervention writes an observation so dreams can compound patterns across time.
 
-**Acceptance criteria.**
-- Two Employees submit PRs touching different files at roughly the same time → Refinery merges them serially, main is clean.
-- Two Employees submit PRs touching the same file, non-overlapping regions → Refinery auto-resolves, merges cleanly.
-- Two Employees submit PRs with a real conflict → Refinery creates a conflict-resolution Task on the Contract, merges the first, leaves the second for the Employee to resolve.
-
-**Depends on:** 1.1, 1.9, 3.1
-**PRs:** 4
-
-### 3.3 — Auto-recovery machinery
-
-**Problem.** Witness catches what it can see. Some failures happen below its level — a daemon crash, a gateway timeout, an agent process that Node can't respawn. Need daemon-level safety rails.
-
-**Scope.**
-- Silent-exit enrichment: the claude-exit diagnostics from v2.5.2 logs argv + stderr. Extend: if the same sessionKey silent-exits N times in M minutes, daemon pauses dispatches for that sessionKey and creates an observation.
-- Budget limits per agent per hour: no more than `N` dispatches. Config per-role in role definition.
-- Crash-loop prevention at the bacteria layer: if a new Employee of role X crashes within 60s of first dispatch, and the same happened to the previous Employee, pause bacteria spawning for that role.
-- Daemon-restart survival: on daemon restart, read Casket state for all agents; resume Witness patrols; don't lose in-flight Contracts.
-
-**Acceptance criteria.**
-- An Employee with a bug that crashes on a specific input gets circuit-broken after 3 silent-exits within 5 minutes.
-- Daemon restarts mid-Contract; agents resume walking the chain without human action.
-- Budget exhaustion for a role pauses dispatches until the hour rolls over; Mark is notified.
-
-**Depends on:** 3.1
+**Depends on:** 1.8 (base watchdog), 1.9 (bacteria), 4.1 (observations), 4.2 (dreams)
 **PRs:** 2-3
 
-**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Witness respawns them). A merge conflict happens (Refinery resolves it or routes it). A role's Employee keeps crashing (circuit breaker trips). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
+### 3.2 — [ABSORBED INTO 1.11 — Shipping]
+
+The Refinery merge-coordinator work moved up into Project 1 (now 1.11 — Shipping). Rationale: merge discipline is prerequisite for multi-agent work, not a polish layer on top. Without serialized merges, parallel Employees stomp on each other from day one of Project 1's autonomous-loop test. Also: the whole thing is Employee-shape work (mechanical merging, no identity), which fits Project 1's "foundation + scaffolding" better than Project 3's "self-heal meta-layer."
+
+If you're looking for the merge-queue + janitor-pool design, go to 1.11.
+
+### 3.3 — [ABSORBED INTO 1.8 + 1.10]
+
+The auto-recovery machinery split across two earlier sub-projects:
+- Silent-exit detection + respawn → **1.8** (Witness tier-1).
+- Crash-loop circuit breaker + per-hour dispatch budget → **1.10** (Budget governor + circuit breaker).
+- Daemon-restart survival (reload Casket state on boot, resume patrols) → left here — the genuinely daemon-lifecycle piece that neither 1.8 nor 1.10 covers.
+
+### 3.3' — Daemon-restart survival (the remnant)
+
+**Problem.** When the daemon process itself dies + restarts, in-flight Contracts shouldn't lose their place. Chit state is file-first so the substrate survives, but the watchdog + bacteria + shipping queue processors all need to pick up mid-cycle cleanly.
+
+**Scope.**
+- Daemon boot walks members.json + Casket chits + merge-submission queue + pending breaker-trip chits, reconstructs in-memory state from disk.
+- Witness patrol resumes (re-registers observers for every agent that has an active Casket).
+- Shipping queue picks up where it left off — checks `shipping-lock` chit's `held_by`; if that janitor's session is gone, release the lock and let the next queued janitor take over.
+- Circuit-breaker chits respected across restart (breaker trips persist).
+
+**Acceptance criteria.**
+- Kill daemon mid-Contract. Restart. Agents dispatch on next hand / Witness tick without human action.
+- Breaker tripped before restart stays tripped after restart.
+
+**Depends on:** 1.8, 1.10, 1.11
+**PRs:** 1-2
+
+**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Witness respawns them from 1.8). A merge conflict happens (Shipping janitor routes it to the author via a blocker chit from 1.11). A role's Employee keeps crashing (circuit breaker trips from 1.10). The daemon process restarts at 3am from a memory leak (3.3' resumes state cleanly). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
 
 ---
 
@@ -1680,7 +1841,7 @@ Each blueprint tested against a real use case before landing.
 **Problem.** After projects 1-5, many old concepts are replaced by new ones. Leaving them in the codebase as parallel paths is exactly the "vocabulary without capacity" sin the refactor exists to fix. They must go, on purpose, deliberately.
 
 **Scope.** Walk the codebase and delete:
-- Old Pulse implementation (replaced by Deacon in 1.8)
+- Old Pulse implementation (replaced by Failsafe in 1.8)
 - Old Blueprint runbook reader / `cc-cli blueprints run` (replaced by blueprint-as-molecule cooking in 2.1)
 - Fragment injection call for claude-code agents (removed in 1.5); keep fragments for OpenClaw
 - Old Casket-as-four-files structure if migrated to single-pointer hook
@@ -1703,9 +1864,9 @@ Each blueprint tested against a real use case before landing.
 **Problem.** The docs/ private design spec currently describes the pre-refactor corp. If someone (founder, future-Claude, outside contributor) reads docs/, they get a wrong mental model. Also CLAUDE.md at repo root needs updating to reflect the new reality.
 
 **Scope.** Update:
-- `docs/architecture/` — describe Employee/Partner split, Casket-as-hook, molecules, Witness, Refinery, Deacon
+- `docs/architecture/` — describe Employee/Partner split, Casket-as-hook, molecules, Witness, Refinery, Failsafe
 - `docs/flows/` — onboarding flow updated (mutual witnessing still central, but now framed as the promotion ceremony, not hire-time)
-- `docs/concepts/glossary.md` — all terms: Employee, Partner, Casket, Contract, Task, Molecule, Witness, Refinery, Deacon, bacteria, pre-BRAIN, ceremony
+- `docs/concepts/glossary.md` — all terms: Employee, Partner, Casket, Contract, Task, Molecule, Witness, Refinery, Failsafe, bacteria, pre-BRAIN, ceremony
 - `docs/next-steps.md` — cross off what's shipped, point forward to next work
 - Manifesto, lineage, vision/ — UNTOUCHED. Those are philosophical origin and stay.
 - Repo-root `CLAUDE.md` (project instructions) — rewritten to reflect new architecture
