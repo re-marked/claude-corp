@@ -615,12 +615,19 @@ Generated: <ISO>. CORP.md at: <path>. Re-run \`cc-cli wtf\` anytime.
 
 **File paths:**
 - `packages/cli/src/commands/wtf.ts` (new — the command)
-- `packages/shared/src/templates/corp-md.ts` (new — builds CORP.md from shared base + kind/role sections)
-- `packages/shared/src/templates/corp-md-partner.ts` and `corp-md-employee.ts` (kind-specific sections)
-- `packages/daemon/src/fragments/chits.ts` (new for OpenClaw — emits same content at dispatch time, preserving the "both substrates work the same way" invariant)
+- `packages/shared/src/templates/corp-md.ts` (new — builds CORP.md from a single file, with kind-specific sections routed inline via opts.kind)
+- `packages/shared/src/templates/wtf-header.ts` (new — builds the situational header)
+- `packages/shared/src/chit-types.ts` + `packages/shared/src/types/chit.ts` (register `inbox-item` chit type so wtf can query it — 0.7.4 CLI surface is separate but the type must exist now)
 - `packages/shared/src/templates/claude-md.ts` (shrink to ~60 lines; drop `@import` of AGENTS.md and TOOLS.md)
-- `packages/shared/src/templates/agents.ts` (delete — content moves to corp-md templates)
-- `packages/shared/src/templates/tools.ts` (delete — content moves to corp-md templates)
+- `packages/shared/src/templates/agents.ts` (delete — content moves to corp-md template)
+- `packages/shared/src/templates/tools.ts` (delete — content moves to corp-md template)
+
+**OpenClaw gets wtf too — not a separate fragment.** The original plan here was a new `packages/daemon/src/fragments/chits.ts` that re-emitted CORP.md content at dispatch via OpenClaw's fragment pipeline. We rejected that during implementation design. Rationale:
+
+- Fragments were invented when workspace content was static markdown. Now CORP.md is regenerated per-wtf-call, so having a parallel OpenClaw path that builds the same content from templates means two code paths where one suffices.
+- OpenClaw agents have the same shell access Claude Code agents do. They can run `cc-cli wtf --agent <slug>` themselves.
+- The cleanest unification: **the OpenClaw harness shells out to `cc-cli wtf` at dispatch time and prepends stdout to the agent's system prompt** — functionally equivalent to Claude Code's SessionStart hook, triggered from the daemon side instead. This belongs in 0.7.2 (hook wiring), not 0.7.1.
+- Implications beyond 0.7: the *static-reference* fragments (workspace.ts, cc-cli.ts, anti-rationalization.ts, brain.ts, culture.ts, inbox.ts, etc.) are now duplicated content relative to CORP.md. They can be deleted in 0.7.2 or a later consolidation pass. The *dynamic-situational* fragments (dredge, context, history) are also subsumed by wtf's situational header. Fragment architecture is the old pattern; wtf+CORP.md replaces it across both substrates.
 
 **Failure-mode behavior for `cc-cli wtf`.** The command is on the critical path for every session start. If it fails the agent boots disoriented. Three explicit fallbacks:
 
@@ -697,12 +704,19 @@ tells you, you get from \`cc-cli wtf\`.
 
 **CLAUDE.local.md variant for Employees in rigs:** when an Employee's sandbox is inside a project rig that has its own tracked CLAUDE.md, write to CLAUDE.local.md instead so the project's git diff stays clean. Dedup via sentinel string in file (Gas Town pattern).
 
+**OpenClaw harness dispatch-prepend (the OpenClaw equivalent of hooks).** OpenClaw agents don't have Claude Code's SessionStart/PreCompact hooks, but they have the same shell access. The unification:
+- At dispatch, the OpenClaw harness shells out to `cc-cli wtf --agent <slug>` and prepends the stdout to the agent's composed system prompt. Same content both substrates receive; the trigger differs (CLI hook vs harness preamble), not the payload.
+- This replaces the old "daemon fragment" scheme for both chits content AND most static-reference fragments. The fragments pipeline stays for the *situation-specific* content that wtf's header doesn't cover (rare — dredge is subsumed, inbox subsumed, most others too), which in practice means almost nothing.
+- Static-reference fragments (workspace, cc-cli, anti-rationalization, brain, culture, inbox, etc.) are deleted in 0.7.2 along with AGENTS.md/TOOLS.md — their content already lives in CORP.md rendered by wtf. One pass through the fragment registry, removing any fragment whose content is now in CORP.md.
+
 **File paths:**
 - `packages/shared/src/templates/claude-md.ts` (shrink)
 - `packages/shared/src/templates/agents.ts` (delete — content in corp-md)
 - `packages/shared/src/templates/tools.ts` (delete — content in corp-md)
 - `packages/shared/src/agent-setup.ts` (update: stop writing AGENTS.md/TOOLS.md; write settings.json with hook entries)
 - `packages/shared/src/templates/settings-json.ts` (new — generates `.claude/settings.json` with SessionStart/PreCompact/Stop/UserPromptSubmit hooks wired to cc-cli)
+- `packages/daemon/src/harness/openclaw-harness.ts` (update: prepend `cc-cli wtf --agent <slug>` stdout at dispatch — the OpenClaw equivalent of SessionStart hook)
+- `packages/daemon/src/fragments/*.ts` + `packages/daemon/src/fragments/index.ts` (delete fragments whose content is now in CORP.md: workspace, cc-cli, anti-rationalization, brain, culture, inbox, blast-radius, fix-now, output-efficiency, debate-protocol, failure-recovery, file-locking, delegation, receiving-delegation, back-reporting, ceo-reporting, channel-etiquette, task-execution, tool-result-management, context-persistence, scratchpad, checkpoint, coordinator, escalation-chain, blocker-escalation, agent-communication, history, context. Keep: dredge — it's purely dispatch-time handoff injection and wtf's situational header doesn't talk to WORKLOG for openclaw, only for claude-code. Actually on closer inspection dredge IS subsumed — wtf's Employee path reads WORKLOG handoff. Delete dredge too. Net: fragments/ subdirectory becomes essentially empty after 0.7.2.)
 
 **Hook settings.json shape:**
 ```json
