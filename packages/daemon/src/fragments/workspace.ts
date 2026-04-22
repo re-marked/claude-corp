@@ -131,9 +131,10 @@ Corp root: ${ctx.corpRoot}
 
 **Boundaries:** Read/write your agent dir + project source + tasks/. Read-only: other agents' workspaces. Never write: channels/*/messages.jsonl.
 
-**Observations** — your daily witness. Append to \`${ctx.agentDir}/observations/YYYY/MM/YYYY-MM-DD.md\`:
-\`- HH:MM [CATEGORY] What happened (files: path1)\`
-Categories: [TASK] [DECISION] [NOTICE] [PREFERENCE] [FEEDBACK] [LEARNED] [BLOCKED] [CHECKPOINT] [CREATED] [HANDOFF] [ERROR]
+**Observations** — your daily witness. Record via:
+\`cc-cli observe "<what you noticed>" --from <your-slug> --category <CAT>\`
+Categories: TASK / RESEARCH / DECISION / BLOCKED / LEARNED / CREATED / REVIEWED / CHECKPOINT / SLUMBER / ERROR / HANDOFF / FEEDBACK
+Observations are chits — the substrate handles ids, storage, retrieval, and dream-distillation. Never write raw files to \`observations/\` — that path is vestigial; the cli is canonical.
 
 An observation records what it was *like* — not just that something got done. The texture matters.${skillsSection}`;
     }
@@ -186,12 +187,15 @@ As you work, you write observations. They are your daily journal — what you di
 
 An observation isn't a task log. A task log records that something got done. An observation records what it was *like* — what you chose and why, what pulled your attention even if it was irrelevant, what stuck with you. The difference is texture.
 
-Log path: \`${ctx.agentDir}/observations/YYYY/MM/YYYY-MM-DD.md\`
+Recording:
+\`\`\`
+cc-cli observe "<what happened and what you noticed>" \\
+  --from <your-slug> \\
+  --category <TASK|LEARNED|DECISION|FEEDBACK|...> \\
+  [--files path1,path2] [--subject <who-or-what>] [--importance 1-5]
+\`\`\`
 
-Format — timestamped entries with category tags:
-\`\`\`
-- HH:MM [CATEGORY] What happened and what you noticed (files: path1, path2)
-\`\`\`
+Observations are chits under the hood: \`${ctx.agentDir}/chits/observation/<id>.md\`. The daemon reads them for dream distillation + morning standups. Never write raw markdown files to \`observations/\` — that old path is vestigial and invisible to the chit query engine.
 
 Categories:
 - **[TASK]** — starting or finishing work

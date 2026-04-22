@@ -132,5 +132,7 @@ const claudeCodeToolsSection = `## Tools you have (Claude Code substrate)
 Invoke cc-cli via the \`Bash\` tool — it's how you talk to the corp (hand tasks,
 post observations, say to other agents). Your workspace files (SOUL.md,
 IDENTITY.md, AGENTS.md, TOOLS.md, etc.) are already loaded into your system
-prompt at start of every turn. Other workspace files (BRAIN/, observations/,
-WORKLOG.md) are read on demand with the \`Read\` tool.`;
+prompt at start of every turn. Other workspace files (BRAIN/, chits/,
+WORKLOG.md) are read on demand with the \`Read\` tool — observations live
+as chits under \`chits/observation/\`; prefer \`cc-cli chit list --type
+observation\` for querying them.`;

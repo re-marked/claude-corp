@@ -71,11 +71,12 @@ describe('buildClaudeMd', () => {
   });
 
   describe('read-on-demand footer', () => {
-    it('lists BRAIN, observations, and WORKLOG with one-liner descriptions', () => {
+    it('lists BRAIN, observations (chit-backed), and WORKLOG with one-liner descriptions', () => {
       const output = buildClaudeMd({ displayName: 'CEO' });
       expect(output).toContain('## Read on demand');
       expect(output).toContain('BRAIN/*.md');
-      expect(output).toContain('observations/');
+      // Post-0.5: observations live as chits under chits/observation/.
+      expect(output).toContain('chits/observation');
       expect(output).toContain('WORKLOG.md');
     });
 

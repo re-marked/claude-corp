@@ -226,7 +226,7 @@ function renderPendingFeedbackPhase(opts: DreamPromptOpts): string {
   lines.push('```bash');
   lines.push(`rm "${opts.agentDir}/.pending-feedback.md"`);
   lines.push('```\n');
-  lines.push('If you skipped entries (deemed them noise), still delete the file — the observations/BRAIN are the durable record. The pending file is an inbox, not an archive.\n');
+  lines.push('If you skipped entries (deemed them noise), still delete the file — observation chits + BRAIN are the durable record. The pending file is an inbox, not an archive.\n');
   lines.push('---\n');
 
   return '\n' + lines.join('\n') + '\n';
@@ -366,11 +366,13 @@ export function buildDreamPrompt(opts: DreamPromptOpts): string {
    Read the last few session summaries. What did you work on? What shipped? What failed?`);
   sourceNum++;
 
-  // Observation logs — structured daily activity records (highest-structure source)
-  sources.push(`${sourceNum}. **Observation logs** — \`${opts.agentDir}/observations/\`
-   These are your daily activity journals — timestamped, categorized entries of what you did.
-   List the observations directory, read today's log and yesterday's if they exist.
-   Each entry has a category tag: [TASK], [RESEARCH], [DECISION], [BLOCKED], [LEARNED], [CREATED], etc.
+  // Observation chits — structured activity records (highest-structure source)
+  sources.push(`${sourceNum}. **Observation chits** — \`${opts.agentDir}/chits/observation/\`
+   Each observation is a chit with structured frontmatter: category, subject, importance, timestamp,
+   tags (including \`from-log:<ACTIVITY-CATEGORY>\` preserving the rich work-activity vocabulary).
+   Query: \`cc-cli chit list --type observation --scope agent:self --since 7d --json\` (or read the
+   directory directly). Each chit's category is one of FEEDBACK/DECISION/DISCOVERY/PREFERENCE/NOTICE/
+   CORRECTION; the original activity category (TASK/LEARNED/BLOCKED/CHECKPOINT/etc) lives in tags.
    This is your most STRUCTURED signal source — use it to identify patterns:
    - What tasks consumed the most time?
    - What decisions were made and why?

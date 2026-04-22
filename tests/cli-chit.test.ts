@@ -502,22 +502,25 @@ describe('cc-cli observe (alias for chit create --type observation)', () => {
     env.cleanup();
   });
 
-  it('creates an observation chit with the same effect as chit create --type observation', async () => {
+  it('creates an observation chit via the agent-native syntax', async () => {
+    // Post-0.5, cc-cli observe is a full agent-native wrapper (not just a
+    // --type alias): --from anchors author+scope, --category accepts the
+    // activity vocabulary with automatic from-log tag preservation,
+    // positional description becomes body + fields.observation.context.
     const { exitCode, stdout, stderr } = await runCli(
       [
         'observe',
-        '--scope',
-        'agent:toast',
-        '--field',
-        'category=FEEDBACK',
-        '--field',
-        'subject=mark',
-        '--field',
-        'importance=3',
+        'Mark reaffirmed: prefers actionable errors over terse ones',
+        '--from',
+        'toast',
+        '--category',
+        'FEEDBACK',
+        '--subject',
+        'mark',
+        '--importance',
+        '4',
         '--tag',
-        'via-observe-alias',
-        '--content',
-        'an observation written via the alias',
+        'via-observe-command',
       ],
       { env: env.homeEnv },
     );
@@ -529,28 +532,55 @@ describe('cc-cli observe (alias for chit create --type observation)', () => {
     const read = await runCli(['chit', 'read', id, '--json'], { env: env.homeEnv });
     const chit = JSON.parse(read.stdout).chit;
     expect(chit.type).toBe('observation');
-    expect(chit.tags).toContain('via-observe-alias');
+    expect(chit.fields.observation.category).toBe('FEEDBACK');
+    expect(chit.fields.observation.subject).toBe('mark');
+    expect(chit.fields.observation.importance).toBe(4);
+    expect(chit.tags).toContain('via-observe-command');
+    // FEEDBACK is a chit-vocabulary value — no from-log translation needed,
+    // so no from-log tag added for this one.
+    expect(chit.tags.find((t: string) => t.startsWith('from-log:'))).toBeUndefined();
     expect(chit.ephemeral).toBe(true);
   });
 
-  it('passes through --type if the user explicitly sets it (no double injection)', async () => {
-    const { exitCode, stderr } = await runCli(
+  it('translates activity-vocabulary categories and preserves original as from-log tag', async () => {
+    const { exitCode, stdout, stderr } = await runCli(
       [
         'observe',
-        '--type',
-        'observation',
-        '--scope',
-        'agent:toast',
-        '--field',
-        'category=NOTICE',
-        '--field',
-        'subject=mark',
-        '--field',
-        'importance=1',
+        'Picked up the auth refactor',
+        '--from',
+        'toast',
+        '--category',
+        'TASK',
       ],
       { env: env.homeEnv },
     );
     expect(exitCode, `stderr: ${stderr}`).toBe(0);
+    const id = stdout.trim();
+
+    const read = await runCli(['chit', 'read', id, '--json'], { env: env.homeEnv });
+    const chit = JSON.parse(read.stdout).chit;
+    // TASK is activity-vocab → collapses to NOTICE at the chit layer
+    expect(chit.fields.observation.category).toBe('NOTICE');
+    // Original preserved
+    expect(chit.tags).toContain('from-log:TASK');
+  });
+
+  it('rejects missing --from with a clear error', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['observe', 'description', '--category', 'TASK'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/--from is required/);
+  });
+
+  it('rejects missing description with a clear error', async () => {
+    const { exitCode, stderr } = await runCli(
+      ['observe', '--from', 'toast', '--category', 'TASK'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).not.toBe(0);
+    expect(stderr).toMatch(/description required/);
   });
 });
 

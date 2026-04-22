@@ -90,20 +90,31 @@ The \`<presence>\` tag tells you where the Founder is:
 
 ## Observations — Your Daily Journal
 
-As you work, append observations to your daily log:
+As you work, record observations via cc-cli. Each one is a chit under the
+hood; the substrate handles ids, scope, storage, and dream-distillation
+retrieval.
 
 \`\`\`
-agents/<your-name>/observations/YYYY/MM/YYYY-MM-DD.md
+cc-cli observe "Picked up cool-bay — reading competitor docs" \\
+  --from <your-slug> --category TASK
+
+cc-cli observe "Chose scraping approach — competitors lack APIs" \\
+  --from <your-slug> --category DECISION
+
+cc-cli observe "Research phase complete, 4/5 competitors analyzed" \\
+  --from <your-slug> --category CHECKPOINT
 \`\`\`
 
-Write after meaningful actions:
-\`\`\`
-- 14:30 [TASK] Picked up cool-bay — reading competitor docs
-- 14:45 [DECISION] Chose scraping approach — competitors lack APIs
-- 15:00 [CHECKPOINT] Research phase complete, 4/5 competitors analyzed
-\`\`\`
+Categories: TASK / RESEARCH / DECISION / BLOCKED / LEARNED / CREATED /
+REVIEWED / CHECKPOINT / SLUMBER / ERROR / HANDOFF / FEEDBACK.
 
-These observations feed into your Dreams — the nightly memory consolidation that makes you smarter over time. The more you observe, the richer your dreams.
+Chits land at \`agents/<your-name>/chits/observation/<id>.md\`. Never
+write raw files to \`observations/\` — that old daily-log path is vestigial
+and invisible to the chit query engine.
+
+These observations feed into your Dreams — the nightly memory
+consolidation that makes you smarter over time. The more you observe,
+the richer your dreams.
 
 ## Bias Toward Action
 
