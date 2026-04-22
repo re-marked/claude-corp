@@ -74,8 +74,12 @@ describe('buildHookSettings — Claude Code nested shape (matcher + hooks array)
     const { hooks } = buildHookSettings(partnerOpts());
     for (const key of ['SessionStart', 'PreCompact', 'Stop', 'UserPromptSubmit'] as const) {
       const inner = hooks[key]![0]!.hooks;
-      expect(inner).toHaveLength(1);
-      expect(inner[0]).toEqual({ type: 'command', command: expect.any(String) });
+      // PreCompact gets two commands (audit + wtf) under one matcher;
+      // the other events get one. All entries must be the same shape.
+      expect(inner.length).toBeGreaterThanOrEqual(1);
+      for (const entry of inner) {
+        expect(entry).toEqual({ type: 'command', command: expect.any(String) });
+      }
     }
   });
 
@@ -103,9 +107,16 @@ describe('buildHookSettings — each hook command content', () => {
     expect(hooks.SessionStart![0]!.hooks[0]!.command).toBe('cc-cli wtf --agent ceo --hook');
   });
 
-  it('PreCompact (Partner) fires `cc-cli wtf --agent <slug> --hook` — refreshes context before compaction so summary survives', () => {
+  it('PreCompact (Partner) fires audit + wtf in order — audit gates, wtf refreshes context', () => {
+    // Audit MUST run first: if it blocks, compaction is rejected and
+    // wtf's context-refresh would be wasted work. Wtf second: on
+    // approve, the post-compact summary is built against fresh state.
     const { hooks } = buildHookSettings(partnerOpts({ agentSlug: 'ceo' }));
-    expect(hooks.PreCompact![0]!.hooks[0]!.command).toBe('cc-cli wtf --agent ceo --hook');
+    const commands = hooks.PreCompact![0]!.hooks.map((h) => h.command);
+    expect(commands).toEqual([
+      'cc-cli audit --agent ceo',
+      'cc-cli wtf --agent ceo --hook',
+    ]);
   });
 
   it('Stop fires `cc-cli audit --agent <slug>` — audit gate', () => {

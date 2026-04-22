@@ -140,6 +140,44 @@ export type {
   QueryChitsResult,
   MalformedChit,
 } from './chits.js';
+
+// Casket lifecycle primitives — the durable work-pointer surface that
+// 0.7.3's audit gate reads and that 1.3's chain walker will eventually
+// write. Module docstring explains the "was 1% built, this is the
+// minimum lifecycle to unblock 0.7.3" framing.
+export {
+  casketExists,
+  createCasketIfMissing,
+  getCurrentStep,
+  advanceCurrentStep,
+  incrementSessionCount,
+} from './casket.js';
+
+// Audit Gate — the 0.7.3 pure decision engine + transcript parser +
+// evidence scanner + prompt template. The cc-cli audit command wires
+// these together at the hook boundary; everything below is pure
+// (except transcript.ts which reads the JSONL file).
+export {
+  runAudit,
+  buildAuditPrompt,
+  scanEvidence,
+  parseTranscript,
+  promotePendingHandoff,
+} from './audit/index.js';
+export type {
+  HookEventName,
+  HookInput,
+  AuditDecision,
+  AuditInput,
+  RecentActivity,
+  ToolCall,
+  TouchedFile,
+  AuditPromptInput,
+  EvidenceScanResult,
+  HandoffPromotionResult,
+  PendingHandoffPayload,
+} from './audit/index.js';
+
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 

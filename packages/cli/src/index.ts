@@ -28,6 +28,15 @@ const { values, positionals } = parseArgs({
     lead: { type: 'string' },
     type: { type: 'string' },
     wait: { type: 'boolean', default: false },
+    override: { type: 'boolean', default: false },
+    // `cc-cli done` flags — completed is multi-valued so agents can
+    // list each acceptance criterion as a separate --completed "..."
+    // without a manual delimiter.
+    completed: { type: 'string', multiple: true },
+    'next-action': { type: 'string' },
+    'open-question': { type: 'string' },
+    'sandbox-state': { type: 'string' },
+    notes: { type: 'string' },
     timeout: { type: 'string' },
     last: { type: 'string' },
     status: { type: 'string' },
@@ -75,7 +84,8 @@ Usage: cc-cli <command> [options]
 
 Commands:
   wtf        "Where tf am I, what tf do I do" — emits CORP.md + your situational context
-  audit      Session-end audit gate (Stop / PreCompact hook invokes this; 0.7.2 stub approves all, 0.7.3 enforces)
+  audit      Session-end audit gate (Stop / PreCompact hook invokes this). --override --reason "..." for founder bypass.
+  done       Employee "I'm done with this task" signal. Writes pending handoff; audit promotes on approve.
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -561,6 +571,30 @@ async function run() {
       const { cmdAudit } = await import('./commands/audit.js');
       await cmdAudit({
         agent: values.agent as string | undefined,
+        override: !!values.override,
+        reason: values.reason as string | undefined,
+        from: values.from as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'done': {
+      const { cmdDone } = await import('./commands/done.js');
+      // `--completed` is multi-valued to mirror the handoff chit's
+      // `completed: string[]` shape — pass it repeatedly, one per
+      // criterion done.
+      const completed = Array.isArray(values.completed)
+        ? (values.completed as string[])
+        : values.completed
+          ? [values.completed as string]
+          : undefined;
+      await cmdDone({
+        from: values.from as string | undefined,
+        completed,
+        nextAction: values['next-action'] as string | undefined,
+        openQuestion: values['open-question'] as string | undefined,
+        sandboxState: values['sandbox-state'] as string | undefined,
+        notes: values.notes as string | undefined,
         json: !!values.json,
       });
       break;

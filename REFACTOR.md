@@ -676,7 +676,7 @@ the corp manual + your situational context.
 You live at <workspace-path>. Stay here. Other agents' workspaces are off-limits.
 
 ## The single critical rule
-Employees: "Your task ends with \`cc-cli hand-complete\`. The Stop hook will
+Employees: "Your task ends with \`cc-cli done\`. The Stop hook will
 audit your work first — you cannot exit a session until it passes."
 Partners: "Your context ends with \`/compact\`. The PreCompact hook audits
 first — you cannot compact until it passes. Never push to main directly,
@@ -749,6 +749,34 @@ tells you, you get from \`cc-cli wtf\`.
 **Depends on:** 0.7.1
 **PRs:** 2
 
+#### 0.7.2.2 — `cc-cli doctor --fix-hooks` (migration for existing agents broken by 0.7.2's shape bug)
+
+**Problem.** 0.7.2 shipped `hook-settings.ts` emitting a flat `{command}` shape per event. Claude Code's actual contract is nested: `hooks.<Event>: [{ matcher: string, hooks: [{type, command}] }]`. The flat shape parses as an error and Claude Code **skips the entire settings file**, not just the bad key — meaning every claude-code agent workspace shipped under 0.7.2 had zero hooks firing in production. The live audit-gate probe (PR #160) caught it. Template fix landed in PR #160.
+
+**Why a follow-up PR.** The template fix only helps fresh hires and agents whose harness is re-reconciled (e.g. via `cc-cli agent set-harness`). Existing claude-code agents with the broken settings.json on disk stay broken until someone re-triggers reconciliation. 0.7.5's `cc-cli agent rewire` will handle this as part of the full pre-0.7 → 0.7 migration, but existing agents need correctness *now* — not after 0.7.5 ships.
+
+**Scope.**
+- New subcommand `cc-cli doctor --fix-hooks [--dry-run] [--corp <name>]` — walks every member in `members.json` with `harness === 'claude-code'`, checks their `.claude/settings.json` against the current expected shape, regenerates any that don't match (or are missing). Output: `[ok: N, fixed: M, skipped: K]` summary.
+- Idempotent — running twice is a no-op on the second run.
+- Honest diff logging: for each fixed agent, logs `fixed: <slug> — shape was <bad-shape>, regenerated from buildHookSettings`.
+- `--dry-run` prints what would change without writing.
+
+**Why include `doctor` framing.** Future settings drift (new hook types, PreCompact→... renames, Claude Code schema evolution) will have the same class of "template fix only helps fresh hires" problem. `cc-cli doctor` is the pattern surface for those migrations — one-shot walkers that reconcile on-disk state to current template state. First use case is `--fix-hooks`; next might be `--fix-claude-md` or `--fix-gitignore`. Ships as an extensible subcommand from day one.
+
+**File paths:**
+- `packages/cli/src/commands/doctor.ts` (new subcommand dispatcher)
+- `packages/cli/src/commands/doctor/fix-hooks.ts` (new — walks members, diffs + regenerates)
+- `packages/cli/src/index.ts` (register `doctor` group)
+- `packages/shared/src/templates/hook-settings.ts` (add pure predicate `isCorrectHookShape(parsed: unknown): boolean` so doctor doesn't duplicate parsing — single source of truth for "what does a correct settings.json look like")
+
+**Test strategy:**
+- Unit: `isCorrectHookShape` accepts the current shape, rejects the legacy flat shape + missing-matcher shape + missing-type shape.
+- Integration: seed a tmp corp with two agents — one broken (flat shape), one correct. Run `cc-cli doctor --fix-hooks`. Assert: broken agent's settings.json now has correct shape + is byte-equal to a fresh `buildHookSettings(...)`; correct agent's file is untouched (preserve mtime).
+- Integration: `--dry-run` writes nothing; output still names the agent that would be fixed.
+
+**Depends on:** 0.7.2 + PR #160 (fix already merged).
+**PRs:** 1
+
 #### 0.7.3 — The Audit Gate (Stop hook)
 
 **Scope.** Build `cc-cli audit` — invoked by the Stop hook, blocks completion until audit passes. Gas Town's blockable-Stop-hook pattern applied to our acceptance-criteria + inbox discipline.
@@ -787,7 +815,7 @@ Unresolved Tier 3 inbox items: <count>
   For each: respond, dismiss with real reason, or justify leaving it
   for next session.
 
-Once every checkbox is verifiably complete, run \`cc-cli hand-complete\`
+Once every checkbox is verifiably complete, run \`cc-cli done\`
 (Employee) or \`/compact\` (Partner) again. The audit will re-run. If
 it passes, your session will end.
 </audit-check>
@@ -805,13 +833,14 @@ it passes, your session will end.
 
 These exist to keep the mechanism strict without being a trap. A Partner with legitimate "I need human input first" is not the failure mode audit is preventing; audit is preventing "I'm done even though tests fail."
 
-**`cc-cli hand-complete` command (Employee completion signal).** Employees invoke this when they believe their task is done. It:
-1. Writes the session summary to `WORKLOG.md` in the Employee's sandbox — structured XML with `<handoff>` tags (current_step, completed, next_action, open_question, sandbox_state, notes) per the Decisions-Made XML schema. This is what Dredge reads when the NEXT session of this slot boots (Project 1.6 consumer). The agent authors the content during their session; hand-complete commits it atomically on session end.
-2. Triggers the Stop hook via Claude Code's session termination path (which fires `cc-cli audit`).
-3. If audit blocks, the Stop is rejected, Claude Code keeps the session alive, and the agent sees the audit prompt injected. WORKLOG.md is NOT yet committed — hand-complete rolls back the write until audit passes.
-4. If audit approves, the Stop proceeds: WORKLOG.md is finalized, the Casket's `current_step` chit is closed as completed, the chit lifecycle is triggered (creates a `handoff` chit referencing the WORKLOG if another session is expected), then the session exits cleanly.
+**`cc-cli done` command (Employee completion signal).** Employees invoke this when they believe their task is done. The coordination with audit uses a pending-file pattern — no transactional rollback needed.
 
-**WORKLOG authoring during session:** the agent updates WORKLOG.md incrementally as they work (as they do today). hand-complete validates the XML structure + applies the final touches. If WORKLOG.md is missing or malformed at hand-complete time, audit blocks — the agent must author a valid session summary before they can exit.
+1. `cc-cli done --completed "..." --next-action "..." --open-question "..." --sandbox-state "..." --notes "..."` writes a payload to `<workspace>/.pending-handoff.json`. Fields match the `handoff` chit type's validated schema so audit can promote the payload without reshaping. Prints a confirmation + reminder that the Stop hook will now fire. Exits 0.
+2. Claude Code fires Stop → `cc-cli audit` runs.
+3. If audit **approves**: audit reads the pending file and promotes it — writes `WORKLOG.md` with the `<handoff>...</handoff>` XML block (plus a `## Session Summary` markdown section for current-Dredge compat); creates a `type: 'handoff'` chit at `agent:<slug>` scope for 1.6-forward Dredge; closes the Casket's current task chit as `completed`; clears Casket's `currentStep` to null; deletes the pending file. Session exits cleanly.
+4. If audit **blocks**: pending file is left alone. Agent sees audit reason in context, keeps working, can update pending via another `cc-cli done` call. Retries via another stop attempt run audit again.
+
+**No rollback logic needed**: either a later approve claims the pending, or a later `done` call overwrites it. The blocked-done state is forward-only — no half-written commits to unwind.
 
 There is no analogous `partner-compact-start` command — Partners trigger PreCompact via Claude Code's native `/compact` slash command, and the PreCompact hook (wired to `cc-cli audit`) runs identically.
 
@@ -829,7 +858,7 @@ Exits with a JSON decision object on stdout (Claude Code reads this from the hoo
 
 **File paths:**
 - `packages/cli/src/commands/audit.ts` (new — the command the Stop hook invokes)
-- `packages/cli/src/commands/hand-complete.ts` (new — Employee completion signal)
+- `packages/cli/src/commands/done.ts` (new — Employee completion signal)
 - `packages/daemon/src/audit-engine.ts` (optional: pulled-out prompt-rendering logic; keeps cc-cli thin)
 
 **Test strategy:**
@@ -936,7 +965,7 @@ This is async delivery: founder DMs a Partner mid-work → router creates Tier 3
 - A Partner running `/compact` fires PreCompact → wtf re-injects current context into the window before the summary is written; compacted session resumes correctly.
 - A Partner trying to end a session without completing audit is blocked by the Stop hook until evidence is provided.
 - A fresh Employee slot on bacteria-spawn gets CLAUDE.local.md (if rig has tracked CLAUDE.md), the Stop hook active, and their first session runs `cc-cli wtf` with Employee-shape output + predecessor handoff.
-- An Employee trying to `cc-cli hand-complete` without auditing is blocked.
+- An Employee trying to `cc-cli done` without auditing is blocked.
 - An @mention in #general produces a Tier 2 inbox-item chit on the target; that agent's next `cc-cli wtf` shows it in the header.
 - A founder DM produces a Tier 3 inbox-item; agent cannot dismiss as not-important; audit blocks handoff while it's unresolved.
 - AGENTS.md and TOOLS.md no longer exist as workspace files anywhere in the corp; all their content now lives in CORP.md rendered dynamically.

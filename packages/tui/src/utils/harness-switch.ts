@@ -62,5 +62,11 @@ export function applyHarnessSwitch(opts: ApplyHarnessSwitchOpts): ReconcileAgent
     agentDir: join(corpRoot, member.agentDir),
     displayName: member.displayName,
     harness: targetHarness,
+    // Passed so reconcile backfills the Casket chit for agents whose
+    // workspace pre-dated Casket lifecycle (0.7.3 prep). Idempotent —
+    // existing Caskets are preserved untouched.
+    corpRoot,
+    agentSlug: member.id,
+    casketCreatedBy: member.id,
   });
 }

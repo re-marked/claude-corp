@@ -46,6 +46,7 @@ import { defaultRules as rulesTemplate } from './templates/rules.js';
 import { buildThinClaudeMd } from './templates/claude-md.js';
 import { buildHookSettings } from './templates/hook-settings.js';
 import { inferKind } from './wtf-state.js';
+import { createCasketIfMissing } from './casket.js';
 
 export interface AgentSetupOpts {
   corpRoot: string;
@@ -337,6 +338,23 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     createdAt: now,
     ...(opts.harness ? { harness: opts.harness } : {}),
   };
+
+  // Casket chit — the durable work-pointer read by `cc-cli wtf` (0.7.1)
+  // and `cc-cli audit` (0.7.3). Idempotent; tolerates re-hire paths
+  // that call setupAgentWorkspace against an existing workspace.
+  // createdBy = the agent's own member id: Casket is agent-owned state,
+  // which keeps git attribution legible when a Casket is later advanced
+  // by the chain walker or by hand-complete.
+  //
+  // Non-fatal on error. The workspace is already fully established at
+  // this point; missing Casket degrades to "audit gate fails open for
+  // this agent" rather than crashing the hire flow outright. The wtf
+  // output + first audit run will surface the gap if it ever happens.
+  try {
+    createCasketIfMissing(corpRoot, agentName, memberId);
+  } catch {
+    /* non-fatal — logged by the eventual first audit pass */
+  }
 
   return { member, agentDir: agentRelDir, config: agentConfig };
 }

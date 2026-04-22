@@ -34,6 +34,11 @@ import {
 } from './chits.js';
 import { taskId } from './id.js';
 import { taskToChit } from './migrations/migrate-tasks.js';
+import {
+  createCasketIfMissing,
+  getCurrentStep,
+  advanceCurrentStep,
+} from './casket.js';
 
 export interface CreateTaskOpts {
   title: string;
@@ -232,6 +237,32 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
     tags: [],
     body,
   });
+
+  // Casket wire — the minimum-viable "someone's been assigned work" path
+  // until 1.4's cc-cli hand rewrite owns Casket population end-to-end.
+  // Rules:
+  //   * Only fires when a task is created WITH an assignee. Unassigned
+  //     tasks don't touch anyone's Casket — they sit in the corp tree
+  //     waiting to be handed.
+  //   * Casket is created-if-missing first so corps that predate the
+  //     Casket lifecycle get backfilled on first assignment.
+  //   * DOESN'T CLOBBER. If the assignee already has a currentStep,
+  //     the new task lands in their queue without interrupting their
+  //     current work. They'll pick it up when the current task closes
+  //     (or when the chain walker from 1.3 advances them there).
+  //   * Non-fatal on error — task creation is the primary operation;
+  //     a Casket-wire failure degrades to "audit gate has nothing to
+  //     read, approves on this agent" rather than crashing the hire.
+  if (opts.assignedTo) {
+    try {
+      createCasketIfMissing(corpRoot, opts.assignedTo, opts.assignedTo);
+      if (getCurrentStep(corpRoot, opts.assignedTo) === null) {
+        advanceCurrentStep(corpRoot, opts.assignedTo, id, task.createdBy);
+      }
+    } catch {
+      /* non-fatal — logged by the first audit pass against this agent */
+    }
+  }
 
   // Return the Task shape derived from the freshly-written chit so
   // timestamps + any normalization reflect the actual persisted state.
