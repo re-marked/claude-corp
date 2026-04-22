@@ -35,6 +35,7 @@ import { join } from 'node:path';
 import { buildThinClaudeMd } from './templates/claude-md.js';
 import { buildHookSettings } from './templates/hook-settings.js';
 import { inferKind } from './wtf-state.js';
+import { createCasketIfMissing } from './casket.js';
 
 const LEGACY_RENAMES: ReadonlyArray<readonly [fromBasename: string, toBasename: string]> = [
   ['RULES.md', 'AGENTS.md'],
@@ -73,6 +74,23 @@ export interface ReconcileAgentWorkspaceOpts {
    * to the last path segment of agentDir's ancestry when not passed.
    */
   corpName?: string;
+  /**
+   * Corp root absolute path — needed to locate + write the agent's
+   * Casket chit at `agents/<slug>/chits/casket/casket-<slug>.md` inside
+   * the corp tree. When both this and `agentSlug` are provided, reconcile
+   * backfills a Casket chit for the agent if one doesn't already exist
+   * (idempotent). Without it, the Casket step is silently skipped —
+   * preserves backwards-compat with tests that exercise reconcile
+   * against bare tmpdirs with no surrounding corp structure.
+   */
+  corpRoot?: string;
+  /**
+   * Member id of the writer recorded in the Casket chit's createdBy
+   * field on backfill. Defaults to the agentSlug itself — Casket is
+   * agent-owned state, so the agent being its own author matches the
+   * substrate semantics.
+   */
+  casketCreatedBy?: string;
 }
 
 export interface ReconcileAgentWorkspaceResult {
@@ -163,6 +181,26 @@ export function reconcileAgentWorkspace(
     const backupPath = `${claudeMdPath}.backup.${timestampSuffix()}`;
     renameSync(claudeMdPath, backupPath);
     result.claudeMdBackedUp = backupPath;
+  }
+
+  // 3. Casket backfill — substrate-agnostic, runs for every harness.
+  //    Only attempts when the caller gave us both corpRoot and agentSlug;
+  //    without those we can't locate the chit store, so we degrade to a
+  //    no-op (tests that exercise reconcile on bare tmpdirs rely on this
+  //    degradation). Idempotent: a Casket that already exists is left
+  //    untouched. Non-fatal on error — reconcile's primary job is file
+  //    migration + hook wiring, and a missing Casket can be fixed on the
+  //    next hire path without blocking the reconcile here.
+  if (opts.corpRoot && opts.agentSlug) {
+    try {
+      createCasketIfMissing(
+        opts.corpRoot,
+        opts.agentSlug,
+        opts.casketCreatedBy ?? opts.agentSlug,
+      );
+    } catch {
+      /* non-fatal — logged by the eventual first audit pass */
+    }
   }
 
   return result;
