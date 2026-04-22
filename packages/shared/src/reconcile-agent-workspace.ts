@@ -26,12 +26,15 @@
 
 import {
   existsSync,
+  mkdirSync,
   renameSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { buildClaudeMd } from './templates/claude-md.js';
+import { buildThinClaudeMd } from './templates/claude-md.js';
+import { buildHookSettings } from './templates/hook-settings.js';
+import { inferKind } from './wtf-state.js';
 
 const LEGACY_RENAMES: ReadonlyArray<readonly [fromBasename: string, toBasename: string]> = [
   ['RULES.md', 'AGENTS.md'],
@@ -41,10 +44,35 @@ const LEGACY_RENAMES: ReadonlyArray<readonly [fromBasename: string, toBasename: 
 export interface ReconcileAgentWorkspaceOpts {
   /** Absolute path to the agent's workspace directory. */
   agentDir: string;
-  /** Display name used in the CLAUDE.md heading ("# I am {displayName}"). */
+  /** Display name used in the CLAUDE.md heading. */
   displayName: string;
   /** Target harness this agent is being switched to. */
   harness: string;
+  /**
+   * Agent slug (members.json id). Required when target harness is
+   * 'claude-code' — baked into the .claude/settings.json hook commands
+   * as `--agent <slug>`. Ignored for other harnesses. Optional here
+   * (not required) so legacy callers that pre-date 0.7.2 don't break;
+   * when missing for a claude-code target, we fall back to using
+   * `displayName` (lowercased) as the slug, which is the convention
+   * agent-setup uses.
+   */
+  agentSlug?: string;
+  /**
+   * Agent rank — drives kind inference (Partner vs Employee), which
+   * determines the hook set written to .claude/settings.json and the
+   * kind-specific critical rule in CLAUDE.md. Optional for the same
+   * backwards-compat reason as agentSlug; defaults to 'worker'
+   * (employee) when absent — safer default since Employees get a
+   * strict subset of Partner hooks.
+   */
+  rank?: string;
+  /**
+   * Corp name — interpolated into the CLAUDE.md identity line ("You
+   * are X, a Y in the <corpName> corporation"). Optional; falls back
+   * to the last path segment of agentDir's ancestry when not passed.
+   */
+  corpName?: string;
 }
 
 export interface ReconcileAgentWorkspaceResult {
@@ -105,11 +133,32 @@ export function reconcileAgentWorkspace(
     }
   }
 
-  // 2. CLAUDE.md — write for claude-code, back up + remove for everything else
+  // 2. CLAUDE.md — write (thin, 0.7 shape) for claude-code, back up for everything else.
+  //    Also writes .claude/settings.json with the hook wiring so the
+  //    switched-to-claude-code agent gets SessionStart / PreCompact / Stop /
+  //    UserPromptSubmit hooks firing `cc-cli wtf` + `cc-cli audit` / inbox check.
   const claudeMdPath = join(agentDir, 'CLAUDE.md');
   if (harness === 'claude-code') {
-    writeFileSync(claudeMdPath, buildClaudeMd({ displayName }), 'utf-8');
+    const rank = opts.rank ?? 'worker'; // safer default — Employees get a strict subset of Partner hooks
+    const kind = inferKind(rank);
+    const agentSlug = opts.agentSlug ?? displayName.toLowerCase().replace(/\s+/g, '-');
+    const corpName = opts.corpName ?? deriveCorpName(agentDir);
+
+    writeFileSync(
+      claudeMdPath,
+      buildThinClaudeMd({ kind, displayName, role: rank, corpName, workspacePath: agentDir }),
+      'utf-8',
+    );
     result.claudeMdWritten = true;
+
+    const claudeDir = join(agentDir, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const settings = buildHookSettings({ kind, agentSlug });
+    writeFileSync(
+      join(claudeDir, 'settings.json'),
+      JSON.stringify(settings, null, 2) + '\n',
+      'utf-8',
+    );
   } else if (existsSync(claudeMdPath)) {
     const backupPath = `${claudeMdPath}.backup.${timestampSuffix()}`;
     renameSync(claudeMdPath, backupPath);
@@ -122,4 +171,30 @@ export function reconcileAgentWorkspace(
 function timestampSuffix(): string {
   // Colons + periods are illegal in NTFS filenames — normalize to hyphens.
   return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+/**
+ * Derive a reasonable corpName from an absolute agentDir when the caller
+ * didn't pass it explicitly. Agent workspaces live under
+ * `<corpRoot>/agents/<slug>/` or `<corpRoot>/projects/<p>/agents/<slug>/`
+ * or similar. Walk up until we find the first segment that isn't a
+ * structural directory name (agents, projects, teams). That's the corp
+ * root's basename — the corp's human-readable name.
+ *
+ * Fallback: if we can't find one, use the agent's parent directory
+ * basename. Ugly but never empty, so the CLAUDE.md identity line
+ * doesn't render with nothing.
+ */
+function deriveCorpName(agentDir: string): string {
+  const structural = new Set(['agents', 'projects', 'teams', 'chits']);
+  const segments = agentDir.split(/[/\\]/).filter(Boolean);
+  // Walk from right to left, skip structural names + any segment that looks like a slug (follows a structural segment)
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const seg = segments[i]!;
+    const prev = i > 0 ? segments[i - 1]! : null;
+    if (structural.has(seg)) continue;
+    if (prev && structural.has(prev)) continue; // this is a slug/name under structural
+    return seg;
+  }
+  return segments[0] ?? 'corp';
 }

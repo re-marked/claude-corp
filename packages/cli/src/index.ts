@@ -75,6 +75,7 @@ Usage: cc-cli <command> [options]
 
 Commands:
   wtf        "Where tf am I, what tf do I do" — emits CORP.md + your situational context
+  audit      Session-end audit gate (Stop / PreCompact hook invokes this; 0.7.2 stub approves all, 0.7.3 enforces)
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -552,6 +553,14 @@ async function run() {
         agent: values.agent as string | undefined,
         corp: values.corp as string | undefined,
         hook: !!values.hook,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'audit': {
+      const { cmdAudit } = await import('./commands/audit.js');
+      await cmdAudit({
+        agent: values.agent as string | undefined,
         json: !!values.json,
       });
       break;

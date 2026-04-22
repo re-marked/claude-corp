@@ -311,7 +311,18 @@ export { USER_TEMPLATE } from './templates/user.js';
 export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarness } from './templates/environment.js';
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
-export { buildClaudeMd, type ClaudeMdTemplateOpts } from './templates/claude-md.js';
+export {
+  buildClaudeMd,
+  buildThinClaudeMd,
+  type ClaudeMdTemplateOpts,
+  type ThinClaudeMdOpts,
+} from './templates/claude-md.js';
+export {
+  buildHookSettings,
+  type HookSettings,
+  type HookSettingsOpts,
+  type HookEntry,
+} from './templates/hook-settings.js';
 export { buildCorpMd, type CorpMdOpts, type CorpMdKind } from './templates/corp-md.js';
 export {
   buildWtfHeader,
@@ -320,6 +331,16 @@ export {
   type WtfInboxPeek,
   type WtfInboxSummary,
 } from './templates/wtf-header.js';
+export {
+  buildWtfOutput,
+  resolveCurrentTask,
+  readWorklogHandoff,
+  resolveInboxSummary,
+  formatAge,
+  inferKind,
+  type WtfOutputOpts,
+  type WtfOutput,
+} from './wtf-state.js';
 
 // Ranks
 export { canHire } from './ranks.js';
