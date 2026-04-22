@@ -134,6 +134,27 @@ describe('POST /tasks/create body field threading', () => {
     expect(fields.blockedBy).toEqual(['cool-bay', 'warm-tide']);
   });
 
+  it('persists complexity from body into the chit file', async () => {
+    await postCreate({
+      title: 'Architecturally complex task',
+      createdBy: 'mark',
+      complexity: 'large',
+    });
+
+    const fields = readOnlyTaskFields();
+    expect(fields.complexity).toBe('large');
+  });
+
+  it('defaults complexity to null when body omits it', async () => {
+    await postCreate({
+      title: 'Unassessed task',
+      createdBy: 'mark',
+    });
+
+    const fields = readOnlyTaskFields();
+    expect(fields.complexity).toBeNull();
+  });
+
   it('persists all new fields together alongside existing ones', async () => {
     await postCreate({
       title: 'Full-featured task',

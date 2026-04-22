@@ -342,6 +342,35 @@ Multiple `--type`, `--status`, `--tag`, `--scope` flags are OR'd within the same
 **Depends on:** 0.1, 0.2
 **PRs:** 2-3
 
+### 0.5.1 — TaskFields.complexity (premature, by design)
+
+**Problem.** The pre-chits `Task.estimate` was a free-form string (`"~2 hours"`, `"small"`). 0.3 migrated it onto `TaskFields.estimate` verbatim. Nothing in the corp ever read it — no scheduler, no UI, no prompt — so agents burned tokens writing values that went to /dev/null. At the same time, Project 1.9's bacteria split rule (queue-depth count > idle Employee count) implicitly assumes all tasks cost the same. They don't. `3 × trivial` and `3 × large` should route very differently.
+
+**Scope.** Replace `TaskFields.estimate: string | null` with `TaskFields.complexity: 'trivial' | 'small' | 'medium' | 'large' | null`. The enum carries a structured signal that three decisions can key off:
+
+1. **Decomposition** — planner treats `large` as a hint that the task should probably become a contract with sub-tasks. Large standalone tasks fail the "one dispatch, one hand, done" shape 1.2 + 1.4 depend on.
+2. **Model routing** — trivial/small → Haiku-suitable; medium/large → Opus-worthy. Avoids burning Opus on var renames or asking Haiku to make architectural calls.
+3. **Bacteria weighting (consumed in 1.9)** — weighted queue depth replaces raw count. `3 × trivial` stays on one Employee. `3 × large` splits. Mixed workloads weight toward the heavier side.
+
+This is intentionally premature. 1.9 hasn't shipped; no consumer reads `complexity` yet. But putting the field in **now**, while Project 0 is still writing the schema, means every task created from 0.5.1 onward carries the signal. By the time 1.9 lands, the backfill already exists — bacteria reads populated data, not an empty column.
+
+**File paths:**
+- `packages/shared/src/types/chit.ts` (TaskFields: estimate → complexity)
+- `packages/shared/src/chit-types.ts` (validator: string-or-null → enum)
+- `packages/shared/src/templates/rules.ts` (agent-facing rubric: what each level means, decomposition heuristic)
+- `packages/daemon/src/plan-prompt.ts` (planner learns the vocabulary + the large→contract trigger)
+- `packages/cli/src/commands/task.ts` (`--complexity <val>` on `task new` / `task update`)
+
+**Not in scope:** migration of existing `estimate` strings. No one read them; the orphan field parses harmlessly. New tasks get `complexity`; old tasks stay null until first touch.
+
+**Test strategy:**
+- Validator rejects invalid complexity values + accepts all four levels + accepts null + accepts omission.
+- `cc-cli task new --complexity large` produces a chit with `fields.task.complexity = "large"`.
+- Agent-facing prompt contains the rubric + the decomposition trigger.
+
+**Depends on:** 0.3 (TaskFields exists)
+**PRs:** 1
+
 ### 0.6 — Wisp lifecycle: ephemeral Chits + 4-signal promotion
 
 **Problem.** Some Chit types are ephemeral (observation, handoff, dispatch-context, pre-brain-entry at role level). They need auto-expiration AND promotion mechanics — otherwise valuable ephemeral content is lost, and garbage accumulates forever.
@@ -716,7 +745,7 @@ Pulse today is a liveness check — "HEARTBEAT: check your inbox." That's noise.
 
 Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Full Witness role arrives in Project 3.
 
-**Queue depth via Chit queries.** Instead of maintaining a separate in-memory queue data structure, bacteria reads Chit state: `cc-cli chit list --type task --status active --assignee-role backend-engineer` returns active Task Chits for a role; `cc-cli chit list --type casket --scope 'agent:backend-engineer/*' --field-has current_step` tells us how many Employees of that role are busy. Split when active Chit count > idle Employee count by threshold. Collapse when idle Employees > 1 and all idle for > N minutes.
+**Queue depth via Chit queries.** Instead of maintaining a separate in-memory queue data structure, bacteria reads Chit state: `cc-cli chit list --type task --status active --assignee-role backend-engineer` returns active Task Chits for a role; `cc-cli chit list --type casket --scope 'agent:backend-engineer/*' --field-has current_step` tells us how many Employees of that role are busy. Split when **weighted** active Chit count > idle Employee count by threshold, where weights come from `fields.task.complexity` (landed in 0.5.1): `trivial=0.25, small=0.5, medium=1.0, large=2.0`. A queue of 3 trivials weighs 0.75 and doesn't split; a queue of 3 larges weighs 6.0 and triggers multiple splits. Null complexity defaults to `medium` weight so pre-backfill tasks still trigger sensibly. Collapse when idle Employees > 1 and all idle for > N minutes.
 
 **First-session self-naming.** When bacteria spawns a new Employee, the role-resolver allocates a slot without a name; first dispatch prompts the Employee to choose a name (as per Decisions Made section). Name persists to the Employee's Member record + attribution.
 

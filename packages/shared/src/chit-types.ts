@@ -154,7 +154,9 @@ function validateTask(fields: unknown): void {
   if (f.acceptanceCriteria !== undefined && f.acceptanceCriteria !== null) {
     requireStringArray(f.acceptanceCriteria, 'task.acceptanceCriteria');
   }
-  if (f.estimate !== undefined) requireStringOrNull(f.estimate, 'task.estimate');
+  if (f.complexity !== undefined && f.complexity !== null) {
+    requireEnum(f.complexity, 'task.complexity', ['trivial', 'small', 'medium', 'large'] as const);
+  }
   if (f.handedBy !== undefined) requireStringOrNull(f.handedBy, 'task.handedBy');
   optionalIsoTimestamp(f.handedAt, 'task.handedAt');
   optionalIsoTimestamp(f.dueAt, 'task.dueAt');

@@ -31,7 +31,8 @@ export async function cmdTasks(opts: { status?: string; assigned?: string; json:
   for (const { task } of tasks) {
     const assignee = members.find((m) => m.id === task.assignedTo);
     const icon = { pending: '\u25C7', assigned: '\u25C6', in_progress: '\u25C6', completed: '\u2713', failed: '\u2717', blocked: '\u25C8', cancelled: '\u2500' }[task.status] ?? '?';
-    console.log(`${icon} [${task.priority.toUpperCase().padEnd(8)}] ${task.title}`);
+    const complexityTag = task.complexity ? `  [${task.complexity}]` : '';
+    console.log(`${icon} [${task.priority.toUpperCase().padEnd(8)}]${complexityTag} ${task.title}`);
     console.log(`  Status: ${task.status}  Assigned: ${assignee?.displayName ?? 'unassigned'}  ID: ${task.id}`);
     console.log('');
   }

@@ -49,6 +49,7 @@ export function TaskDetail({ taskId, onBack }: Props) {
           <Text color={COLORS.muted}>ID: <Text color={COLORS.subtle}>{task.id}</Text></Text>
           <Text color={COLORS.muted}>Created: <Text color={COLORS.subtle}>{new Date(task.createdAt).toLocaleString()}</Text></Text>
           {task.dueAt && <Text color={COLORS.muted}>Due: <Text color={COLORS.warning}>{new Date(task.dueAt).toLocaleString()}</Text></Text>}
+          <Text color={COLORS.muted}>Complexity: <Text color={task.complexity === 'large' ? COLORS.warning : COLORS.subtle}>{task.complexity ?? 'unassessed'}</Text></Text>
         </Box>
 
         {/* Body */}

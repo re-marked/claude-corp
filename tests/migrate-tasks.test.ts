@@ -38,6 +38,7 @@ function sampleTask(overrides: Partial<Task> = {}): Task {
     handedAt: null,
     teamId: null,
     acceptanceCriteria: null,
+    complexity: null,
     dueAt: null,
     loopId: null,
     createdAt: '2026-04-20T10:00:00.000Z',
@@ -102,6 +103,18 @@ describe('taskToChit — pure mapping', () => {
     );
     expect(chit.fields.task.handedBy).toBe('engineering-lead');
     expect(chit.fields.task.handedAt).toBe('2026-04-21T12:00:00.000Z');
+  });
+
+  it('preserves complexity across the mapping', () => {
+    for (const c of ['trivial', 'small', 'medium', 'large'] as const) {
+      const chit = taskToChit(sampleTask({ complexity: c }));
+      expect(chit.fields.task.complexity).toBe(c);
+    }
+  });
+
+  it('defaults complexity to null when unset on the source task', () => {
+    const chit = taskToChit(sampleTask());
+    expect(chit.fields.task.complexity).toBeNull();
   });
 
   it('preserves dueAt, loopId, acceptanceCriteria', () => {
