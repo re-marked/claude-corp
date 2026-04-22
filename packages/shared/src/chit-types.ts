@@ -27,6 +27,7 @@ import type {
   DispatchContextFields,
   PreBrainEntryFields,
   StepLogFields,
+  InboxItemFields,
 } from './types/chit.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -284,6 +285,38 @@ function validateStepLog(fields: unknown): void {
   if (f.details !== undefined) requireStringOrNull(f.details, 'step-log.details');
 }
 
+function validateInboxItem(fields: unknown): void {
+  const f = requireObject(fields, 'inbox-item') as Partial<InboxItemFields>;
+  // Tier is the load-bearing discriminant — if it's wrong the whole
+  // lifecycle treats the chit incorrectly, so validate strictly.
+  if (f.tier !== 1 && f.tier !== 2 && f.tier !== 3) {
+    throw new ChitValidationError(
+      `inbox-item.tier must be 1, 2, or 3 (got ${JSON.stringify(f.tier)})`,
+      'inbox-item.tier',
+    );
+  }
+  requireNonEmptyString(f.from, 'inbox-item.from');
+  requireNonEmptyString(f.subject, 'inbox-item.subject');
+  requireEnum(f.source, 'inbox-item.source', ['channel', 'dm', 'hand', 'escalation', 'system'] as const);
+  if (f.sourceRef !== undefined) requireStringOrNull(f.sourceRef, 'inbox-item.sourceRef');
+  if (f.resolution !== undefined && f.resolution !== null) {
+    requireEnum(f.resolution, 'inbox-item.resolution', ['responded', 'dismissed'] as const);
+  }
+  if (f.dismissalReason !== undefined) requireStringOrNull(f.dismissalReason, 'inbox-item.dismissalReason');
+  if (f.carriedForward !== undefined && f.carriedForward !== null && typeof f.carriedForward !== 'boolean') {
+    throw new ChitValidationError('inbox-item.carriedForward must be a boolean or null', 'inbox-item.carriedForward');
+  }
+  if (f.carryReason !== undefined) requireStringOrNull(f.carryReason, 'inbox-item.carryReason');
+  if (f.carriedForward === true && (f.carryReason === null || f.carryReason === undefined || f.carryReason === '')) {
+    // carriedForward without a reason defeats the whole point — the audit
+    // gate can't evaluate "is this a legitimate punt" without text.
+    throw new ChitValidationError(
+      'inbox-item.carryReason is required when carriedForward is true',
+      'inbox-item.carryReason',
+    );
+  }
+}
+
 // ─── Registry ────────────────────────────────────────────────────────
 
 /**
@@ -381,6 +414,25 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     terminalStatuses: ['completed', 'failed', 'closed'],
     destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
     validate: validateStepLog,
+  },
+  {
+    id: 'inbox-item',
+    idPrefix: 'i',
+    defaultEphemeral: true,
+    // Registry default TTL is 7d (Tier 2 — the "direct" case). Tier 1
+    // creators override to '24h' via createChit opts; Tier 3 creators
+    // override to '30d'. Per-instance destructionPolicy override (from
+    // 0.6 extension) drives tier-varying destroy-vs-cool behavior.
+    defaultTTL: '7d',
+    defaultStatus: 'active',
+    validStatuses: ['active', 'completed', 'rejected', 'closed', 'cold'],
+    terminalStatuses: ['completed', 'rejected', 'closed'],
+    // Registry default matches Tier 2/3 (the dominant case — founder DMs,
+    // @mentions, task handoffs all preserve for audit). Tier 1 ambient
+    // creators MUST override to 'destroy-if-not-promoted' via per-instance
+    // frontmatter. Validation of that override contract is part of 0.7.4.
+    destructionPolicy: 'keep-forever',
+    validate: validateInboxItem,
   },
 ];
 
