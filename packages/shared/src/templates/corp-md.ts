@@ -370,6 +370,21 @@ any cc-cli command to "post" — just type your response.
 To ping someone in your reply: write \`@their-slug\` inside your text. The
 router dispatches to them automatically.
 
+### Go direct
+
+@mention the agent you actually need — don't route through a Partner
+unless it's that Partner's decision to make. Two workers coordinating on
+a task shouldn't need the CEO to relay messages. The hierarchy works
+when information flows to the right level, not when it bottlenecks at
+the top.
+
+The CEO (or your rank-master) gets @mentioned for:
+- Task completion reports and blockers you can't resolve at your level
+- Direct CEO instructions or strategic decisions
+- Escalations past your Partner / supervisor
+
+For everything else, talk peer-to-peer.
+
 ### Broadcast discipline
 
 In broadcast channels (#general, team channels), keep responses concise —
