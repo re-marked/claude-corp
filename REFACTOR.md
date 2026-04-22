@@ -129,7 +129,7 @@ A Chit is a markdown file with YAML frontmatter:
 ```yaml
 ---
 id: chit-abc123
-type: task | observation | contract | casket | handoff | dispatch-context | pre-brain-entry | step-log | ...
+type: task | observation | contract | casket | handoff | dispatch-context | pre-brain-entry | step-log | inbox-item | ...
 status: draft | active | review | completed | rejected | failed | closed | burning
 ephemeral: false                 # true = auto-expires unless promoted (see 0.6 lifecycle)
 ttl: 2026-04-28T00:00:00Z        # optional, only meaningful when ephemeral=true
@@ -198,6 +198,12 @@ Each type registers its configuration:
 - `dispatch-context` — ephemeral, tracks an in-flight dispatch between agents; burns on dispatch completion.
 - `pre-brain-entry` — ephemeral by default at the role level; auto-promotes to permanent via 4-signal rule and becomes part of the role's distilled pre-BRAIN library.
 - `step-log` — non-ephemeral (Temporal memoization pattern), one per Task-execution phase, used for crash recovery.
+- `inbox-item` — **ephemeral by default**, tier-aware lifecycle (see 0.7 inbox system). Three tiers encoded as per-instance `fields.inbox-item.tier: 1 | 2 | 3`. Policy varies by tier via the per-instance destructionPolicy override:
+  - **Tier 1 (ambient)** — `destructionPolicy: 'destroy-if-not-promoted'`, 24h TTL. Broadcast notifications, system events (Failsafe restarts, Herald digests). Genuinely fire-and-forget noise.
+  - **Tier 2 (direct)** — `destructionPolicy: 'keep-forever'`, 7d TTL. Peer @mentions, inter-agent DMs, task handoffs from peers. Goes cold on TTL; preserves audit trail.
+  - **Tier 3 (critical)** — `destructionPolicy: 'keep-forever'`, 30d TTL. Founder DMs, escalations, direct task assignments from supervisor, audit failures. Goes cold on TTL but blocks Audit Gate (0.7) while unresolved.
+
+  Created by the daemon on the recipient's behalf (router when it sees @mention, hire/hand commands on dispatch, `cc-cli escalate` on escalation). Agents never create their own inbox items — they're always the RECIPIENT. Resolution via `cc-cli inbox respond <id>` (closes with `status: completed`, references the response chit) or `cc-cli inbox dismiss <id>` (closes with `status: rejected`, records dismissal reason). Tier 3 items reject `--not-important` dismissal at the CLI boundary.
 
 ### Sub-projects
 
