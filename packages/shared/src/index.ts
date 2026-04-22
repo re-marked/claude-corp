@@ -6,6 +6,7 @@ export type {
   MemberType,
   MemberScope,
   AgentWorkStatus,
+  AgentKind,
   Channel,
   ChannelKind,
   ChannelScope,
