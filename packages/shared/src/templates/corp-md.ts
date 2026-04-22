@@ -54,6 +54,7 @@ export function buildCorpMd(opts: CorpMdOpts): string {
     commandReference(),
     communication(),
     auditGate(),
+    writeDownWhatMatters(),
     filePaths(opts),
     commonPatterns(),
     redLines(),
@@ -534,6 +535,72 @@ again — audit re-runs. Loop until pass.
 - If truly stuck: the founder can run \`cc-cli audit --override --reason "..."\`
   to bypass. Logged to \`chits/_log/audit-overrides.jsonl\`. Don't expect this
   to happen — if it does, the audit criteria are wrong, not avoidable.`;
+}
+
+function writeDownWhatMatters(): string {
+  return `## Write Down What Matters
+
+Your session context is ephemeral. Compaction summarizes older messages,
+tool results get cleared to save space, a crash resets everything that
+wasn't written to disk. The discipline: if it matters, it goes in a
+file. If it's in memory only, it may not be there next turn.
+
+### If you didn't write it down, it doesn't exist after compaction
+
+What survives compaction:
+- Files you wrote (WORKLOG.md, MEMORY.md, BRAIN/, source code, chits)
+- Your workspace directory (everything in your Casket)
+- Messages in channels (messages.jsonl)
+
+What does NOT survive:
+- Your conversation history — may be summarized to a short recap
+- Tool call results — may be cleared; scrolling back won't recover them
+- Anything you remembered but didn't persist
+
+### Mid-work snapshots
+
+Before any 3+ tool-call operation, write a quick snapshot — either in
+your response text or appended to WORKLOG.md:
+
+\`\`\`
+## Current Work — <timestamp>
+Goal: <what you're trying to achieve>
+Plan: <numbered steps>
+Progress: <what's done, what's next>
+Key files: <paths you're working with>
+Key findings: <what you've discovered>
+\`\`\`
+
+If compaction hits mid-work, this snapshot lets you reconstruct.
+
+### Continuity checkpoints
+
+At natural stopping points (task phase complete, research done, before
+a build), append a checkpoint to WORKLOG.md:
+
+\`\`\`
+## Checkpoint — 14:30
+Completed: auth.ts type fix (lines 40-55)
+Next: update middleware.ts to use new Session type
+Blocker: none
+Files modified: src/auth.ts, src/types.ts
+Build: PASS (0 errors)
+\`\`\`
+
+10 seconds to write, saves 10 minutes of re-discovery after compaction.
+
+### Session start ritual
+
+You wake up fresh every session. Before acting:
+
+1. Read WORKLOG.md — check the latest Session Summary / Checkpoint
+2. Read TASKS.md — check for in-progress work you might be mid-way through
+3. Read MEMORY.md — recall what you've learned across sessions
+4. Run \`cc-cli wtf\` if you're disoriented — regenerates CORP.md +
+   emits your situational header
+
+If WORKLOG.md shows you were mid-something, pick up from where you
+stopped. Don't start over.`;
 }
 
 function filePaths(opts: CorpMdOpts): string {
