@@ -59,6 +59,7 @@ describe('CHIT_TYPES registry invariants', () => {
     'dispatch-context',
     'pre-brain-entry',
     'step-log',
+    'inbox-item',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {
@@ -135,11 +136,21 @@ describe('CHIT_TYPES registry invariants', () => {
     expect(observation.terminalStatuses).not.toContain('cold');
   });
 
-  it('no other chit type allows `cold` (cold is observation-specific in 0.6)', () => {
-    for (const entry of CHIT_TYPES) {
-      if (entry.id === 'observation') continue;
-      expect(entry.validStatuses, `${entry.id} should not accept cold status`).not.toContain('cold');
-    }
+  it('inbox-items can reach `cold` status (Tier 2/3 path), but cold is NOT terminal', () => {
+    const inbox = CHIT_TYPES.find((e) => e.id === 'inbox-item')!;
+    expect(inbox.validStatuses).toContain('cold');
+    expect(inbox.terminalStatuses).not.toContain('cold');
+  });
+
+  it('cold status is restricted to keep-forever ephemeral types (observation + inbox-item)', () => {
+    const coldTypes = CHIT_TYPES.filter((e) => e.validStatuses.includes('cold')).map((e) => e.id).sort();
+    expect(coldTypes).toEqual(['inbox-item', 'observation']);
+  });
+
+  it('inbox-item has keep-forever registry default (Tier 2/3 are dominant; Tier 1 overrides per-instance)', () => {
+    const inbox = CHIT_TYPES.find((e) => e.id === 'inbox-item')!;
+    expect(inbox.destructionPolicy).toBe('keep-forever');
+    expect(inbox.defaultEphemeral).toBe(true);
   });
 });
 
@@ -509,6 +520,156 @@ describe('validator: step-log', () => {
     expect(() =>
       entry.validate({ taskChitId: 'chit-t-abc', phase: 'x', outcome: 'partially' }),
     ).toThrow(/outcome/);
+  });
+});
+
+describe('validator: inbox-item', () => {
+  const entry = getChitType('inbox-item')!;
+
+  it('accepts a minimal valid Tier 1 ambient inbox-item', () => {
+    expect(() =>
+      entry.validate({
+        tier: 1,
+        from: 'failsafe',
+        subject: 'restarted researcher',
+        source: 'system',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts Tier 2 direct @mention inbox-item with sourceRef', () => {
+    expect(() =>
+      entry.validate({
+        tier: 2,
+        from: 'herald',
+        subject: 'how are the chits going?',
+        source: 'channel',
+        sourceRef: 'general',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts Tier 3 founder DM inbox-item', () => {
+    expect(() =>
+      entry.validate({
+        tier: 3,
+        from: 'mark',
+        subject: 'what is the corp status?',
+        source: 'dm',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects invalid tier values (not 1|2|3)', () => {
+    expect(() =>
+      entry.validate({ tier: 4, from: 'x', subject: 'y', source: 'system' }),
+    ).toThrow(/tier/);
+    expect(() =>
+      entry.validate({ tier: 0, from: 'x', subject: 'y', source: 'system' }),
+    ).toThrow(/tier/);
+    expect(() =>
+      entry.validate({ tier: '1', from: 'x', subject: 'y', source: 'system' }),
+    ).toThrow(/tier/);
+  });
+
+  it('rejects empty from / subject (the wtf header would render garbage)', () => {
+    expect(() =>
+      entry.validate({ tier: 2, from: '', subject: 'y', source: 'system' }),
+    ).toThrow(/from/);
+    expect(() =>
+      entry.validate({ tier: 2, from: 'x', subject: '', source: 'system' }),
+    ).toThrow(/subject/);
+  });
+
+  it('rejects unknown source values (enum drift catch)', () => {
+    expect(() =>
+      entry.validate({ tier: 2, from: 'x', subject: 'y', source: 'telepathy' }),
+    ).toThrow(/source/);
+  });
+
+  it('accepts resolution states: responded, dismissed, null, omitted', () => {
+    for (const resolution of ['responded', 'dismissed', null, undefined]) {
+      expect(() =>
+        entry.validate({
+          tier: 2,
+          from: 'x',
+          subject: 'y',
+          source: 'dm',
+          resolution,
+        }),
+      ).not.toThrow();
+    }
+  });
+
+  it('rejects invalid resolution values', () => {
+    expect(() =>
+      entry.validate({
+        tier: 2,
+        from: 'x',
+        subject: 'y',
+        source: 'dm',
+        resolution: 'ignored',
+      }),
+    ).toThrow(/resolution/);
+  });
+
+  it('rejects carriedForward:true without carryReason (load-bearing for audit)', () => {
+    // The escape valve requires a real reason — a bare carriedForward flip
+    // would let an agent punt without explaining, defeating the audit gate.
+    expect(() =>
+      entry.validate({
+        tier: 3,
+        from: 'mark',
+        subject: 'clarify X',
+        source: 'dm',
+        carriedForward: true,
+      }),
+    ).toThrow(/carryReason/);
+
+    expect(() =>
+      entry.validate({
+        tier: 3,
+        from: 'mark',
+        subject: 'clarify X',
+        source: 'dm',
+        carriedForward: true,
+        carryReason: '',
+      }),
+    ).toThrow(/carryReason/);
+  });
+
+  it('accepts carriedForward:true with a real carryReason', () => {
+    expect(() =>
+      entry.validate({
+        tier: 3,
+        from: 'mark',
+        subject: 'clarify X',
+        source: 'dm',
+        carriedForward: true,
+        carryReason: 'waiting on founder clarification on X',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts carriedForward:false or null without a reason', () => {
+    expect(() =>
+      entry.validate({
+        tier: 2,
+        from: 'x',
+        subject: 'y',
+        source: 'dm',
+        carriedForward: false,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      entry.validate({
+        tier: 2,
+        from: 'x',
+        subject: 'y',
+        source: 'dm',
+        carriedForward: null,
+      }),
+    ).not.toThrow();
   });
 });
 

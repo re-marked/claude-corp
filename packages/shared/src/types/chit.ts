@@ -28,6 +28,7 @@ export interface FieldsForType {
   'dispatch-context': DispatchContextFields;
   'pre-brain-entry': PreBrainEntryFields;
   'step-log': StepLogFields;
+  'inbox-item': InboxItemFields;
 }
 
 /**
@@ -296,4 +297,60 @@ export interface StepLogFields {
   outcome: 'started' | 'in-progress' | 'completed' | 'failed';
   /** Free-form details from the execution session — what happened, what went wrong. */
   details?: string | null;
+}
+
+/**
+ * Tier for inbox items — determines the ceremony required to resolve them.
+ * The sender determines the tier (recipient cannot self-downgrade); the
+ * audit gate only blocks on unresolved Tier 3 items.
+ *
+ * - **Tier 1 (ambient)** — broadcasts, system events, digests. Auto-expire
+ *   after 24h if not touched. Dismissible with \`--not-important\` alone.
+ * - **Tier 2 (direct)** — @mentions, peer DMs, inter-agent handoffs. Go
+ *   cold after 7d (preserved audit trail). Dismiss requires a real reason.
+ * - **Tier 3 (critical)** — founder DMs, escalations, task assignments,
+ *   audit failures. Go cold after 30d. Dismiss rejects \`--not-important\`
+ *   at the CLI boundary; must respond, dismiss with specific reason, or
+ *   carry-forward with justification.
+ */
+export type InboxItemTier = 1 | 2 | 3;
+
+/**
+ * Source vocabulary for inbox items — where the notification came from.
+ * Used by the wtf header + resolution routing (\`cc-cli inbox respond\`
+ * dispatches differently based on source).
+ */
+export type InboxItemSource = 'channel' | 'dm' | 'hand' | 'escalation' | 'system';
+
+/**
+ * Fields for an inbox-item chit — a lightweight notification pointing
+ * at underlying content (a channel message, a DM, a handed task, a
+ * system event). Created by the daemon on the recipient's behalf
+ * (router on @mention detection, hand command on task dispatch, etc.).
+ * Agents never author inbox-items for themselves — they are always
+ * the RECIPIENT.
+ *
+ * Per-instance \`destructionPolicy\` override on the chit's common fields
+ * drives tier-varying lifecycle: Tier 1 gets \`destroy-if-not-promoted\`,
+ * Tier 2/3 get \`keep-forever\` (cool on TTL age instead of destroying).
+ */
+export interface InboxItemFields {
+  /** Tier — sender-determined, not recipient-overridable. */
+  tier: InboxItemTier;
+  /** Sender member id (e.g. 'mark' for founder, 'herald' for herald), or 'system' for daemon-emitted notifications. */
+  from: string;
+  /** One-line preview rendered in the wtf header and \`cc-cli inbox list\`. Keep under ~80 chars. */
+  subject: string;
+  /** What kind of thing generated this notification. Drives how \`cc-cli inbox respond\` dispatches. */
+  source: InboxItemSource;
+  /** Source-specific reference — channel name for 'channel', null for most others. */
+  sourceRef?: string | null;
+  /** Set when the chit is closed. 'responded' for active engagement; 'dismissed' for the CLI dismiss paths. */
+  resolution?: 'responded' | 'dismissed' | null;
+  /** Required on Tier 2+ dismissals; the CLI rejects under-threshold text on Tier 3. */
+  dismissalReason?: string | null;
+  /** Set when resolution is deferred with justification — agent had a decision but isn't able to act right now. Counts as resolution for audit but keeps the item visible in future wtf. */
+  carriedForward?: boolean | null;
+  /** Reason if carriedForward. Required when carriedForward is true. */
+  carryReason?: string | null;
 }
