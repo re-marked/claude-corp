@@ -170,6 +170,42 @@ describe('setupAgentWorkspace', () => {
       expect(content).not.toContain('.claude/');
     });
 
+    it('preserves an existing .gitignore when one is already present (append-if-missing, not clobber)', () => {
+      // Simulate an agent workspace that already has a .gitignore with
+      // user-custom entries (maybe from an earlier setup pass or a
+      // founder hand-edit). Running setupAgentWorkspace must add CORP.md
+      // WITHOUT destroying the existing entries.
+      const opts = makeOpts(corpRoot, { harness: 'claude-code' });
+      const agentAbs = join(corpRoot, opts.scope === 'corp' ? `agents/${opts.agentName}` : `${opts.scope}s/${opts.scopeId}/agents/${opts.agentName}`);
+      const gitignorePath = join(agentAbs, '.gitignore');
+      mkdirSync(agentAbs, { recursive: true });
+      writeFileSync(gitignorePath, '# User-custom\nmy-secret-note.md\nscratch/\n', 'utf-8');
+
+      setupAgentWorkspace(opts);
+
+      const content = readFileSync(gitignorePath, 'utf-8');
+      // User's original entries survive
+      expect(content).toContain('my-secret-note.md');
+      expect(content).toContain('scratch/');
+      // CORP.md added
+      expect(content).toContain('CORP.md');
+    });
+
+    it('does not duplicate CORP.md when .gitignore already contains it (idempotent)', () => {
+      const opts = makeOpts(corpRoot, { harness: 'claude-code' });
+      const agentAbs = join(corpRoot, opts.scope === 'corp' ? `agents/${opts.agentName}` : `${opts.scope}s/${opts.scopeId}/agents/${opts.agentName}`);
+      const gitignorePath = join(agentAbs, '.gitignore');
+      mkdirSync(agentAbs, { recursive: true });
+      writeFileSync(gitignorePath, '# Existing\nCORP.md\n', 'utf-8');
+
+      setupAgentWorkspace(opts);
+
+      const content = readFileSync(gitignorePath, 'utf-8');
+      // Only one CORP.md entry, not two
+      const matches = content.split(/\r?\n/).filter((l) => l.trim() === 'CORP.md');
+      expect(matches).toHaveLength(1);
+    });
+
     it('STATUS.md + TASKS.md + .gitignore exist for OpenClaw agents too', () => {
       // OpenClaw doesn't @import these files but the agent can still
       // read them via tools; writing them unconditionally keeps the
