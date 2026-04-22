@@ -453,6 +453,49 @@ channel. Not for talking in the channel you're already in.
 
 \`cc-cli send\` — **founder-only**. Agents never call this.
 
+### Asking the founder a question
+
+When you need the founder's input — a preference, a decision, a choice
+between approaches — embed a structured question in your response. The
+TUI renders it as an interactive card the founder selects with number
+keys. Their answer arrives in the channel as \`[Answer: <value>] <label>\`
+— parseable, unambiguous.
+
+**Basic multi-choice:**
+\`\`\`xml
+<askFounder>
+  <question>Which database should we use?</question>
+  <answers>
+    <answer value="postgres" description="Better for concurrent writes">Postgres</answer>
+    <answer value="sqlite" description="Simpler, file-based">SQLite</answer>
+  </answers>
+</askFounder>
+\`\`\`
+
+**Score (potentiometer — arrow-key number pick):**
+\`\`\`xml
+<askFounder type="score" min="0" max="10">
+  <question>How much do you trust agents to work autonomously?</question>
+</askFounder>
+\`\`\`
+
+**Multi-select (founder toggles multiple):**
+\`\`\`xml
+<askFounder type="multi">
+  <question>Which features should we prioritize?</question>
+  <answers>
+    <answer value="auth">Authentication</answer>
+    <answer value="search">Search</answer>
+  </answers>
+</askFounder>
+\`\`\`
+
+Add \`preview="code or mockup here"\` to an answer for a preview pane.
+Use \`\\n\` for newlines inside a preview.
+
+Don't overuse structured questions — most are better asked in plain text.
+Reserve them for decisions that genuinely need a clear, parseable answer.
+
 ### End of exchange = no @mention
 
 If another agent answered your question, do NOT reply with "@them thanks" or
