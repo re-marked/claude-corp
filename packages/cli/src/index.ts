@@ -28,6 +28,7 @@ const { values, positionals } = parseArgs({
     lead: { type: 'string' },
     type: { type: 'string' },
     wait: { type: 'boolean', default: false },
+    override: { type: 'boolean', default: false },
     timeout: { type: 'string' },
     last: { type: 'string' },
     status: { type: 'string' },
@@ -75,7 +76,7 @@ Usage: cc-cli <command> [options]
 
 Commands:
   wtf        "Where tf am I, what tf do I do" — emits CORP.md + your situational context
-  audit      Session-end audit gate (Stop / PreCompact hook invokes this; 0.7.2 stub approves all, 0.7.3 enforces)
+  audit      Session-end audit gate (Stop / PreCompact hook invokes this). --override --reason "..." for founder bypass.
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -561,6 +562,9 @@ async function run() {
       const { cmdAudit } = await import('./commands/audit.js');
       await cmdAudit({
         agent: values.agent as string | undefined,
+        override: !!values.override,
+        reason: values.reason as string | undefined,
+        from: values.from as string | undefined,
         json: !!values.json,
       });
       break;
