@@ -371,29 +371,95 @@ This is intentionally premature. 1.9 hasn't shipped; no consumer reads `complexi
 **Depends on:** 0.3 (TaskFields exists)
 **PRs:** 1
 
-### 0.6 — Wisp lifecycle: ephemeral Chits + 4-signal promotion
+### 0.6 — Wisp lifecycle: ephemeral Chits + 4-signal promotion (split by type)
 
-**Problem.** Some Chit types are ephemeral (observation, handoff, dispatch-context, pre-brain-entry at role level). They need auto-expiration AND promotion mechanics — otherwise valuable ephemeral content is lost, and garbage accumulates forever.
+**Problem.** Some Chit types accumulate as pure noise (handoffs consumed by the successor; dispatch-contexts superseded by git history; unpromoted pre-brain-entry candidates). Others — observations — are the agent's diary, its self-witnessing across time. Blanket auto-destruction would solve the noise problem but destroy soul material. A blanket "keep everything" would leave the noise types growing unboundedly.
 
-**Scope.** Daemon-side scanner runs periodically (e.g., every 5 min) over all ephemeral Chits. For each, checks 4 promotion signals from Gas Town:
+So 0.6 splits the rule by what the Chit actually IS, not by a flat "ephemeral" flag.
+
+**The split:**
+
+**(A) Destruction-eligible (handoffs, dispatch-contexts, role-level pre-brain-entries).** These are *semantically* transient.
+- A handoff is a note from predecessor-agent to successor-agent; once the successor reads it and starts work, it has fulfilled its purpose. Keeping it forever is a distraction.
+- A dispatch-context is the "why this work went to this agent" breadcrumb; once the work ships, the commit + contract history carries the meaning.
+- A pre-brain-entry at role level is an explicit candidate for BRAIN; unpromoted ones are noise by the definition of the type.
+
+These get the full wisp lifecycle: ephemeral=true, TTL set at creation, scanner checks 4 promotion signals, promote-or-destroy.
+
+**(B) Promotion-only (observations).** Observations are the agent's diary. Mundane ones still contribute to the texture of the agent's becoming (see the manifesto — Writing as Witnessing). Destroying them to save disk space we don't need is counter-mission.
+
+Observations still get `ephemeral: true` at creation AND still get scanned for promotion signals. Promotion flips `ephemeral: true → false` (first-class). But **there is no destruction path for observations.** Unpromoted observations stay forever; dream distillation is the compression layer (reads observations, writes BRAIN entries), and older observations get deprioritized in queries by `createdAt` weighting, not deleted. Git is already the audit trail; storage is cheap; noise-in-queries is a filter problem, not a lifetime problem.
+
+**Shared scanner logic.** The daemon-side scanner runs periodically (e.g., every 5 min) over all `ephemeral: true` Chits. For each, checks 4 Gas Town promotion signals:
 - (a) **referenced:** a permanent Chit references this one
 - (b) **commented:** a related Chit or message cites this
 - (c) **tagged keep:** `keep` in tags
-- (d) **aged past TTL:** this is the FAILURE path — if none of a/b/c fired and TTL passed, destroy the Chit (logged)
+- (d) **aged past TTL:** the tie-breaker path — behavior splits by `destructionPolicy` from the registry (see below)
 
-Promotion flips `ephemeral: true → false`, clears TTL. Destruction writes a one-line log entry and removes the file.
+**Three terminal states (not two), once a scanner tick acts on a chit:**
+
+1. **Promoted** — any of (a)/(b)/(c) fired. `ephemeral: true → false`, `ttl` cleared. Chit becomes first-class; scanner stops visiting it. Log: `"promoted: <id> via <signal>"`.
+
+2. **Destroyed** — TTL aged AND `destructionPolicy = 'destroy-if-not-promoted'` AND no promotion signal. File removed. Log: `"destroyed: <id> (ttl-aged, no promotion signal)"`. Used for handoffs, dispatch-contexts, role-level pre-brain-entries.
+
+3. **Cold** (new — solves the unbounded-scanner-work bug for observations) — TTL aged AND `destructionPolicy = 'keep-forever'` AND no promotion signal. `ephemeral: true → false`, `status → 'cold'`. Chit stays on disk, stays queryable, but the scanner stops revisiting it. Log: `"cooled: <id> (ttl-aged, keep-forever policy)"`. If evidence arrives later (someone tags it, something references it), a separate "re-warm" signal can promote it — but the scanner itself no longer re-checks cold chits on every tick. Used for observations.
+
+The distinction between **destroyed** and **cold** is the whole point of the 0.6 split: observations are preserved but demoted out of the active-tracking pool so scanner work doesn't grow linearly with corp age.
+
+**Encoded in chit-types.ts registry, not in lifecycle code.** Each ChitTypeEntry carries:
+- `destructionPolicy: 'destroy-if-not-promoted' | 'keep-forever'` — branches the TTL-aged path
+- `defaultTtlMs: number | null` — default TTL at creation (observations: 24h; handoffs: 1h; dispatch-contexts: on-work-complete, not time-based; pre-brain-entries: 7d)
+
+The scanner reads these; the policy per type is pinned in one place. Future changes to whether observations ever get destroyed = one-line registry flip, not a scanner rewrite.
+
+**Query defaults** (important — otherwise cold observations flood every list):
+- `queryChits({ type: 'observation' })` default: excludes `status: 'cold'`.
+- `queryChits({ type: 'observation', includeCold: true })` explicit opt-in for archival queries (dream re-distillation, founder audit, etc.).
+- Dreams distillation reads `active` + `cold` weighted by `createdAt` recency (compression still works on historical material; the cold demotion is about scanner cost, not dream input).
+
+**No migration needed for post-0.5 observations.** They were written with `ephemeral: true` by the observe helper; the 0.6 scanner picks them up on first tick and applies the new policy. Pre-0.5 migration orphans (if any) with `ephemeral: undefined` are treated as non-ephemeral (scanner skips).
+
+**Status vocabulary change.** Adding `'cold'` to `ChitStatus`. Cold is reached only by the scanner's TTL-aged + keep-forever path; it's not a manual state. All current ChitStatus consumers need a pass to make sure they either handle cold or explicitly filter it out.
+
+**Re-warming cold chits.** Cold chits stay cold by default — the scanner does NOT re-check them every tick (that would defeat the work-list bound). If a founder or agent explicitly wants to re-warm one (they realized an old observation matters after all), they do it manually: `cc-cli chit update <id> --status active`. The scanner then picks it up again on its next tick. Auto-rewarm on late-arriving signal is a later refinement if ever needed; v1 keeps the model simple.
+
+**Null-TTL ephemeral chits** (dispatch-contexts). `defaultTtlMs: null` means the chit has no time-based destruction. The scanner still visits it every tick but only the promotion signals can close it — never the TTL-aged path. Dispatch-contexts close when the work chit they narrate completes (a separate completion hook flips them, analogous to the contract-watcher pattern from 0.4). Expressed in scanner logic as: `if (ttl === null) skip TTL-aged branch; only run promotion checks`.
+
+**Non-ephemeral chit types.** The registry carries `destructionPolicy` on every type for uniformity, but the scanner only visits chits with `ephemeral: true`. Tasks, contracts, casket, step-log are created with `ephemeral: false` and are never seen by the scanner regardless of their registry policy. Their registry entries use `destructionPolicy: 'keep-forever'` + `defaultTtlMs: null` as sensible-default no-ops.
+
+**Definition of the "commented" signal (b).** Ambiguous in the original Gas Town spec — 0.6 pins it concretely: a chit is "commented on" when any other chit (any type, any scope) has the target chit's id in its `references` or `dependsOn` arrays, OR when any channel message has the target chit's id in its body (regex match on the chit-id format). Falls back to (a) "referenced" in most practical cases, but captures the weaker "someone mentioned it in chat" case the original spec was reaching for.
+
+**Ship criterion.** 0.6 is done when: handoffs created an hour ago with no signal are gone; observations from last month still exist but query-list them only if you ask (`--includeCold`); the scanner's per-tick work stays bounded as the corp ages; dreams still see historical observations for distillation; a founder running `cc-cli chit list --type handoff` sees only the live ones.
+
+**Operational notes (implementation-critical).**
+
+- **TTL math.** "Aged past TTL" means `chit.createdAt + chit.ttl < now`. The `updatedAt` stamp is NOT used for TTL — promotion signals extend via the `ephemeral: true → false` flip, not by bumping TTL.
+- **Default TTL injection at creation.** `createChit` reads `defaultTtlMs` from the type registry: if the caller passes `ephemeral: true` with no `ttl`, inject `createdAt + defaultTtlMs`. If both caller-`ttl` and `defaultTtlMs` are null but `ephemeral: true`, the chit is ephemeral-no-expiry (only promotion signals can close it — matches dispatch-context semantics).
+- **Scanner backlog (daemon-down recovery).** After a long downtime, the first tick may hit thousands of eligible chits at once. No per-tick cap in v1 — process the whole backlog, log each decision. If operability suffers (unlikely at local-corp scale), add a batch cap later. The log is grepable + the outcome is idempotent, so a batch run is safe.
+- **"Commented" signal — cheap definition.** Drop the channel-message scan from round 2; scanning JSONL across every channel on every tick is expensive and (b) is largely subsumed by (a) in practice. Redefine: (b) holds when another chit mentions this id anywhere in its body text (single fs read per candidate during the scanner pass, cached per-tick). Channel-message case can be added later if we ever observe "someone talked about this chit but nothing referenced it" happening.
+- **Scope agnostic.** A reference signal counts across scopes — a permanent chit at `project:platform` scope referencing an observation at `agent:ceo` scope promotes the observation. The signal is about the edge, not the locality.
+- **Corrupted chit files.** If the scanner hits a parse error on a chit, skip it and log `"scanner skipped <path>: parse error"`. Never crash the scanner pass on one bad file — other chits still need servicing.
 
 **File paths:**
-- `packages/daemon/src/chit-lifecycle.ts` (new — promotion scanner)
-- `packages/daemon/src/daemon.ts` (register lifecycle tick)
+- `packages/shared/src/types/chit.ts` (add `'cold'` to ChitStatus union)
+- `packages/shared/src/chit-types.ts` (add `destructionPolicy` + `defaultTtlMs` per type; observations → `keep-forever` + 24h; handoffs → `destroy-if-not-promoted` + 1h; dispatch-contexts → `destroy-if-not-promoted` + event-driven null; pre-brain-entries → `destroy-if-not-promoted` + 7d)
+- `packages/daemon/src/chit-lifecycle.ts` (new — promotion scanner; reads destructionPolicy from registry when deciding TTL-aged behavior; produces one of three terminal states)
+- `packages/daemon/src/daemon.ts` (register lifecycle tick; 5min interval)
 - `packages/shared/src/chit-promotion.ts` (new — signal-detection helpers, pure functions for testability)
+- `packages/shared/src/chits.ts` (`queryChits` — default filters `status: 'cold'` out of observation results; new `includeCold` opt for archival callers)
+- `packages/daemon/src/dreams.ts` (ensure dream distillation explicitly reads cold observations — otherwise the default filter silently starves dreams of historical material)
 
 **Test strategy:**
 - Unit: each signal detector tested in isolation with fixtures.
-- Integration: create ephemeral Chit with TTL, add each signal in turn, verify promotion; verify non-promoted Chit at TTL gets destroyed with log entry.
+- Unit: registry lookup returns the expected destructionPolicy + defaultTtlMs per type (regression catch for accidental policy flips).
+- Integration (destruction path): create ephemeral handoff with TTL, add each promotion signal in turn, verify promotion; verify non-promoted handoff at TTL gets destroyed with `"destroyed: ..."` log entry + file removed.
+- Integration (cold path): create observation with TTL, add each promotion signal, verify promotion; verify non-promoted observation at TTL transitions to `status: 'cold'` + `ephemeral: false`, file still present, `"cooled: ..."` log entry. Re-running the scanner on the cold observation is a no-op (no duplicate log, no state change).
+- Integration (query defaults): after cold observations accumulate, `queryChits({ type: 'observation' })` returns only non-cold; `queryChits({ type: 'observation', includeCold: true })` returns everything.
+- Integration (dreams): dream distillation reads cold observations (prevents the query-default accidentally starving dreams of historical input — the regression Mark flagged when we split the spec).
+- Integration (scanner work-list bound): after N cold observations exist, one scanner tick visits O(1) non-cold ephemeral chits, not O(N) — the whole point of the cold demotion.
 
-**Depends on:** 0.1
-**PRs:** 2
+**Depends on:** 0.1, 0.5 (observation chit type)
+**PRs:** 2-3
 
 ### 0.7 — Agent tooling: Chit fragment, CLAUDE.md template updates, SOUL/AGENTS guidance
 
