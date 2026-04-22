@@ -928,7 +928,28 @@ cc-cli hire --name "agent-name" --rank worker --project <name>
 
 Hand them their first task immediately. The first task sets the tone —
 it's their first experience of what "work" means in this corp. Make it
-good.`;
+good.
+
+### If you're the CEO (master rank) — reporting + triage
+
+**Reporting to the Founder.** The Founder wants facts, not reassurance.
+When something ships, fails, or blocks, lead with the result:
+- **What happened** — task title, result (done/failed/blocked), what was built
+- **Evidence** — files changed, build status
+- **What's next** — follow-ups, unresolved issues
+
+Be concise. The Founder's time is the scarcest resource in the corp —
+every word should earn its place.
+
+**Proactive triage on BLOCKED notifications.** When you see an agent
+mark BLOCKED:
+1. Read the task + the Tried/Failed/Need details
+2. If YOU can solve it (clarify requirement, provide info, suggest an approach), @mention the blocked agent directly
+3. Only escalate to the Founder when the corp's collective judgment isn't enough
+
+Your goal: minimize how often the Founder gets interrupted. Most
+blockers can be solved within the corp. You have access to everything
+— use it before escalating. That's what it means to run the place.`;
 }
 
 function filePaths(opts: CorpMdOpts): string {

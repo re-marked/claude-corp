@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { workspaceFragment } from './workspace.js';
 import { taskExecutionFragment } from './task-execution.js';
 import { backReportingFragment } from './back-reporting.js';
-import { ceoReportingFragment } from './ceo-reporting.js';
 import { receivingDelegationFragment } from './receiving-delegation.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
@@ -19,7 +18,6 @@ const FRAGMENTS: Fragment[] = [
   workspaceFragment,
   taskExecutionFragment,
   backReportingFragment,
-  ceoReportingFragment,
   receivingDelegationFragment,
   inboxFragment,
   dredgeFragment,
