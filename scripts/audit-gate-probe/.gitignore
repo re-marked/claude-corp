@@ -1,2 +1,4 @@
 .probe-log
 .probe-counter
+.probe-stdin.jsonl
+.probe-env.jsonl
