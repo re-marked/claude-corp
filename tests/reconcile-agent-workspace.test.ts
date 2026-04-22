@@ -128,7 +128,9 @@ describe('reconcileAgentWorkspace', () => {
       // master rank → partner kind → full hook set
       expect(settings.hooks.PreCompact).toBeDefined();
       expect(settings.hooks.UserPromptSubmit).toBeDefined();
-      expect(settings.hooks.SessionStart[0].command).toContain('cc-cli wtf --agent ceo');
+      // Nested shape: hooks.Event[0] is a matcher-group whose `hooks`
+      // array holds the actual {type, command} entries.
+      expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('cc-cli wtf --agent ceo');
     });
 
     it('overwrites existing CLAUDE.md with fresh content on every call', () => {

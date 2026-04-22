@@ -123,7 +123,9 @@ describe('setupAgentWorkspace', () => {
       expect(settings.hooks).toHaveProperty('Stop');
       expect(settings.hooks).toHaveProperty('PreCompact');
       expect(settings.hooks).toHaveProperty('UserPromptSubmit');
-      expect(settings.hooks.SessionStart[0].command).toContain('cc-cli wtf');
+      // Nested shape: hooks.Event[0] is a matcher-group whose `hooks`
+      // array holds the actual {type, command} entries.
+      expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('cc-cli wtf');
     });
 
     it('does NOT write .claude/settings.json when harness=openclaw', () => {

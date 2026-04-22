@@ -14,6 +14,18 @@
  *   Partner:  SessionStart + PreCompact + Stop +    (4 hooks)
  *             UserPromptSubmit
  *
+ * Shape note (why the nesting). Claude Code's settings.json schema for
+ * hooks is two-level: each event maps to an array of `{matcher, hooks}`
+ * groups, where `hooks` is itself an array of `{type, command}`
+ * entries. The outer `matcher` filters by tool name for tool-scoped
+ * hooks (PreToolUse/PostToolUse); for Stop/SessionStart/PreCompact/
+ * UserPromptSubmit the matcher has no semantic effect but must still
+ * be present and a string. An earlier version of this file emitted the
+ * flat `{command}` shape, which Claude Code rejected at settings-parse
+ * time — skipping the entire settings file. The probe at
+ * `scripts/audit-gate-probe/` is the regression harness that catches
+ * this class of schema drift.
+ *
  * The `Stop` hook command shell (`cc-cli audit`) lands in 0.7.3; until
  * then it's a stub that exits 0 (allows stops) so these settings
  * files are safe to ship to fresh hires. Once 0.7.3 ships, existing
@@ -33,12 +45,25 @@ export interface HookSettingsOpts {
 }
 
 /**
- * One entry in a hook array — Claude Code's hook config schema.
- * Expanded if we ever need matcher/type filtering; for now every hook
- * we wire runs unconditionally when the event fires.
+ * Innermost entry — the command Claude Code actually invokes when the
+ * hook fires. `type: 'command'` is the only variant we use; Claude
+ * Code supports other types (e.g. MCP-server-backed hooks) but they're
+ * not in scope for Claude Corp.
+ */
+export interface HookCommand {
+  type: 'command';
+  command: string;
+}
+
+/**
+ * One matcher group for an event. `matcher` is a string filter (tool
+ * name, pipe-separated list, or empty-for-match-all). For the four
+ * events Claude Corp wires, the matcher has no semantic effect — we
+ * pass empty string to match all triggers.
  */
 export interface HookEntry {
-  command: string;
+  matcher: string;
+  hooks: HookCommand[];
 }
 
 /**
@@ -53,6 +78,19 @@ export interface HookSettings {
     PreCompact?: HookEntry[];
     Stop?: HookEntry[];
     UserPromptSubmit?: HookEntry[];
+  };
+}
+
+/**
+ * Wrap a raw command string into Claude Code's expected nested shape.
+ * All four events Claude Corp wires use a catch-all matcher, so we
+ * factor the wrapping into a single helper instead of repeating the
+ * boilerplate at every call site.
+ */
+function commandEntry(command: string): HookEntry {
+  return {
+    matcher: '',
+    hooks: [{ type: 'command', command }],
   };
 }
 
@@ -74,16 +112,16 @@ export function buildHookSettings(opts: HookSettingsOpts): HookSettings {
   // SessionStart + Stop are universal — both kinds get wtf-on-boot
   // and audit-gated session-end.
   const hooks: HookSettings['hooks'] = {
-    SessionStart: [{ command: `cc-cli wtf --agent ${slug} --hook` }],
-    Stop: [{ command: `cc-cli audit --agent ${slug}` }],
+    SessionStart: [commandEntry(`cc-cli wtf --agent ${slug} --hook`)],
+    Stop: [commandEntry(`cc-cli audit --agent ${slug}`)],
   };
 
   // PreCompact + UserPromptSubmit are Partner-only:
   //   - Employees don't compact (per-step handoff via WORKLOG instead)
   //   - Employees don't receive founder DMs mid-session (Partners broker)
   if (opts.kind === 'partner') {
-    hooks.PreCompact = [{ command: `cc-cli wtf --agent ${slug} --hook` }];
-    hooks.UserPromptSubmit = [{ command: `cc-cli inbox check --agent ${slug} --inject` }];
+    hooks.PreCompact = [commandEntry(`cc-cli wtf --agent ${slug} --hook`)];
+    hooks.UserPromptSubmit = [commandEntry(`cc-cli inbox check --agent ${slug} --inject`)];
   }
 
   return { hooks };

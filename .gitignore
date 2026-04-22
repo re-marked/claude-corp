@@ -24,3 +24,7 @@ docs/
 
 # Claude
 .claude/
+# Exception: the audit-gate probe's settings.json is its load-bearing
+# piece (wires the Stop hook to the probe script). Track it explicitly.
+!scripts/audit-gate-probe/.claude/
+!scripts/audit-gate-probe/.claude/settings.json
