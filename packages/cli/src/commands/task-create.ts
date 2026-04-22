@@ -4,18 +4,30 @@ export async function cmdTaskCreate(opts: {
   title?: string;
   description?: string;
   priority?: string;
+  complexity?: string;
   assigned?: string;
   to?: string; // Alias for --assigned + hand (create + dispatch in one step)
   json: boolean;
 }) {
   if (!opts.title) {
-    console.error('Usage: cc-cli task create --title "..." [--to <agent-slug>] [--priority high]');
+    console.error('Usage: cc-cli task create --title "..." [--to <agent-slug>] [--priority high] [--complexity medium]');
     console.error('');
     console.error('Options:');
-    console.error('  --to <slug>     Create AND hand to agent (starts work immediately)');
-    console.error('  --assigned <id> Set assignee without dispatching (plan, hand later)');
-    console.error('  --priority      critical | high | normal | low (default: normal)');
+    console.error('  --to <slug>          Create AND hand to agent (starts work immediately)');
+    console.error('  --assigned <id>      Set assignee without dispatching (plan, hand later)');
+    console.error('  --priority           critical | high | normal | low (default: normal)');
+    console.error('  --complexity         trivial | small | medium | large (default: unassessed)');
+    console.error('                       Routes decomposition, model choice, bacteria weighting.');
+    console.error('                       `large` = decompose into a Contract; don\'t ship as standalone.');
     process.exit(1);
+  }
+
+  if (opts.complexity !== undefined) {
+    const valid = ['trivial', 'small', 'medium', 'large'];
+    if (!valid.includes(opts.complexity)) {
+      console.error(`Invalid --complexity: ${opts.complexity}. Expected one of: ${valid.join(', ')}.`);
+      process.exit(1);
+    }
   }
 
   const client = getClient();
@@ -44,6 +56,7 @@ export async function cmdTaskCreate(opts: {
     title: opts.title,
     description: opts.description,
     priority: opts.priority ?? 'normal',
+    complexity: opts.complexity as any,
     assignedTo: assigneeId,
     createdBy: founder.id,
     handTo, // Only dispatches if --to was provided

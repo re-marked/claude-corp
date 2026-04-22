@@ -23,6 +23,7 @@ const { values, positionals } = parseArgs({
     taskId: { type: 'string' },
     reason: { type: 'string' },
     priority: { type: 'string' },
+    complexity: { type: 'string' },
     project: { type: 'string' },
     lead: { type: 'string' },
     type: { type: 'string' },
@@ -157,7 +158,7 @@ Model commands:
   models fallback --chain "sonnet,haiku"    Set fallback chain
 
 Management commands:
-  task create --title "..." [--priority high] [--assigned <id>]
+  task create --title "..." [--priority high] [--complexity medium] [--assigned <id>]
   projects list | projects create --name "..." [--type development]
   teams list | teams create --name "..." --project <id> --lead <id>
   agent start --agent <id> | agent stop --agent <id>
@@ -551,12 +552,13 @@ async function run() {
           title: values.title as string | undefined,
           description: values.description as string | undefined,
           priority: values.priority as string | undefined,
+          complexity: values.complexity as string | undefined,
           assigned: values.assigned as string | undefined,
           to: values.to as string | undefined,
           json: !!values.json,
         });
       } else {
-        console.error('Usage: cc-cli task create --title "..." [--to <agent>] [--priority high]');
+        console.error('Usage: cc-cli task create --title "..." [--to <agent>] [--priority high] [--complexity medium]');
         process.exit(1);
       }
       break;
