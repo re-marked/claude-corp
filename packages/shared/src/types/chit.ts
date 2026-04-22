@@ -148,8 +148,29 @@ export interface TaskFields {
   assignee?: string | null;
   /** Concrete, checkable criteria that define "done." Null means not-yet-specified. */
   acceptanceCriteria?: string[] | null;
-  /** Free-form effort estimate (e.g. "~2 hours", "small"). Null means no estimate. */
-  estimate?: string | null;
+  /**
+   * Task complexity — structured signal that routes real decisions:
+   *
+   *   - `trivial`  — one-liner (typo, var rename, version bump). Haiku-suitable.
+   *                  Shouldn't trigger bacteria split on its own; many trivial
+   *                  tasks stack on one Employee cheaply.
+   *   - `small`    — bounded scope, typically one file, no cross-cutting
+   *                  changes. Haiku-suitable.
+   *   - `medium`   — multi-file, tests expected, some design thinking.
+   *                  Opus-worthy. One of these counts more than three trivials
+   *                  toward a bacteria-split threshold.
+   *   - `large`    — enough work that it SHOULD probably be decomposed into a
+   *                  contract. Planner treats a `large` task as a hint to
+   *                  decompose before accepting the hand; bacteria treats
+   *                  queue of large tasks as split-worthy even at low count.
+   *
+   * Null = unassessed. Agents drafting tasks SHOULD set this; tasks migrated
+   * from pre-chits are left null and can be backfilled on first touch.
+   *
+   * NOT wall-clock time — agents don't experience time like humans. The enum
+   * signals effort + decomposition + resource-allocation shape, not duration.
+   */
+  complexity?: 'trivial' | 'small' | 'medium' | 'large' | null;
   /** Member id of the Partner who most recently handed this task (audit trail — who's accountable for it landing on this Casket). Null if never handed. */
   handedBy?: string | null;
   /** ISO timestamp of the most recent hand. Null if never handed. */
