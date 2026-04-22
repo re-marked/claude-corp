@@ -44,6 +44,28 @@ export class ChitValidationError extends Error {
 
 // ─── Registry entry shape ───────────────────────────────────────────
 
+/**
+ * Destruction policy for ephemeral chits that age past their TTL without
+ * receiving a promotion signal. Read by the chit-lifecycle scanner (0.6).
+ *
+ * - `'destroy-if-not-promoted'` — the classic ephemeral-record lifecycle.
+ *   Used for chits whose content is semantically transient (handoffs
+ *   consumed by successor, dispatch-contexts superseded by git history,
+ *   role-level pre-brain-entries that lost the promotion race). Scanner
+ *   removes the file, writes a one-line destruction log entry.
+ *
+ * - `'keep-forever'` — never destroy. Used for chits whose content is
+ *   soul material the corp should not discard (observations). Scanner
+ *   flips `status: 'cold'` + `ephemeral: false` instead; file stays on
+ *   disk, still queryable (explicit `includeCold: true` opt-in),
+ *   demoted out of scanner tracking so per-tick work stays bounded.
+ *
+ * Non-ephemeral types (task, contract, casket, step-log) carry
+ * `'keep-forever'` as a sensible no-op — scanner only visits
+ * `ephemeral: true` chits regardless of this field.
+ */
+export type DestructionPolicy = 'destroy-if-not-promoted' | 'keep-forever';
+
 export interface ChitTypeEntry {
   /** Type id, matches a member of ChitTypeId. */
   id: ChitTypeId;
@@ -59,6 +81,8 @@ export interface ChitTypeEntry {
   terminalStatuses: readonly ChitStatus[];
   /** All statuses valid for this type. status transitions outside this set are rejected at the cc-cli boundary. */
   validStatuses: readonly ChitStatus[];
+  /** Policy for TTL-aged ephemeral chits without promotion signal. See DestructionPolicy docstring. Non-ephemeral types carry `'keep-forever'` as a no-op. */
+  destructionPolicy: DestructionPolicy;
   /** Pure validator for the `fields.<type>` payload. Throws ChitValidationError on invalid input. Returning void on success. */
   validate: (fields: unknown) => void;
 }
@@ -276,6 +300,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultStatus: 'draft',
     validStatuses: ['draft', 'active', 'completed', 'rejected', 'failed', 'closed'],
     terminalStatuses: ['completed', 'rejected', 'failed', 'closed'],
+    destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
     validate: validateTask,
   },
   {
@@ -286,6 +311,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultStatus: 'draft',
     validStatuses: ['draft', 'active', 'review', 'completed', 'rejected', 'failed', 'closed'],
     terminalStatuses: ['completed', 'rejected', 'failed', 'closed'],
+    destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
     validate: validateContract,
   },
   {
@@ -294,8 +320,11 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultEphemeral: true,
     defaultTTL: '7d',
     defaultStatus: 'active',
-    validStatuses: ['active', 'closed', 'burning'],
-    terminalStatuses: ['closed', 'burning'],
+    // `cold` reachable only via the 0.6 scanner's TTL-aged + keep-forever path;
+    // manual re-warm via `cc-cli chit update --status active` moves it back to active.
+    validStatuses: ['active', 'closed', 'burning', 'cold'],
+    terminalStatuses: ['closed', 'burning'], // cold is NOT terminal — it's re-warmable
+    destructionPolicy: 'keep-forever', // soul material; flip to cold instead of destroying
     validate: validateObservation,
   },
   {
@@ -306,6 +335,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultStatus: 'active',
     validStatuses: ['active'],
     terminalStatuses: [],
+    destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
     validate: validateCasket,
   },
   {
@@ -316,6 +346,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultStatus: 'active',
     validStatuses: ['active', 'closed', 'burning'],
     terminalStatuses: ['closed', 'burning'],
+    destructionPolicy: 'destroy-if-not-promoted', // consumed by successor; accumulating = noise
     validate: validateHandoff,
   },
   {
@@ -326,6 +357,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultStatus: 'active',
     validStatuses: ['active', 'closed', 'burning'],
     terminalStatuses: ['closed', 'burning'],
+    destructionPolicy: 'destroy-if-not-promoted', // superseded by git history on work completion
     validate: validateDispatchContext,
   },
   {
@@ -336,6 +368,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultStatus: 'active',
     validStatuses: ['active', 'closed', 'burning'],
     terminalStatuses: ['closed', 'burning'],
+    destructionPolicy: 'destroy-if-not-promoted', // unpromoted candidates are noise by definition
     validate: validatePreBrainEntry,
   },
   {
@@ -346,6 +379,7 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultStatus: 'active',
     validStatuses: ['active', 'completed', 'failed', 'closed'],
     terminalStatuses: ['completed', 'failed', 'closed'],
+    destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
     validate: validateStepLog,
   },
 ];

@@ -52,7 +52,15 @@ export type ChitStatus =
   | 'rejected'
   | 'failed'
   | 'closed'
-  | 'burning';
+  | 'burning'
+  /**
+   * Reached only by the chit-lifecycle scanner: TTL-aged ephemeral chit
+   * whose type has destructionPolicy='keep-forever' (observations) and
+   * had no promotion signal. File stays on disk, stays queryable, but
+   * scanner stops revisiting on subsequent ticks. Manually re-warmable
+   * via `cc-cli chit update --status active`.
+   */
+  | 'cold';
 
 /**
  * Scope determines ownership and where the chit lives on disk

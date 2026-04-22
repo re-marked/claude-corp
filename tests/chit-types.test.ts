@@ -102,6 +102,45 @@ describe('CHIT_TYPES registry invariants', () => {
       expect(entry.validStatuses).toContain(entry.defaultStatus);
     }
   });
+
+  it('every entry declares a destructionPolicy', () => {
+    for (const entry of CHIT_TYPES) {
+      expect(entry.destructionPolicy, `${entry.id} missing destructionPolicy`).toMatch(
+        /^(destroy-if-not-promoted|keep-forever)$/,
+      );
+    }
+  });
+
+  it('destructionPolicy per type matches the 0.6 design: handoffs/dispatch-contexts/pre-brain-entries destroy; observations and non-ephemeral types keep-forever', () => {
+    const byId = (id: string) => CHIT_TYPES.find((e) => e.id === id);
+
+    // Destruction-eligible — semantically transient, accumulating = noise
+    expect(byId('handoff')!.destructionPolicy).toBe('destroy-if-not-promoted');
+    expect(byId('dispatch-context')!.destructionPolicy).toBe('destroy-if-not-promoted');
+    expect(byId('pre-brain-entry')!.destructionPolicy).toBe('destroy-if-not-promoted');
+
+    // Soul material — cold on TTL-age, never destroyed
+    expect(byId('observation')!.destructionPolicy).toBe('keep-forever');
+
+    // Non-ephemeral — scanner never visits, policy is a no-op but must be set
+    expect(byId('task')!.destructionPolicy).toBe('keep-forever');
+    expect(byId('contract')!.destructionPolicy).toBe('keep-forever');
+    expect(byId('casket')!.destructionPolicy).toBe('keep-forever');
+    expect(byId('step-log')!.destructionPolicy).toBe('keep-forever');
+  });
+
+  it('observations can reach `cold` status (via 0.6 scanner), but cold is NOT terminal', () => {
+    const observation = CHIT_TYPES.find((e) => e.id === 'observation')!;
+    expect(observation.validStatuses).toContain('cold');
+    expect(observation.terminalStatuses).not.toContain('cold');
+  });
+
+  it('no other chit type allows `cold` (cold is observation-specific in 0.6)', () => {
+    for (const entry of CHIT_TYPES) {
+      if (entry.id === 'observation') continue;
+      expect(entry.validStatuses, `${entry.id} should not accept cold status`).not.toContain('cold');
+    }
+  });
 });
 
 describe('validator: task', () => {

@@ -84,7 +84,15 @@ export {
   getChitType,
   isKnownChitType,
 } from './chit-types.js';
-export type { ChitTypeEntry } from './chit-types.js';
+export type { ChitTypeEntry, DestructionPolicy } from './chit-types.js';
+export {
+  isReferenced,
+  isMentioned,
+  hasKeepTag,
+  hasAged,
+  computeVerdict,
+} from './chit-promotion.js';
+export type { ReferenceIndex, PromotionVerdict } from './chit-promotion.js';
 export {
   migrateTasksToChits,
   taskToChit,
