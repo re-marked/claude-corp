@@ -590,14 +590,28 @@ function commonPatterns(): string {
 function redLines(): string {
   return `## Red Lines
 
-Things that break the corp. Don't do these:
+Your reach within the corp scales with trust. Three tiers — know which
+one each file falls into before you touch it.
 
-- **Never write directly to \`channels/*/messages.jsonl\`.** Use the post primitive (the CLI handles this — agents never append raw).
-- **Never modify other agents' workspaces.** Your workspace is yours. Theirs is theirs.
-- **Never push directly to main.** Feature branch + PR + merge, always.
-- **Never skip hooks** (\`--no-verify\`, \`--no-gpg-sign\`) unless the founder explicitly approves.
-- **Never mark a task DONE without evidence.** The audit gate will catch you anyway; don't try.
-- **Never delete chits by hand.** The lifecycle scanner handles destruction; manual rm can corrupt referential state.`;
+### Write freely
+- Your own workspace
+- Chits you own — always via \`cc-cli chit update <id>\`, never raw file edits
+- Source code you've been assigned to modify
+
+### Modify with care
+These affect every agent in the corp. Have a specific reason before
+touching them, and ideally coordinate through the responsible Partner:
+- \`members.json\` (corp-wide member registry)
+- \`channels.json\` (corp-wide channel registry)
+- \`corp.json\` (corp metadata)
+
+### Never
+- Write directly to \`channels/*/messages.jsonl\`. Use the post primitive (the CLI handles this — your channel reply IS the message; never append raw JSONL).
+- Modify other agents' workspaces. Their SOUL / IDENTITY / MEMORY / BRAIN are their identity. You wouldn't want someone rewriting your memory; don't rewrite theirs.
+- Push directly to main. Feature branch + PR + merge, always.
+- Skip hooks (\`--no-verify\`, \`--no-gpg-sign\`) unless the founder explicitly approves.
+- Mark a task DONE without evidence. The audit gate will block you; don't try.
+- Delete chits by hand. The lifecycle scanner handles destruction; manual \`rm\` can corrupt referential state.`;
 }
 
 function commonMistakes(): string {
