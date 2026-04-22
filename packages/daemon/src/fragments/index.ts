@@ -10,7 +10,6 @@ import { receivingDelegationFragment } from './receiving-delegation.js';
 import { escalationChainFragment } from './escalation-chain.js';
 import { blockerEscalationFragment } from './blocker-escalation.js';
 import { failureRecoveryFragment } from './failure-recovery.js';
-import { fileLockingFragment } from './file-locking.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { inboxFragment } from './inbox.js';
@@ -39,7 +38,6 @@ const FRAGMENTS: Fragment[] = [
   escalationChainFragment,
   blockerEscalationFragment,
   failureRecoveryFragment,
-  fileLockingFragment,
   inboxFragment,
   dredgeFragment,
   coordinatorFragment,

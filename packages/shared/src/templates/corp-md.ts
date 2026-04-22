@@ -605,6 +605,22 @@ touching them, and ideally coordinate through the responsible Partner:
 - \`channels.json\` (corp-wide channel registry)
 - \`corp.json\` (corp metadata)
 
+**Lock before writing any shared file.** Locks live in
+\`<corpRoot>/locks.json\`. Protocol:
+1. Read \`locks.json\` and look up your target path.
+2. If locked by another agent within the last 30 min: STOP. Report the
+   conflict to your supervisor.
+3. If unlocked, or the lock is older than 30 min (stale): add your entry
+   (\`{filePath, lockedBy, lockedByName, lockedAt: ISO, reason}\`).
+4. Write your file.
+5. Remove your lock entry.
+
+Stale rule: any lock older than 30 min is evictable — you may take
+ownership and proceed. Your own workspace doesn't need locks.
+\`channels/*/messages.jsonl\` and \`locks.json\` itself are never locked
+(the former is never written raw anyway; the latter updates atomically
+and releases immediately).
+
 ### Never
 - Write directly to \`channels/*/messages.jsonl\`. Use the post primitive (the CLI handles this — your channel reply IS the message; never append raw JSONL).
 - Modify other agents' workspaces. Their SOUL / IDENTITY / MEMORY / BRAIN are their identity. You wouldn't want someone rewriting your memory; don't rewrite theirs.
