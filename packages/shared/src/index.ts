@@ -162,6 +162,7 @@ export {
   buildAuditPrompt,
   scanEvidence,
   parseTranscript,
+  promotePendingHandoff,
 } from './audit/index.js';
 export type {
   HookEventName,
@@ -173,6 +174,8 @@ export type {
   TouchedFile,
   AuditPromptInput,
   EvidenceScanResult,
+  HandoffPromotionResult,
+  PendingHandoffPayload,
 } from './audit/index.js';
 
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';

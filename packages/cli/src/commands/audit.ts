@@ -51,6 +51,7 @@ import {
   getCurrentStep,
   casketExists,
   inferKind,
+  promotePendingHandoff,
   type Chit,
   type HookInput,
   type AuditDecision,
@@ -140,6 +141,8 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
 
   if (!opts.agent) {
     // No agent slug → can't resolve casket/member. Fail-open + log.
+    // No promotion here either — without an agent slug we can't find
+    // the workspace where .pending-handoff.json would live.
     logAuditError(corpRoot, 'unknown', new Error('--agent flag required on audit hook invocation'));
     emitDecision({ decision: 'approve' });
     return;
@@ -152,13 +155,14 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
   // on this very invocation, not wait for an extra turn.
   if (consumePendingOverride(corpRoot, slug)) {
     logAuditDecision(corpRoot, slug, { decision: 'approve' }, { reason: 'override-consumed' });
-    emitDecision({ decision: 'approve' });
+    approveAndMaybePromote(corpRoot, slug);
     return;
   }
 
   const member = resolveMember(corpRoot, slug);
   if (!member) {
-    // Unknown agent; substrate gap. Fail-open.
+    // Unknown agent; substrate gap. Fail-open. Skip promotion — no
+    // member means we can't find their workspace anyway.
     logAuditError(corpRoot, slug, new Error(`member not found for slug: ${slug}`));
     emitDecision({ decision: 'approve' });
     return;
@@ -193,7 +197,54 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
     tier3Count: openTier3Inbox.length,
   });
 
-  emitDecision(decision);
+  if (decision.decision === 'approve') {
+    approveAndMaybePromote(corpRoot, slug);
+  } else {
+    emitDecision(decision);
+  }
+}
+
+// ─── Promotion on approve ───────────────────────────────────────────
+
+/**
+ * Every approve path that holds a valid agent slug routes through here
+ * so a pending handoff (from `cc-cli done`) gets promoted to WORKLOG.md
+ * + handoff chit + task close + Casket clear before the session ends.
+ *
+ * Promotion is best-effort: if it fails, we still emit approve (the
+ * agent's session still ends). Any errors are logged to the agent's
+ * .audit-log.jsonl so the founder can inspect afterwards. Trapping
+ * the session because promotion failed would violate the fail-open
+ * invariant the audit command holds everywhere else.
+ *
+ * No-ops cleanly when there's no .pending-handoff.json — approves
+ * that didn't come from a `cc-cli done` (e.g. override, idle, tier-3-
+ * clear) skip the promotion path harmlessly.
+ */
+function approveAndMaybePromote(corpRoot: string, slug: string): void {
+  try {
+    const workspace = findAgentWorkspace(corpRoot, slug);
+    if (workspace) {
+      const promotion = promotePendingHandoff(corpRoot, slug, workspace);
+      if (promotion.promoted) {
+        logAuditDecision(
+          corpRoot,
+          slug,
+          { decision: 'approve' },
+          {
+            event: 'handoff-promoted',
+            worklogPath: promotion.worklogPath,
+            handoffChitId: promotion.handoffChitId,
+            closedTaskId: promotion.closedTaskId,
+            promotionErrors: promotion.errors,
+          },
+        );
+      }
+    }
+  } catch (err) {
+    logAuditError(corpRoot, slug, err);
+  }
+  emitDecision({ decision: 'approve' });
 }
 
 // ─── Stdin reader ───────────────────────────────────────────────────
