@@ -153,6 +153,28 @@ export {
   incrementSessionCount,
 } from './casket.js';
 
+// Audit Gate — the 0.7.3 pure decision engine + transcript parser +
+// evidence scanner + prompt template. The cc-cli audit command wires
+// these together at the hook boundary; everything below is pure
+// (except transcript.ts which reads the JSONL file).
+export {
+  runAudit,
+  buildAuditPrompt,
+  scanEvidence,
+  parseTranscript,
+} from './audit/index.js';
+export type {
+  HookEventName,
+  HookInput,
+  AuditDecision,
+  AuditInput,
+  RecentActivity,
+  ToolCall,
+  TouchedFile,
+  AuditPromptInput,
+  EvidenceScanResult,
+} from './audit/index.js';
+
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 
