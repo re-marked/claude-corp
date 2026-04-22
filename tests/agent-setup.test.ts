@@ -92,16 +92,44 @@ describe('setupAgentWorkspace', () => {
   });
 
   describe('CLAUDE.md gating by harness', () => {
-    it('writes CLAUDE.md when harness=claude-code', () => {
+    it('writes CLAUDE.md (thin 0.7 shape) when harness=claude-code', () => {
       const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot, { harness: 'claude-code' }));
       const agentAbs = join(corpRoot, agentDir);
 
       expect(existsSync(join(agentAbs, 'CLAUDE.md'))).toBe(true);
       const content = readFileSync(join(agentAbs, 'CLAUDE.md'), 'utf-8');
-      expect(content).toContain('# I am CEO');
+      // Thin shell has the displayName heading (not the old "# I am X" form)
+      expect(content).toContain('# CEO');
+      // Agent-authored soul files ARE @imported
       expect(content).toContain('@./SOUL.md');
-      expect(content).toContain('@./AGENTS.md');
-      expect(content).toContain('@./TOOLS.md');
+      expect(content).toContain('@./IDENTITY.md');
+      expect(content).toContain('@./USER.md');
+      expect(content).toContain('@./MEMORY.md');
+      // But AGENTS.md / TOOLS.md are intentionally NOT imported — their
+      // content lives in CORP.md, rendered dynamically by cc-cli wtf
+      expect(content).not.toContain('@./AGENTS.md');
+      expect(content).not.toContain('@./TOOLS.md');
+    });
+
+    it('writes .claude/settings.json with hook wiring when harness=claude-code', () => {
+      const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot, { harness: 'claude-code' }));
+      const agentAbs = join(corpRoot, agentDir);
+      const settingsPath = join(agentAbs, '.claude', 'settings.json');
+
+      expect(existsSync(settingsPath)).toBe(true);
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      // Master rank → Partner kind → full hook set
+      expect(settings.hooks).toHaveProperty('SessionStart');
+      expect(settings.hooks).toHaveProperty('Stop');
+      expect(settings.hooks).toHaveProperty('PreCompact');
+      expect(settings.hooks).toHaveProperty('UserPromptSubmit');
+      expect(settings.hooks.SessionStart[0].command).toContain('cc-cli wtf');
+    });
+
+    it('does NOT write .claude/settings.json when harness=openclaw', () => {
+      const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot, { harness: 'openclaw' }));
+      const agentAbs = join(corpRoot, agentDir);
+      expect(existsSync(join(agentAbs, '.claude', 'settings.json'))).toBe(false);
     });
 
     it('does NOT write CLAUDE.md when harness=openclaw', () => {
@@ -125,7 +153,10 @@ describe('setupAgentWorkspace', () => {
       const agentAbs = join(corpRoot, agentDir);
 
       const content = readFileSync(join(agentAbs, 'CLAUDE.md'), 'utf-8');
-      expect(content).toContain('# I am Herald');
+      // Thin shell: bare "# <displayName>" (was "# I am X" under the fat template)
+      expect(content).toContain('# Herald');
+      // Identity line carries kind inferred from rank (worker → employee)
+      expect(content).toContain('You are Herald, a worker (employee)');
     });
   });
 
