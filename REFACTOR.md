@@ -99,7 +99,7 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
 | 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 |
-| 1 | Foundation | Employee/Partner split, Casket, Hand, CLAUDE.md migration | Fix the root problem: sessions stop being identity carriers | 12-16 (some sub-projects simpler once Chits exist) |
+| 1 | Foundation | Employee/Partner split, Casket, Hand, per-step session cycling | Fix the root problem: sessions stop being identity carriers. CLAUDE.md architecture now lives in 0.7. | 10-14 (Project 1.5 absorbed into 0.7; some sub-projects simpler once Chits exist) |
 | 2 | Workflow Substrate | Blueprint-as-molecule, Deacon, self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 10-12 |
 | 3 | Autonomous Operations | Witness, Refinery, auto-recovery | Corp heals itself without human intervention | 10-12 |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
@@ -129,7 +129,7 @@ A Chit is a markdown file with YAML frontmatter:
 ```yaml
 ---
 id: chit-abc123
-type: task | observation | contract | casket | handoff | dispatch-context | pre-brain-entry | step-log | ...
+type: task | observation | contract | casket | handoff | dispatch-context | pre-brain-entry | step-log | inbox-item | ...
 status: draft | active | review | completed | rejected | failed | closed | burning
 ephemeral: false                 # true = auto-expires unless promoted (see 0.6 lifecycle)
 ttl: 2026-04-28T00:00:00Z        # optional, only meaningful when ephemeral=true
@@ -198,6 +198,12 @@ Each type registers its configuration:
 - `dispatch-context` — ephemeral, tracks an in-flight dispatch between agents; burns on dispatch completion.
 - `pre-brain-entry` — ephemeral by default at the role level; auto-promotes to permanent via 4-signal rule and becomes part of the role's distilled pre-BRAIN library.
 - `step-log` — non-ephemeral (Temporal memoization pattern), one per Task-execution phase, used for crash recovery.
+- `inbox-item` — **ephemeral by default**, tier-aware lifecycle (see 0.7 inbox system). Three tiers encoded as per-instance `fields.inbox-item.tier: 1 | 2 | 3`. Policy varies by tier via the per-instance destructionPolicy override:
+  - **Tier 1 (ambient)** — `destructionPolicy: 'destroy-if-not-promoted'`, 24h TTL. Broadcast notifications, system events (Failsafe restarts, Herald digests). Genuinely fire-and-forget noise.
+  - **Tier 2 (direct)** — `destructionPolicy: 'keep-forever'`, 7d TTL. Peer @mentions, inter-agent DMs, task handoffs from peers. Goes cold on TTL; preserves audit trail.
+  - **Tier 3 (critical)** — `destructionPolicy: 'keep-forever'`, 30d TTL. Founder DMs, escalations, direct task assignments from supervisor, audit failures. Goes cold on TTL but blocks Audit Gate (0.7) while unresolved.
+
+  Created by the daemon on the recipient's behalf (router when it sees @mention, hire/hand commands on dispatch, `cc-cli escalate` on escalation). Agents never create their own inbox items — they're always the RECIPIENT. Resolution via `cc-cli inbox respond <id>` (closes with `status: completed`, references the response chit) or `cc-cli inbox dismiss <id>` (closes with `status: rejected`, records dismissal reason). Tier 3 items reject `--not-important` dismissal at the CLI boundary.
 
 ### Sub-projects
 
@@ -335,7 +341,7 @@ Multiple `--type`, `--status`, `--tag`, `--scope` flags are OR'd within the same
 **File paths:**
 - `packages/shared/src/observations.ts` (rewrite as Chit-wrapper; `cc-cli observe` aliased from `cc-cli chit create --type observation`)
 - `scripts/migrate-observations-to-chits.ts`
-- `packages/shared/src/templates/fragments/observations.md` (update: agents learn to write structured observations)
+- Observation-related teaching moved into existing templates (rules.ts, workspace fragment) in the 0.5 implementation. Post-0.7, agent-facing observation guidance will live in CORP.md sections rendered by `cc-cli wtf`, not in a standalone fragment file. No new workspace file created.
 
 **Test strategy:** structured observation query returns categorized results; legacy-prose observations migrate with best-effort categorization (NOTE as default).
 
@@ -406,11 +412,15 @@ Observations still get `ephemeral: true` at creation AND still get scanned for p
 
 The distinction between **destroyed** and **cold** is the whole point of the 0.6 split: observations are preserved but demoted out of the active-tracking pool so scanner work doesn't grow linearly with corp age.
 
-**Encoded in chit-types.ts registry, not in lifecycle code.** Each ChitTypeEntry carries:
-- `destructionPolicy: 'destroy-if-not-promoted' | 'keep-forever'` — branches the TTL-aged path
+**Encoded in chit-types.ts registry, with per-instance override.** Each ChitTypeEntry carries:
+- `destructionPolicy: 'destroy-if-not-promoted' | 'keep-forever'` — registry-level default for this type
 - `defaultTtlMs: number | null` — default TTL at creation (observations: 24h; handoffs: 1h; dispatch-contexts: on-work-complete, not time-based; pre-brain-entries: 7d)
 
-The scanner reads these; the policy per type is pinned in one place. Future changes to whether observations ever get destroyed = one-line registry flip, not a scanner rewrite.
+**Per-instance destructionPolicy override.** A chit's frontmatter can carry its own `destructionPolicy: <value>` that takes precedence over the registry default. The scanner reads instance-first, falls back to registry. This is load-bearing for types whose policy varies BY INSTANCE (not just by type) — most notably `inbox-item` (tier 1 destroys, tier 2/3 cool) but also covers edge cases like "this specific handoff should be preserved for audit; mark it keep-forever."
+
+Writing the override is a one-line frontmatter field; reading it is one extra line in the scanner. Minimal cost, meaningful flexibility. A chit with no explicit override inherits type default — no migration churn on existing chits.
+
+The scanner reads these; the policy per type is pinned in one place, with instance-level escape valve. Future changes to whether observations ever get destroyed = one-line registry flip, not a scanner rewrite.
 
 **Query defaults** (important — otherwise cold observations flood every list):
 - `queryChits({ type: 'observation' })` default: excludes `status: 'cold'`.
@@ -461,26 +471,456 @@ The scanner reads these; the policy per type is pinned in one place. Future chan
 **Depends on:** 0.1, 0.5 (observation chit type)
 **PRs:** 2-3
 
-### 0.7 — Agent tooling: Chit fragment, CLAUDE.md template updates, SOUL/AGENTS guidance
+### 0.7 — Dynamic system-prompt architecture (`cc-cli wtf` + CORP.md + Audit Gate + Inbox)
 
-**Problem.** Agents need to know how to create, read, query, close Chits naturally. This is the behavioral/prompting layer that makes the substrate load-bearing.
+**Problem.** Our current Claude Code agent boot pattern uses `@import`ed workspace files (AGENTS.md, TOOLS.md) carrying behavioral rules, CLI reference, and substrate vocabulary. This has three failure modes:
 
-**Scope.**
-- New Chit fragment `packages/shared/src/templates/fragments/chits.md` — explains the primitive, lists key cc-cli commands, shows examples by type.
-- CLAUDE.md template updated to `@import` the Chit fragment.
-- SOUL/AGENTS/TOOLS templates updated with Chit-first patterns: "when you notice X, write a Chit of type=observation via `cc-cli chit create --type observation ...`. Don't write free prose to daily files — that's deprecated."
+1. **Drift** — AGENTS.md and TOOLS.md go stale between refactor cycles. An agent reading them reads whatever was true the day they were created. When we ship 0.6's chit lifecycle, every existing agent has AGENTS.md/TOOLS.md that don't know about cold chits, the re-warm path, or the new CLI flags.
+
+2. **No discipline gate on completion** — agents can claim DONE without verification. The behavioral rule "audit before handoff" is prose an agent may or may not follow. "Backend Engineer marks incomplete work as done" is the most commonly-cited corp failure mode, and it happens because the discipline is unreinforced.
+
+3. **Inbox is just markdown noise** — INBOX.md is an append-only file. There's no read/unread, no tier, no lifecycle. Agents either read the whole thing every turn (token waste) or skip it (miss signal). Founders can't tell what's been engaged-with vs ignored.
+
+Gas Town solves failure mode 1 via a different architecture: thin static CLAUDE.md as survival anchor, full context injected dynamically at SessionStart and PreCompact via a CLI command (`gt prime`) that renders templates and emits a system-reminder block. No `@imports`. Content is always current because it's always regenerated at session boundaries.
+
+0.7 adopts that architecture AND adds the discipline mechanisms (Audit Gate, Tiered Inbox) that our failure modes demand.
+
+**The reframe.** Drop the old 0.7 ("write a chits fragment, `@import` it, update templates"). Replace with:
+
+1. New command `cc-cli wtf` — emits CORP.md contents + situational header as a single system-reminder block. The agent's "where tf am I, what tf do I need to do" answer.
+2. New generated file `CORP.md` — flat comprehensive manual, written by `cc-cli wtf` each invocation, gitignored. The corp's orchestration reference.
+3. Shrink CLAUDE.md template to a survival anchor (~60 lines).
+4. Delete AGENTS.md and TOOLS.md as workspace files — their content moves to CORP.md sections, rendered by `cc-cli wtf`.
+5. Hook wiring — SessionStart, PreCompact, Stop, UserPromptSubmit — all routed through `cc-cli wtf` or its siblings.
+6. The Audit Gate — Stop hook that blocks handoff/completion until an audit prompt is answered satisfactorily.
+7. The Tiered Inbox — inbox-item chits (type added to registry in prior commit), three tiers, CLI commands for respond/dismiss.
+
+### 0.7 — Sub-tasks
+
+#### 0.7.1 — `cc-cli wtf` + CORP.md generation
+
+**Scope.** Build the command + its output templates. Kind-aware (Partner vs Employee) + role-aware + scope-aware.
+
+**`cc-cli wtf` behavior:**
+1. Reads member record (slug from env or `--agent` flag) → resolves kind, role, scope, sandbox path.
+2. Reads Casket chit → current_step Task chit (if any) + its title/fields.
+3. Reads WORKLOG.md for Employee predecessor handoff XML (if exists — Employee only).
+4. Queries open inbox-item chits grouped by tier.
+5. Renders CORP.md from shared template + kind/role-specific fill-ins, writes to `<workspace>/CORP.md` (gitignored).
+6. Prints to stdout: a `<system-reminder>` block containing the situational header + CORP.md contents inline. Claude Code captures as injected context.
+
+**CORP.md structure** (inspired by Gas Town's GAS.md; adapted for Claude Corp):
+
+```
+# Claude Corp — Orchestration Manual
+
+This file contains everything you need to know to work in this corp.
+Generated by \`cc-cli wtf\` at <ISO timestamp>.
+
+## Architecture
+  [corp folder tree: agents/, projects/, channels/, chits/ by type + scope]
+
+## Roles
+  Town-level: Founder, CEO, Herald, HR, Janitor, Adviser, Failsafe (table)
+  Project/team: Partners-by-role, Employees-by-role (table)
+
+## The Two Non-Negotiables
+
+  ### 1. The Casket Imperative
+  If your Casket has work, execute it immediately. No confirmation.
+  No polling. Dispatch IS your assignment.
+
+  ### 2. The Audit Gate
+  You cannot hand off (Employee) or compact (Partner) without self-auditing.
+  The Stop/PreCompact hook blocks completion until audit passes.
+  Checklist: acceptance criteria verified, files read-back, build output,
+  test output, git status, inbox resolved.
+
+## Core Concepts
+  Chits, Caskets, Contracts, Tasks (with complexity), Observations,
+  Dreams, BRAIN, pre-BRAIN (role-shared)
+
+## Chit Lifecycle
+  Ephemeral vs permanent; destruction-eligible vs keep-forever (per-type table);
+  Three terminal states (promoted / destroyed / cold);
+  4 promotion signals; re-warming cold via \`cc-cli chit update --status active\`
+
+## Partner vs Employee (kind section — varies per agent)
+  Your kind + what it means for your sessions + your persistence model
+
+## Task Complexity (the decomposition rule)
+  Rubric (trivial/small/medium/large); large = decompose into Contract
+
+## Session Model (kind section)
+  Partner: compaction at ~70% via /compact; PreCompact hook re-injects wtf
+  Employee: per-step handoff via Dredge reading WORKLOG.md XML; Stop hook runs audit
+
+## Commands Quick Reference
+  Chit CRUD, task wrappers, observation wrappers, hand + escalate,
+  channel communication, inbox (respond/dismiss), system (wtf, status, agents)
+
+## Communication
+  Channels: @mention dispatches; your reply IS the post
+  DMs: out-of-channel asks
+  Inbox tiers: ambient (auto-expire), direct (7d cool), critical (blocks audit)
+
+## The Audit Gate — what the hook checks
+  Per acceptance criterion: verified?
+  Per claimed file: read-back verifies content?
+  Build: ran, output?
+  Tests: relevant ones ran, output?
+  Git status: clean?
+  Inbox: all tier 3 resolved?
+
+## File Paths (your workspace)
+  Agent-authored (persist, @imported by thin CLAUDE.md): SOUL.md, IDENTITY.md,
+    USER.md, MEMORY.md, BRAIN/, chits/observation/
+  Operational (live state): STATUS.md, INBOX.md (pointer to chits), TASKS.md
+  Generated (don't edit): CORP.md, WORKLOG.md (your session summary)
+
+## Common Patterns
+  "I noticed something worth keeping", "my task is too big", "I need a partner",
+  "I need to hand off mid-work", "I got pinged but it's noise"
+
+## Red Lines
+  Never write to channels/*/messages.jsonl directly — use the post primitive
+  Never modify other agents' workspaces
+  Never push directly to main
+  Never skip hooks (--no-verify) without explicit founder approval
+
+## Common Mistakes (numbered)
+  Pinging back to say thanks (no @mention = end of exchange);
+  marking DONE without running acceptance checks;
+  dismissing tier 3 inbox items as not-important;
+  ignoring handed task to re-plan from scratch
+```
+
+**Situational header** (prepended to CORP.md in wtf stdout, NOT in CORP.md file):
+
+```
+You are <display-name>, <role> (<partner|employee>).
+Sandbox: <path>.
+Current task: <casket.current_step-chit-id — title>
+Handoff from predecessor: <XML if exists, Employee only>
+Inbox: <N> unresolved — <tier-breakdown>
+  [T3] <N critical> items
+  [T2] <N direct> items
+  (Tier 1 counted separately; auto-expires)
+Generated: <ISO>. CORP.md at: <path>. Re-run \`cc-cli wtf\` anytime.
+
+---
+
+<full CORP.md contents>
+```
 
 **File paths:**
-- `packages/shared/src/templates/fragments/chits.md` (new)
-- `packages/shared/src/templates/claude-md.ts` (add @import)
-- `packages/shared/src/templates/agents.ts` (update: Chit-first patterns)
-- `packages/shared/src/templates/tools.ts` (update: cc-cli chit reference)
-- `packages/shared/src/templates/soul.ts` (no change — soul is substrate-agnostic)
+- `packages/cli/src/commands/wtf.ts` (new — the command)
+- `packages/shared/src/templates/corp-md.ts` (new — builds CORP.md from shared base + kind/role sections)
+- `packages/shared/src/templates/corp-md-partner.ts` and `corp-md-employee.ts` (kind-specific sections)
+- `packages/daemon/src/fragments/chits.ts` (new for OpenClaw — emits same content at dispatch time, preserving the "both substrates work the same way" invariant)
+- `packages/shared/src/templates/claude-md.ts` (shrink to ~60 lines; drop `@import` of AGENTS.md and TOOLS.md)
+- `packages/shared/src/templates/agents.ts` (delete — content moves to corp-md templates)
+- `packages/shared/src/templates/tools.ts` (delete — content moves to corp-md templates)
 
-**Test strategy:** agent in a test dispatch creates, reads, queries, and closes a Chit via cc-cli; verify successful round-trip via the daemon log.
+**Failure-mode behavior for `cc-cli wtf`.** The command is on the critical path for every session start. If it fails the agent boots disoriented. Three explicit fallbacks:
 
-**Depends on:** 0.1, 0.2
+1. **Daemon not required.** wtf reads local files + the chit store. Does NOT talk to the daemon. Works when daemon is down — the whole point is surviving disorientation including "why isn't the daemon up?"
+2. **Missing member record.** If `--agent <slug>` can't be resolved in members.json, wtf prints a `<system-reminder>` explaining the failure + what the founder needs to run to fix it, then exits non-zero. Claude Code surfaces the error to the agent instead of silent failure.
+3. **Corrupted state.** If the Casket chit or other required file is malformed, wtf emits a degraded-mode context ("Your Casket is malformed, escalate to CEO. Continue with caution.") and exits zero so session-start hooks don't fail catastrophically.
+
+A silent wtf failure is the worst outcome — agent has no idea they're running blind. These three fallbacks mean every failure path produces visible agent-facing text.
+
+**Test strategy:**
+- Unit: Partner vs Employee wtf output includes kind-appropriate sections, excludes others.
+- Unit: role-specific sections rendered from role data (e.g., role pre-BRAIN pointer for Employees).
+- Integration: run `cc-cli wtf --agent <slug>` → CORP.md written, stdout block structurally correct.
+- Integration: `cc-cli wtf` with no casket.current_step → header says "No current task; check INBOX or TASKS."
+- Integration: re-running wtf twice in a row — CORP.md contents identical (no nondeterminism).
+
+**Depends on:** 0.1 (Chits), 0.2 (cc-cli chit), 0.3-0.5 (tasks/contracts/observations as chits), 0.6 (lifecycle scanner — so chit lifecycle section is accurate)
+**PRs:** 3-4
+
+#### 0.7.2 — Hook wiring + thin CLAUDE.md template
+
+**Scope.** Wire Claude Code hooks to fire `cc-cli wtf` at session boundaries; write the shrunken CLAUDE.md template that directs the agent to expect dynamic injection.
+
+**Hook table:**
+
+| Hook | Partner | Employee |
+|---|---|---|
+| SessionStart | `cc-cli wtf --agent <slug>` | `cc-cli wtf --agent <slug>` |
+| PreCompact | `cc-cli wtf --agent <slug> --hook` | not relevant (Employees don't compact) |
+| Stop | audit hook (see 0.7.3) | audit hook (see 0.7.3) |
+| UserPromptSubmit | `cc-cli inbox check --inject` | not needed (Employees don't receive founder DMs mid-session — Partners do) |
+
+**Thin CLAUDE.md template structure** (~60 lines):
+
+```
+# <Display Name>
+
+You are <display-name>, a <role> (<kind>) in the <corp-name> corporation.
+
+## Survival protocol
+If your context has been compacted, or this is a fresh session, or you're
+disoriented at any point: run \`cc-cli wtf\` in a Bash tool call. It injects
+the corp manual + your situational context.
+
+## Workspace discipline
+You live at <workspace-path>. Stay here. Other agents' workspaces are off-limits.
+
+## The single critical rule
+Employees: "Your task ends with \`cc-cli hand-complete\`. The Stop hook will
+audit your work first — you cannot exit a session until it passes."
+Partners: "Your context ends with \`/compact\`. The PreCompact hook audits
+first — you cannot compact until it passes. Never push to main directly,
+ever. That's corp-breaking."
+
+## Your soul files (agent-authored, @imported)
+@./SOUL.md
+@./IDENTITY.md
+@./USER.md
+@./MEMORY.md
+
+## Your live operational state
+@./STATUS.md      # you maintain this — brief status line, current focus
+@./TASKS.md       # auto-rendered digest of your open task chits (not hand-maintained)
+
+## Your inbox
+Inbox items are chits, not a file. Run \`cc-cli inbox list\` to see open ones.
+Your wtf header shows the summary: count per tier, most-recent peek.
+
+## What you'll get dynamically
+SessionStart auto-injects CORP.md + your situation. Don't @import AGENTS.md
+or TOOLS.md — those no longer exist as workspace files. Everything the corp
+tells you, you get from \`cc-cli wtf\`.
+```
+
+**CLAUDE.local.md variant for Employees in rigs:** when an Employee's sandbox is inside a project rig that has its own tracked CLAUDE.md, write to CLAUDE.local.md instead so the project's git diff stays clean. Dedup via sentinel string in file (Gas Town pattern).
+
+**File paths:**
+- `packages/shared/src/templates/claude-md.ts` (shrink)
+- `packages/shared/src/templates/agents.ts` (delete — content in corp-md)
+- `packages/shared/src/templates/tools.ts` (delete — content in corp-md)
+- `packages/shared/src/agent-setup.ts` (update: stop writing AGENTS.md/TOOLS.md; write settings.json with hook entries)
+- `packages/shared/src/templates/settings-json.ts` (new — generates `.claude/settings.json` with SessionStart/PreCompact/Stop/UserPromptSubmit hooks wired to cc-cli)
+
+**Hook settings.json shape:**
+```json
+{
+  "hooks": {
+    "SessionStart": [{"command": "cc-cli wtf --agent <slug> --hook"}],
+    "PreCompact": [{"command": "cc-cli wtf --agent <slug> --hook"}],
+    "Stop": [{"command": "cc-cli audit --agent <slug>"}],
+    "UserPromptSubmit": [{"command": "cc-cli inbox check --agent <slug> --inject"}]
+  }
+}
+```
+
+**Test strategy:**
+- Unit: CLAUDE.md template renders to <80 lines, no @import of AGENTS.md/TOOLS.md.
+- Unit: CLAUDE.local.md path chosen when rig has tracked CLAUDE.md.
+- Integration: fresh Partner hire → workspace has CLAUDE.md + settings.json with 4 hooks, no AGENTS.md, no TOOLS.md.
+- Integration: fresh Employee slot → workspace has CLAUDE.local.md (or CLAUDE.md if rig has no CLAUDE.md), settings.json with Stop + SessionStart hooks (no PreCompact, no UserPromptSubmit).
+
+**Depends on:** 0.7.1
 **PRs:** 2
+
+#### 0.7.3 — The Audit Gate (Stop hook)
+
+**Scope.** Build `cc-cli audit` — invoked by the Stop hook, blocks completion until audit passes. Gas Town's blockable-Stop-hook pattern applied to our acceptance-criteria + inbox discipline.
+
+**`cc-cli audit` behavior:**
+1. Reads the agent's current Casket → current_step Task chit.
+2. Parses `fields.task.acceptanceCriteria[]`.
+3. Reads recent tool-use history from session transcript (or WORKLOG.md if Employee).
+4. Queries open inbox-item chits at Tier 3.
+5. Emits an audit prompt as a `<system-reminder>` block AND a JSON decision object:
+   - If audit checklist passes: `{"decision": "approve"}` → Stop proceeds, session ends.
+   - If audit checklist fails: `{"decision": "block", "reason": "<prose>"}` → Claude Code blocks the stop, agent continues with the audit prompt in their context.
+
+**The audit prompt injected on block:**
+```
+<audit-check>
+You tried to end your session. Before I let you go, audit your work:
+
+For the task chit-t-<id> "<title>":
+  Acceptance criteria:
+    [ ] <criterion 1> — verify and cite evidence in your next turn
+    [ ] <criterion 2> — ditto
+    ...
+
+  Files you claimed to write/edit — re-read each with the Read tool
+  and confirm the content matches what you intended:
+    - <path 1>
+    - <path 2>
+    ...
+
+  Build: did you run \`pnpm build\`? Show the output.
+  Tests: did you run the relevant vitest tests? Show the output.
+  Git status: run \`git status\` and report.
+
+Unresolved Tier 3 inbox items: <count>
+  For each: respond, dismiss with real reason, or justify leaving it
+  for next session.
+
+Once every checkbox is verifiably complete, run \`cc-cli hand-complete\`
+(Employee) or \`/compact\` (Partner) again. The audit will re-run. If
+it passes, your session will end.
+</audit-check>
+```
+
+**What counts as "verifiably complete":**
+- Acceptance criteria: the agent's next turn must contain specific references to how each was met (commit hash, test name + output, file + line number, etc.). The audit doesn't parse these — the Stop hook just re-runs. If the agent is honest, they produce evidence; if they try to lie, the hook blocks again and they loop.
+- Inbox: Tier 3 items must have `status != active` by the time Stop hook re-runs.
+- Unreferenced: the audit is a loop until the agent's state reaches a provable DONE shape. Mechanical.
+
+**Escape valves for blocked compaction / handoff.** The audit gate is strict, which creates real stuck-state risk for Partners mid-conversation with the founder. Two mechanisms prevent the worst jams:
+
+1. **"Carry to next session" resolution for inbox items.** An agent waiting on human input can resolve a Tier 3 item as `status: active, fields.inbox-item.carriedForward: true, fields.inbox-item.carryReason: "waiting on founder clarification on X"`. This counts as resolution for audit purposes (item has an explicit "I looked at this and made a call") but preserves the item as active for when the context arrives. Audit accepts it; agent proceeds. The `carriedForward` flag is visible in the next wtf so the agent doesn't lose track.
+2. **`cc-cli audit --override --reason "text"` (founder-only).** If the agent is truly stuck and the founder is present to unblock, the founder can bypass the audit gate with a reason. Written to `chits/_log/audit-overrides.jsonl` so overrides are always traceable post-hoc. The override is rare by design — if it becomes common, the audit criteria are wrong and need fixing, not bypassing.
+
+These exist to keep the mechanism strict without being a trap. A Partner with legitimate "I need human input first" is not the failure mode audit is preventing; audit is preventing "I'm done even though tests fail."
+
+**`cc-cli hand-complete` command (Employee completion signal).** Employees invoke this when they believe their task is done. It:
+1. Writes the session summary to `WORKLOG.md` in the Employee's sandbox — structured XML with `<handoff>` tags (current_step, completed, next_action, open_question, sandbox_state, notes) per the Decisions-Made XML schema. This is what Dredge reads when the NEXT session of this slot boots (Project 1.6 consumer). The agent authors the content during their session; hand-complete commits it atomically on session end.
+2. Triggers the Stop hook via Claude Code's session termination path (which fires `cc-cli audit`).
+3. If audit blocks, the Stop is rejected, Claude Code keeps the session alive, and the agent sees the audit prompt injected. WORKLOG.md is NOT yet committed — hand-complete rolls back the write until audit passes.
+4. If audit approves, the Stop proceeds: WORKLOG.md is finalized, the Casket's `current_step` chit is closed as completed, the chit lifecycle is triggered (creates a `handoff` chit referencing the WORKLOG if another session is expected), then the session exits cleanly.
+
+**WORKLOG authoring during session:** the agent updates WORKLOG.md incrementally as they work (as they do today). hand-complete validates the XML structure + applies the final touches. If WORKLOG.md is missing or malformed at hand-complete time, audit blocks — the agent must author a valid session summary before they can exit.
+
+There is no analogous `partner-compact-start` command — Partners trigger PreCompact via Claude Code's native `/compact` slash command, and the PreCompact hook (wired to `cc-cli audit`) runs identically.
+
+**`cc-cli audit` command shape:**
+```
+cc-cli audit --agent <slug> [--hook-context <json>]
+```
+Exits with a JSON decision object on stdout (Claude Code reads this from the hook return):
+```json
+{"decision": "approve"}                 // session may end / compact may proceed
+{"decision": "block", "reason": "..."}  // Claude Code blocks the stop/compact; reason injected as system-reminder
+```
+
+**Claude Code blocking-hook format — verify before implementing.** The Stop + PreCompact hooks blocking pattern (decision object on stdout) is what Gas Town's research showed works for their Stop hook. Before 0.7.3 implementation starts, build a minimal probe: write a Stop hook that returns `{"decision": "block", "reason": "test"}` and confirm Claude Code actually rejects the stop + injects the reason. If the exact format differs, adjust the audit.ts output accordingly. (Claude Code's hook docs are the authoritative reference — we're relying on a documented feature, not an assumption.)
+
+**File paths:**
+- `packages/cli/src/commands/audit.ts` (new — the command the Stop hook invokes)
+- `packages/cli/src/commands/hand-complete.ts` (new — Employee completion signal)
+- `packages/daemon/src/audit-engine.ts` (optional: pulled-out prompt-rendering logic; keeps cc-cli thin)
+
+**Test strategy:**
+- Unit: audit blocks when acceptance criteria look unaddressed.
+- Unit: audit approves when all criteria have evidence references in recent turns.
+- Unit: audit JSON output shape matches Claude Code's expected hook format.
+- Integration: simulate Stop hook → audit blocks → agent responds with evidence → Stop re-runs → audit approves → session ends.
+- Integration: Tier 3 inbox unresolved → audit blocks → agent resolves → audit approves.
+- Integration: live-probe test — end-to-end Stop hook in a sandbox Claude Code session verifies the block actually blocks (catches any Claude Code hook-format drift early).
+
+**Depends on:** 0.7.1, 0.7.2
+**PRs:** 2-3 (extra PR absorbs the live-probe verification)
+
+#### 0.7.4 — The Tiered Inbox (inbox-item CLI commands)
+
+**Scope.** Build the CLI surface for the inbox-item chit type (type added to registry in prior commit). Router integration: when daemon detects an @mention or a DM or an escalation, it creates the appropriate inbox-item chit.
+
+**CLI commands:**
+```
+cc-cli inbox list [--tier 1|2|3] [--include-resolved]
+cc-cli inbox respond <id>        # routes based on source (reply DM, close task, etc.)
+cc-cli inbox dismiss <id> [--not-important | --reason "text"]
+cc-cli inbox check [--inject]    # UserPromptSubmit hook integration
+```
+
+**`cc-cli inbox check --inject` semantics (UserPromptSubmit hook path):**
+1. Queries open inbox-item chits for the agent at Tier 3 first, then Tier 2, created SINCE the last wtf render.
+2. If any new items, emits a `<system-reminder>` block listing them (tier + from + subject) on stdout. Claude Code captures it and prepends to the agent's next turn, so the agent sees "hey, N new items arrived since you last looked" alongside the founder's latest prompt.
+3. If no new items: emits nothing (exit 0, empty stdout). No noise, no tokens wasted.
+4. Updates a tiny `<workspace>/.inbox-last-checked` timestamp file so "since last check" is tracked per-session without needing a daemon query.
+
+This is async delivery: founder DMs a Partner mid-work → router creates Tier 3 inbox-item → on the Partner's next UserPromptSubmit tick, the hook injects a heads-up before they respond to whatever the user just typed. No polling, no message stuffing into AGENTS.md.
+
+**Discipline enforcement at CLI boundary:**
+- `inbox dismiss --not-important` on a Tier 3 item → exit with error, message: "Tier 3 items require substantive engagement. Respond, dismiss with specific reason, or justify leaving for next session."
+- `inbox dismiss --reason "x"` where reason is fewer than a minimum-length threshold on Tier 3 → rejected similarly.
+- Tier 1 items freely accept either form.
+
+**Router integration:**
+- When router processes an @mention in a channel, it creates an `inbox-item` chit at `scope: agent:<target-slug>` with `tier: 2`, `from: <sender-id>`, `subject: <first line of message>`, `source: "channel"`, `sourceRef: "<channel-name>"`, `references: ["<channel>:<offset>"]`.
+- When `cc-cli hand` dispatches a task, it creates `tier: 3` inbox-item.
+- When `cc-cli escalate` triggers, `tier: 3`.
+- System events (Failsafe restart, clock tick, Herald digest) → `tier: 1`.
+
+**File paths:**
+- `packages/cli/src/commands/inbox.ts` (new — subcommand dispatcher)
+- `packages/cli/src/commands/inbox/list.ts`, `respond.ts`, `dismiss.ts`, `check.ts`
+- `packages/daemon/src/router.ts` (update: emit inbox-item chit on @mention detection)
+- `packages/daemon/src/hand.ts` (update: emit inbox-item chit on task dispatch)
+- `packages/cli/src/commands/escalate.ts` (update: emit inbox-item chit — though escalate itself lands in Project 1.4)
+
+**Test strategy:**
+- Unit: creating a Tier 1/2/3 inbox-item chit produces correct `destructionPolicy` override + TTL.
+- Unit: `cc-cli inbox dismiss` rejects `--not-important` on Tier 3.
+- Integration: @mention in channel produces inbox-item chit for the target agent; that agent's `cc-cli wtf` header lists it under [T2].
+- Integration: `cc-cli inbox respond <id>` closes the inbox-item chit with `status: completed`, references the response.
+- Integration: Tier 1 ambient item ages past 24h → scanner destroys it (confirms 0.6 + 0.6-extension per-instance override integration).
+- Integration: Tier 3 unresolved across a Stop hook → audit blocks.
+
+**Depends on:** 0.1, 0.2, 0.6 (scanner + per-instance destructionPolicy), 0.7.1-0.7.3
+**PRs:** 2
+
+#### 0.7.5 — Transition from existing agents
+
+**Scope.** What happens to live corps with existing agents when 0.7 ships — their workspaces still have AGENTS.md, TOOLS.md, full CLAUDE.md with `@import`s of both. A fresh 0.7 binary in an existing corp would generate conflicting state (two CORP.md sources — one from `@import` of the old schema, one from `cc-cli wtf`) unless we handle the transition explicitly.
+
+**Three options evaluated:**
+
+- **(a) No migration, new-agents-only cutover.** Existing agents keep their AGENTS.md/TOOLS.md workspace files; 0.7 applies only to hires from 0.7 onward. Cleanest code, but means existing agents never benefit from drift-protection until re-hired. Unacceptable for corps that don't churn agents often.
+- **(b) Opt-in re-hire.** `cc-cli agent rewire --agent <slug>` rewrites the agent's workspace to 0.7 shape: shrinks CLAUDE.md, deletes AGENTS.md + TOOLS.md, writes settings.json with hooks. Agent needs a fresh session after rewire (their next compaction or restart picks up new files). Preserves soul files (SOUL.md, IDENTITY.md, USER.md, MEMORY.md, BRAIN/). Founder-triggered, safe, reversible by git.
+- **(c) Auto-migrate on corp upgrade.** First boot of a 0.7-daemon against a pre-0.7 corp automatically rewires every agent. Fast cutover, but surprises. Founder might not be ready for the shift.
+
+**Lean: (b).** Matches the refactor's respect for founder control ("nothing auto-destroys soul material"). Rewire is explicit, per-agent, rollback-able via git (workspaces are git-tracked). Corps can migrate at their own pace. Provides a clean `--dry-run` path to preview the changes before committing.
+
+**`cc-cli agent rewire` behavior:**
+1. Backs up existing CLAUDE.md, AGENTS.md, TOOLS.md to `.claude-backup/<timestamp>/` in the workspace.
+2. Writes new thin CLAUDE.md from the 0.7 template.
+3. Deletes AGENTS.md and TOOLS.md (content now lives in CORP.md rendered by wtf).
+4. Writes `.claude/settings.json` with the four hook entries.
+5. Fires `cc-cli wtf --agent <slug>` once to generate initial CORP.md.
+6. Prints: "Rewired <slug>. Next session will boot with the 0.7 architecture. Backup at .claude-backup/<ts>/."
+
+**Corp-level state migration:** corps also need a new field in corp.json: `architecture_version: "0.7"` (or similar) so the daemon knows which template to use when hiring new agents. Pre-0.7 corps have no such field; daemon treats absence as pre-0.7. When `cc-cli corp upgrade` runs (explicit founder command), the version is bumped and new hires default to 0.7 shape.
+
+**File paths:**
+- `packages/cli/src/commands/agent-rewire.ts` (new)
+- `packages/cli/src/commands/corp-upgrade.ts` (new — bumps architecture_version)
+- `packages/shared/src/corp-json.ts` (add architecture_version field to Corporation type)
+- `packages/shared/src/agent-setup.ts` (update: read architecture_version, choose template variant)
+
+**Test strategy:**
+- Integration: rewire a pre-0.7 agent, confirm new files exist + old ones backed up + settings.json correct.
+- Integration: `--dry-run` prints changes without writing.
+- Regression: pre-0.7 agents with no rewire still function (their AGENTS.md/TOOLS.md are stale but not broken; they run under the old model until explicitly rewired).
+- Integration: new hire after corp upgrade gets 0.7 shape automatically.
+
+**Depends on:** 0.7.1-0.7.4
+**PRs:** 1-2
+
+### 0.7 — Project ship criterion
+
+0.7 is done when:
+- A fresh Partner hire boots with a thin CLAUDE.md (<80 lines, no @import of deleted templates), settings.json wired with all 4 hooks, and their first session gets `cc-cli wtf` auto-fired by SessionStart — injecting CORP.md + situational header as system-reminder.
+- A Partner running `/compact` fires PreCompact → wtf re-injects current context into the window before the summary is written; compacted session resumes correctly.
+- A Partner trying to end a session without completing audit is blocked by the Stop hook until evidence is provided.
+- A fresh Employee slot on bacteria-spawn gets CLAUDE.local.md (if rig has tracked CLAUDE.md), the Stop hook active, and their first session runs `cc-cli wtf` with Employee-shape output + predecessor handoff.
+- An Employee trying to `cc-cli hand-complete` without auditing is blocked.
+- An @mention in #general produces a Tier 2 inbox-item chit on the target; that agent's next `cc-cli wtf` shows it in the header.
+- A founder DM produces a Tier 3 inbox-item; agent cannot dismiss as not-important; audit blocks handoff while it's unresolved.
+- AGENTS.md and TOOLS.md no longer exist as workspace files anywhere in the corp; all their content now lives in CORP.md rendered dynamically.
+
+### 0.7 — Dependencies and PR count
+
+**Depends on:** 0.1, 0.2, 0.3, 0.4, 0.5, 0.5.1, 0.6 (+ 0.6 extension for per-instance destructionPolicy override)
+**PRs:** 10-14 (across five sub-tasks including 0.7.5 transition)
 
 ---
 
@@ -712,26 +1152,13 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.3 (chain)
 **PRs:** 3-4
 
-### 1.5 — Fragment → CLAUDE.md migration
+### 1.5 — [ABSORBED INTO 0.7]
 
-Pull fragment render outputs into .md files in agent workspaces. Update CLAUDE.md template to `@import` them: `@./SOUL.md @./IDENTITY.md @./CASKET.md @./TOOLS.md @./AGENTS.md`. Corp-level state (roster, channel list) becomes a live-maintained CORP.md at corp root, also imported. Delete fragment injection call in claude-code harness. Keep fragments only for OpenClaw.
+**This sub-project was the original "fragment → CLAUDE.md migration" idea — pull fragments into `.md` files, update CLAUDE.md to `@import` them, maintain a live-updated CORP.md via file watcher.**
 
-**Scope:** extract fragments to .md, update CLAUDE.md template, remove injection, maintain CORP.md live.
-**File paths:**
-- `packages/daemon/src/fragments/*.ts` (migrate static content out of render functions into `.md` templates under `packages/shared/src/templates/fragments/`)
-- `packages/shared/src/templates/claude-md.ts` (CLAUDE.md template adds `@import` lines for each migrated fragment)
-- `packages/daemon/src/harness/claude-code-harness.ts` (remove fragment-injection block; keep for openclaw-harness)
-- `packages/daemon/src/corp-md-writer.ts` (new: daemon watches members.json / channels.json changes, regenerates CORP.md at corp root)
-- `packages/daemon/src/harness/openclaw-harness.ts` (unchanged — fragments still injected here; flag this as the legacy path)
+**Superseded by 0.7 (Dynamic system-prompt architecture).** 0.7's approach is mechanically better: thin static CLAUDE.md as survival anchor, full context injected dynamically via `cc-cli wtf` at SessionStart / PreCompact hooks. CORP.md is regenerated on every wtf invocation (not watcher-maintained), guaranteeing freshness. AGENTS.md and TOOLS.md are deleted as workspace files entirely — their content moves into CORP.md sections rendered by wtf.
 
-**Test strategy:**
-- Unit: CLAUDE.md template emits correct @imports for all migrated fragments.
-- Integration: dispatching a claude-code agent shows CLAUDE.md-imported content in init events; no system-context wrapper; dispatch succeeds end-to-end.
-- Integration: CORP.md regenerates when members.json changes (simulate a hire).
-- Regression: openclaw dispatches still inject fragments (existing harness tests should pass unchanged).
-
-**Depends on:** nothing (can run parallel to 1.1-1.4)
-**PRs:** 3-4
+If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. The work that was here has been absorbed — do not implement 1.5 as originally written (it would directly conflict with 0.7's architecture).
 
 ### 1.6 — Per-step session cycling for Employees (activate Dredge, Chit-ify handoffs)
 
