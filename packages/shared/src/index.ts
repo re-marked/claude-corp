@@ -14,6 +14,7 @@ export type {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskComplexity,
   Team,
   TeamStatus,
   Corporation,

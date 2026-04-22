@@ -161,15 +161,23 @@ Now — and ONLY now — write the plan. Use this format:
 ## Phases
 
 ### Phase 1: [name]
-- [ ] Task: [specific, actionable with file paths]
-- [ ] Task: [...]
+- [ ] Task: [specific, actionable with file paths] — complexity: trivial|small|medium|large
+- [ ] Task: [...] — complexity: ...
 - Assign to: [agent role]
 - Dependencies: none
 
 ### Phase 2: [name]
-- [ ] Task: [...]
+- [ ] Task: [...] — complexity: ...
 - Assign to: [agent role]
 - Dependencies: Phase 1
+
+**Sizing tasks (required).** Every task gets a \`complexity\` label. Rubric:
+- \`trivial\` — one-liner, single-file mechanical change (typo, rename, version bump)
+- \`small\` — bounded scope, one file, no design questions
+- \`medium\` — multi-file, tests expected, some design thinking
+- \`large\` — cross-cutting + design uncertainty + tests + docs
+
+**Decomposition rule.** If a task comes out as \`large\`, STOP and split it. A large standalone task is almost always actually a Contract with sub-tasks. Decompose it into a phase of 2–4 medium/small tasks with clear dependencies. Large tasks inside plans are a smell — they mean the plan didn't go deep enough.
 
 ## Risks
 - [What could go wrong and mitigation]

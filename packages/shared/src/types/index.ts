@@ -22,6 +22,7 @@ export type {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskComplexity,
 } from './task.js';
 
 export type {

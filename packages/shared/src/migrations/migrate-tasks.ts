@@ -101,6 +101,7 @@ export function taskToChit(task: Task): Chit<'task'> {
     priority: task.priority,
     assignee: task.assignedTo ?? null,
     acceptanceCriteria: task.acceptanceCriteria ?? null,
+    complexity: task.complexity ?? null,
     dueAt: task.dueAt ?? null,
     loopId: task.loopId ?? null,
     handedBy: task.handedBy ?? null,

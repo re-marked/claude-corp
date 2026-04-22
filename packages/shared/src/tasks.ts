@@ -22,7 +22,7 @@
  */
 
 import { basename, dirname } from 'node:path';
-import type { Task, TaskStatus, TaskPriority } from './types/task.js';
+import type { Task, TaskStatus, TaskPriority, TaskComplexity } from './types/task.js';
 import type { Chit, ChitStatus, TaskFields } from './types/chit.js';
 import {
   createChit,
@@ -45,6 +45,7 @@ export interface CreateTaskOpts {
   parentTaskId?: string | null;
   blockedBy?: string[] | null;
   acceptanceCriteria?: string[];
+  complexity?: TaskComplexity | null;
   dueAt?: string | null;
 }
 
@@ -86,6 +87,7 @@ function chitToTask(chit: Chit<'task'>): Task {
     handedAt: fields.handedAt ?? null,
     teamId: fields.teamId ?? null,
     acceptanceCriteria: fields.acceptanceCriteria ?? null,
+    complexity: fields.complexity ?? null,
     dueAt: fields.dueAt ?? null,
     loopId: fields.loopId ?? null,
     createdAt: chit.createdAt,
@@ -198,6 +200,7 @@ export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
     handedAt: null,
     teamId: null,
     acceptanceCriteria: opts.acceptanceCriteria ?? null,
+    complexity: opts.complexity ?? null,
     dueAt: opts.dueAt ?? null,
     loopId: null,
     createdAt: now,

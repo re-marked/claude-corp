@@ -194,6 +194,30 @@ describe('validator: task', () => {
     );
   });
 
+  it('accepts all four complexity levels', () => {
+    for (const c of ['trivial', 'small', 'medium', 'large'] as const) {
+      expect(() =>
+        entry.validate({ title: 'x', priority: 'normal', complexity: c }),
+      ).not.toThrow();
+    }
+  });
+
+  it('accepts null or omitted complexity', () => {
+    expect(() =>
+      entry.validate({ title: 'x', priority: 'normal', complexity: null }),
+    ).not.toThrow();
+    expect(() => entry.validate({ title: 'x', priority: 'normal' })).not.toThrow();
+  });
+
+  it('rejects invalid complexity value', () => {
+    expect(() =>
+      entry.validate({ title: 'x', priority: 'normal', complexity: 'huge' }),
+    ).toThrow(/complexity/);
+    expect(() =>
+      entry.validate({ title: 'x', priority: 'normal', complexity: '~2 hours' }),
+    ).toThrow(/complexity/);
+  });
+
   it('rejects non-object input', () => {
     expect(() => entry.validate('string payload')).toThrow(/task/);
     expect(() => entry.validate(null)).toThrow(/task/);
