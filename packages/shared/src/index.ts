@@ -311,7 +311,12 @@ export { USER_TEMPLATE } from './templates/user.js';
 export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarness } from './templates/environment.js';
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
-export { buildClaudeMd, type ClaudeMdTemplateOpts } from './templates/claude-md.js';
+export {
+  buildClaudeMd,
+  buildThinClaudeMd,
+  type ClaudeMdTemplateOpts,
+  type ThinClaudeMdOpts,
+} from './templates/claude-md.js';
 export { buildCorpMd, type CorpMdOpts, type CorpMdKind } from './templates/corp-md.js';
 export {
   buildWtfHeader,
