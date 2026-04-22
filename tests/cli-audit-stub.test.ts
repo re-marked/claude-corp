@@ -2,17 +2,18 @@ import { describe, it, expect, vi } from 'vitest';
 import { cmdAudit } from '../packages/cli/src/commands/audit.js';
 
 /**
- * Smoke coverage for the 0.7.2 cc-cli audit stub. The stub's whole job
- * is "approve everything so the Stop hook doesn't block sessions until
- * 0.7.3 ships the real audit gate." A crash at invocation time would
- * silently break every fresh Claude Code hire's session-end flow.
+ * Fail-open invariant coverage for the 0.7.3 real cc-cli audit.
  *
- * 0.7.3 will replace the stub wholesale — these tests will be rewritten
- * against the real audit logic. Keeping them minimal so the churn is
- * trivial when that happens.
+ * Rich decision-tree coverage lives in tests/audit-engine.test.ts
+ * (pure function, canned inputs). This file tests the I/O-shell
+ * guarantees: even when cmdAudit is invoked outside a live corp
+ * (no members.json, no resolvable state) or without --agent, it
+ * MUST emit an approve decision and not throw. Trapping a session
+ * because audit crashed on startup is the worst failure mode the
+ * refactor thesis explicitly protects against.
  */
 
-describe('cmdAudit (0.7.2 stub — approves everything)', () => {
+describe('cmdAudit — fail-open invariants (I/O shell)', () => {
   it('writes a JSON approve decision to stdout and does not throw', async () => {
     const writes: string[] = [];
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
@@ -31,7 +32,7 @@ describe('cmdAudit (0.7.2 stub — approves everything)', () => {
     expect(parsed).toEqual({ decision: 'approve' });
   });
 
-  it('accepts but ignores --json flag (stub output shape is fixed regardless)', async () => {
+  it('accepts --json flag without crashing (fail-open still emits approve JSON)', async () => {
     const writes: string[] = [];
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
       writes.push(String(chunk));
@@ -48,7 +49,7 @@ describe('cmdAudit (0.7.2 stub — approves everything)', () => {
     expect(JSON.parse(combined).decision).toBe('approve');
   });
 
-  it('accepts omitted --agent (the stub ignores it; 0.7.3 real command will require it)', async () => {
+  it('accepts omitted --agent without crashing (logs the missing-slug error, fail-open approves)', async () => {
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as never);
     try {
       await expect(cmdAudit({ json: false })).resolves.not.toThrow();
