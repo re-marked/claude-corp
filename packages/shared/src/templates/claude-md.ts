@@ -66,11 +66,34 @@ export interface ThinClaudeMdOpts {
  */
 export function buildThinClaudeMd(opts: ThinClaudeMdOpts): string {
   const criticalRule = opts.kind === 'employee'
-    ? `Your task ends with \`cc-cli hand-complete\`. The Stop hook will audit
+    ? `Your task ends with \`cc-cli done\`. The Stop hook will audit
 your work first — you cannot exit a session until audit passes.`
     : `Your context ends with \`/compact\`. The PreCompact hook audits first
 — you cannot compact until audit passes. Never push to main directly,
 ever. That's corp-breaking.`;
+
+  // Soul-file @imports are Partner-only. Project 1.1's DNA split says
+  // Employees don't have soul at the slot level — no SOUL, no USER, no
+  // MEMORY/BRAIN. Their identity is captured by role + displayName in
+  // members.json and rendered dynamically into CORP.md's Role section
+  // via the role registry. @importing files Employees don't have would
+  // log "import not found" warnings every dispatch; kind-conditional
+  // rendering keeps the prompt honest.
+  const soulFilesSection = opts.kind === 'partner'
+    ? `## Your soul files (agent-authored, persist across sessions)
+
+@./SOUL.md
+@./IDENTITY.md
+@./USER.md
+@./MEMORY.md`
+    : `## Your identity
+
+You don't have soul files at the slot level — Employees are ephemeral
+role-slots; identity lives at the role-registry level, not per-slot.
+Your role (\`${opts.role}\`) is rendered into CORP.md dynamically by
+\`cc-cli wtf\`, always current. When you earn promotion to Partner
+(\`cc-cli tame\`), soul files get created; until then, your role is
+your identity.`;
 
   return `# ${opts.displayName}
 
@@ -93,12 +116,7 @@ chits) but never write outside your own sandbox.
 
 ${criticalRule}
 
-## Your soul files (agent-authored, persist across sessions)
-
-@./SOUL.md
-@./IDENTITY.md
-@./USER.md
-@./MEMORY.md
+${soulFilesSection}
 
 ## Your live operational state
 

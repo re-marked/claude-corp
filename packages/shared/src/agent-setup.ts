@@ -127,8 +127,20 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   const memberId = makeMemberId(displayName);
   const now = new Date().toISOString();
 
-  // Create workspace directories
-  mkdirSync(join(agentAbsDir, 'brain'), { recursive: true });
+  // Effective kind for this setup. Post-1.1 callers pass opts.kind
+  // explicitly; legacy call sites fall through to 'partner' (every
+  // existing agent is persistent-named by profile, so the default
+  // matches reality). This single value drives every kind-aware
+  // branch in this function.
+  const effectiveKind = opts.kind ?? 'partner';
+
+  // Create workspace directories. skills/ is universal. brain/ is
+  // Partner-only — Employees don't accumulate persistent memory at
+  // the slot level (per-step handoff via WORKLOG; role-level pre-
+  // BRAIN will be the shared memory surface when 4.x lands).
+  if (effectiveKind === 'partner') {
+    mkdirSync(join(agentAbsDir, 'brain'), { recursive: true });
+  }
   mkdirSync(join(agentAbsDir, 'skills'), { recursive: true });
 
   // Sync corp-level skills to agent workspace
@@ -142,12 +154,27 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   // "environment" for semantic clarity (these are rules + env info,
   // regardless of the AGENTS.md / TOOLS.md filesystem handle).
   const templateHarness = (opts.harness === 'claude-code' ? 'claude-code' : 'openclaw') as 'claude-code' | 'openclaw';
-  writeFileSync(join(agentAbsDir, 'SOUL.md'), soulContent, 'utf-8');
+
+  // Kind-aware soul-file routing (Project 1.1). Partners get the full
+  // soul-file stack; Employees skip SOUL / USER / MEMORY / IDENTITY
+  // / BOOTSTRAP because at the slot level they don't have soul —
+  // identity lives at the role level (role registry + pre-BRAIN when
+  // 4.x lands). Shipping these files for Employees would be the
+  // hollow-soul problem the refactor thesis explicitly rejects.
+  //
+  // When kind is undefined (legacy call sites), effectiveKind falls
+  // back to 'partner' at the top of the function — the pre-1.1 shape
+  // is preserved so round-trips through setupAgentWorkspace stay
+  // idempotent for existing agents.
+  if (effectiveKind === 'partner') {
+    writeFileSync(join(agentAbsDir, 'SOUL.md'), soulContent, 'utf-8');
+    writeFileSync(join(agentAbsDir, 'MEMORY.md'), MEMORY_TEMPLATE, 'utf-8');
+    writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? identityTemplate(displayName, rank), 'utf-8');
+    writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? USER_TEMPLATE, 'utf-8');
+  }
+  // Always written — operational, not soul:
   writeFileSync(join(agentAbsDir, 'AGENTS.md'), agentsContent ?? rulesTemplate({ rank, harness: templateHarness }), 'utf-8');
   writeFileSync(join(agentAbsDir, 'HEARTBEAT.md'), heartbeatContent ?? heartbeatTemplate(rank), 'utf-8');
-  writeFileSync(join(agentAbsDir, 'MEMORY.md'), MEMORY_TEMPLATE, 'utf-8');
-  writeFileSync(join(agentAbsDir, 'IDENTITY.md'), identityContent ?? identityTemplate(displayName, rank), 'utf-8');
-  writeFileSync(join(agentAbsDir, 'USER.md'), userContent ?? USER_TEMPLATE, 'utf-8');
   writeFileSync(join(agentAbsDir, 'TOOLS.md'), defaultEnvironment({
     corpRoot,
     agentDir: agentAbsDir,
@@ -233,37 +260,47 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
       'utf-8',
     );
   }
-  // CEO gets the founding conversation guide; hired agents get the absorption shield
-  // with culture vocabulary injected at hire time when available
-  let bootstrapContent = CEO_BOOTSTRAP;
-  if (rank !== 'master') {
-    let sharedTags: string[] = [];
-    try {
-      sharedTags = getSharedTags(corpRoot).map(t => t.tag);
-    } catch { /* culture data unavailable — fine, bootstrap works without it */ }
-
-    // Resolve hiring agent's display name from members.json
-    let hiringAgentName: string | undefined;
-    if (opts.spawnedBy) {
+  // BOOTSTRAP.md — first-run absorption shield. Partners only (Project
+  // 1.1): Employees are ephemeral role-slots, they don't have a "first
+  // run" to be shielded into. The bootstrap file exists to help a NEW
+  // Partner absorb corp vocabulary + culture before they have to
+  // respond to anything — a one-time gift, not load-bearing after that
+  // (agents delete it themselves when onboarding completes). Employees
+  // arrive already-scoped by role; they boot into work immediately.
+  //
+  // CEO gets the founding conversation guide; hired Partners get the
+  // absorption shield with culture vocabulary injected when available.
+  if (effectiveKind === 'partner') {
+    let bootstrapContent = CEO_BOOTSTRAP;
+    if (rank !== 'master') {
+      let sharedTags: string[] = [];
       try {
-        const allMembers = readConfig<Array<{ id: string; displayName: string }>>(join(corpRoot, MEMBERS_JSON));
-        const spawner = allMembers.find(m => m.id === opts.spawnedBy);
-        if (spawner) hiringAgentName = spawner.displayName;
-      } catch { /* name resolution failed — fine, bootstrap works without it */ }
+        sharedTags = getSharedTags(corpRoot).map(t => t.tag);
+      } catch { /* culture data unavailable — fine, bootstrap works without it */ }
+
+      // Resolve hiring agent's display name from members.json
+      let hiringAgentName: string | undefined;
+      if (opts.spawnedBy) {
+        try {
+          const allMembers = readConfig<Array<{ id: string; displayName: string }>>(join(corpRoot, MEMBERS_JSON));
+          const spawner = allMembers.find(m => m.id === opts.spawnedBy);
+          if (spawner) hiringAgentName = spawner.displayName;
+        } catch { /* name resolution failed — fine, bootstrap works without it */ }
+      }
+
+      let hasCulture = false;
+      try {
+        hasCulture = readCulture(corpRoot) !== null;
+      } catch { /* fine, bootstrap works without it */ }
+
+      bootstrapContent = buildAgentBootstrap({
+        sharedTags: sharedTags.length > 0 ? sharedTags : undefined,
+        hiringAgentName,
+        hasCulture,
+      });
     }
-
-    let hasCulture = false;
-    try {
-      hasCulture = readCulture(corpRoot) !== null;
-    } catch { /* fine, bootstrap works without it */ }
-
-    bootstrapContent = buildAgentBootstrap({
-      sharedTags: sharedTags.length > 0 ? sharedTags : undefined,
-      hiringAgentName,
-      hasCulture,
-    });
+    writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), bootstrapContent, 'utf-8');
   }
-  writeFileSync(join(agentAbsDir, 'BOOTSTRAP.md'), bootstrapContent, 'utf-8');
 
   // Agent config
   const agentConfig: AgentConfig = {
