@@ -26,7 +26,7 @@ import type { Chit } from '../types/chit.js';
  * fires at the end of every assistant turn; PreCompact fires before a
  * Partner's `/compact` summarization. Same audit logic runs for both
  * with one cosmetic branch — the audit prompt's "exit primitive" line
- * says "run `cc-cli hand-complete`" for Stop+Employee, "/compact"
+ * says "run `cc-cli done`" for Stop+Employee, "/compact"
  * for PreCompact+Partner, etc.
  *
  * `unknown` lets the engine accept future event names without crashing

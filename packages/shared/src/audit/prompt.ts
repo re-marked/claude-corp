@@ -5,7 +5,7 @@
  * Kind-aware + event-aware so the "exit primitive" line names the right
  * next action:
  *
- *   Stop + Employee     → `cc-cli hand-complete`
+ *   Stop + Employee     → `cc-cli done`
  *   Stop + Partner      → `/compact` (Partners hand off via compaction)
  *   PreCompact + Partner → `/compact` (re-try compaction once audit passes)
  *
@@ -153,7 +153,7 @@ function endOfSessionVerb(event: HookEventName, kind: 'partner' | 'employee'): s
  */
 function tryAgainVerb(event: HookEventName, kind: 'partner' | 'employee'): string {
   if (event === 'PreCompact') return 'try `/compact` again';
-  if (kind === 'employee') return 'run `cc-cli hand-complete` again';
+  if (kind === 'employee') return 'run `cc-cli done` again';
   return 'try to end the session again';
 }
 
