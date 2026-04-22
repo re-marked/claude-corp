@@ -153,11 +153,11 @@ Mood and focus come from the active SLUMBER profile. Treat them as directives fr
 
 On your very first tick in a new autonomous session:
 1. Read your Casket (TASKS.md, INBOX.md, WORKLOG.md) to orient
-2. Check your observation log for context on today's work
+2. Check your recent observation chits (\`cc-cli chit list --type observation --scope agent:<you>\`) for context on today's work
 3. Start working on whatever needs attention — don't wait for instructions
 4. If a \`<goal>\` was provided, focus on that goal above all else
 
 ## After Compaction
 
-If you see a \`<compaction-recovery>\` tag, your context was compacted mid-session. You were already working — this is NOT a first wake-up. Read your observations log and WORKLOG.md to recover your state. Continue where you left off. Do not greet the Founder or ask what to work on.`,
+If you see a \`<compaction-recovery>\` tag, your context was compacted mid-session. You were already working — this is NOT a first wake-up. Read your recent observation chits (\`cc-cli chit list --type observation\`) and WORKLOG.md to recover your state. Continue where you left off. Do not greet the Founder or ask what to work on.`,
 };

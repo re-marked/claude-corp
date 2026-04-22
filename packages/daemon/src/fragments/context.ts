@@ -98,11 +98,11 @@ function buildContinuityHint(agentDir: string, now: Date): string {
     }
   } catch {}
 
-  // Check today's observation log
+  // Check today's observation chits
   try {
     const stats = getObservationStats(agentDir);
     if (stats && stats.entryCount > 0) {
-      hints.push(`Today's observation log has ${stats.entryCount} entries (last at ${stats.lastEntry}). Read it for context on what you've done today.`);
+      hints.push(`You have ${stats.entryCount} observation chit${stats.entryCount === 1 ? '' : 's'} today (last at ${stats.lastEntry}). Query with \`cc-cli chit list --type observation\` for context on what you've done.`);
     }
   } catch {}
 
