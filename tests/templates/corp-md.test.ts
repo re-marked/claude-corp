@@ -229,6 +229,60 @@ describe('buildCorpMd — determinism', () => {
   });
 });
 
+describe('buildCorpMd — section ordering (canonical sequence)', () => {
+  // Renumber the rules and an agent reads section-by-section — if "Red Lines"
+  // appears before "The Two Non-Negotiables" because someone reordered the
+  // function calls, the reading flow breaks. Pin the order explicitly.
+  const canonicalOrder = [
+    '# ',
+    'This file contains everything',
+    '## Architecture',
+    '## Roles',
+    '## The Two Non-Negotiables',
+    '## Core Concepts',
+    '## Chit Lifecycle',
+    '## Task Complexity',
+    '## Session Model',
+    '## Commands Quick Reference',
+    '## Communication',
+    '## The Audit Gate',
+    '## File Paths',
+    '## Common Patterns',
+    '## Red Lines',
+    '## Common Mistakes',
+  ] as const;
+
+  function assertCanonicalOrder(out: string) {
+    const positions = canonicalOrder.map((marker) => ({ marker, idx: out.indexOf(marker) }));
+    for (const p of positions) {
+      expect(p.idx, `missing marker: ${p.marker}`).toBeGreaterThan(-1);
+    }
+    for (let i = 1; i < positions.length; i++) {
+      expect(
+        positions[i]!.idx,
+        `"${positions[i]!.marker}" should appear after "${positions[i - 1]!.marker}"`,
+      ).toBeGreaterThan(positions[i - 1]!.idx);
+    }
+  }
+
+  it('Partner output follows canonical section order', () => {
+    assertCanonicalOrder(buildCorpMd(partnerOpts()));
+  });
+
+  it('Employee output follows canonical section order', () => {
+    assertCanonicalOrder(buildCorpMd(employeeOpts()));
+  });
+
+  it('kind-specific section appears between Chit Lifecycle and Task Complexity', () => {
+    const partner = buildCorpMd(partnerOpts());
+    const lifecycleIdx = partner.indexOf('## Chit Lifecycle');
+    const partnerSectionIdx = partner.indexOf('## You are a Partner');
+    const complexityIdx = partner.indexOf('## Task Complexity');
+    expect(lifecycleIdx).toBeLessThan(partnerSectionIdx);
+    expect(partnerSectionIdx).toBeLessThan(complexityIdx);
+  });
+});
+
 describe('buildCorpMd — shared sections identical across kinds', () => {
   // Sections that are corp-wide and must not diverge between Partner/Employee
   // renderings. Drift between kinds here = agents working from conflicting

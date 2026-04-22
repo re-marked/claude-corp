@@ -236,6 +236,74 @@ describe('cmdWtf', () => {
       await cmdWtf({ agent: 'ceo', hook: false, json: false });
       expect(stdoutText()).toMatch(/Current task: none\./);
     });
+
+    it('falls back to "none" when Casket points at a task chit that no longer exists', async () => {
+      // Casket references a task id that was never created (simulates
+      // task closed + archived, or hand aborted mid-flight).
+      createChit(tmpCorpRoot, {
+        type: 'casket',
+        scope: 'agent:ceo',
+        id: 'chit-cask-ceo',
+        createdBy: 'ceo',
+        fields: { casket: { currentStep: 'chit-t-deadbeef' } },
+      });
+
+      await cmdWtf({ agent: 'ceo', hook: false, json: false });
+      // No thrown exception, degraded to "none" — the agent should still
+      // get a usable system-reminder, not a crashed hook.
+      const out = stdoutText();
+      expect(out).toMatch(/Current task: none\./);
+      expect(out.startsWith('<system-reminder>')).toBe(true);
+    });
+  });
+
+  describe('failure-mode fallbacks (spec-mandated)', () => {
+    // The spec's cc-cli wtf failure section mandates three fallbacks:
+    //   (1) Daemon not required — covered implicitly (none of the tests
+    //       run a daemon; all still pass).
+    //   (2) Missing member record → visible error + exit 1 — tested above.
+    //   (3) Corrupted state → degraded mode + exit 0 so session-start
+    //       hooks don't fail catastrophically — tested here.
+
+    it('emits system-reminder + exits 0 when Casket chit file is corrupted', async () => {
+      const dir = createAgentWorkspace(tmpCorpRoot, 'ceo');
+      writeMembers(tmpCorpRoot, [{ id: 'ceo', displayName: 'CEO', rank: 'master', agentDir: dir }]);
+
+      // Write a malformed chit file at the expected Casket path. The
+      // chit-file layout is <corpRoot>/agents/<slug>/chits/casket/<id>.md
+      const casketDir = join(tmpCorpRoot, 'agents', 'ceo', 'chits', 'casket');
+      mkdirSync(casketDir, { recursive: true });
+      writeFileSync(
+        join(casketDir, 'chit-cask-ceo.md'),
+        '---\nthis is not valid yaml :::\nfields:\n  casket:\n    missing_quote: "unterminated\n---\n',
+        'utf-8',
+      );
+
+      // The command should NOT throw (no process.exit(1) branch) — it
+      // degrades gracefully and emits a usable system-reminder.
+      await cmdWtf({ agent: 'ceo', hook: false, json: false });
+
+      const out = stdoutText();
+      expect(out.startsWith('<system-reminder>')).toBe(true);
+      expect(out).toContain('You are CEO');
+      // With the Casket unreadable, current task falls back to "none"
+      expect(out).toMatch(/Current task: none\./);
+    });
+
+    it('works without a running daemon (reads local filesystem + chit store only)', async () => {
+      // The getCorpRoot mock doesn't touch any daemon. This test
+      // pins the invariant explicitly: wtf MUST work in a daemon-down
+      // scenario, since disorientation can include "why is the daemon
+      // not up?"
+      const dir = createAgentWorkspace(tmpCorpRoot, 'ceo');
+      writeMembers(tmpCorpRoot, [{ id: 'ceo', displayName: 'CEO', rank: 'master', agentDir: dir }]);
+
+      await cmdWtf({ agent: 'ceo', hook: false, json: false });
+      // If wtf had tried to contact a daemon, it would have failed or
+      // hung. Passing means the no-daemon path is clean.
+      const out = stdoutText();
+      expect(out.length).toBeGreaterThan(500); // full output, not a stub
+    });
   });
 
   describe('inbox summary with tier-mixed chits', () => {
