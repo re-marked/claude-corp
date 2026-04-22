@@ -24,7 +24,6 @@ import { coordinatorFragment } from './coordinator.js';
 import { toolResultManagementFragment } from './tool-result-management.js';
 import { contextPersistenceFragment } from './context-persistence.js';
 import { scratchpadFragment } from './scratchpad.js';
-import { checkpointFragment } from './checkpoint.js';
 import { autoemonFragment } from './autoemon.js';
 import { brainFragment } from './brain.js';
 import { cultureFragment } from './culture.js';
@@ -48,7 +47,6 @@ const FRAGMENTS: Fragment[] = [
   channelEtiquetteFragment,
   fixNowFragment,
   outputEfficiencyFragment,
-  checkpointFragment,
   blastRadiusFragment,
   fileLockingFragment,
   agentCommunicationFragment,
