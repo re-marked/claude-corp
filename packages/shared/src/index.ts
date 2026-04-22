@@ -84,7 +84,7 @@ export {
   getChitType,
   isKnownChitType,
 } from './chit-types.js';
-export type { ChitTypeEntry } from './chit-types.js';
+export type { ChitTypeEntry, DestructionPolicy } from './chit-types.js';
 export {
   migrateTasksToChits,
   taskToChit,
