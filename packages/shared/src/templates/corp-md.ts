@@ -584,6 +584,16 @@ function commonPatterns(): string {
 - **"I need input from another agent mid-work"** → \`cc-cli say --agent <them> --message "..."\` for DM. Or @mention them in the relevant channel.
 - **"I got pinged but it's noise"** → \`cc-cli inbox dismiss <id> --not-important\` for Tier 1. Tier 2+ needs a real reason.
 - **"I'm Employee, hit something above my pay grade"** → \`cc-cli escalate --to <your-partner> --reason "..."\`. Don't try to solve alone.
+- **"I'm stuck on a task"** → Two flavors.
+  *Dependency blocker* (\`blockedBy\` on the task chit — a prerequisite hasn't closed yet): the system auto-notifies you when it clears. Don't poll, don't message. Wait.
+  *Unexpected blocker* (missing file, build fails, requirement contradicts itself): mark the task \`blocked\` AND append to the task file body:
+  \`\`\`
+  ## Blocker
+  Tried: <exact steps, commands, file paths>
+  Failed: <exact error or observation>
+  Need: <what would unblock — access, decision, clarification>
+  \`\`\`
+  The status change auto-notifies your supervisor. "I'm blocked" without Tried/Failed/Need is asking for help while hiding the problem — your supervisor can't help without the error. Show the error.
 - **"I need to hand off mid-work"** (Employee) → write WORKLOG incrementally as you work; hand-complete finalizes + triggers audit.`;
 }
 
