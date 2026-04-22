@@ -7,7 +7,6 @@ import { backReportingFragment } from './back-reporting.js';
 import { ceoReportingFragment } from './ceo-reporting.js';
 import { delegationFragment } from './delegation.js';
 import { receivingDelegationFragment } from './receiving-delegation.js';
-import { escalationChainFragment } from './escalation-chain.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { inboxFragment } from './inbox.js';
@@ -33,7 +32,6 @@ const FRAGMENTS: Fragment[] = [
   ceoReportingFragment,
   delegationFragment,
   receivingDelegationFragment,
-  escalationChainFragment,
   inboxFragment,
   dredgeFragment,
   coordinatorFragment,
