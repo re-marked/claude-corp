@@ -11,7 +11,6 @@ import { escalationChainFragment } from './escalation-chain.js';
 import { blockerEscalationFragment } from './blocker-escalation.js';
 import { failureRecoveryFragment } from './failure-recovery.js';
 import { channelEtiquetteFragment } from './channel-etiquette.js';
-import { antiRationalizationFragment } from './anti-rationalization.js';
 import { fixNowFragment } from './fix-now.js';
 import { outputEfficiencyFragment } from './output-efficiency.js';
 import { blastRadiusFragment } from './blast-radius.js';
@@ -49,7 +48,6 @@ const FRAGMENTS: Fragment[] = [
   failureRecoveryFragment,
   channelEtiquetteFragment,
   fixNowFragment,
-  antiRationalizationFragment,
   outputEfficiencyFragment,
   checkpointFragment,
   blastRadiusFragment,
