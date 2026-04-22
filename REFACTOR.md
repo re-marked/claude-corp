@@ -749,6 +749,34 @@ tells you, you get from \`cc-cli wtf\`.
 **Depends on:** 0.7.1
 **PRs:** 2
 
+#### 0.7.2.2 — `cc-cli doctor --fix-hooks` (migration for existing agents broken by 0.7.2's shape bug)
+
+**Problem.** 0.7.2 shipped `hook-settings.ts` emitting a flat `{command}` shape per event. Claude Code's actual contract is nested: `hooks.<Event>: [{ matcher: string, hooks: [{type, command}] }]`. The flat shape parses as an error and Claude Code **skips the entire settings file**, not just the bad key — meaning every claude-code agent workspace shipped under 0.7.2 had zero hooks firing in production. The live audit-gate probe (PR #160) caught it. Template fix landed in PR #160.
+
+**Why a follow-up PR.** The template fix only helps fresh hires and agents whose harness is re-reconciled (e.g. via `cc-cli agent set-harness`). Existing claude-code agents with the broken settings.json on disk stay broken until someone re-triggers reconciliation. 0.7.5's `cc-cli agent rewire` will handle this as part of the full pre-0.7 → 0.7 migration, but existing agents need correctness *now* — not after 0.7.5 ships.
+
+**Scope.**
+- New subcommand `cc-cli doctor --fix-hooks [--dry-run] [--corp <name>]` — walks every member in `members.json` with `harness === 'claude-code'`, checks their `.claude/settings.json` against the current expected shape, regenerates any that don't match (or are missing). Output: `[ok: N, fixed: M, skipped: K]` summary.
+- Idempotent — running twice is a no-op on the second run.
+- Honest diff logging: for each fixed agent, logs `fixed: <slug> — shape was <bad-shape>, regenerated from buildHookSettings`.
+- `--dry-run` prints what would change without writing.
+
+**Why include `doctor` framing.** Future settings drift (new hook types, PreCompact→... renames, Claude Code schema evolution) will have the same class of "template fix only helps fresh hires" problem. `cc-cli doctor` is the pattern surface for those migrations — one-shot walkers that reconcile on-disk state to current template state. First use case is `--fix-hooks`; next might be `--fix-claude-md` or `--fix-gitignore`. Ships as an extensible subcommand from day one.
+
+**File paths:**
+- `packages/cli/src/commands/doctor.ts` (new subcommand dispatcher)
+- `packages/cli/src/commands/doctor/fix-hooks.ts` (new — walks members, diffs + regenerates)
+- `packages/cli/src/index.ts` (register `doctor` group)
+- `packages/shared/src/templates/hook-settings.ts` (add pure predicate `isCorrectHookShape(parsed: unknown): boolean` so doctor doesn't duplicate parsing — single source of truth for "what does a correct settings.json look like")
+
+**Test strategy:**
+- Unit: `isCorrectHookShape` accepts the current shape, rejects the legacy flat shape + missing-matcher shape + missing-type shape.
+- Integration: seed a tmp corp with two agents — one broken (flat shape), one correct. Run `cc-cli doctor --fix-hooks`. Assert: broken agent's settings.json now has correct shape + is byte-equal to a fresh `buildHookSettings(...)`; correct agent's file is untouched (preserve mtime).
+- Integration: `--dry-run` writes nothing; output still names the agent that would be fixed.
+
+**Depends on:** 0.7.2 + PR #160 (fix already merged).
+**PRs:** 1
+
 #### 0.7.3 — The Audit Gate (Stop hook)
 
 **Scope.** Build `cc-cli audit` — invoked by the Stop hook, blocks completion until audit passes. Gas Town's blockable-Stop-hook pattern applied to our acceptance-criteria + inbox discipline.
