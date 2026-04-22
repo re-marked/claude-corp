@@ -320,6 +320,16 @@ export {
   type WtfInboxPeek,
   type WtfInboxSummary,
 } from './templates/wtf-header.js';
+export {
+  buildWtfOutput,
+  resolveCurrentTask,
+  readWorklogHandoff,
+  resolveInboxSummary,
+  formatAge,
+  inferKind,
+  type WtfOutputOpts,
+  type WtfOutput,
+} from './wtf-state.js';
 
 // Ranks
 export { canHire } from './ranks.js';
