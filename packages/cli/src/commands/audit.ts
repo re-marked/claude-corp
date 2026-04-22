@@ -41,7 +41,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, appendFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, isAbsolute } from 'node:path';
 import {
   MEMBERS_JSON,
   findChitById,
@@ -174,7 +174,37 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
 
   const transcriptPath =
     typeof hookInput.transcript_path === 'string' ? hookInput.transcript_path : '';
-  const recent = transcriptPath
+  const transcriptAvailable = Boolean(transcriptPath) && existsSync(transcriptPath);
+
+  // Fail-open on transcript unavailable WHEN a task is active.
+  // Rationale: the engine's evidence gate flags missing build/tests/
+  // git-status as universal gaps. Without a transcript we can't see
+  // ANY evidence — so every run would block with gaps the agent has
+  // no observable way to satisfy (their real tool use happened but
+  // we couldn't read it). That's not a gate; that's a trap. Idle
+  // agents (currentTask === null) don't hit this because there's no
+  // evidence gate to fall through to — the engine approves or falls
+  // to the tier-3 inbox check, which is independent of transcript.
+  if (currentTask !== null && currentTask !== undefined && !transcriptAvailable) {
+    logAuditError(
+      corpRoot,
+      slug,
+      new Error(
+        `transcript_path missing or unreadable (value=${JSON.stringify(transcriptPath)}); ` +
+          'fail-open on evidence gate — trapping a session on substrate unavailability is worse than missing one block',
+      ),
+    );
+    logAuditDecision(
+      corpRoot,
+      slug,
+      { decision: 'approve' },
+      { event: 'transcript-unavailable-fail-open', taskId: currentTask.id },
+    );
+    approveAndMaybePromote(corpRoot, slug);
+    return;
+  }
+
+  const recent = transcriptAvailable
     ? parseTranscript(transcriptPath)
     : { toolCalls: [], touchedFiles: [], assistantText: [] };
 
@@ -433,13 +463,21 @@ function logAuditError(corpRoot: string, slug: string, err: unknown): void {
 
 function findAgentWorkspace(corpRoot: string, slug: string): string | null {
   // Walk members.json to find the agent's agentDir, resolve absolute.
+  // agentDir can be stored either as corp-relative (the common shape)
+  // or as an absolute path (rare but supported by other codepaths —
+  // e.g. agents whose workspaces live outside the corp tree). Mirror
+  // cmdDone's logic here: when agentDir is absolute, use it verbatim.
+  // `path.join(corpRoot, absolutePath)` does NOT collapse absolute
+  // paths on Node (that's `path.resolve`), so a naive join yields a
+  // bogus path like `<corp>/<absolute-drive>...` which silently fails
+  // every downstream read.
   try {
     const membersPath = join(corpRoot, MEMBERS_JSON);
     if (!existsSync(membersPath)) return null;
     const members = JSON.parse(readFileSync(membersPath, 'utf-8')) as Member[];
     const member = members.find((m) => m.id === slug);
     if (!member?.agentDir) return null;
-    return join(corpRoot, member.agentDir);
+    return isAbsolute(member.agentDir) ? member.agentDir : join(corpRoot, member.agentDir);
   } catch {
     return null;
   }

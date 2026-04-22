@@ -142,15 +142,28 @@ function isCriterionVerified(criterion: string, recent: RecentActivity): boolean
 
 /**
  * Extract any "looks like a file path" tokens from a criterion string.
- * Catches `src/foo.ts`, `packages/shared/bar.ts`, `README.md`. Ignores
- * bare extensions like `.ts` (too broad — would match "uses .ts files")
- * and purely-directory paths like `src/`.
+ * Catches `src/foo.ts`, `packages/shared/bar.ts`, AND top-level
+ * filenames like `README.md`, `LICENSE`, `CLAUDE.md`, `CHANGELOG.md`.
+ *
+ * The filter preserves two intents:
+ *   1. Pathy tokens (contain `/` or `\`) — the common shape of file
+ *      references in criteria written by humans.
+ *   2. Top-level filenames that by convention start with an uppercase
+ *      letter — README.md, LICENSE, CLAUDE.md, STATUS.md, etc. These
+ *      are legitimate file references even though they lack a slash.
+ *
+ * Rejects: bare extensions (`.ts`), lowercase ambiguous tokens like
+ * `feature.ts` mentioned in passing prose. The extension-only case
+ * can't actually match the regex anyway (requires a leading word
+ * char), but the lowercase-first filter guards against false-positive
+ * file-reference detection from phrases like "build a feature.ts
+ * then ship it."
  */
 function extractFilePathsFromCriterion(criterion: string): string[] {
-  // Match non-whitespace tokens containing at least one slash AND
-  // ending with a file extension. Rough but effective.
   const matches = criterion.match(/[\w./\\-]+\.[a-z]{1,6}\b/gi) ?? [];
-  return matches.filter((m) => m.includes('/') || m.includes('\\'));
+  return matches.filter(
+    (m) => m.includes('/') || m.includes('\\') || /^[A-Z]/.test(m),
+  );
 }
 
 function hasBashMatching(toolCalls: ToolCall[], pattern: RegExp): boolean {
