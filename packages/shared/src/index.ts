@@ -317,6 +317,12 @@ export {
   type ClaudeMdTemplateOpts,
   type ThinClaudeMdOpts,
 } from './templates/claude-md.js';
+export {
+  buildHookSettings,
+  type HookSettings,
+  type HookSettingsOpts,
+  type HookEntry,
+} from './templates/hook-settings.js';
 export { buildCorpMd, type CorpMdOpts, type CorpMdKind } from './templates/corp-md.js';
 export {
   buildWtfHeader,
