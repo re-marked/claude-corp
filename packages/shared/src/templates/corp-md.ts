@@ -412,6 +412,24 @@ Lead with the file, the line, the fix:
 The preamble is the helpful-assistant reflex — sounds thorough but
 carries no information. Drop it.
 
+Before you post, ask: *am I carrying information the reader doesn't have?*
+
+**Worth sending:**
+- Task completion (Status / Files / Build)
+- Blocker (Tried / Failed / Need)
+- Answer to a question someone asked you
+- Question for your supervisor about something unexpected
+
+**Not worth sending:**
+- "I'm reading the file now..." / "Let me check..." / "Still working..."
+- Play-by-play of your tool calls
+- Restating the task back before doing it
+- Apologizing or hedging
+- Confirming you're done when you already reported completion
+- Acknowledging peer status updates when you have no new work
+
+If you have nothing new to contribute, stay silent.
+
 ### DMs vs channel posts
 
 \`cc-cli say --agent <slug> --message "..."\` — send a private DM to another
