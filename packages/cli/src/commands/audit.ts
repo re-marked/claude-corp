@@ -357,9 +357,17 @@ function queryOpenTier3Inbox(corpRoot: string, slug: string): Chit<'inbox-item'>
       scopes: [`agent:${slug}` as const],
       limit: 200,
     });
-    return (result.chits as Chit<'inbox-item'>[]).filter(
-      (c) => c.fields['inbox-item']?.tier === 3,
-    );
+    return (result.chits as Chit<'inbox-item'>[]).filter((c) => {
+      const f = c.fields['inbox-item'];
+      // Tier 3 + still-active + NOT carried forward. Carry-forward
+      // is 0.7.4's explicit escape valve: the agent has acknowledged
+      // the item and documented what they're waiting on, so it
+      // doesn't block the audit gate even though status remains
+      // 'active' (the item isn't resolved, just deferred). The next
+      // session's wtf header still surfaces carried items for
+      // visibility until real resolution lands.
+      return f?.tier === 3 && f?.carriedForward !== true;
+    });
   } catch {
     return [];
   }
