@@ -406,11 +406,15 @@ Observations still get `ephemeral: true` at creation AND still get scanned for p
 
 The distinction between **destroyed** and **cold** is the whole point of the 0.6 split: observations are preserved but demoted out of the active-tracking pool so scanner work doesn't grow linearly with corp age.
 
-**Encoded in chit-types.ts registry, not in lifecycle code.** Each ChitTypeEntry carries:
-- `destructionPolicy: 'destroy-if-not-promoted' | 'keep-forever'` — branches the TTL-aged path
+**Encoded in chit-types.ts registry, with per-instance override.** Each ChitTypeEntry carries:
+- `destructionPolicy: 'destroy-if-not-promoted' | 'keep-forever'` — registry-level default for this type
 - `defaultTtlMs: number | null` — default TTL at creation (observations: 24h; handoffs: 1h; dispatch-contexts: on-work-complete, not time-based; pre-brain-entries: 7d)
 
-The scanner reads these; the policy per type is pinned in one place. Future changes to whether observations ever get destroyed = one-line registry flip, not a scanner rewrite.
+**Per-instance destructionPolicy override.** A chit's frontmatter can carry its own `destructionPolicy: <value>` that takes precedence over the registry default. The scanner reads instance-first, falls back to registry. This is load-bearing for types whose policy varies BY INSTANCE (not just by type) — most notably `inbox-item` (tier 1 destroys, tier 2/3 cool) but also covers edge cases like "this specific handoff should be preserved for audit; mark it keep-forever."
+
+Writing the override is a one-line frontmatter field; reading it is one extra line in the scanner. Minimal cost, meaningful flexibility. A chit with no explicit override inherits type default — no migration churn on existing chits.
+
+The scanner reads these; the policy per type is pinned in one place, with instance-level escape valve. Future changes to whether observations ever get destroyed = one-line registry flip, not a scanner rewrite.
 
 **Query defaults** (important — otherwise cold observations flood every list):
 - `queryChits({ type: 'observation' })` default: excludes `status: 'cold'`.
