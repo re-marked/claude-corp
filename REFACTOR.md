@@ -371,26 +371,46 @@ This is intentionally premature. 1.9 hasn't shipped; no consumer reads `complexi
 **Depends on:** 0.3 (TaskFields exists)
 **PRs:** 1
 
-### 0.6 — Wisp lifecycle: ephemeral Chits + 4-signal promotion
+### 0.6 — Wisp lifecycle: ephemeral Chits + 4-signal promotion (split by type)
 
-**Problem.** Some Chit types are ephemeral (observation, handoff, dispatch-context, pre-brain-entry at role level). They need auto-expiration AND promotion mechanics — otherwise valuable ephemeral content is lost, and garbage accumulates forever.
+**Problem.** Some Chit types accumulate as pure noise (handoffs consumed by the successor; dispatch-contexts superseded by git history; unpromoted pre-brain-entry candidates). Others — observations — are the agent's diary, its self-witnessing across time. Blanket auto-destruction would solve the noise problem but destroy soul material. A blanket "keep everything" would leave the noise types growing unboundedly.
 
-**Scope.** Daemon-side scanner runs periodically (e.g., every 5 min) over all ephemeral Chits. For each, checks 4 promotion signals from Gas Town:
+So 0.6 splits the rule by what the Chit actually IS, not by a flat "ephemeral" flag.
+
+**The split:**
+
+**(A) Destruction-eligible (handoffs, dispatch-contexts, role-level pre-brain-entries).** These are *semantically* transient.
+- A handoff is a note from predecessor-agent to successor-agent; once the successor reads it and starts work, it has fulfilled its purpose. Keeping it forever is a distraction.
+- A dispatch-context is the "why this work went to this agent" breadcrumb; once the work ships, the commit + contract history carries the meaning.
+- A pre-brain-entry at role level is an explicit candidate for BRAIN; unpromoted ones are noise by the definition of the type.
+
+These get the full wisp lifecycle: ephemeral=true, TTL set at creation, scanner checks 4 promotion signals, promote-or-destroy.
+
+**(B) Promotion-only (observations).** Observations are the agent's diary. Mundane ones still contribute to the texture of the agent's becoming (see the manifesto — Writing as Witnessing). Destroying them to save disk space we don't need is counter-mission.
+
+Observations still get `ephemeral: true` at creation AND still get scanned for promotion signals. Promotion flips `ephemeral: true → false` (first-class). But **there is no destruction path for observations.** Unpromoted observations stay forever; dream distillation is the compression layer (reads observations, writes BRAIN entries), and older observations get deprioritized in queries by `createdAt` weighting, not deleted. Git is already the audit trail; storage is cheap; noise-in-queries is a filter problem, not a lifetime problem.
+
+**Shared scanner logic.** The daemon-side scanner runs periodically (e.g., every 5 min) over all ephemeral Chits. For each, checks 4 Gas Town promotion signals:
 - (a) **referenced:** a permanent Chit references this one
 - (b) **commented:** a related Chit or message cites this
 - (c) **tagged keep:** `keep` in tags
-- (d) **aged past TTL:** this is the FAILURE path — if none of a/b/c fired and TTL passed, destroy the Chit (logged)
+- (d) **aged past TTL:** the tie-breaker path — for destruction-eligible types, destroy (logged); for observations, do nothing and leave ephemeral=true (they can still get promoted later if evidence arrives, but they're not going anywhere in the meantime)
 
-Promotion flips `ephemeral: true → false`, clears TTL. Destruction writes a one-line log entry and removes the file.
+Promotion flips `ephemeral: true → false`, clears TTL. Destruction writes a one-line log entry and removes the file (destruction-eligible types only).
+
+**Encoded in chit-types.ts registry, not in lifecycle code.** Each ChitTypeEntry carries a `destructionPolicy: 'destroy-if-not-promoted' | 'keep-forever'` field. The scanner reads it; the policy per type is pinned in one place. This also makes the split testable: a future change to whether observations ever get destroyed is a one-line registry flip, not a scanner rewrite.
 
 **File paths:**
-- `packages/daemon/src/chit-lifecycle.ts` (new — promotion scanner)
+- `packages/shared/src/chit-types.ts` (add `destructionPolicy` per type; observations → `keep-forever`; handoffs/dispatch-contexts/pre-brain-entries → `destroy-if-not-promoted`)
+- `packages/daemon/src/chit-lifecycle.ts` (new — promotion scanner; reads destructionPolicy from registry when deciding TTL-aged behavior)
 - `packages/daemon/src/daemon.ts` (register lifecycle tick)
 - `packages/shared/src/chit-promotion.ts` (new — signal-detection helpers, pure functions for testability)
 
 **Test strategy:**
 - Unit: each signal detector tested in isolation with fixtures.
-- Integration: create ephemeral Chit with TTL, add each signal in turn, verify promotion; verify non-promoted Chit at TTL gets destroyed with log entry.
+- Integration: create ephemeral handoff with TTL, add each signal in turn, verify promotion; verify non-promoted handoff at TTL gets destroyed with log entry.
+- Integration: create observation with TTL, add each signal, verify promotion; verify non-promoted observation at TTL **stays** (ephemeral=true, file present, log entry saying "skipped destruction — keep-forever policy").
+- Integration: dream distillation still reads older unpromoted observations (prevents a regression where dreams silently rely on the ephemeral-means-recent assumption).
 
 **Depends on:** 0.1
 **PRs:** 2
