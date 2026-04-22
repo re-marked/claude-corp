@@ -308,4 +308,83 @@ describe('setupAgentWorkspace', () => {
       expect(member.harness).toBe('claude-code');
     });
   });
+
+  describe('Project 1.1 kind-aware workspace (Employee vs Partner DNA split)', () => {
+    it('Partner hire writes SOUL/IDENTITY/USER/MEMORY + creates brain/ dir + BOOTSTRAP.md', () => {
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, { kind: 'partner' as const, role: 'ceo' }),
+      );
+      const abs = join(corpRoot, agentDir);
+
+      expect(existsSync(join(abs, 'SOUL.md'))).toBe(true);
+      expect(existsSync(join(abs, 'IDENTITY.md'))).toBe(true);
+      expect(existsSync(join(abs, 'USER.md'))).toBe(true);
+      expect(existsSync(join(abs, 'MEMORY.md'))).toBe(true);
+      expect(existsSync(join(abs, 'brain'))).toBe(true);
+      expect(existsSync(join(abs, 'BOOTSTRAP.md'))).toBe(true);
+    });
+
+    it('Employee hire skips SOUL/USER/MEMORY/BOOTSTRAP/brain — the DNA split on disk', () => {
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          kind: 'employee' as const,
+          role: 'backend-engineer',
+          rank: 'worker' as const,
+          agentName: 'toast',
+          displayName: 'Toast',
+        }),
+      );
+      const abs = join(corpRoot, agentDir);
+
+      expect(existsSync(join(abs, 'SOUL.md'))).toBe(false);
+      expect(existsSync(join(abs, 'USER.md'))).toBe(false);
+      expect(existsSync(join(abs, 'MEMORY.md'))).toBe(false);
+      expect(existsSync(join(abs, 'IDENTITY.md'))).toBe(false);
+      expect(existsSync(join(abs, 'BOOTSTRAP.md'))).toBe(false);
+      expect(existsSync(join(abs, 'brain'))).toBe(false);
+    });
+
+    it('Employee hire still writes operational files (AGENTS.md, TOOLS.md, STATUS.md, TASKS.md, skills/)', () => {
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          kind: 'employee' as const,
+          role: 'backend-engineer',
+          rank: 'worker' as const,
+          agentName: 'toast',
+          displayName: 'Toast',
+        }),
+      );
+      const abs = join(corpRoot, agentDir);
+
+      expect(existsSync(join(abs, 'AGENTS.md'))).toBe(true);
+      expect(existsSync(join(abs, 'TOOLS.md'))).toBe(true);
+      expect(existsSync(join(abs, 'STATUS.md'))).toBe(true);
+      expect(existsSync(join(abs, 'TASKS.md'))).toBe(true);
+      expect(existsSync(join(abs, 'skills'))).toBe(true);
+    });
+
+    it('omitted kind falls back to partner (pre-1.1 compat)', () => {
+      // Legacy call sites don't pass kind; default must preserve the
+      // pre-1.1 full-soul-stack workspace shape.
+      const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot));
+      const abs = join(corpRoot, agentDir);
+
+      expect(existsSync(join(abs, 'SOUL.md'))).toBe(true);
+      expect(existsSync(join(abs, 'brain'))).toBe(true);
+    });
+
+    it('kind + role are written into the returned Member record', () => {
+      const { member } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          kind: 'employee' as const,
+          role: 'backend-engineer',
+          rank: 'worker' as const,
+          agentName: 'toast',
+          displayName: 'Toast',
+        }),
+      );
+      expect(member.kind).toBe('employee');
+      expect(member.role).toBe('backend-engineer');
+    });
+  });
 });
