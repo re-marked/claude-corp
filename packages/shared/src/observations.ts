@@ -280,6 +280,11 @@ export function readObservationsForDate(agentDir: string, date: Date): string {
     sortBy: 'createdAt',
     sortOrder: 'asc',
     limit: 0,
+    // Include cold observations: a caller asking for "observations on date X"
+    // wants every observation from that date, regardless of whether the
+    // lifecycle scanner has since cooled them. Cold preserves the data;
+    // only the default query surface hides it.
+    includeCold: true,
   });
 
   if (chits.length === 0) return '';
@@ -332,6 +337,9 @@ export function listObservationLogs(
       sortBy: 'createdAt',
       sortOrder: 'desc',
       limit: 0,
+      // listObservationLogs is the "all history" enumeration — cold
+      // observations are part of that history and must not disappear.
+      includeCold: true,
     });
     chits = result.chits;
   } catch {
@@ -375,6 +383,10 @@ export function countRecentObservations(agentDir: string, sinceDaysAgo = 7): num
     scopes: [`agent:${slug}`],
     updatedSince: cutoff,
     limit: 0,
+    // Count every observation in the window regardless of lifecycle state.
+    // Dreams use this count to decide whether to schedule an agent; a
+    // heavily-cold agent still has work to distill from their history.
+    includeCold: true,
   });
   return chits.length;
 }

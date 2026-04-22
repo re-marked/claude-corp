@@ -38,9 +38,9 @@ import { existsSync, mkdirSync, unlinkSync, appendFileSync, readFileSync, writeF
 import { join } from 'node:path';
 import {
   queryChits,
-  readChit,
   updateChit,
   chitScopeFromPath,
+  findChitById,
   getChitType,
   computeVerdict,
   stringifyFrontmatter,
@@ -277,13 +277,14 @@ function rewriteEphemeralFields(
   id: string,
   patch: { ephemeral: boolean; ttl?: string | undefined },
 ): void {
-  // Find the chit again (scope may not be in scope here — easier to re-find)
-  const { chits } = queryChits(corpRoot, { types: [type], limit: 0 });
-  const hit = chits.find((c) => c.chit.id === id);
+  // findChitById reads the file directly (no queryChits cold-filter). This
+  // matters because the `cold` flip happens via updateChit first, THEN this
+  // rewriter runs — if we routed through queryChits we'd miss the freshly-
+  // cooled chit and leave ephemeral:true on disk forever.
+  const hit = findChitById(corpRoot, id);
   if (!hit) return;
 
-  const current = readChit(corpRoot, chitScopeFromPath(corpRoot, hit.path), type, id);
-  const updated = { ...current.chit, ephemeral: patch.ephemeral } as unknown as Record<string, unknown>;
+  const updated = { ...hit.chit, ephemeral: patch.ephemeral } as unknown as Record<string, unknown>;
   if (patch.ttl === undefined) delete updated.ttl;
   else updated.ttl = patch.ttl;
 
@@ -291,7 +292,7 @@ function rewriteEphemeralFields(
   // stringifier. updateChit above bumped updatedAt + updatedBy; this
   // rewrite only flips the lifecycle-specific ephemeral/ttl fields that
   // updateChit's public API intentionally doesn't expose.
-  const full = stringifyFrontmatter(updated, current.body);
+  const full = stringifyFrontmatter(updated, hit.body);
   writeFileSync(hit.path, full, 'utf-8');
 }
 
