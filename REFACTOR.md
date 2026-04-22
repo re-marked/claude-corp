@@ -99,7 +99,7 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
 | 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 |
-| 1 | Foundation | Employee/Partner split, Casket, Hand, CLAUDE.md migration | Fix the root problem: sessions stop being identity carriers | 12-16 (some sub-projects simpler once Chits exist) |
+| 1 | Foundation | Employee/Partner split, Casket, Hand, per-step session cycling | Fix the root problem: sessions stop being identity carriers. CLAUDE.md architecture now lives in 0.7. | 10-14 (Project 1.5 absorbed into 0.7; some sub-projects simpler once Chits exist) |
 | 2 | Workflow Substrate | Blueprint-as-molecule, Deacon, self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 10-12 |
 | 3 | Autonomous Operations | Witness, Refinery, auto-recovery | Corp heals itself without human intervention | 10-12 |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
@@ -341,7 +341,7 @@ Multiple `--type`, `--status`, `--tag`, `--scope` flags are OR'd within the same
 **File paths:**
 - `packages/shared/src/observations.ts` (rewrite as Chit-wrapper; `cc-cli observe` aliased from `cc-cli chit create --type observation`)
 - `scripts/migrate-observations-to-chits.ts`
-- `packages/shared/src/templates/fragments/observations.md` (update: agents learn to write structured observations)
+- Observation-related teaching moved into existing templates (rules.ts, workspace fragment) in the 0.5 implementation. Post-0.7, agent-facing observation guidance will live in CORP.md sections rendered by `cc-cli wtf`, not in a standalone fragment file. No new workspace file created.
 
 **Test strategy:** structured observation query returns categorized results; legacy-prose observations migrate with best-effort categorization (NOTE as default).
 
@@ -1059,26 +1059,13 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.3 (chain)
 **PRs:** 3-4
 
-### 1.5 — Fragment → CLAUDE.md migration
+### 1.5 — [ABSORBED INTO 0.7]
 
-Pull fragment render outputs into .md files in agent workspaces. Update CLAUDE.md template to `@import` them: `@./SOUL.md @./IDENTITY.md @./CASKET.md @./TOOLS.md @./AGENTS.md`. Corp-level state (roster, channel list) becomes a live-maintained CORP.md at corp root, also imported. Delete fragment injection call in claude-code harness. Keep fragments only for OpenClaw.
+**This sub-project was the original "fragment → CLAUDE.md migration" idea — pull fragments into `.md` files, update CLAUDE.md to `@import` them, maintain a live-updated CORP.md via file watcher.**
 
-**Scope:** extract fragments to .md, update CLAUDE.md template, remove injection, maintain CORP.md live.
-**File paths:**
-- `packages/daemon/src/fragments/*.ts` (migrate static content out of render functions into `.md` templates under `packages/shared/src/templates/fragments/`)
-- `packages/shared/src/templates/claude-md.ts` (CLAUDE.md template adds `@import` lines for each migrated fragment)
-- `packages/daemon/src/harness/claude-code-harness.ts` (remove fragment-injection block; keep for openclaw-harness)
-- `packages/daemon/src/corp-md-writer.ts` (new: daemon watches members.json / channels.json changes, regenerates CORP.md at corp root)
-- `packages/daemon/src/harness/openclaw-harness.ts` (unchanged — fragments still injected here; flag this as the legacy path)
+**Superseded by 0.7 (Dynamic system-prompt architecture).** 0.7's approach is mechanically better: thin static CLAUDE.md as survival anchor, full context injected dynamically via `cc-cli wtf` at SessionStart / PreCompact hooks. CORP.md is regenerated on every wtf invocation (not watcher-maintained), guaranteeing freshness. AGENTS.md and TOOLS.md are deleted as workspace files entirely — their content moves into CORP.md sections rendered by wtf.
 
-**Test strategy:**
-- Unit: CLAUDE.md template emits correct @imports for all migrated fragments.
-- Integration: dispatching a claude-code agent shows CLAUDE.md-imported content in init events; no system-context wrapper; dispatch succeeds end-to-end.
-- Integration: CORP.md regenerates when members.json changes (simulate a hire).
-- Regression: openclaw dispatches still inject fragments (existing harness tests should pass unchanged).
-
-**Depends on:** nothing (can run parallel to 1.1-1.4)
-**PRs:** 3-4
+If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. The work that was here has been absorbed — do not implement 1.5 as originally written (it would directly conflict with 0.7's architecture).
 
 ### 1.6 — Per-step session cycling for Employees (activate Dredge, Chit-ify handoffs)
 
