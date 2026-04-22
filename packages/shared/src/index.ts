@@ -140,6 +140,19 @@ export type {
   QueryChitsResult,
   MalformedChit,
 } from './chits.js';
+
+// Casket lifecycle primitives — the durable work-pointer surface that
+// 0.7.3's audit gate reads and that 1.3's chain walker will eventually
+// write. Module docstring explains the "was 1% built, this is the
+// minimum lifecycle to unblock 0.7.3" framing.
+export {
+  casketExists,
+  createCasketIfMissing,
+  getCurrentStep,
+  advanceCurrentStep,
+  incrementSessionCount,
+} from './casket.js';
+
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 
