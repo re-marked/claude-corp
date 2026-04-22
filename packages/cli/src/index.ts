@@ -59,6 +59,7 @@ const { values, positionals } = parseArgs({
     json: { type: 'boolean', default: false },
     pending: { type: 'boolean', default: false },
     culture: { type: 'boolean', default: false },
+    hook: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
   allowPositionals: true,
@@ -73,6 +74,7 @@ if (!cmd || values.help) {
 Usage: cc-cli <command> [options]
 
 Commands:
+  wtf        "Where tf am I, what tf do I do" — emits CORP.md + your situational context
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -540,6 +542,16 @@ async function run() {
       await cmdHand({
         task: values.task as string | undefined,
         to: values.to as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'wtf': {
+      const { cmdWtf } = await import('./commands/wtf.js');
+      await cmdWtf({
+        agent: values.agent as string | undefined,
+        corp: values.corp as string | undefined,
+        hook: !!values.hook,
         json: !!values.json,
       });
       break;
