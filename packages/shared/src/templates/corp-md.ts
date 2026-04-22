@@ -600,7 +600,44 @@ You wake up fresh every session. Before acting:
    emits your situational header
 
 If WORKLOG.md shows you were mid-something, pick up from where you
-stopped. Don't start over.`;
+stopped. Don't start over.
+
+### Summarize large tool results
+
+When a tool returns hundreds of lines (directory listings, build output,
+large file contents), DON'T copy it all into your response — extract
+what matters. The raw output stays in the tool call details; your
+response carries the analysis.
+
+\`\`\`
+BAD:  (dumps entire 200-line build output)
+GOOD: "Build failed. 3 errors:
+       1. src/auth.ts:42 — Type 'string' not assignable to 'Session'
+       2. src/auth.ts:58 — Property 'userId' missing
+       3. src/types.ts:15 — Duplicate identifier 'Session'
+       Root cause: type definition changed but consumers weren't updated."
+\`\`\`
+
+### What to extract per tool
+
+**After reading a file:** path, key line numbers, function names, what
+you were looking for and whether you found it.
+\`"src/auth.ts — validateSession() at line 42. Type assertion on line 48 is wrong (casts to 'any' instead of SessionData)."\`
+
+**After a build/typecheck:** pass/fail, error count, first 2-3 errors
+with file:line, root cause if obvious.
+\`"Build FAILED. 3 errors, all in auth module. Root cause: Session type changed in types.ts but auth.ts still uses old shape."\`
+
+**After a directory listing:** how many files, the relevant ones, the
+structure pattern.
+\`"src/auth/ has 8 files. Key: validate.ts (handler), types.ts (Session definition), middleware.ts (Express middleware)."\`
+
+**After a search/grep:** how many matches, most relevant \`file:line\`
+pairs, the pattern searched.
+\`"Searched for 'Session' — 23 matches across 8 files. Most relevant: types.ts:15 (definition), auth.ts:42 (usage)."\`
+
+**After running a command:** exit code, key output, success/failure.
+\`"Tests: 42 passed, 3 failed. All failures in auth.test.ts — expected 'Session' but got 'undefined'."\``;
 }
 
 function filePaths(opts: CorpMdOpts): string {

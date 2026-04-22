@@ -12,7 +12,6 @@ import { historyFragment } from './history.js';
 import { inboxFragment } from './inbox.js';
 import { dredgeFragment } from './dredge.js';
 import { coordinatorFragment } from './coordinator.js';
-import { toolResultManagementFragment } from './tool-result-management.js';
 import { scratchpadFragment } from './scratchpad.js';
 import { autoemonFragment } from './autoemon.js';
 import { brainFragment } from './brain.js';
@@ -23,7 +22,6 @@ const FRAGMENTS: Fragment[] = [
   brainFragment,
   cultureFragment,
   workspaceFragment,
-  toolResultManagementFragment,
   scratchpadFragment,
   taskExecutionFragment,
   backReportingFragment,
