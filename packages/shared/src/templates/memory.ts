@@ -16,7 +16,7 @@ This file is an **index** to your long-term memory in BRAIN/.
 
 ## This is NOT
 
-- **Not your diary** — daily observations go in \`observations/YYYY/MM/YYYY-MM-DD.md\`
+- **Not your diary** — observations are chits written via \`cc-cli observe\` (land at \`chits/observation/<id>.md\`)
 - **Not a knowledge dump** — write content to \`BRAIN/\` files, index them here
 - **Not a task list** — tasks live in \`TASKS.md\`
 - **Not a scratchpad** — temporary notes don't belong in long-term memory

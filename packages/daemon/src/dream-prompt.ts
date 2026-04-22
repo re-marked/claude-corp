@@ -206,7 +206,7 @@ function renderPendingFeedbackPhase(opts: DreamPromptOpts): string {
   lines.push('   - Is this a firm correction, a gentle nudge, a joke, a casual affirmation, or mixed?');
   lines.push('   - Was your prior message actually wrong, or did the founder change their mind?');
   lines.push('   - Is it specific (one decision) or thematic (how you work in general)?');
-  lines.push('3. **Append a `[FEEDBACK]` observation** to today\'s observation log documenting what you heard — in your own voice, not the router\'s. Include: what the founder said, what you had done, and your interpretation.');
+  lines.push('3. **Write a FEEDBACK observation chit** (`cc-cli observe "..." --from <you> --category FEEDBACK`) documenting what you heard — in your own voice, not the router\'s. Include: what the founder said, what you had done, and your interpretation.');
   lines.push('4. **Check for a matching existing BRAIN entry FIRST.** Before creating anything new, list `BRAIN/` and read any file whose tags or title could be the same theme. Semantic match beats exact title — "don\'t summarize" and "stop recapping" are the same rule. If you find a match:');
   lines.push('   - **Do NOT create a duplicate.** Open the existing file.');
   lines.push('   - Increment `times_heard:` in the frontmatter (default 1 if missing → 2). This counter is load-bearing: corp-level culture synthesis uses it to decide what becomes law.');
@@ -226,7 +226,7 @@ function renderPendingFeedbackPhase(opts: DreamPromptOpts): string {
   lines.push('```bash');
   lines.push(`rm "${opts.agentDir}/.pending-feedback.md"`);
   lines.push('```\n');
-  lines.push('If you skipped entries (deemed them noise), still delete the file — the observations/BRAIN are the durable record. The pending file is an inbox, not an archive.\n');
+  lines.push('If you skipped entries (deemed them noise), still delete the file — observation chits + BRAIN are the durable record. The pending file is an inbox, not an archive.\n');
   lines.push('---\n');
 
   return '\n' + lines.join('\n') + '\n';
@@ -366,11 +366,13 @@ export function buildDreamPrompt(opts: DreamPromptOpts): string {
    Read the last few session summaries. What did you work on? What shipped? What failed?`);
   sourceNum++;
 
-  // Observation logs — structured daily activity records (highest-structure source)
-  sources.push(`${sourceNum}. **Observation logs** — \`${opts.agentDir}/observations/\`
-   These are your daily activity journals — timestamped, categorized entries of what you did.
-   List the observations directory, read today's log and yesterday's if they exist.
-   Each entry has a category tag: [TASK], [RESEARCH], [DECISION], [BLOCKED], [LEARNED], [CREATED], etc.
+  // Observation chits — structured activity records (highest-structure source)
+  sources.push(`${sourceNum}. **Observation chits** — \`${opts.agentDir}/chits/observation/\`
+   Each observation is a chit with structured frontmatter: category, subject, importance, timestamp,
+   tags (including \`from-log:<ACTIVITY-CATEGORY>\` preserving the rich work-activity vocabulary).
+   Query: \`cc-cli chit list --type observation --scope agent:self --since 7d --json\` (or read the
+   directory directly). Each chit's category is one of FEEDBACK/DECISION/DISCOVERY/PREFERENCE/NOTICE/
+   CORRECTION; the original activity category (TASK/LEARNED/BLOCKED/CHECKPOINT/etc) lives in tags.
    This is your most STRUCTURED signal source — use it to identify patterns:
    - What tasks consumed the most time?
    - What decisions were made and why?

@@ -152,5 +152,7 @@ const claudeCodeToolsSection = `## Tools Available (Claude Code substrate)
 
 Your workspace files (SOUL/IDENTITY/AGENTS/TOOLS/USER/MEMORY/STATUS/INBOX/
 TASKS/HEARTBEAT) are loaded into your system prompt at the start of every
-turn. Other workspace files (BRAIN/*, observations/*, WORKLOG.md) are read
-on demand with your \`Read\` tool — follow MEMORY.md's wikilinks into BRAIN.`;
+turn. Other workspace files (BRAIN/*, chits/observation/*, WORKLOG.md) are read
+on demand with your \`Read\` tool — follow MEMORY.md's wikilinks into BRAIN.
+For observations, prefer \`cc-cli chit list --type observation --scope agent:self\`
+over direct Read — it handles date filtering and sort order for you.`;

@@ -97,6 +97,15 @@ export {
 export type { ContractMigrationResult, ContractMigrationOpts } from './migrations/migrate-contracts.js';
 
 export {
+  migrateObservationsToChits,
+  bulletToChit,
+} from './migrations/migrate-observations.js';
+export type {
+  ObservationMigrationResult,
+  ObservationMigrationOpts,
+} from './migrations/migrate-observations.js';
+
+export {
   chitId,
   casketChitId,
   isChitIdFormat,

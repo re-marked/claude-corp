@@ -17,7 +17,7 @@
  *      about non-negotiable RULES and per-turn state awareness.
  *   3. @imports grouped by purpose: identity, bootstrap, tools+founder,
  *      memory index, heartbeat, current state.
- *   4. Read-on-demand footer listing BRAIN/ observations/ WORKLOG —
+ *   4. Read-on-demand footer listing BRAIN/ chits/observation/ WORKLOG —
  *      large, contextual, fetched reactively with the Read tool.
  *
  * Only generated for agents with harness='claude-code'. OpenClaw
@@ -69,8 +69,10 @@ up front.
 
 - \`BRAIN/*.md\` — specific memories. Follow MEMORY.md's wikilinks into the
   files that match the topic at hand.
-- \`observations/*.md\` — your daily journal entries, your self-witnessing
-  across time. Read them when reflecting on what you've done or noticed.
+- \`chits/observation/*.md\` — your observations (chits of type=observation).
+  Each recorded via \`cc-cli observe\`. Your self-witnessing across time;
+  read via \`cc-cli chit list --type observation --scope agent:self\`
+  when reflecting on what you've done or noticed.
 - \`WORKLOG.md\` — historical work log. Read when you need to recall how
   something was built or decided.
 `;
