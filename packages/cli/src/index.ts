@@ -86,6 +86,7 @@ Commands:
   wtf        "Where tf am I, what tf do I do" — emits CORP.md + your situational context
   audit      Session-end audit gate (Stop / PreCompact hook invokes this). --override --reason "..." for founder bypass.
   done       Employee "I'm done with this task" signal. Writes pending handoff; audit promotes on approve.
+  inbox      Tiered inbox management. cc-cli inbox <list|respond|dismiss|carry-forward|check>.
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -217,6 +218,12 @@ async function run() {
       // process.argv.slice(3) = everything after `node cc-cli chit`.
       const { cmdChit } = await import('./commands/chit.js');
       await cmdChit(process.argv.slice(3));
+      break;
+    }
+    case 'inbox': {
+      // Same pass-through pattern as chit — each subcommand owns its flags.
+      const { cmdInbox } = await import('./commands/inbox.js');
+      await cmdInbox(process.argv.slice(3));
       break;
     }
     case 'observe': {
