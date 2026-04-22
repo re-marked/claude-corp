@@ -168,7 +168,8 @@ function coreConcepts(): string {
 - **Dream** — background consolidation. When idle, agents distill recent observations into BRAIN entries. Cold observations stay queryable as source material.
 - **BRAIN** — durable long-term memory (Partner-only at the slot level; Employees use role-level pre-BRAIN).
 - **Pre-BRAIN (role-shared)** — accumulator for Employees of the same role. Promotion to Partner inherits the role's pre-BRAIN as personal BRAIN seed.
-- **Inbox-item** — a notification Chit. Three tiers (ambient/direct/critical). See the inbox section below.`;
+- **Inbox-item** — a notification Chit. Three tiers (ambient/direct/critical). See the inbox section below.
+- **Scratchpad** — shared workspace per contract at \`projects/<name>/contracts/<id>/scratchpad/\`. Cross-agent artifacts live here: research findings, intermediate specs, test results, decisions. What you write in the scratchpad is how you exist for agents you're collaborating with — they know your work through what you left behind. Write as if a colleague with zero context will pick up where you left off. Name files descriptively; before writing, check if one on your topic already exists (append, don't duplicate). **Channels = talking. Scratchpad = making. Keep them separate.**`;
 }
 
 function chitLifecycle(): string {
