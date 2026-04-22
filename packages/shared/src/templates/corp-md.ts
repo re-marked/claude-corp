@@ -594,6 +594,13 @@ function commonPatterns(): string {
   Need: <what would unblock — access, decision, clarification>
   \`\`\`
   The status change auto-notifies your supervisor. "I'm blocked" without Tried/Failed/Need is asking for help while hiding the problem — your supervisor can't help without the error. Show the error.
+- **"I got FAIL'd on my work"** → Read the Reviewer's feedback carefully.
+  If they're right: fix the specific issue, report back with \`RETRY: <what you fixed>\`.
+  If they're wrong: push back with evidence — file path, code snippet, build result. Don't just accept; prove your case. Example: "The code is at chat.tsx line 195. Here's what I wrote: [snippet]. Build: PASS. The Reviewer may have read a stale version."
+  If you still disagree after showing evidence: @mention the supervisor. They break the tie. **Evidence decides, not hierarchy.**
+- **"I'm marking another agent's work FAIL as reviewer"** → You MUST @mention the implementer with specific feedback: what exactly is missing or wrong, which file you checked, what you expected vs found, build output if relevant.
+  Good: \`@Coder FAIL: /stats handler not found in chat.tsx. Searched lines 150-300, no match. Build passes but the feature doesn't exist.\`
+  Bad: \`@Coder FAIL: didn't work.\`
 - **"I need to hand off mid-work"** (Employee) → write WORKLOG incrementally as you work; hand-complete finalizes + triggers audit.`;
 }
 
