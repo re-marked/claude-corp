@@ -400,64 +400,19 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
-      // POST /tasks/:id/hand — hand a task to an agent (assign + dispatch + refresh)
-      const taskHandMatch = path.match(/^\/tasks\/([^/]+)\/hand$/);
-      if (method === 'POST' && taskHandMatch) {
-        const taskId = decodeURIComponent(taskHandMatch[1]!);
-        const body = await readBody(req) as Record<string, unknown>;
-        const toSlug = body.to as string;
-        if (!toSlug) {
-          json(res, { error: '"to" (agent slug) is required' }, 400);
-          return;
-        }
-
-        try {
-          // Resolve agent by slug or ID
-          const members = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
-          const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
-          const target = members.find((m: any) =>
-            m.type === 'agent' && (normalize(m.displayName) === normalize(toSlug) || m.id === toSlug),
-          );
-          if (!target) {
-            json(res, { error: `Agent "${toSlug}" not found` }, 404);
-            return;
-          }
-
-          // Resolve who is handing (explicit handedBy, or detect from members)
-          const founder = members.find((m: any) => m.rank === 'owner');
-          const handedBy = (body.handedBy as string) ?? founder?.id ?? null;
-          const hander = members.find((m: any) => m.id === handedBy);
-          const handerName = hander?.displayName ?? 'system';
-
-          // Update task: assign + record hander + timestamp
-          const filePath = taskPath(daemon.corpRoot, taskId);
-          const updated = updateTask(filePath, {
-            assignedTo: target.id,
-            handedBy,
-            handedAt: new Date().toISOString(),
-          } as any);
-
-          // Log to #tasks (read-only event) + dispatch to agent's DM
-          logTaskAssignment(daemon.corpRoot, target.id, updated.title);
-          dispatchTaskToDm(daemon, target.id, updated.title, taskId);
-
-          // Wake sleeping autoemon agent if task is urgent (critical/high priority)
-          if (daemon.autoemon.isSleeping(target.id)) {
-            const priority = updated.priority ?? 'normal';
-            if (priority === 'critical' || priority === 'high') {
-              daemon.autoemon.wakeAgent(target.id, 'urgent_task', `Task "${updated.title}" (${priority})`);
-            }
-          }
-
-          // Refresh all agents' TASKS.md + casket files
-          daemon.heartbeat.refreshAll();
-
-          json(res, { ok: true, task: updated, handedTo: target.displayName, handedBy: handerName });
-        } catch {
-          json(res, { error: 'Task not found' }, 404);
-        }
-        return;
-      }
+      // Legacy POST /tasks/:id/hand endpoint deleted in Project 1.4.
+      // The old path ran through the legacy Task API (updateTask
+      // assignedTo + dispatchTaskToDm + heartbeat.refreshAll) — a
+      // "slightly nicer @mention" per REFACTOR.md's diagnosis.
+      //
+      // Post-1.4 hand writes directly to the Casket chit via the
+      // shared `handChitToSlot` helper (shared/src/hand-core.ts).
+      // CLI cmdHand calls it directly; daemon cron task-spawn (the
+      // only other consumer) now imports + calls the helper in-
+      // process instead of self-HTTP'ing this endpoint.
+      //
+      // If any caller hits /tasks/:id/hand now, they get 404 —
+      // honest signal to migrate, not silent coexistence.
 
       // POST /projects/create
       if (method === 'POST' && path === '/projects/create') {

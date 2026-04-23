@@ -20,6 +20,7 @@ import {
   post,
   createTask,
   agentSessionKey,
+  handChitToSlot,
   CHANNELS_JSON,
   MEMBERS_JSON,
   MESSAGES_JSONL,
@@ -537,17 +538,27 @@ export class CronManager {
 
           log(`[crons] Spawned task "${title}" (${task.id}) from cron ${slug}`);
 
-          // Hand the task so the agent gets a DM notification
+          // Hand the spawned task to the assignee via the 1.4 shared
+          // helper. Pre-1.4 this was a self-HTTP POST to the daemon's
+          // /tasks/:id/hand endpoint; 1.4 deleted that endpoint, so
+          // we call handChitToSlot directly (same mechanism cmdHand
+          // uses). File-first: Casket write + state machine transition,
+          // no RPC round-trip.
           if (assignedTo && tpl.assignTo) {
             try {
-              await fetch(`http://127.0.0.1:${this.daemon.getPort()}/tasks/${encodeURIComponent(task.id)}/hand`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ to: tpl.assignTo }),
+              handChitToSlot({
+                corpRoot: this.daemon.corpRoot,
+                targetSlug: tpl.assignTo,
+                chitId: task.id,
+                handerId: 'system',
+                reason: `cron ${slug}`,
+                announce: true,
               });
               log(`[crons] Handed spawned task ${task.id} → @${tpl.assignTo}`);
-            } catch {
-              // Non-fatal — task exists even if hand fails
+            } catch (err) {
+              // Non-fatal — task exists even if hand fails. Logged so
+              // runaway cron-targets-invalid-role misconfigs surface.
+              log(`[crons] Hand failed for ${task.id} → @${tpl.assignTo}: ${(err as Error).message}`);
             }
           }
         } catch (err) {

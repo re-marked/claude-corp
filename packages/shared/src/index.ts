@@ -198,6 +198,13 @@ export type {
   RoleUnknownResult,
 } from './role-resolver.js';
 
+// Hand core — the shared mechanics for Casket-pointer writes + state
+// machine transitions + announcement. CLI cmdHand and daemon cron
+// task-spawn both use this; the daemon no longer has its own
+// /tasks/:id/hand endpoint.
+export { handChitToSlot, HandNotAllowedError } from './hand-core.js';
+export type { HandChitToSlotOpts, HandChitToSlotResult } from './hand-core.js';
+
 // Casket lifecycle primitives — the durable work-pointer surface that
 // 0.7.3's audit gate reads and that 1.3's chain walker will eventually
 // write. Module docstring explains the "was 1% built, this is the

@@ -46,19 +46,12 @@
 import { parseArgs } from 'node:util';
 import { isAbsolute, join } from 'node:path';
 import {
-  type Chit,
   type Member,
-  advanceCurrentStep,
-  findChitById,
-  updateChit,
-  chitScopeFromPath,
   resolveRoleToEmployee,
-  validateTransition,
-  TaskTransitionError,
-  createInboxItem,
   getRole,
-  type TaskFields,
-  type TaskWorkflowStatus,
+  handChitToSlot,
+  HandNotAllowedError,
+  TaskTransitionError,
 } from '@claudecorp/shared';
 import { getCorpRoot, getMembers, getFounder } from '../client.js';
 
@@ -91,57 +84,31 @@ export async function cmdHand(input: string[] | HandOpts): Promise<void> {
   const target = resolution.target;
   const targetMode = resolution.mode;
 
-  // 2. Validate chit + state-machine eligibility.
-  const hit = findChitById(corpRoot, opts.chit);
-  if (!hit) fail(`chit "${opts.chit}" not found`);
-  const chit = hit.chit;
-
-  // Hand eligibility: only task / contract / escalation are eligible
-  // work-chits for routing. Handing a Casket or observation is
-  // nonsense — reject at the boundary with an actionable message.
-  if (!isHandableType(chit.type)) {
-    fail(
-      `cannot hand a chit of type "${chit.type}" — hand is for work chits ` +
-        `(task, contract, escalation). Got ${opts.chit}.`,
-    );
-  }
-
-  // 3. Write Casket.currentStep on target BEFORE transitioning the
-  // chit's workflow state, so an intermediate failure at the task
-  // transition leaves the Casket pointing at a real (if not-yet-
-  // dispatched) chit rather than the wrong id.
+  // 2. Delegate the mechanics to handChitToSlot — the shared helper
+  // owns: chit-type eligibility check, Casket write, state machine
+  // transition, assignee stamp, inbox-item notification. Error paths
+  // come back as HandNotAllowedError (type/state) or TaskTransitionError
+  // (state machine rejection with legal-triggers list); the CLI
+  // surfaces both with actionable messages here.
+  let result;
   try {
-    advanceCurrentStep(corpRoot, target.id, opts.chit, handerId);
+    result = handChitToSlot({
+      corpRoot,
+      targetSlug: target.id,
+      chitId: opts.chit,
+      handerId,
+      reason: opts.reason,
+      announce: !opts.noAnnounce,
+    });
   } catch (err) {
-    fail(`casket advance failed: ${(err as Error).message}`);
-  }
-
-  // 4. + 5. Transition workflowStatus (task chits only) + stamp
-  // assignee / handedBy / handedAt.
-  let finalState: TaskWorkflowStatus | null = null;
-  if (chit.type === 'task') {
-    finalState = handTaskChit(corpRoot, hit, target.id, handerId);
-  }
-
-  // 6. Announcement. Tier 2 inbox-item — "you have new work." Fire-
-  // and-log: failure here doesn't undo the hand, it's observability.
-  let announced = false;
-  if (!opts.noAnnounce) {
-    try {
-      createInboxItem({
-        corpRoot,
-        recipient: target.id,
-        tier: 2,
-        from: handerId,
-        subject: renderAnnounceSubject(chit, opts.reason),
-        source: 'hand',
-        sourceRef: opts.chit,
-      });
-      announced = true;
-    } catch {
-      // Inbox failure is non-fatal — the Casket write IS delivery.
+    if (err instanceof HandNotAllowedError) fail(err.message);
+    if (err instanceof TaskTransitionError) {
+      fail(`task ${opts.chit} can't be handed from state "${err.from}". ${err.message}`);
     }
+    throw err;
   }
+  const finalState = result.finalWorkflowStatus;
+  const announced = result.announced;
 
   // Output.
   if (opts.json) {
@@ -237,89 +204,7 @@ function resolveTarget(
   };
 }
 
-// ─── Task-chit transition + assignee stamp ──────────────────────────
-
-function handTaskChit(
-  corpRoot: string,
-  hit: { chit: Chit; path: string },
-  assigneeId: string,
-  handerId: string,
-): TaskWorkflowStatus {
-  const fields = hit.chit.fields as { task: TaskFields };
-  const currentWs = fields.task.workflowStatus ?? 'draft';
-  const now = new Date().toISOString();
-
-  // Hand is idempotent at `dispatched`. A second hand to the same
-  // Casket re-stamps handedBy / handedAt (audit trail of re-handing)
-  // but workflowStatus stays put.
-  if (currentWs === 'dispatched') {
-    writeTaskFieldUpdate(corpRoot, hit, {
-      assignee: assigneeId,
-      handedBy: handerId,
-      handedAt: now,
-    });
-    return 'dispatched';
-  }
-
-  // Two-phase for `draft`: assign → queued, then dispatch → dispatched.
-  // One call from the caller's perspective; two validated transitions.
-  let nextWs: TaskWorkflowStatus = currentWs;
-  try {
-    if (nextWs === 'draft') {
-      nextWs = validateTransition(nextWs, 'assign', hit.chit.id);
-    }
-    if (nextWs === 'queued') {
-      nextWs = validateTransition(nextWs, 'dispatch', hit.chit.id);
-    }
-  } catch (err) {
-    if (err instanceof TaskTransitionError) {
-      fail(
-        `task ${hit.chit.id} is in state "${currentWs}" and cannot be handed. ` +
-          `${err.message}`,
-      );
-    }
-    throw err;
-  }
-
-  if (nextWs === currentWs) {
-    // Unreachable given the switch above, but type-level belt-and-suspenders.
-    return currentWs;
-  }
-
-  writeTaskFieldUpdate(corpRoot, hit, {
-    workflowStatus: nextWs,
-    assignee: assigneeId,
-    handedBy: handerId,
-    handedAt: now,
-  });
-  return nextWs;
-}
-
-function writeTaskFieldUpdate(
-  corpRoot: string,
-  hit: { chit: Chit; path: string },
-  partial: Partial<TaskFields>,
-): void {
-  const scope = chitScopeFromPath(corpRoot, hit.path);
-  updateChit(corpRoot, scope, 'task', hit.chit.id, {
-    fields: { task: partial } as never,
-    updatedBy: (partial.handedBy as string) ?? 'system',
-  });
-}
-
 // ─── Helpers ────────────────────────────────────────────────────────
-
-function isHandableType(type: string): boolean {
-  return type === 'task' || type === 'contract' || type === 'escalation';
-}
-
-function renderAnnounceSubject(chit: Chit, reason?: string): string {
-  const title =
-    chit.type === 'task'
-      ? (chit.fields as { task: TaskFields }).task.title
-      : chit.id;
-  return reason ? `${title} — handed (${reason})` : `${title} — handed to you`;
-}
 
 function safeGetMembers(corpRoot: string): Member[] {
   try {
