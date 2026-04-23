@@ -351,23 +351,34 @@ function resolveCurrentTask(
 
 function queryOpenTier3Inbox(corpRoot: string, slug: string): Chit<'inbox-item'>[] {
   try {
-    const result = queryChits(corpRoot, {
+    // queryChits returns ChitWithBody[] ({ chit, body, path }), not
+    // raw Chit[] — the prior shape cast the wrapper directly to Chit
+    // which passed tsc only via `as` but accessed .fields on the
+    // wrapper (undefined at runtime), so every filter returned []
+    // and tier-3 items never actually blocked the audit gate.
+    //
+    // Typed generic narrows chit to Chit<'inbox-item'> with no cast
+    // needed; .map pulls out the chit payload; filter predicates
+    // reach fields through the real path.
+    const result = queryChits<'inbox-item'>(corpRoot, {
       types: ['inbox-item'],
       statuses: ['active'],
       scopes: [`agent:${slug}` as const],
       limit: 200,
     });
-    return (result.chits as Chit<'inbox-item'>[]).filter((c) => {
-      const f = c.fields['inbox-item'];
-      // Tier 3 + still-active + NOT carried forward. Carry-forward
-      // is 0.7.4's explicit escape valve: the agent has acknowledged
-      // the item and documented what they're waiting on, so it
-      // doesn't block the audit gate even though status remains
-      // 'active' (the item isn't resolved, just deferred). The next
-      // session's wtf header still surfaces carried items for
-      // visibility until real resolution lands.
-      return f?.tier === 3 && f?.carriedForward !== true;
-    });
+    return result.chits
+      .map((w) => w.chit)
+      .filter((c) => {
+        const f = c.fields['inbox-item'];
+        // Tier 3 + still-active + NOT carried forward. Carry-forward
+        // is 0.7.4's explicit escape valve: the agent has acknowledged
+        // the item and documented what they're waiting on, so it
+        // doesn't block the audit gate even though status remains
+        // 'active' (the item isn't resolved, just deferred). The next
+        // session's wtf header still surfaces carried items for
+        // visibility until real resolution lands.
+        return f?.tier === 3 && f?.carriedForward !== true;
+      });
   } catch {
     return [];
   }
