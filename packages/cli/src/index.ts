@@ -584,6 +584,15 @@ async function run() {
       await cmdHand(process.argv.slice(3));
       break;
     }
+    case 'escalate': {
+      // Project 1.4: Employee-to-Partner judgment request. Creates
+      // escalation chit + writes Partner's Casket + fires inbox at
+      // severity-matched tier (blocker → Tier 3, question/review →
+      // Tier 2). Same raw-argv pattern as hand.
+      const { cmdEscalate } = await import('./commands/escalate.js');
+      await cmdEscalate(process.argv.slice(3));
+      break;
+    }
     case 'wtf': {
       const { cmdWtf } = await import('./commands/wtf.js');
       await cmdWtf({
