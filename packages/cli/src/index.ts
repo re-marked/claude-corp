@@ -593,6 +593,16 @@ async function run() {
       await cmdEscalate(process.argv.slice(3));
       break;
     }
+    case 'block': {
+      // Project 1.4.1: dynamic blocker injection. Files a sub-task,
+      // adds to caller's dependsOn, transitions caller to blocked via
+      // state machine, hands blocker chit to assignee, fires inbox
+      // on caller so wtf surfaces the BLOCKED state. Same raw-argv
+      // pattern as hand / escalate.
+      const { cmdBlock } = await import('./commands/block.js');
+      await cmdBlock(process.argv.slice(3));
+      break;
+    }
     case 'wtf': {
       const { cmdWtf } = await import('./commands/wtf.js');
       await cmdWtf({
