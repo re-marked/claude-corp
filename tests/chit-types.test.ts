@@ -60,6 +60,9 @@ describe('CHIT_TYPES registry invariants', () => {
     'pre-brain-entry',
     'step-log',
     'inbox-item',
+    // Project 1.4: Employee → Partner judgment request. Ephemeral
+    // 7d TTL, destroy-if-not-promoted, active → completed|rejected|closed.
+    'escalation',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {
