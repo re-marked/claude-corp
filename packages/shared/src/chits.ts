@@ -699,9 +699,9 @@ export function closeChit<T extends ChitTypeId>(
 
 // ─── Query ──────────────────────────────────────────────────────────
 
-export interface QueryChitsOpts {
+export interface QueryChitsOpts<T extends ChitTypeId = ChitTypeId> {
   /** Match ANY of these types. Omit to accept all types. */
-  types?: readonly ChitTypeId[];
+  types?: readonly T[];
   /** Match ANY of these statuses. Omit to accept all statuses. */
   statuses?: readonly ChitStatus[];
   /** Match ANY of these tags. Omit to not filter on tags. */
@@ -903,9 +903,19 @@ function matchesFilter(chit: Chit, opts: QueryChitsOpts): boolean {
   return true;
 }
 
-/** Result of a queryChits call — matches plus any malformed files encountered during the walk. */
-export interface QueryChitsResult {
-  chits: ChitWithBody[];
+/**
+ * Result of a queryChits call — matches plus any malformed files
+ * encountered during the walk. Generic T narrows `chits[i].chit` to a
+ * specific chit variant when the caller constrained the type filter.
+ *
+ * The narrowing is a type-level assertion: runtime still filters by
+ * `opts.types`, which mirrors the static T when the caller passes
+ * `types: ['inbox-item']` + `<'inbox-item'>` together. Passing a type
+ * parameter without a matching runtime filter would lie — caller's
+ * responsibility, same contract shape as lodash's `.map<T>()`.
+ */
+export interface QueryChitsResult<T extends ChitTypeId = ChitTypeId> {
+  chits: ChitWithBody<T>[];
   malformed: MalformedChit[];
 }
 
@@ -926,11 +936,14 @@ export interface QueryChitsResult {
  * malformed can ignore `result.malformed`; callers that do (TUI health
  * views, daemon monitors, admin commands) surface them directly.
  */
-export function queryChits(corpRoot: string, opts: QueryChitsOpts = {}): QueryChitsResult {
+export function queryChits<T extends ChitTypeId = ChitTypeId>(
+  corpRoot: string,
+  opts: QueryChitsOpts<T> = {},
+): QueryChitsResult<T> {
   const scopesToVisit = resolveScopesToVisit(corpRoot, opts.scopes);
   const paths = findChitFiles(scopesToVisit, opts.types, opts.includeArchive ?? false);
 
-  const matches: ChitWithBody[] = [];
+  const matches: ChitWithBody<T>[] = [];
   const malformed: MalformedChit[] = [];
 
   for (const path of paths) {
@@ -952,7 +965,7 @@ export function queryChits(corpRoot: string, opts: QueryChitsOpts = {}): QueryCh
     }
 
     if (!matchesFilter(chit, opts)) continue;
-    matches.push({ chit, body, path });
+    matches.push({ chit: chit as Chit<T>, body, path });
   }
 
   // Sort
