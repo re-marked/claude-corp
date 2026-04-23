@@ -148,7 +148,7 @@ export function buildCheckpointObservation(
     category: 'NOTICE',
     subject: input.agentSlug,
     importance: 3,
-    title: `[auto] pre-compact checkpoint (${trigger})`,
+    title: `pre-compact checkpoint (${trigger})`,
     context: founderAsk,
   };
 

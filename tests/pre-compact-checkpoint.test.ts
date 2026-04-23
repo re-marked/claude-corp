@@ -57,11 +57,11 @@ describe('buildCheckpointObservation — observation field structure', () => {
     expect(out.fields.observation.importance).toBe(3);
   });
 
-  it('title names the trigger', () => {
+  it('title names the trigger without redundant prefixes', () => {
     const auto = buildCheckpointObservation(baseInput({ hookInput: { trigger: 'auto' } }))!;
     const manual = buildCheckpointObservation(baseInput({ hookInput: { trigger: 'manual' } }))!;
-    expect(auto.fields.observation.title).toContain('auto');
-    expect(manual.fields.observation.title).toContain('manual');
+    expect(auto.fields.observation.title).toBe('pre-compact checkpoint (auto)');
+    expect(manual.fields.observation.title).toBe('pre-compact checkpoint (manual)');
   });
 
   it('scope is agent:<slug>', () => {
@@ -155,6 +155,20 @@ describe('buildCheckpointObservation — founder ask threading', () => {
       baseInput({ hookInput: { trigger: 'auto', custom_instructions: null } }),
     )!;
     expect(out.fields.observation.context).toBeNull();
+  });
+
+  it('multi-line custom_instructions renders every line as its own blockquote', () => {
+    const out = buildCheckpointObservation(
+      baseInput({
+        hookInput: {
+          trigger: 'manual',
+          custom_instructions: 'keep the orchestration focus\nand note the deadline\nthird line',
+        },
+      }),
+    )!;
+    expect(out.body).toMatch(/> keep the orchestration focus/);
+    expect(out.body).toMatch(/> and note the deadline/);
+    expect(out.body).toMatch(/> third line/);
   });
 });
 
