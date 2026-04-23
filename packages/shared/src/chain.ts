@@ -33,12 +33,14 @@
  * shouldn't spin the scanner forever.
  */
 
-import type { Chit } from './types/chit.js';
+import type { Chit, TaskFields, TaskWorkflowStatus } from './types/chit.js';
 import type { ChitTypeId } from './types/chit.js';
-import { findChitById, readChit, queryChits } from './chits.js';
+import { findChitById, readChit, queryChits, updateChit, chitScopeFromPath } from './chits.js';
 import {
   isTerminalSuccess,
   isTerminalFailure,
+  validateTransition,
+  TaskTransitionError,
   type TaskTransitionTrigger,
 } from './task-state-machine.js';
 
@@ -347,6 +349,139 @@ function getWorkflowStatus(chit: Chit): string | undefined {
   if (chit.type !== 'task') return undefined;
   const ws = (chit.fields.task as { workflowStatus?: string | null }).workflowStatus;
   return ws ?? undefined;
+}
+
+// ─── applyDependentDelta — the mutation side of advanceChain ────────
+
+export interface ApplyDeltaResult {
+  /** True when the state transition actually landed on the chit. */
+  readonly applied: boolean;
+  /** Target chit id — always set, matches the delta's chitId. */
+  readonly chitId: string;
+  /** State before the apply (undefined when skipped before reading). */
+  readonly fromState?: TaskWorkflowStatus;
+  /** State after the apply (undefined when not applied). */
+  readonly toState?: TaskWorkflowStatus;
+  /** Classification of why we skipped, when applied=false. Callers log but shouldn't error. */
+  readonly skippedReason?:
+    | 'chit-missing'
+    | 'not-task'
+    | 'no-workflow-status'
+    | 'transition-rejected';
+  /** Free-form detail for log entries — the specific error or the rejected transition. */
+  readonly detail?: string;
+}
+
+export interface ApplyDeltaOpts {
+  corpRoot: string;
+  delta: DependentDelta;
+  /** Member id to stamp on the chit's updatedBy audit field. */
+  actor: string;
+}
+
+/**
+ * Apply a single DependentDelta from advanceChain — translates the
+ * delta's trigger through the state machine + writes the chit.
+ *
+ * Fail-open on substrate gaps (missing chit, pre-1.3 task without
+ * workflowStatus, state machine rejection): returns `applied: false`
+ * with a classified `skippedReason` so the caller can log the gap but
+ * shouldn't stop its outer loop. The alternative — throwing — would
+ * abort the whole cascade on one stale dependent, which is worse
+ * than leaving one chit in the wrong state for one cycle (the next
+ * close event re-evaluates).
+ *
+ * Callers:
+ *   - handoff-promotion.ts on audit-approve (apply deltas from the
+ *     closed task's advanceChain result).
+ *   - task-events.ts / task-watcher.ts on any task-close event
+ *     (replacing the pre-1.4 ad-hoc blockedBy resolver).
+ *   - cmdBlock's blocker-close handler (dynamic blocker flow).
+ *
+ * The caller is ALSO responsible for dispatch/re-hand after unblock —
+ * this helper does the chit write, not the side effects. Separation
+ * keeps unit-testability clean; wiring is done at the caller boundary
+ * where the daemon context (re-dispatch routing, DM announcements,
+ * Casket pointer updates) is available.
+ */
+export function applyDependentDelta(opts: ApplyDeltaOpts): ApplyDeltaResult {
+  const { corpRoot, delta, actor } = opts;
+  const hit = findChitById(corpRoot, delta.chitId);
+  if (!hit) {
+    return {
+      applied: false,
+      chitId: delta.chitId,
+      skippedReason: 'chit-missing',
+      detail: `chit ${delta.chitId} not found — stale dependent reference`,
+    };
+  }
+  if (hit.chit.type !== 'task') {
+    return {
+      applied: false,
+      chitId: delta.chitId,
+      skippedReason: 'not-task',
+      detail: `chit ${delta.chitId} is type '${hit.chit.type}'; chain walker only transitions tasks`,
+    };
+  }
+  const fields = hit.chit.fields.task as TaskFields;
+  const fromState = fields.workflowStatus ?? undefined;
+  if (!fromState) {
+    // Pre-1.3 task chit or migration straggler. Skip transition;
+    // chit.status-level lifecycle still moves via other paths.
+    return {
+      applied: false,
+      chitId: delta.chitId,
+      skippedReason: 'no-workflow-status',
+      detail: `task ${delta.chitId} has no fields.task.workflowStatus — pre-1.3 chit`,
+    };
+  }
+
+  let toState: TaskWorkflowStatus;
+  try {
+    toState = validateTransition(fromState, delta.trigger, delta.chitId);
+  } catch (err) {
+    if (err instanceof TaskTransitionError) {
+      return {
+        applied: false,
+        chitId: delta.chitId,
+        fromState,
+        skippedReason: 'transition-rejected',
+        detail: err.message,
+      };
+    }
+    throw err;
+  }
+
+  const scope = chitScopeFromPath(corpRoot, hit.path);
+  updateChit(corpRoot, scope, 'task', delta.chitId, {
+    // Chain walker deltas are workflowStatus-level — coarse chit.status
+    // stays untouched (it already reflects the terminal / non-terminal
+    // state). Touching chit.status from here would double-classify.
+    fields: { task: { workflowStatus: toState } } as never,
+    updatedBy: actor,
+  });
+
+  return {
+    applied: true,
+    chitId: delta.chitId,
+    fromState,
+    toState,
+  };
+}
+
+/**
+ * Apply every delta in a DependentDelta[] and return per-delta results.
+ * Pure sequential loop — if one applies and the next's transition is
+ * rejected, the first's mutation stays (chain walker cascades are not
+ * transactional). Callers receiving partial success should inspect each
+ * result and decide how to log / recover.
+ */
+export function applyDependentDeltas(
+  corpRoot: string,
+  deltas: readonly DependentDelta[],
+  actor: string,
+): ApplyDeltaResult[] {
+  return deltas.map((delta) => applyDependentDelta({ corpRoot, delta, actor }));
 }
 
 // ─── Convenience re-exports (save callers a second import) ─────────
