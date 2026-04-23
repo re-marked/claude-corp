@@ -269,6 +269,7 @@ export {
   revertTaskFromUnderReview,
   peekLatestHandoffChit,
   consumeHandoffChit,
+  buildPreCompactInstructions,
 } from './audit/index.js';
 export type {
   HookEventName,

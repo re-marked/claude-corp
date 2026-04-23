@@ -53,6 +53,7 @@ import {
   inferKind,
   promotePendingHandoff,
   revertTaskFromUnderReview,
+  buildPreCompactInstructions,
   type Chit,
   type HookInput,
   type AuditDecision,
@@ -170,6 +171,42 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
   }
 
   const kind = inferKind(member.rank);
+
+  // PreCompact branches early — the contract is fundamentally different
+  // from Stop. Claude Code merges our stdout into its summarization
+  // prompt via mergeHookInstructions (leaked source:
+  // services/compact/autoCompact.ts). So instead of running the audit
+  // gate + emitting {decision}, we emit summary-shaping instructions
+  // that bias what the summarizer preserves across the compact boundary.
+  // Fail-open: if the template returns empty (e.g. employee kind for
+  // now), emit nothing — Claude Code treats absent stdout as no extra
+  // instructions, same as before the hook existed.
+  if (event === 'PreCompact') {
+    const instructions = buildPreCompactInstructions({
+      hookInput,
+      kind,
+      agentDisplayName: member.displayName,
+      agentSlug: slug,
+    });
+    logAuditDecision(
+      corpRoot,
+      slug,
+      { decision: 'approve' },
+      {
+        event: 'pre-compact-instructions',
+        trigger: hookInput.trigger ?? null,
+        emitted: instructions.length > 0,
+        customInstructionsPresent: typeof hookInput.custom_instructions === 'string'
+          && hookInput.custom_instructions.trim().length > 0,
+      },
+    );
+    if (instructions) process.stdout.write(instructions + '\n');
+    // Do NOT emit AuditDecision JSON — PreCompact's output protocol is
+    // raw text merged into the summary prompt, not the {decision,reason}
+    // envelope. Emitting both would confuse the summarizer.
+    return;
+  }
+
   const currentTask = resolveCurrentTask(corpRoot, slug);
   const openTier3Inbox = queryOpenTier3Inbox(corpRoot, slug);
 
