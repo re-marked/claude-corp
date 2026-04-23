@@ -579,6 +579,15 @@ export class ClaudeCodeHarness implements AgentHarness {
         this._lastRateLimit = event.info;
         break;
 
+      case 'usage':
+        // Surface the parser's usage snapshot to the dispatch caller.
+        // state.resolvedModel is populated on `init` before any
+        // message_start fires, so the model we thread here matches the
+        // model that actually ran the turn (not the spec-requested model
+        // that may have been overridden by Claude Code's own routing).
+        callbacks?.onUsage?.(event.usage, state.resolvedModel);
+        break;
+
       case 'assistant_message':
         // Full assistant text — already streamed via tokens. Use as
         // fallback content if no result event arrives (defensive).

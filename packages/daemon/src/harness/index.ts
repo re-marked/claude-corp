@@ -48,6 +48,7 @@ export {
   ClaudeCodeStreamParser,
   type ClaudeCodeEvent,
   type ClaudeCodeEventListener,
+  type ClaudeCodeUsage,
 } from './claude-code-stream.js';
 export {
   sessionIdFor,

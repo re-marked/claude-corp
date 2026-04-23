@@ -1,0 +1,72 @@
+/**
+ * Pre-compact signal fragment — Project 1.7.
+ *
+ * Injects a nudge when a Partner's context window is about to be
+ * autocompacted by Claude Code. Fires only when:
+ *
+ *   - agent kind is `partner` (employees use Claude Corp's own wake /
+ *     SLUMBER machinery, which is already compaction-aware; the signal
+ *     is a Partner-specific feature since Partners ride Claude Code's
+ *     native `/compact`)
+ *   - harness is `claude-code` (OpenClaw agents don't go through
+ *     autocompact; the signal has no substrate to attach to)
+ *   - the daemon has observed a recent usage snapshot (sessionTokens +
+ *     sessionModel populated on FragmentContext)
+ *   - tokens are in the `[ourSignalAt, autoCompactAt)` window per
+ *     calculateCompactionThreshold — i.e., past our 30k-runway mark but
+ *     not yet past Claude Code's 13k-autocompact mark
+ *
+ * The purpose of the fragment is to give the Partner time to persist
+ * "soul material" — observations, memories, in-progress-thought —
+ * to durable storage (BRAIN/, observation chits, WORKLOG.md) BEFORE
+ * Claude Code's summarization model scrapes context. The summarizer is
+ * good, but it compresses everything into a single synthetic summary
+ * turn. Anything the Partner explicitly crystallizes into files
+ * survives independently of that summary.
+ *
+ * Fragment is short + high-signal. Over-explaining here eats tokens
+ * from exactly the context we're trying to save.
+ */
+
+import type { Fragment } from './types.js';
+import { calculateCompactionThreshold, formatThresholdSummary } from '@claudecorp/shared';
+
+export const preCompactSignalFragment: Fragment = {
+  id: 'pre-compact-signal',
+  // Order: very early — this is a NOW signal. Ahead of workspace (10),
+  // context (20), history (30) so the Partner reads it before anything
+  // else pulls their attention.
+  order: 5,
+  applies: (ctx) => {
+    if (ctx.agentKind !== 'partner') return false;
+    if (ctx.harness !== 'claude-code') return false;
+    if (typeof ctx.sessionTokens !== 'number' || !ctx.sessionModel) return false;
+    const state = calculateCompactionThreshold(ctx.sessionTokens, ctx.sessionModel);
+    return state.inSignalWindow;
+  },
+  render: (ctx) => {
+    const state = calculateCompactionThreshold(ctx.sessionTokens!, ctx.sessionModel!);
+    return `# Pre-Compact Signal
+
+Your context is approaching Claude Code's autocompact threshold:
+**${formatThresholdSummary(state)}**
+
+Autocompact will summarize everything into one synthetic turn. Anything
+you DON'T crystallize into durable storage before then gets reduced to
+the summarizer's best guess.
+
+**Crystallize now — before \`/compact\` fires:**
+
+- \`cc-cli observe "<insight>" --from <you> --category <TASK|DECISION|LEARNED|CHECKPOINT>\`
+  for anything you want to remember across the compact boundary.
+- \`cc-cli handoff\` or update your Casket with the current work pointer
+  so the next turn (pre- or post-compact) picks up cleanly.
+- Write any mid-flight reasoning you need to preserve into
+  \`observation\` chits or your BRAIN/ files. Bullet-point notes survive
+  the summary untouched.
+
+After this turn, continue as normal. The PreCompact hook will shape the
+summary itself when compact fires — but the durable artifacts you write
+now are what actually persist.`;
+  },
+};

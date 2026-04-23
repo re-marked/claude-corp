@@ -44,6 +44,7 @@ import { OpenClawWS } from './openclaw-ws.js';
 import { InflightRegistry } from './inflight-registry.js';
 import {
   type AgentHarness,
+  type ClaudeCodeUsage,
   ClaudeCodeHarness,
   HarnessRouter,
   OpenClawHarness,
@@ -112,6 +113,20 @@ export class Daemon {
   harness: HarnessRouter;
   /** Track consecutive overloaded errors per agent for gateway restart logic */
   overloadCounts = new Map<string, number>();
+  /**
+   * Per-agent latest usage snapshot from the Claude Code stream. Populated
+   * via recordAgentUsage on every `message_start` / `message_delta` the
+   * harness emits. Consumed by Project 1.7's pre-compact signal fragment
+   * (through FragmentContext.sessionTokens + sessionModel) to decide
+   * whether the Partner has crossed into the "crystallize memories"
+   * window before Claude Code's autocompact fires.
+   *
+   * Keyed on memberId. `at` is the wall-clock ms of the snapshot — kept
+   * for diagnostics ("signal fired on stale usage from 20 min ago")
+   * rather than staleness gating; even old usage approximates context
+   * size well enough to justify the signal.
+   */
+  private lastAgentUsage = new Map<string, { usage: ClaudeCodeUsage; model: string; at: number }>();
   /** Founder presence tracking for autoemon — when was the last user interaction? */
   lastFounderInteractionAt = 0;
   private server: Server | null = null;
@@ -230,6 +245,25 @@ export class Daemon {
   /** Diagnostic — list all currently in-flight session keys. */
   listInflight(): string[] {
     return this.inflightRegistry.list();
+  }
+
+  /**
+   * Record a usage snapshot observed by the Claude Code harness for a
+   * given agent. Keeps the latest — message_delta overwrites the early
+   * message_start snapshot once output tokens are known. Called by the
+   * harness callback wiring on each dispatch.
+   */
+  recordAgentUsage(memberId: string, usage: ClaudeCodeUsage, model: string): void {
+    this.lastAgentUsage.set(memberId, { usage, model, at: Date.now() });
+  }
+
+  /**
+   * Latest observed usage for an agent, or null when no dispatch has
+   * produced a usage event yet (first turn of a session, or OpenClaw
+   * agent that doesn't emit usage).
+   */
+  getLastAgentUsage(memberId: string): { usage: ClaudeCodeUsage; model: string; at: number } | null {
+    return this.lastAgentUsage.get(memberId) ?? null;
   }
 
   /** Update agent work status + broadcast event + fire transition callbacks + analytics */

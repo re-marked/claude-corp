@@ -11,6 +11,7 @@ import { inboxFragment } from './inbox.js';
 // one-shot handoff signal, and avoids duplicate injection.
 import { autoemonFragment } from './autoemon.js';
 import { cultureFragment } from './culture.js';
+import { preCompactSignalFragment } from './pre-compact-signal.js';
 
 const FRAGMENTS: Fragment[] = [
   autoemonFragment,
@@ -19,6 +20,7 @@ const FRAGMENTS: Fragment[] = [
   inboxFragment,
   contextFragment,
   historyFragment,
+  preCompactSignalFragment,
 ].sort((a, b) => a.order - b.order);
 
 /**

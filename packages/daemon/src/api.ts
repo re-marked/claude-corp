@@ -699,6 +699,7 @@ export function createApi(daemon: Daemon): Server {
           supervisorName = sup?.displayName ?? null;
         }
 
+        const lastUsage = daemon.getLastAgentUsage(target.id);
         const context = {
           agentDir,
           corpRoot,
@@ -716,6 +717,8 @@ export function createApi(daemon: Daemon): Server {
           supervisorName,
           autoemonEnrolled: daemon.autoemon.isEnrolled(target.id),
           harness: (agentProc.mode === 'harness' ? 'claude-code' : 'openclaw') as 'openclaw' | 'claude-code',
+          sessionTokens: lastUsage?.usage.inputTokens,
+          sessionModel: lastUsage?.model,
         };
 
         // Set target busy
@@ -873,6 +876,12 @@ export function createApi(daemon: Daemon): Server {
                   });
                 }
               } : undefined,
+              onUsage: (usage, model) => {
+                // Project 1.7 pre-compact signal bookkeeping — stash the
+                // latest per-agent usage snapshot so the next dispatch's
+                // FragmentContext can decide whether to inject the nudge.
+                daemon.recordAgentUsage(target.id, usage, model);
+              },
             },
           });
 

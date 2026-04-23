@@ -532,6 +532,12 @@ export class MessageRouter {
               toolName: tool.name,
             });
           },
+          onUsage: (usage, model) => {
+            // Record per-agent token count for Project 1.7 pre-compact
+            // signal. Fires on message_start (early) + message_delta
+            // (final); latest wins.
+            this.daemon.recordAgentUsage(targetId, usage, model);
+          },
         },
       });
 
@@ -757,6 +763,8 @@ export class MessageRouter {
       supervisorName = supervisor?.displayName ?? null;
     }
 
+    const lastUsage = this.daemon.getLastAgentUsage(targetAgent.id);
+
     return {
       agentDir: agentDirDisplay,
       corpRoot: corpRootDisplay,
@@ -774,6 +782,8 @@ export class MessageRouter {
       supervisorName,
       autoemonEnrolled: this.daemon.autoemon.isEnrolled(targetAgent.id),
       harness: this.resolveHarness(targetAgent),
+      sessionTokens: lastUsage?.usage.inputTokens,
+      sessionModel: lastUsage?.model,
     };
   }
 

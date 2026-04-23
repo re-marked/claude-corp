@@ -140,6 +140,7 @@ export class HeartbeatManager {
         supervisorName = sup?.displayName ?? null;
       }
 
+      const lastUsage = this.daemon.getLastAgentUsage(agent.id);
       const context: DispatchContext = {
         agentDir,
         corpRoot,
@@ -156,6 +157,8 @@ export class HeartbeatManager {
         channelKind: 'direct',
         supervisorName,
         autoemonEnrolled: this.daemon.autoemon.isEnrolled(agent.id),
+        sessionTokens: lastUsage?.usage.inputTokens,
+        sessionModel: lastUsage?.model,
       };
 
       // Mark busy during inbox dispatch
@@ -169,6 +172,11 @@ export class HeartbeatManager {
           message: summary,
           sessionKey,
           context,
+          callbacks: {
+            onUsage: (usage, model) => {
+              this.daemon.recordAgentUsage(agent.id, usage, model);
+            },
+          },
         });
         log(`[heartbeat] ${agent.displayName} inbox response: ${result.content.slice(0, 60)}`);
       } catch (err) {
