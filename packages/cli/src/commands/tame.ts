@@ -85,7 +85,27 @@ export async function cmdTame(opts: {
     );
   }
 
-  // 3. Mutate members.json (kind flip + optional rename).
+  // 3. Resolve + validate workspace FIRST, before any persistence.
+  //    Every subsequent step (members.json flip, soul-file expansion,
+  //    BRAIN genesis, CLAUDE.md rewrite, hook regen, ceremony) needs
+  //    a real workspace to land on. If we wrote members.json first and
+  //    then bailed on a missing workspace, we'd leave the corp in a
+  //    half-tamed state — Partner by flag, Employee by substrate —
+  //    that no idempotent re-run can cleanly recover from.
+  if (!target.agentDir) {
+    fail(`"${slug}" has no agentDir — can't expand soul files without a workspace.`);
+  }
+  const workspace = isAbsolute(target.agentDir)
+    ? target.agentDir
+    : join(corpRoot, target.agentDir);
+  if (!existsSync(workspace)) {
+    fail(
+      `"${slug}" workspace does not exist at ${workspace}. Stale members.json entry — fix with cc-cli fire --remove or re-hire.`,
+    );
+  }
+
+  // 4. Mutate members.json (kind flip + optional rename). Safe to
+  //    persist now — every later step has a real target.
   const updatedName = opts.name?.trim() || target.displayName;
   const newMembers = members.map((m) =>
     m.id === slug
@@ -97,14 +117,6 @@ export async function cmdTame(opts: {
     JSON.stringify(newMembers, null, 2),
     'utf-8',
   );
-
-  // 4. Resolve workspace.
-  if (!target.agentDir) {
-    fail(`"${slug}" has no agentDir — can't expand soul files without a workspace.`);
-  }
-  const workspace = isAbsolute(target.agentDir)
-    ? target.agentDir
-    : join(corpRoot, target.agentDir);
 
   // 5. Expand soul-file set. Idempotent — write only if missing, so
   //    re-running tame (e.g. if ceremony failed mid-way) doesn't
