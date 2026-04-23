@@ -39,6 +39,7 @@ import { ClaudeCodeStreamParser, type ClaudeCodeEvent } from './claude-code-stre
 import { sessionIdFor } from './session-id.js';
 import { findExecutableInPath } from './spawn-utils.js';
 import { composeSystemMessage } from '../fragments/index.js';
+import { preCompactSignalFragment } from '../fragments/pre-compact-signal.js';
 import {
   type AgentHarness,
   type AgentSpec,
@@ -383,6 +384,27 @@ export class ClaudeCodeHarness implements AgentHarness {
           // crash. Sparse contexts (tests, minimal say() calls) may
           // lack fields fragments expect. Log and continue.
           logError(`[harness:claude-code] fragment composition failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else if (sessionHasHistory && opts.context) {
+        // Resume path — the full composeSystemMessage deliberately
+        // skips here (seed-once policy, see rule above). But the
+        // pre-compact-signal fragment (1.7) is per-dispatch by design:
+        // the signal window is reached deep into a long session, which
+        // means EVERY dispatch that could cross the threshold must
+        // re-evaluate. Fragment.applies() already enforces the Partner
+        // + claude-code + in-window gates; we just let it run and
+        // prepend on positive. Any other per-dispatch fragments would
+        // plug in at the same spot.
+        try {
+          if (preCompactSignalFragment.applies(opts.context)) {
+            const signal = preCompactSignalFragment.render(opts.context);
+            if (signal.trim()) {
+              fullMessage = `<system-context>\n${signal}\n</system-context>\n\n${opts.message}`;
+              log(`[harness:claude-code] pre-compact signal injected (resume): ${signal.length} chars for ${opts.agentId}`);
+            }
+          }
+        } catch (err) {
+          logError(`[harness:claude-code] pre-compact signal injection failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
 
