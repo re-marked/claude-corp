@@ -1150,25 +1150,45 @@ If you're reading this after a context compaction: you ARE the same Claude that 
 
 ### 1.1 — Introduce Employee vs Partner distinction
 
-Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee spawned with self-chosen name on first session). Promotion command `cc-cli agent promote --slug <x> --name <new-name>` changes kind.
+Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee spawned with founder-given name — self-naming deferred to 1.9's bacteria). Promotion-by-ceremony command `cc-cli tame --slug <x> --reason "..." [--name <new-name>]` changes kind from employee → partner, expands soul-file set, writes first BRAIN entry from the founder's reason, triggers the welcome ceremony via inbox chits.
 
-**Scope:** schema, hire wizard, cc-cli agent subcommands, role definitions.
+**Scope:** AgentKind type + Member.kind/role fields, role registry, hire --kind/--role branching, kind-aware workspace (Employees skip soul files), CORP.md "Your Role" dynamic section from the registry, cc-cli tame command (ceremony via inbox chits, no faked agent voice).
+
 **File paths:**
-- `packages/shared/src/types/member.ts` (add `kind` field to Member type)
-- `packages/shared/src/index.ts` (export any new types)
-- `packages/tui/src/views/hire-wizard.tsx` (branch on kind; Partner = named, Employee = pool-spawn)
-- `packages/cli/src/commands/hire.ts` (accept --kind flag)
-- `packages/cli/src/commands/agent-control.ts` (promote subcommand, or new `promote.ts`)
-- `packages/shared/src/templates/identity.ts` (kind-aware IDENTITY.md content — Employee is lighter, Partner is fuller)
-- `packages/shared/src/templates/role-*.md` (new: per-role definition files — Partner of role vs Employee of role)
+- `packages/shared/src/types/member.ts` (AgentKind + Member.kind + Member.role fields)
+- `packages/shared/src/roles.ts` (new — role registry with 12 entries across decree/role-lead/worker tiers)
+- `packages/shared/src/wtf-state.ts` (resolveKind helper alongside inferKind; WtfOutputOpts gains kind + roleId)
+- `packages/shared/src/templates/corp-md.ts` (CorpMdKind aliases AgentKind; CorpMdOpts gains roleId; new yourRoleSection rendering from registry)
+- `packages/shared/src/templates/claude-md.ts` (kind-aware @imports — Employees skip SOUL/USER/MEMORY)
+- `packages/shared/src/agent-setup.ts` (kind-aware brain/ dir + soul-file + BOOTSTRAP.md writes)
+- `packages/cli/src/commands/hire.ts` (--kind / --role validation against registry)
+- `packages/cli/src/commands/tame.ts` (new — the promotion ceremony)
+- `packages/daemon/src/fragments/types.ts`, `router.ts`, `api.ts`, `heartbeat.ts` (FragmentContext + producers pass agentKind/agentRole)
+
+**Ceremony** — inbox-chit based, matches the manifesto's "ceremony is witnessed":
+1. Founder writes `--reason` → becomes new Partner's first BRAIN entry (type='self-knowledge', source='founder-direct', confidence='high', tags=['taming','genesis','founder-recognition']).
+2. Data transition: kind flip + optional rename + soul-file expansion (SOUL, IDENTITY, USER, MEMORY, BRAIN/).
+3. Tier 3 inbox-item for new Partner from founder: "You've been tamed. Welcome to the Partner circle."
+4. Tier 2 inbox-item for every OTHER Partner from founder: "Welcome {name} — tamed for {reason-preview}." Each Partner picks it up on their next wtf/inbox check; responds via DM in their own voice on their own tempo. No faked agent speech; the walkarounds accrete organically across the next few turns.
 
 **Test strategy:**
-- Unit: Member type accepts `kind`, defaults sensibly, validates.
-- Integration: hire flow produces correct workspace layout for each kind.
-- Manual: hire a Partner, hire an Employee (bacteria-free spawn), verify both work.
+- Unit: AgentKind + Member.kind + Member.role round-trip through setupAgentWorkspace.
+- Unit: kind-aware workspace — Partner gets brain/ + SOUL/USER/MEMORY; Employee gets none.
+- Unit: role registry invariants (unique ids, defaultKind ↔ tier consistency).
+- Unit: thin CLAUDE.md kind branch (Partner @imports all four soul files; Employee @imports none).
+- Integration: tame flips kind, expands soul files, writes genesis.md, fires the Tier 2/3 welcome chits.
+- Manual: hire Partner, hire Employee, tame the Employee, verify welcome flow.
 
-**Depends on:** nothing
-**PRs:** 2-3
+**Naming.** Renamed from the original spec's `cc-cli agent promote`. "tame" is load-bearing — short, evocative, pairs with `hire`/`fire` as the three verbs of an agent lifecycle. "Promote" was a generic corporate-ladder verb; "tame" names the SPECIFIC relational act of bringing an ephemeral slot into the trusted named circle.
+
+**Deferred to later sub-projects:**
+- Self-chosen Employee names on first dispatch → 1.9 (needs bacteria spawn machinery).
+- Role-level pre-BRAIN → 4.x (needs dream-distillation accumulation).
+- Per-step session cycling for Employees → 1.6.
+- Compaction for Partners → 1.7.
+
+**Depends on:** 0.7.4 (createInboxItem — the ceremony uses inbox chits), 0.7.3 (BRAIN + Casket already available).
+**PRs:** 1 (this one).
 
 ### 1.2 — Casket: durable hook
 
@@ -1730,34 +1750,20 @@ The auto-recovery machinery split across two earlier sub-projects:
 **Depends on:** 4.1
 **PRs:** 3-4
 
-### 4.3 — Promotion mechanism (Employee → Partner, with ceremony)
+### 4.3 — [ABSORBED INTO 1.1]
 
-**Problem.** Promotion is defined (see Decisions Made section — it's a ceremony) but not built. Today there's no way for Mark to say "this Employee becomes a Partner" and have the corp ceremony run.
+The core taming command + ceremony shipped in 1.1 — see 1.1's "Ceremony" subsection for the shipped shape:
 
-**Scope.**
-- Command: `cc-cli agent promote <employee-slug> --name <new-partner-name> --reason "..."`
-- Data transition:
-  - `Member.kind` changes from `employee` to `partner`
-  - Slot made persistent (excluded from bacteria-collapse)
-  - New Partner's workspace expanded: SOUL.md + IDENTITY.md + BRAIN/ + MEMORY.md created from role's pre-BRAIN as seed
-  - Name in members.json gets updated to new Partner name
-- Ceremony sequence (orchestrated by daemon or CEO):
-  1. Founder's `--reason` note written as the first BRAIN/ entry: `BRAIN/01-origin.md`
-  2. CEO receives prompt to welcome the new Partner by name, reference the reason
-  3. Relevant Partners (Engineering Lead if a dev Employee is promoted, etc.) also prompted to welcome briefly
-  4. Messages posted in corp-wide channel (maybe `#announcements` or `#general`)
-  5. New Partner's first dispatch includes those welcomes in context + their seeded BRAIN + an instruction: "acknowledge your own becoming, thank those who welcomed you."
-  6. The new Partner's first reply is written to their BRAIN as `BRAIN/02-arrival.md`.
-- Role adjustment: Employee pool for the role loses this slot; role pre-BRAIN continues accumulating from other Employees.
+- Command is `cc-cli tame` (not `cc-cli agent promote` — renamed because "tame" is the load-bearing verb; it pairs with hire/fire as the three verbs of an agent lifecycle, and captures the specific relational act of bringing an ephemeral slot into the trusted named circle).
+- Ceremony is inbox-chit based: Tier 3 welcome for new Partner from founder; Tier 2 walkaround-requests for every other Partner. No faked agent voice; each Partner engages in their own voice on their own tempo. The accretion IS the witnessing.
+- Genesis BRAIN entry: `BRAIN/genesis.md` (not `01-origin.md`) carries the founder's reason with `source='founder-direct'`, `confidence='high'`, `type='self-knowledge'`.
 
-**Acceptance criteria.**
-- Promote an Employee named "toast" to Partner "Joe" with reason "shipped 12 clean PRs over 3 weeks."
-- Next dispatch: Joe has `IDENTITY.md` (role = Partner, name = Joe), `BRAIN/01-origin.md` (the reason), `BRAIN/02-arrival.md` (their arrival response), seeded MEMORY.md pointing at both.
-- Joe references the promotion reason in a later dispatch when making a judgment call aligned with it.
-- Joe is listed as a Partner in `cc-cli agents`, not an Employee in a pool.
+What remains deferred to this project (4.3) once role-level pre-BRAIN lands (4.x):
 
-**Depends on:** 1.1, 4.1
-**PRs:** 3
+- **Role pre-BRAIN seeding.** On tame, the new Partner's BRAIN should inherit the accumulated pre-BRAIN of their role (observations other Employees in that role produced over time, distilled into rules). Requires 4.x's pre-BRAIN distillation mechanism to exist. The 1.1-shipped tame creates an empty BRAIN/ dir + genesis.md; 4.3 extends it to pre-BRAIN inheritance.
+- **Second BRAIN arrival entry** (`BRAIN/02-arrival.md`): the new Partner's first reply to the ceremony, written back as BRAIN. Requires a dispatch hook to capture their response. 1.1-shipped tame doesn't do this; the welcomes arrive, the new Partner responds via normal channels, no automated capture.
+
+Both are meaningful additions but not blockers — 1.1's shipped tame already feels like a real moment with the inbox ceremony + genesis.md. 4.3 is the accumulating upgrade when pre-BRAIN + dreams are live.
 
 **Project 4 ship criterion:** an Employee that's been shipping backend work for 2 weeks gets promoted via a witnessing ceremony. Next session Joe reads BRAIN with accumulated insights (role pre-BRAIN seed + origin reason + arrival memory). Behavior changes — references past incidents, shows personality, makes founder-aligned judgment calls. Promotion feels like a real moment, not a flag flip.
 

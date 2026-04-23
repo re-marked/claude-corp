@@ -129,19 +129,39 @@ describe('buildThinClaudeMd — the single critical rule', () => {
   });
 });
 
-describe('buildThinClaudeMd — @imports (agent-authored files only)', () => {
-  const requiredImports = [
+describe('buildThinClaudeMd — @imports (Project 1.1 kind-aware split)', () => {
+  // Partners get the full soul-file @import set. Employees don't have
+  // soul files at the slot level (1.1's DNA split) — their CLAUDE.md
+  // skips the soul-file @imports entirely and points at CORP.md for
+  // role context instead. Operational-state @imports (STATUS, TASKS)
+  // are universal.
+  const partnerOnlyImports = [
     '@./SOUL.md',
     '@./IDENTITY.md',
     '@./USER.md',
     '@./MEMORY.md',
-    '@./STATUS.md',
-    '@./TASKS.md',
   ] as const;
+  const universalImports = ['@./STATUS.md', '@./TASKS.md'] as const;
 
-  it.each(requiredImports)('imports %s', (path) => {
+  it.each(partnerOnlyImports)('Partner imports %s', (path) => {
+    expect(buildThinClaudeMd(partnerOpts())).toContain(path);
+  });
+
+  it.each(partnerOnlyImports)('Employee does NOT import %s (no soul at the slot level)', (path) => {
+    expect(buildThinClaudeMd(employeeOpts())).not.toContain(path);
+  });
+
+  it.each(universalImports)('both kinds import %s (operational state is universal)', (path) => {
     expect(buildThinClaudeMd(partnerOpts())).toContain(path);
     expect(buildThinClaudeMd(employeeOpts())).toContain(path);
+  });
+
+  it("Employee CLAUDE.md explains why they have no soul files + points at CORP.md", () => {
+    const out = buildThinClaudeMd(employeeOpts());
+    expect(out).toMatch(/ephemeral role-slot/);
+    expect(out).toMatch(/CORP\.md/);
+    // The upgrade path must be named so Employees know tame elevates them.
+    expect(out).toMatch(/cc-cli tame/);
   });
 
   it('does NOT import AGENTS.md (content moved to CORP.md)', () => {

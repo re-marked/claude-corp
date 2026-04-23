@@ -5,6 +5,7 @@ export type {
   MemberType,
   MemberScope,
   AgentWorkStatus,
+  AgentKind,
 } from './member.js';
 
 export type {

@@ -66,6 +66,10 @@ export class DaemonClient {
     model?: string;
     provider?: string;
     harness?: string;
+    /** Structural agent kind (1.1). Optional; daemon infers from rank when omitted. */
+    kind?: 'employee' | 'partner';
+    /** Role slot id (1.1) — references the role registry. Optional. */
+    role?: string;
   }): Promise<{ ok: boolean; member: unknown; dmChannel: unknown }> {
     const resp = await fetch(`${this.baseUrl}/agents/hire`, {
       method: 'POST',

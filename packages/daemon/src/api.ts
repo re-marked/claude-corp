@@ -184,6 +184,8 @@ export function createApi(daemon: Daemon): Server {
           provider: (body.provider as string) ?? undefined,
           harness: (body.harness as string) ?? undefined,
           supervisorId: (body.supervisorId as string) ?? undefined,
+          kind: (body.kind as 'employee' | 'partner' | undefined) ?? undefined,
+          role: (body.role as string) ?? undefined,
         });
         json(res, { ok: true, member: result.member, dmChannel: result.dmChannel });
         return;
@@ -752,6 +754,8 @@ export function createApi(daemon: Daemon): Server {
           daemonPort: daemon.getPort(),
           agentMemberId: target.id,
           agentRank: target.rank,
+          agentKind: target.kind,
+          agentRole: target.role,
           agentDisplayName: target.displayName,
           channelKind: 'direct' as const,
           supervisorName,

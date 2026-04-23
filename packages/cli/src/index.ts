@@ -14,6 +14,9 @@ const { values, positionals } = parseArgs({
     message: { type: 'string' },
     from: { type: 'string' },
     rank: { type: 'string' },
+    kind: { type: 'string' },
+    role: { type: 'string' },
+    slug: { type: 'string' },
     model: { type: 'string' },
     agent: { type: 'string' },
     chain: { type: 'string' },
@@ -87,6 +90,7 @@ Commands:
   audit      Session-end audit gate (Stop / PreCompact hook invokes this). --override --reason "..." for founder bypass.
   done       Employee "I'm done with this task" signal. Writes pending handoff; audit promotes on approve.
   inbox      Tiered inbox management. cc-cli inbox <list|respond|dismiss|carry-forward|check>.
+  tame       Promote an Employee to Partner. --slug <id> --reason "..." [--name <new-name>].
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -226,6 +230,18 @@ async function run() {
       await cmdInbox(process.argv.slice(3));
       break;
     }
+    case 'tame': {
+      const { cmdTame } = await import('./commands/tame.js');
+      await cmdTame({
+        slug: values.slug as string | undefined,
+        reason: values.reason as string | undefined,
+        name: values.name as string | undefined,
+        from: values.from as string | undefined,
+        corp: values.corp as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'observe': {
       // Thin alias for `cc-cli chit create --type observation`. Same
       // pass-through pattern as the chit dispatcher: raw args after
@@ -292,6 +308,8 @@ async function run() {
         project: values.project as string | undefined,
         harness: values.harness as string | undefined,
         supervisor: values.supervisor as string | undefined,
+        kind: values.kind as string | undefined,
+        role: values.role as string | undefined,
         json: !!values.json,
       });
       break;

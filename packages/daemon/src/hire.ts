@@ -44,6 +44,10 @@ export interface HireOpts {
    */
   harness?: string;
   supervisorId?: string | null;
+  /** Structural agent kind (Project 1.1). Optional; inferred from rank when omitted. */
+  kind?: 'employee' | 'partner';
+  /** Role slot id (Project 1.1) — references packages/shared/src/roles.ts. Optional. */
+  role?: string;
 }
 
 export interface HireResult {
@@ -130,6 +134,8 @@ export async function hireAgent(
     remote: true,
     projectName,
     harness,
+    kind: opts.kind,
+    role: opts.role,
   });
 
   // FIXME(v0.10.1): Per-agent worktrees disabled — needs project-scoped repos first.
