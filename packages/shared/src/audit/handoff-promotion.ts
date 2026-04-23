@@ -43,6 +43,7 @@ import {
   createChit,
   findChitById,
   updateChit,
+  closeChit,
   chitScopeFromPath,
 } from '../chits.js';
 import { advanceCurrentStep, getCurrentStep } from '../casket.js';
@@ -421,6 +422,92 @@ export function revertTaskFromUnderReview(
   });
 
   return { reverted: true, taskId: chit.id };
+}
+
+// ─── Consumer side — Project 1.6 ───────────────────────────────────
+
+/**
+ * Read the agent's most-recently-created active handoff chit without
+ * mutating it. Diagnostic / peek path — safe to call from debug tools
+ * and `cc-cli wtf --peek` without triggering consumption semantics.
+ *
+ * "Latest" is by createdAt desc — normal flow produces exactly one
+ * active handoff per session boundary, but if drift produces multiple
+ * (concurrent writers, migration stragglers), peek returns the newest
+ * and leaves the rest for a future sweep.
+ *
+ * Returns null when no active handoff exists for the agent — the
+ * steady state during a session in progress (pre-first-done) or for
+ * agents that haven't cycled a session yet.
+ */
+export function peekLatestHandoffChit(
+  corpRoot: string,
+  agentSlug: string,
+): Chit<'handoff'> | null {
+  try {
+    const { chits } = queryChits<'handoff'>(corpRoot, {
+      types: ['handoff'],
+      statuses: ['active'],
+      scopes: [`agent:${agentSlug}` as const],
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+      limit: 1,
+    });
+    const first = chits[0];
+    return first ? first.chit : null;
+  } catch {
+    // Corrupt store / missing scope → no handoff, not an error. The
+    // caller (wtf / dredge) degrades to no-handoff-block output.
+    return null;
+  }
+}
+
+/**
+ * Read the latest active handoff chit AND close it atomically —
+ * "atomic" here means the close fires from the same findChitById the
+ * peek did, so concurrent wtf invocations compete via optimistic
+ * concurrency at the chit layer.
+ *
+ * The close flips status: 'active' → 'closed' via closeChit (terminal).
+ * The chit-lifecycle scanner's destroy-if-not-promoted policy then
+ * GCs it at TTL age (24h default). WORKLOG.md preserves the handoff
+ * content independently for post-hoc audit — losing the chit at TTL
+ * doesn't lose the session-handoff trail.
+ *
+ * Returns the consumed chit so callers (wtf's handoff block) can
+ * render its fields into output. Returns null when no active handoff
+ * exists (steady-state in-session; no-op for callers).
+ *
+ * Concurrent consumption: if two wtf invocations race on the same
+ * handoff, one's closeChit throws ChitConcurrentModificationError
+ * (or hits the terminal-already-closed guard) — caller treats it as
+ * "already consumed" and proceeds with no handoff block. Idempotent
+ * in practice: whichever call wins owns the consumption; the loser
+ * renders the same no-handoff fallback.
+ */
+export function consumeHandoffChit(
+  corpRoot: string,
+  agentSlug: string,
+  consumedBy: string,
+): Chit<'handoff'> | null {
+  const chit = peekLatestHandoffChit(corpRoot, agentSlug);
+  if (!chit) return null;
+  try {
+    closeChit(
+      corpRoot,
+      `agent:${agentSlug}` as const,
+      'handoff',
+      chit.id,
+      'closed',
+      consumedBy,
+    );
+  } catch {
+    // Close failed (concurrent consumer closed first, or storage
+    // write race). The handoff is effectively "already consumed"
+    // from this caller's perspective — treat as no-handoff.
+    return null;
+  }
+  return chit;
 }
 
 /**

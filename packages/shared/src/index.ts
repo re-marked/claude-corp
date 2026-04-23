@@ -257,6 +257,8 @@ export {
   parseTranscript,
   promotePendingHandoff,
   revertTaskFromUnderReview,
+  peekLatestHandoffChit,
+  consumeHandoffChit,
 } from './audit/index.js';
 export type {
   HookEventName,
