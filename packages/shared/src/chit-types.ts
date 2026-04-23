@@ -208,6 +208,10 @@ function validateTask(fields: unknown): void {
   }
   if (f.projectId !== undefined) requireStringOrNull(f.projectId, 'task.projectId');
   if (f.teamId !== undefined) requireStringOrNull(f.teamId, 'task.teamId');
+  // Project 1.3 structured step I/O. Null signals "no output captured"
+  // explicitly (distinct from undefined which means "field not present"
+  // on pre-1.3 chits); both are legal.
+  if (f.output !== undefined) requireStringOrNull(f.output, 'task.output');
 }
 
 function validateContract(fields: unknown): void {

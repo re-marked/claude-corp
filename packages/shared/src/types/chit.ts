@@ -260,12 +260,37 @@ export interface TaskFields {
   dueAt?: string | null;
   /** Chit id of the Loop driving this task (auto-advance tasks tied to recurring work). Null for standalone tasks. */
   loopId?: string | null;
-  /** Fine-grained workflow state (pending/assigned/in_progress/blocked/completed/failed/cancelled). Coexists with chit.status; see TaskWorkflowStatus docstring. */
+  /** Fine-grained workflow state — see TaskWorkflowStatus docstring for the 10-state lifecycle. Coexists with chit.status (coarse draft/active/terminal). */
   workflowStatus?: TaskWorkflowStatus | null;
   /** Project.id the task belongs to. New tasks prefer `scope=project:<name>`; this field preserves the link for migrated tasks that pre-date scope-encoding. */
   projectId?: string | null;
   /** Team.id the task belongs to. Same legacy-link role as projectId. */
   teamId?: string | null;
+  /**
+   * Structured step-to-step I/O (Project 1.3). Prose summary written
+   * by the executing agent as part of `cc-cli done` — the canonical
+   * task-level result that downstream tasks in the chain read via
+   * `depends_on[i].fields.task.output` without grepping the task body
+   * or the worklog.
+   *
+   * Scope:
+   *   - SEMANTIC summary — "what this step produced" in 1-5 sentences
+   *     (changed files, key decisions, observable outcome). Not a full
+   *     worklog, not the raw command outputs. Callers needing the
+   *     full build log reach for commit history / CI artifacts.
+   *   - Audit-gate-promoted: populated by done.ts at handoff-to-chit
+   *     promotion time from the `completed[]` array the agent passes.
+   *     Absent on draft/queued/in_progress/blocked tasks — present
+   *     means the task at least reached under_review.
+   *   - Blueprint-defined tasks (Project 2.1) can specify an
+   *     `expected_output` shape the prose should hit; typed-schema
+   *     I/O layers on top of this field rather than replacing it.
+   *
+   * Null / undefined both mean "no output captured yet." Agents reading
+   * a dependency's output should handle undefined as "the producing
+   * step didn't write an output summary" rather than as a failure.
+   */
+  output?: string | null;
 }
 
 export interface ContractFields {
