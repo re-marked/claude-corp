@@ -52,6 +52,7 @@ import {
   casketExists,
   inferKind,
   promotePendingHandoff,
+  revertTaskFromUnderReview,
   type Chit,
   type HookInput,
   type AuditDecision,
@@ -230,6 +231,22 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
   if (decision.decision === 'approve') {
     approveAndMaybePromote(corpRoot, slug);
   } else {
+    // Block: revert the Casket-current task from under_review back to
+    // in_progress via the 1.3 state machine so the agent sees the
+    // right state after they address the audit reason and retry. Best-
+    // effort — logged on failure, never blocks the block emission.
+    try {
+      const revert = revertTaskFromUnderReview(corpRoot, slug);
+      if (revert.reverted || revert.reason) {
+        logAuditDecision(corpRoot, slug, decision, {
+          event: 'block-revert',
+          revertedTaskId: revert.taskId ?? null,
+          revertedReason: revert.reason ?? null,
+        });
+      }
+    } catch (err) {
+      logAuditError(corpRoot, slug, err);
+    }
     emitDecision(decision);
   }
 }
