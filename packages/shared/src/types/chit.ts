@@ -29,6 +29,7 @@ export interface FieldsForType {
   'pre-brain-entry': PreBrainEntryFields;
   'step-log': StepLogFields;
   'inbox-item': InboxItemFields;
+  escalation: EscalationFields;
 }
 
 /**
@@ -394,6 +395,80 @@ export interface StepLogFields {
   outcome: 'started' | 'in-progress' | 'completed' | 'failed';
   /** Free-form details from the execution session — what happened, what went wrong. */
   details?: string | null;
+}
+
+/**
+ * Escalation — Employee-to-Partner "I need a judgment call" chit (Project
+ * 1.4). Distinct from a task (which is work to DO) and from a blocker
+ * (which is work that unblocks another piece of work). An escalation is a
+ * DECISION request: the Employee hit something above their pay grade and
+ * wants a Partner's call before proceeding.
+ *
+ * ### Lifecycle stance
+ *
+ * Ephemeral by default (TTL 7d). Escalations aren't soul material — once
+ * the Partner resolves, the outcome either becomes a new task (the
+ * follow-up work) or is recorded in the originating task's
+ * `output` / body / conversation log. The escalation chit itself is the
+ * IN-FLIGHT signal; history lives on the chits it references.
+ *
+ * Statuses: `active → completed | rejected | closed`.
+ *   - `active`    — landed on the Partner's Casket / inbox, pending decision.
+ *   - `completed` — Partner resolved (resolution field describes how).
+ *   - `rejected`  — Partner bounced back ("I'm not the right person, re-escalate").
+ *   - `closed`    — superseded (Employee self-unblocked, or the originating
+ *                   work closed before Partner got to it).
+ *
+ * ### Project 2 note
+ *
+ * REFACTOR.md calls out a `gate` chit primitive (Gas Town's gate-bead
+ * analog) that will eventually subsume escalation, approval-requests,
+ * design-questions, and review-blocks under a single "someone-must-make-
+ * a-call" primitive. When that primitive lands in Project 2, this type
+ * migrates to `fields.gate.kind = 'escalation'`. Shipping as its own
+ * type now because the lifecycle + policy differ materially from task,
+ * and tagging (the alternative) can't encode `ephemeral` or a different
+ * terminal-state set.
+ */
+export interface EscalationFields {
+  /**
+   * Chit id of the work the Employee was on when they escalated. Typed
+   * field (not `references[0]`) because this pointer is semantic, not
+   * a loose relation — it's THE work the escalation is about.
+   */
+  originatingChit: string;
+  /**
+   * Employee's explanation of what they hit and what they need from the
+   * Partner. Load-bearing for the Partner's ability to answer without
+   * reading the whole task body. Min-length enforced at CLI boundary;
+   * validator here allows any non-empty string so mid-lifecycle edits
+   * (Partner extending the note before responding) don't trip validation.
+   */
+  reason: string;
+  /** Member id of the Employee who escalated. */
+  from: string;
+  /** Member id of the Partner the escalation landed on. */
+  to: string;
+  /**
+   * What kind of call the Partner is being asked to make. Drives UI
+   * weighting + inbox tier in 1.4: `blocker` escalations get Tier 3
+   * (founder visibility since a chain is stalled); `question` and
+   * `review` get Tier 2 (important but not chain-stalling).
+   */
+  severity: 'blocker' | 'question' | 'review';
+  /**
+   * How the Partner closed it out (null while active).
+   *   - `resolved`           — Partner answered; Employee can proceed.
+   *   - `dismissed`          — Partner says "this isn't worth it" /
+   *                            "you can decide yourself."
+   *   - `converted-to-task`  — Partner created a real follow-up task;
+   *                            convertedTaskId points at it.
+   */
+  resolution?: 'resolved' | 'dismissed' | 'converted-to-task' | null;
+  /** Partner's free-form note on the decision. Provides the "what to do next" Employee reads on resume. Null while active. */
+  resolutionNotes?: string | null;
+  /** When resolution='converted-to-task', chit id of the created task. Null otherwise. */
+  convertedTaskId?: string | null;
 }
 
 /**

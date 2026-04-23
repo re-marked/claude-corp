@@ -50,6 +50,7 @@ export type {
   InboxItemFields,
   InboxItemTier,
   InboxItemSource,
+  EscalationFields,
 } from './types/index.js';
 
 // Parsers
