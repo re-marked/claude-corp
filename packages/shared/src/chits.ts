@@ -714,6 +714,20 @@ export interface QueryChitsOpts<T extends ChitTypeId = ChitTypeId> {
   updatedSince?: string;
   /** Chits with updatedAt <= this ISO timestamp. */
   updatedUntil?: string;
+  /**
+   * Chits with createdAt >= this ISO timestamp.
+   *
+   * Use this axis — not updatedSince — for "observations/tasks made
+   * ON or AFTER date X" semantics. Lifecycle scanner mutations (cooling,
+   * status flips) bump updatedAt but not createdAt, so created-time
+   * slicing is the stable window for daily-log / recency-counter use
+   * cases. updatedSince is correct for "what has CHANGED since X"
+   * (notification feeds, dredge deltas); createdSince is correct for
+   * "what was AUTHORED since X" (daily logs, birth-date queries).
+   */
+  createdSince?: string;
+  /** Chits with createdAt <= this ISO timestamp. Paired with createdSince for day/range slicing. */
+  createdUntil?: string;
   /** Match chits that reference ANY of these ids. */
   references?: readonly string[];
   /** Match chits that depend_on ANY of these ids. */
@@ -881,6 +895,12 @@ function matchesFilter(chit: Chit, opts: QueryChitsOpts): boolean {
     return false;
   }
   if (opts.updatedUntil !== undefined && chit.updatedAt > opts.updatedUntil) {
+    return false;
+  }
+  if (opts.createdSince !== undefined && chit.createdAt < opts.createdSince) {
+    return false;
+  }
+  if (opts.createdUntil !== undefined && chit.createdAt > opts.createdUntil) {
     return false;
   }
   if (
