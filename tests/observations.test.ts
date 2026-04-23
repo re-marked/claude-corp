@@ -9,7 +9,8 @@ import {
   countRecentObservations,
   listObservationLogs,
 } from '../packages/shared/src/observations.js';
-import { existsSync, rmSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { readObservationsForDate } from '../packages/shared/src/observations.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
@@ -152,5 +153,102 @@ describe('observations (post-0.5 chit-backed)', () => {
     const malformedDir = join(corpRoot, 'not-agents', 'toast');
     mkdirSync(malformedDir, { recursive: true });
     expect(() => observe(malformedDir, 'TASK', 'x')).toThrow(/agents\/<slug>/);
+  });
+
+  // ─── Codex P1: daily log + recency count slice by createdAt ───────
+  //
+  // Before the fix both readObservationsForDate and countRecentObservations
+  // filtered by updatedAt. The chit-lifecycle scanner bumps updatedAt when
+  // it cools an observation on TTL-age, so an observation written on
+  // day X would vanish from day X's log and reappear on the cooling day.
+  // These tests construct observation chits with divergent createdAt
+  // vs updatedAt and assert the date window anchors on createdAt.
+
+  /** Write a raw observation chit directly with controlled timestamps. */
+  function writeObservationChit(opts: {
+    id: string;
+    createdAt: string;
+    updatedAt: string;
+    subject: string;
+  }): void {
+    const dir = join(corpRoot, 'agents', 'toast', 'chits', 'observation');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, `${opts.id}.md`),
+      [
+        '---',
+        `id: ${opts.id}`,
+        'type: observation',
+        'status: active',
+        'ephemeral: true',
+        'createdBy: toast',
+        // Quote ISO timestamps so YAML loads them as strings, not
+        // Date objects (js-yaml's default timestamp coercion would
+        // trip the ChitCommon string validator downstream).
+        `createdAt: "${opts.createdAt}"`,
+        `updatedAt: "${opts.updatedAt}"`,
+        'references: []',
+        'dependsOn: []',
+        'tags: []',
+        'fields:',
+        '  observation:',
+        '    category: TASK',
+        `    subject: ${opts.subject}`,
+        '    importance: 3',
+        '---',
+        `- 09:00 TASK ${opts.subject}`,
+      ].join('\n'),
+      'utf-8',
+    );
+  }
+
+  it('readObservationsForDate anchors the day window on createdAt, not updatedAt', () => {
+    // Observation authored 2026-04-20, later cooled (updatedAt bumped to 2026-04-23).
+    writeObservationChit({
+      id: 'chit-o-fixed-a',
+      createdAt: '2026-04-20T12:00:00.000Z',
+      updatedAt: '2026-04-23T12:00:00.000Z',
+      subject: 'authored-on-20',
+    });
+
+    // Day 20 should surface it (createdAt inside window). The
+    // formatted output wraps category + body; presence of the date
+    // header + a non-empty bullet is proof the chit matched.
+    const day20 = readObservationsForDate(agentDir, new Date('2026-04-20T00:00:00.000Z'));
+    expect(day20).toContain('# Observations — 2026-04-20');
+    expect(day20).toMatch(/\n- .+TASK/);
+
+    // Day 23 must be empty — createdAt is outside the window.
+    // The old updatedAt-based slicing would have falsely included it
+    // here (and simultaneously excluded it from day 20), since the
+    // lifecycle scanner bumping updatedAt to 23 made that the "touch"
+    // day even though the chit was authored on 20.
+    const day23 = readObservationsForDate(agentDir, new Date('2026-04-23T00:00:00.000Z'));
+    expect(day23).toBe('');
+  });
+
+  it('countRecentObservations counts by authorship, not by lifecycle churn', () => {
+    // Observation authored 30 days ago, cooled today (updatedAt bumped to now).
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 86_400_000);
+    writeObservationChit({
+      id: 'chit-o-old-author',
+      createdAt: thirtyDaysAgo.toISOString(),
+      updatedAt: now.toISOString(),
+      subject: 'old-by-creation',
+    });
+    // Fresh observation authored today, authored at all — real signal.
+    writeObservationChit({
+      id: 'chit-o-fresh',
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      subject: 'fresh',
+    });
+
+    // 7-day window: only the fresh observation counts.
+    // Under the old updatedAt filter, both would count (the stale one
+    // looks recent because cooling bumped its updatedAt), falsely
+    // inflating the dreams-scheduling signal.
+    expect(countRecentObservations(agentDir, 7)).toBe(1);
   });
 });
