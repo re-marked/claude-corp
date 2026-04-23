@@ -172,25 +172,36 @@ describe('cmdWtf', () => {
       expect(out).not.toContain('## You are a Partner');
     });
 
-    it('extracts <handoff> block from WORKLOG.md when present', async () => {
-      const worklogPath = join(tmpCorpRoot, 'agents', 'toast', 'WORKLOG.md');
-      writeFileSync(
-        worklogPath,
-        `# Toast — session 1\n\nSome narrative.\n\n<handoff>\n  <current-step>chit-t-abcdef12</current-step>\n  <next-action>continue implementation</next-action>\n</handoff>\n\nTrailing notes.`,
-        'utf-8',
-      );
-      await cmdWtf({ agent: 'toast', hook: false, json: false });
+    it('renders handoff block from the agent\'s active handoff chit (Project 1.6)', async () => {
+      // Post-1.6: wtf reads from the `handoff` chit, not WORKLOG.md
+      // XML. Test fixture creates an active handoff chit directly;
+      // wtf consumes it + renders the block via handoffChitToXml.
+      createChit(tmpCorpRoot, {
+        type: 'handoff',
+        scope: 'agent:toast' as const,
+        fields: {
+          handoff: {
+            predecessorSession: 'toast-17',
+            currentStep: 'chit-t-abcdef12',
+            completed: ['implemented the parser'],
+            nextAction: 'continue implementation',
+            openQuestion: null,
+            sandboxState: null,
+            notes: null,
+          },
+        } as never,
+        createdBy: 'toast',
+      });
+
+      await cmdWtf({ agent: 'toast', hook: false, peek: true, json: false });
       const out = stdoutText();
       expect(out).toContain('Handoff from predecessor session');
       expect(out).toContain('<current-step>chit-t-abcdef12</current-step>');
       expect(out).toContain('<next-action>continue implementation</next-action>');
-      // Narrative outside the handoff block doesn't leak
-      expect(out).not.toContain('Some narrative.');
-      expect(out).not.toContain('Trailing notes.');
     });
 
-    it('gracefully skips handoff when WORKLOG.md is absent (fresh slot)', async () => {
-      await cmdWtf({ agent: 'toast', hook: false, json: false });
+    it('gracefully skips handoff when no active handoff chit exists (fresh slot)', async () => {
+      await cmdWtf({ agent: 'toast', hook: false, peek: true, json: false });
       expect(stdoutText()).not.toMatch(/Handoff from predecessor/);
     });
   });

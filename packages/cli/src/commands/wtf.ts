@@ -29,6 +29,21 @@ export interface WtfOpts {
   agent?: string;
   corp?: string;
   hook: boolean;
+  /**
+   * Project 1.6. When true, read the handoff chit without consuming
+   * it (status stays 'active'). Default false → wtf closes the
+   * handoff as part of its run, so the next invocation gets the
+   * "no active handoff" steady-state.
+   *
+   * The founder / debug tooling uses --peek for non-destructive
+   * inspection ("what's waiting for this agent?") without spending
+   * the one-shot signal.
+   *
+   * Optional — legacy callers that predate this flag get the
+   * default-consume behavior (undefined → !undefined → true →
+   * consumeHandoff=true). Only the --peek path needs to pass it.
+   */
+  peek?: boolean;
   json: boolean;
 }
 
@@ -72,6 +87,9 @@ export async function cmdWtf(opts: WtfOpts): Promise<void> {
     // inference and the role-is-rank display fallback respectively.
     ...(member.kind ? { kind: member.kind } : {}),
     ...(member.role ? { roleId: member.role } : {}),
+    // Project 1.6 — default-consume. --peek flips to peek-only so
+    // diagnostic reads don't spend the one-shot handoff signal.
+    consumeHandoff: !opts.peek,
   });
 
   // Write CORP.md for the agent to re-read cheaply without spawning wtf again.

@@ -72,6 +72,9 @@ const { values, positionals } = parseArgs({
     pending: { type: 'boolean', default: false },
     culture: { type: 'boolean', default: false },
     hook: { type: 'boolean', default: false },
+    // Project 1.6: `cc-cli wtf --peek` reads without consuming the
+    // handoff chit (diagnostic inspection path; default consumes).
+    peek: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
   allowPositionals: true,
@@ -609,6 +612,7 @@ async function run() {
         agent: values.agent as string | undefined,
         corp: values.corp as string | undefined,
         hook: !!values.hook,
+        peek: !!values.peek,
         json: !!values.json,
       });
       break;
