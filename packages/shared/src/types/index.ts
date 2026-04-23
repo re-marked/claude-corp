@@ -67,4 +67,7 @@ export type {
   InboxItemTier,
   InboxItemSource,
   EscalationFields,
+  BlueprintFields,
+  BlueprintStep,
+  BlueprintVar,
 } from './chit.js';
