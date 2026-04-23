@@ -179,10 +179,30 @@ describe('validator: task', () => {
   });
 
   it('accepts all workflow status enum values', () => {
-    for (const s of ['pending', 'assigned', 'in_progress', 'blocked', 'completed', 'failed', 'cancelled']) {
+    // Project 1.3 expanded this enum from 7 to 10 states. Legacy
+    // names (`pending`, `assigned`) are rejected at write-time now;
+    // read-time compat is handled by the tasks.ts bridge.
+    const validStates = [
+      'draft', 'queued', 'dispatched', 'in_progress',
+      'blocked', 'under_review',
+      'completed', 'rejected', 'failed', 'cancelled',
+    ];
+    for (const s of validStates) {
       expect(() =>
         entry.validate({ title: 'x', priority: 'normal', workflowStatus: s }),
       ).not.toThrow();
+    }
+  });
+
+  it('rejects legacy pending/assigned workflowStatus (1.3 rename)', () => {
+    // After 1.3's enum rename, attempts to write pre-1.3 names
+    // directly to the chit layer fail loudly. Existing pre-1.3
+    // chits on disk still load (read path absorbs via tasks.ts
+    // bridge); this guards against NEW writes with legacy names.
+    for (const legacy of ['pending', 'assigned']) {
+      expect(() =>
+        entry.validate({ title: 'x', priority: 'normal', workflowStatus: legacy }),
+      ).toThrow(/workflowStatus/);
     }
   });
 
