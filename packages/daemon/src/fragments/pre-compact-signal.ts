@@ -28,8 +28,25 @@
  * from exactly the context we're trying to save.
  */
 
-import type { Fragment } from './types.js';
-import { calculateCompactionThreshold, formatThresholdSummary } from '@claudecorp/shared';
+import type { Fragment, FragmentContext } from './types.js';
+import { calculateCompactionThreshold, formatThresholdSummary, inferKind } from '@claudecorp/shared';
+
+/**
+ * Backward-compat kind resolution: honor explicit ctx.agentKind first,
+ * fall back to inferKind(ctx.agentRank) for pre-1.1 Partner records
+ * that predate the structural `kind` field. Mirrors resolveKind in
+ * wtf-state.ts. A strict `ctx.agentKind === 'partner'` check would
+ * fail-closed for every legacy Partner, silently disabling the nudge
+ * across upgraded corps until every Member record is backfilled —
+ * exactly the upgrade friction the refactor is trying to avoid.
+ */
+function resolveAgentKind(ctx: FragmentContext): 'employee' | 'partner' | null {
+  if (ctx.agentKind === 'partner' || ctx.agentKind === 'employee') return ctx.agentKind;
+  if (typeof ctx.agentRank === 'string' && ctx.agentRank.length > 0) {
+    return inferKind(ctx.agentRank);
+  }
+  return null;
+}
 
 export const preCompactSignalFragment: Fragment = {
   id: 'pre-compact-signal',
@@ -38,7 +55,7 @@ export const preCompactSignalFragment: Fragment = {
   // else pulls their attention.
   order: 5,
   applies: (ctx) => {
-    if (ctx.agentKind !== 'partner') return false;
+    if (resolveAgentKind(ctx) !== 'partner') return false;
     if (ctx.harness !== 'claude-code') return false;
     if (typeof ctx.sessionTokens !== 'number' || !ctx.sessionModel) return false;
     const state = calculateCompactionThreshold(ctx.sessionTokens, ctx.sessionModel);
