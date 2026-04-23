@@ -283,6 +283,21 @@ function approveAndMaybePromote(corpRoot: string, slug: string): void {
             worklogPath: promotion.worklogPath,
             handoffChitId: promotion.handoffChitId,
             closedTaskId: promotion.closedTaskId,
+            // Project 1.3: chain walker deltas surfaced for founder
+            // visibility. dependentsNowReady + cascadedBlocked get
+            // derived from the deltas the walker returned when the
+            // closed task got promoted. Application of the state
+            // transitions named in these deltas is task-watcher /
+            // task-events' responsibility (they own re-dispatch and
+            // Casket pointer updates); this log entry makes the
+            // cascade observable without coupling.
+            chainDeltas: promotion.chainDeltas,
+            dependentsNowReady: promotion.chainDeltas
+              .filter((d) => d.trigger === 'unblock')
+              .map((d) => d.chitId),
+            cascadedBlocked: promotion.chainDeltas
+              .filter((d) => d.trigger === 'block')
+              .map((d) => d.chitId),
             promotionErrors: promotion.errors,
           },
         );
