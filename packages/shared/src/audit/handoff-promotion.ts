@@ -456,10 +456,13 @@ function findNextSameAgentChainStep(
     if (!next) continue;
     const nextAssignee = (next.fields.task as TaskFields).assignee;
     if (nextAssignee === agentSlug) return next.id;
-    // Next step is for someone else — chain ownership passes; this
-    // agent's Casket should clear, NOT advance to a task they're
-    // not assigned to. Return null explicitly.
-    return null;
+    // Next step is for someone else — chain ownership passes in THIS
+    // contract. Keep scanning — the closed task might appear in
+    // another contract whose next step IS assigned to us. Practically
+    // each task belongs to exactly one contract so the loop finishes
+    // without another match, but the early-return bug (review P5)
+    // silently skipped legitimate second-contract matches.
+    continue;
   }
   return null;
 }

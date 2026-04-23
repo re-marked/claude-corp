@@ -215,6 +215,101 @@ describe('promotePendingHandoff — Casket advance to next-in-chain', () => {
     void task2Id;
   });
 
+  it('P5: same task appearing in two contracts — picks the same-agent match even when scanned second', () => {
+    // Regression for PR #168 review P5: findNextSameAgentChainStep
+    // used to `return null` as soon as the FIRST matching contract
+    // had a different-agent next step, skipping later contracts that
+    // might have a same-agent next step. Low practical risk (tasks
+    // usually belong to exactly one contract) but silently wrong.
+    //
+    // Fixture: task1 appears in two contracts.
+    //   contract-A: [task1, task-other-agent]  → next step is other agent
+    //   contract-B: [task1, task-same-agent]   → next step IS our agent
+    // Expect: Casket advances to task-same-agent (via contract-B).
+    const task1 = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: {
+        task: {
+          title: 'shared-task',
+          priority: 'normal',
+          workflowStatus: 'under_review',
+          assignee: AGENT,
+        },
+      } as never,
+      createdBy: 'founder',
+      status: 'active',
+    });
+    const taskOther = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: {
+        task: {
+          title: 'other-agent-next',
+          priority: 'normal',
+          workflowStatus: 'queued',
+          assignee: 'other-agent',
+        },
+      } as never,
+      createdBy: 'founder',
+      status: 'draft',
+      dependsOn: [task1.id],
+    });
+    const taskSame = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: {
+        task: {
+          title: 'same-agent-next',
+          priority: 'normal',
+          workflowStatus: 'queued',
+          assignee: AGENT,
+        },
+      } as never,
+      createdBy: 'founder',
+      status: 'draft',
+      dependsOn: [task1.id],
+    });
+    // contract-A comes lexically first in the queryChits scan (depends
+    // on id ordering; "contract-A-xxx" < "contract-B-xxx"). We can't
+    // force ordering, but having TWO contracts with one match in each
+    // exercises the loop-continue behavior regardless of scan order.
+    createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      fields: {
+        contract: {
+          title: 'contract-A',
+          goal: 'other-agent path',
+          taskIds: [task1.id, taskOther.id],
+          leadId: 'founder',
+        },
+      },
+      createdBy: 'founder',
+    });
+    createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      fields: {
+        contract: {
+          title: 'contract-B',
+          goal: 'same-agent path',
+          taskIds: [task1.id, taskSame.id],
+          leadId: 'founder',
+        },
+      },
+      createdBy: 'founder',
+    });
+    advanceCurrentStep(corpRoot, AGENT, task1.id, 'founder');
+    writePending();
+
+    const result = promotePendingHandoff(corpRoot, AGENT, workspace);
+    expect(result.promoted).toBe(true);
+    // The loop must scan both contracts; the same-agent next step
+    // (in whichever contract it happens to be found) wins.
+    expect(getCurrentStep(corpRoot, AGENT)).toBe(taskSame.id);
+  });
+
   it('next task blocked on a dep that did not close: Casket clears (nextReadyTask skips non-ready)', () => {
     // task1 + task2 chained. ALSO an external blocker that task2
     // depends on. Closing task1 unblocks one dep but not the
