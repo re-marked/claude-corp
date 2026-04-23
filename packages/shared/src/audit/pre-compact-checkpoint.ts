@@ -31,6 +31,7 @@
  */
 
 import type { HookInput } from './types.js';
+import type { TranscriptUsageSnapshot } from './transcript.js';
 import type { ChitScope } from '../types/chit.js';
 import type { ObservationFields } from '../types/chit.js';
 
@@ -57,6 +58,13 @@ export interface CheckpointBuilderInput {
   readonly agentSlug: string;
   readonly casket: CheckpointCasketRef | null;
   readonly recent: CheckpointRecentActivity | null;
+  /**
+   * Token snapshot at the compact boundary. Sourced from
+   * extractLatestUsageFromTranscript. Null when the transcript is
+   * missing, empty, or carries no usage events — the checkpoint still
+   * writes, it just omits the Token snapshot line.
+   */
+  readonly tokens?: TranscriptUsageSnapshot | null;
   /** Injected for deterministic test output. Defaults to `new Date().toISOString()`. */
   readonly nowIso?: string;
 }
@@ -125,6 +133,10 @@ export function buildCheckpointObservation(
     lines.push('- **Casket current_step:** _(idle — no active task)_');
   }
 
+  if (input.tokens) {
+    lines.push(`- **Token snapshot:** ${formatUsage(input.tokens)}`);
+  }
+
   const excerpts = collectAssistantExcerpts(input.recent);
   if (excerpts.length > 0) {
     lines.push('');
@@ -187,4 +199,35 @@ function formatBlockquote(text: string): string {
     .split(/\r?\n/)
     .map((line) => `> ${line}`)
     .join('\n');
+}
+
+/**
+ * Render a usage snapshot as a compact one-liner. Shape:
+ *   "152.0k input / 3.2k output / 120.0k cache-read / 0.5k cache-write"
+ * Rounds to one decimal place in thousands; drops cache fields that
+ * are zero so the line doesn't fill with noise for models that didn't
+ * hit the cache. Exact input_tokens always shown in parens after —
+ * post-compact analysis likes "I compacted at 152000 tokens" precisely.
+ */
+function formatUsage(u: {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadInputTokens: number;
+  readonly cacheCreationInputTokens: number;
+}): string {
+  const parts: string[] = [];
+  parts.push(`${toK(u.inputTokens)} input`);
+  parts.push(`${toK(u.outputTokens)} output`);
+  if (u.cacheReadInputTokens > 0) parts.push(`${toK(u.cacheReadInputTokens)} cache-read`);
+  if (u.cacheCreationInputTokens > 0) parts.push(`${toK(u.cacheCreationInputTokens)} cache-write`);
+  return `${parts.join(' / ')} (input=${u.inputTokens})`;
+}
+
+function toK(n: number): string {
+  if (!Number.isFinite(n)) return '0k';
+  const k = n / 1000;
+  // One decimal for anything under 100k; integer for larger values
+  // (no one cares whether the 152k compact boundary was at 152.3 or 152.7).
+  if (Math.abs(k) >= 100) return `${Math.round(k)}k`;
+  return `${k.toFixed(1)}k`;
 }

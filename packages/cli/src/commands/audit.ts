@@ -56,6 +56,7 @@ import {
   buildPreCompactInstructions,
   buildCheckpointObservation,
   createChit,
+  extractLatestUsageFromTranscript,
   type Chit,
   type HookInput,
   type AuditDecision,
@@ -458,6 +459,13 @@ function writeAutoCheckpoint(
       const activity = parseTranscript(transcriptPath);
       recent = { assistantText: activity.assistantText ?? [] };
     }
+    // Token snapshot at the compact boundary. Fail-soft — extractor
+    // returns null if the transcript is absent/malformed/emits no
+    // usage events; the checkpoint still writes without the Token
+    // snapshot line. The daemon's in-memory lastAgentUsage map is
+    // richer but lives in a separate process — reading the transcript
+    // keeps this CLI-process-local.
+    const tokens = transcriptPath ? extractLatestUsageFromTranscript(transcriptPath) : null;
 
     const spec = buildCheckpointObservation({
       hookInput,
@@ -466,6 +474,7 @@ function writeAutoCheckpoint(
       agentSlug: slug,
       casket: casketRef,
       recent,
+      tokens,
     });
 
     if (!spec) return null;

@@ -254,6 +254,84 @@ describe('buildCheckpointObservation — recent activity excerpts', () => {
   });
 });
 
+describe('buildCheckpointObservation — token snapshot', () => {
+  it('renders the Token snapshot line when tokens provided', () => {
+    const out = buildCheckpointObservation(
+      baseInput({
+        tokens: {
+          inputTokens: 152_300,
+          outputTokens: 3_200,
+          cacheReadInputTokens: 120_000,
+          cacheCreationInputTokens: 500,
+        },
+      }),
+    )!;
+    expect(out.body).toMatch(/\*\*Token snapshot:\*\*/);
+    expect(out.body).toContain('152k input');
+    expect(out.body).toContain('3.2k output');
+    expect(out.body).toContain('120k cache-read');
+    expect(out.body).toContain('0.5k cache-write');
+  });
+
+  it('embeds the exact input_tokens count for precise post-hoc analysis', () => {
+    const out = buildCheckpointObservation(
+      baseInput({
+        tokens: {
+          inputTokens: 152_387,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      }),
+    )!;
+    expect(out.body).toContain('input=152387');
+  });
+
+  it('drops zero cache fields from the rendered line', () => {
+    const out = buildCheckpointObservation(
+      baseInput({
+        tokens: {
+          inputTokens: 50_000,
+          outputTokens: 1_000,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      }),
+    )!;
+    expect(out.body).not.toContain('cache-read');
+    expect(out.body).not.toContain('cache-write');
+    expect(out.body).toContain('50.0k input');
+    expect(out.body).toContain('1.0k output');
+  });
+
+  it('omits the Token snapshot line entirely when tokens is null', () => {
+    const out = buildCheckpointObservation(baseInput({ tokens: null }))!;
+    expect(out.body).not.toContain('Token snapshot');
+  });
+
+  it('omits the Token snapshot line entirely when tokens is undefined', () => {
+    // baseInput already omits `tokens`, so this is the default-path test.
+    const out = buildCheckpointObservation(baseInput())!;
+    expect(out.body).not.toContain('Token snapshot');
+  });
+
+  it('uses integer formatting for 100k+ values (no spurious decimals)', () => {
+    const out = buildCheckpointObservation(
+      baseInput({
+        tokens: {
+          inputTokens: 100_000,
+          outputTokens: 0,
+          cacheReadInputTokens: 999_999,
+          cacheCreationInputTokens: 0,
+        },
+      }),
+    )!;
+    expect(out.body).toContain('100k input');
+    expect(out.body).toMatch(/1000k cache-read/);
+    expect(out.body).not.toContain('100.0k input');
+  });
+});
+
 describe('buildCheckpointObservation — timestamp threading', () => {
   it('uses the injected nowIso verbatim in the body', () => {
     const out = buildCheckpointObservation(
