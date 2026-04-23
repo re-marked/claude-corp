@@ -250,3 +250,75 @@ function loadPriorityWeight(corpRoot: string, chitId: string): number | null {
     default: return null;
   }
 }
+
+// ─── Slot-or-role unified resolution (Project 1.4) ──────────────────
+
+/**
+ * Discriminated result of `resolveSlotOrRole`. Callers switch on
+ * `kind` to either grab the resolved Member (kinds `slot` / `role`)
+ * or to format a tailored error message (everything else) — the
+ * helper deliberately doesn't produce error STRINGS because each
+ * caller (hand / block / future escalate-by-role) wants slightly
+ * different guidance ("use cc-cli escalate" for blockers vs
+ * "wait for bacteria" for fresh hires).
+ */
+export type SlotOrRoleResolution =
+  | { readonly kind: 'slot'; readonly member: Member; readonly mode: 'slot' }
+  | { readonly kind: 'role'; readonly member: Member; readonly mode: 'role'; readonly roleId: string }
+  | { readonly kind: 'role-is-partner-only'; readonly roleId: string; readonly partnerCandidates: readonly { slug: string; displayName: string }[] }
+  | { readonly kind: 'role-no-candidates'; readonly roleId: string }
+  | { readonly kind: 'unknown'; readonly to: string };
+
+/**
+ * Unified "to" resolution: slot id first, then registered role id
+ * via the existing resolveRoleToEmployee pipeline. Returns a
+ * discriminated result so each caller formats its own error
+ * messages (different guidance for hand / block / etc.).
+ *
+ * Replaces the duplicated resolveTarget / resolveAssignee functions
+ * that lived inside hand.ts and block.ts pre-1.4-review.
+ */
+export function resolveSlotOrRole(
+  corpRoot: string,
+  members: readonly Member[],
+  to: string,
+): SlotOrRoleResolution {
+  // Slot mode: exact id match on an active agent Member.
+  const slotMember = members.find(
+    (m) => m.type === 'agent' && m.status === 'active' && m.id === to,
+  );
+  if (slotMember) {
+    return { kind: 'slot', member: slotMember, mode: 'slot' };
+  }
+
+  // Role mode: consult the ROLES registry + resolveRoleToEmployee.
+  if (!getRole(to)) {
+    return { kind: 'unknown', to };
+  }
+  const pick = resolveRoleToEmployee(corpRoot, to);
+  switch (pick.kind) {
+    case 'resolved': {
+      const m = members.find((x) => x.id === pick.slug);
+      if (!m) {
+        // resolver returned a slug that members.json doesn't have —
+        // stale state. Treat as unknown so the caller surfaces it
+        // actionably.
+        return { kind: 'unknown', to };
+      }
+      return { kind: 'role', member: m, mode: 'role', roleId: to };
+    }
+    case 'role-is-partner-only':
+      return {
+        kind: 'role-is-partner-only',
+        roleId: to,
+        partnerCandidates: pick.partnerCandidates,
+      };
+    case 'no-candidates':
+      return { kind: 'role-no-candidates', roleId: to };
+    case 'unknown-role':
+      return { kind: 'unknown', to };
+  }
+}
+
+// getRole is a static import; re-declaring here would be a cycle.
+// (role-resolver.ts already imports it from roles.js above.)

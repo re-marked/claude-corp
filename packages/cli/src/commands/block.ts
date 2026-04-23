@@ -56,11 +56,10 @@ import {
   findChitById,
   updateChit,
   chitScopeFromPath,
-  resolveRoleToEmployee,
+  resolveSlotOrRole,
   validateTransition,
   TaskTransitionError,
   getCurrentStep,
-  getRole,
   handChitToSlot,
   HandNotAllowedError,
   createInboxItem,
@@ -307,72 +306,66 @@ export async function cmdBlock(input: string[] | BlockOpts): Promise<void> {
   }
 }
 
-// ─── Assignee resolution (slug OR role, like hand) ───────────────────
+// ─── Assignee resolution — thin wrapper around shared resolveSlotOrRole ────
 
 type AssigneeResolution =
   | { kind: 'resolved'; slug: string; displayName: string; mode: 'slot' | 'role' }
   | { kind: 'error'; message: string };
 
+/**
+ * Block-specific guidance on top of the shared slot-or-role helper.
+ * Partner-role error points at `cc-cli escalate` (blockers go to
+ * workers; Partner-level decisions use the escalation primitive).
+ */
 function resolveAssignee(
   corpRoot: string,
   members: Member[],
   to: string,
 ): AssigneeResolution {
-  const slotTarget = members.find(
-    (m) => m.type === 'agent' && m.status === 'active' && m.id === to,
-  );
-  if (slotTarget) {
-    return {
-      kind: 'resolved',
-      slug: slotTarget.id,
-      displayName: slotTarget.displayName,
-      mode: 'slot',
-    };
-  }
-
-  if (getRole(to)) {
-    const pick = resolveRoleToEmployee(corpRoot, to);
-    switch (pick.kind) {
-      case 'resolved': {
-        const m = members.find((x) => x.id === pick.slug);
-        return {
-          kind: 'resolved',
-          slug: pick.slug,
-          displayName: m?.displayName ?? pick.slug,
-          mode: 'role',
-        };
-      }
-      case 'role-is-partner-only': {
-        const list = pick.partnerCandidates.length
-          ? pick.partnerCandidates.map((p) => p.slug).join(', ')
-          : '<none hired>';
-        return {
-          kind: 'error',
-          message:
-            `role "${to}" is a Partner role — Partners are slot targets. ` +
-            `Blockers go to workers; for Partner-level decisions use ` +
-            `\`cc-cli escalate\`. If you truly need a Partner to unblock, ` +
-            `name them. Candidates: ${list}.`,
-        };
-      }
-      case 'no-candidates':
-        return {
-          kind: 'error',
-          message:
-            `no Employees of role "${to}" exist yet. Hire one with ` +
-            `\`cc-cli hire --role ${to} --kind employee\` before filing this blocker.`,
-        };
-      case 'unknown-role':
-        return { kind: 'error', message: `unknown role "${to}"` };
+  const res = resolveSlotOrRole(corpRoot, members, to);
+  switch (res.kind) {
+    case 'slot':
+      return {
+        kind: 'resolved',
+        slug: res.member.id,
+        displayName: res.member.displayName,
+        mode: 'slot',
+      };
+    case 'role':
+      return {
+        kind: 'resolved',
+        slug: res.member.id,
+        displayName: res.member.displayName,
+        mode: 'role',
+      };
+    case 'role-is-partner-only': {
+      const list = res.partnerCandidates.length
+        ? res.partnerCandidates.map((p) => p.slug).join(', ')
+        : '<none hired>';
+      return {
+        kind: 'error',
+        message:
+          `role "${to}" is a Partner role — Partners are slot targets. ` +
+          `Blockers go to workers; for Partner-level decisions use ` +
+          `\`cc-cli escalate\`. If you truly need a Partner to unblock, ` +
+          `name them. Candidates: ${list}.`,
+      };
     }
+    case 'role-no-candidates':
+      return {
+        kind: 'error',
+        message:
+          `no Employees of role "${to}" exist yet. Hire one with ` +
+          `\`cc-cli hire --role ${to} --kind employee\` before filing this blocker.`,
+      };
+    case 'unknown':
+      return {
+        kind: 'error',
+        message:
+          `no agent or role matches "${to}". Use the member id (e.g. \`toast\`) ` +
+          `or a registered role id (e.g. \`qa-engineer\`).`,
+      };
   }
-
-  return {
-    kind: 'error',
-    message:
-      `no agent or role matches "${to}". Use the member id (e.g. \`toast\`) ` +
-      `or a registered role id (e.g. \`qa-engineer\`).`,
-  };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────

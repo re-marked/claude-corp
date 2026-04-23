@@ -44,11 +44,9 @@
  */
 
 import { parseArgs } from 'node:util';
-import { isAbsolute, join } from 'node:path';
 import {
   type Member,
-  resolveRoleToEmployee,
-  getRole,
+  resolveSlotOrRole,
   handChitToSlot,
   HandNotAllowedError,
   TaskTransitionError,
@@ -144,64 +142,47 @@ type TargetResolution =
   | { kind: 'resolved'; target: Member; mode: 'slot' | 'role' }
   | { kind: 'error'; message: string };
 
+/**
+ * Thin CLI-layer wrapper around the shared resolveSlotOrRole helper.
+ * Keeps command-specific error wording (bacteria hint, Partner-role
+ * Address-by-name hint) without reimplementing the resolution logic.
+ */
 function resolveTarget(
   corpRoot: string,
   members: Member[],
   to: string,
 ): TargetResolution {
-  // Slot mode: exact id match on an active agent Member.
-  const slotTarget = members.find(
-    (m) => m.type === 'agent' && m.status === 'active' && m.id === to,
-  );
-  if (slotTarget) {
-    return { kind: 'resolved', target: slotTarget, mode: 'slot' };
-  }
-
-  // Role mode: is `to` a registered role id? If yes, resolve via pool.
-  if (getRole(to)) {
-    const pick = resolveRoleToEmployee(corpRoot, to);
-    switch (pick.kind) {
-      case 'resolved': {
-        const member = members.find((m) => m.id === pick.slug);
-        if (!member) {
-          return {
-            kind: 'error',
-            message: `role resolver returned "${pick.slug}" but members.json doesn't have that slug (stale index?)`,
-          };
-        }
-        return { kind: 'resolved', target: member, mode: 'role' };
-      }
-      case 'role-is-partner-only': {
-        const list = pick.partnerCandidates.length
-          ? pick.partnerCandidates.map((p) => p.slug).join(', ')
-          : '<none hired>';
-        return {
-          kind: 'error',
-          message:
-            `role "${to}" is a Partner role — Partners are slot targets, ` +
-            `not pool-resolvable. Address by name. Candidates: ${list}.`,
-        };
-      }
-      case 'no-candidates':
-        return {
-          kind: 'error',
-          message:
-            `no Employees of role "${to}" exist yet. Hire one with ` +
-            `\`cc-cli hire --role ${to} --kind employee\` or wait for bacteria (Project 1.9).`,
-        };
-      case 'unknown-role':
-        // Can't happen — we gated on getRole above. Belt + suspenders.
-        return { kind: 'error', message: `unknown role "${to}"` };
+  const res = resolveSlotOrRole(corpRoot, members, to);
+  switch (res.kind) {
+    case 'slot':
+    case 'role':
+      return { kind: 'resolved', target: res.member, mode: res.mode };
+    case 'role-is-partner-only': {
+      const list = res.partnerCandidates.length
+        ? res.partnerCandidates.map((p) => p.slug).join(', ')
+        : '<none hired>';
+      return {
+        kind: 'error',
+        message:
+          `role "${to}" is a Partner role — Partners are slot targets, ` +
+          `not pool-resolvable. Address by name. Candidates: ${list}.`,
+      };
     }
+    case 'role-no-candidates':
+      return {
+        kind: 'error',
+        message:
+          `no Employees of role "${to}" exist yet. Hire one with ` +
+          `\`cc-cli hire --role ${to} --kind employee\` or wait for bacteria (Project 1.9).`,
+      };
+    case 'unknown':
+      return {
+        kind: 'error',
+        message:
+          `no agent or role matches "${to}". Use the member id (e.g. \`ceo\`, \`toast\`) ` +
+          `or a registered role id (e.g. \`backend-engineer\`).`,
+      };
   }
-
-  // Not a known slot and not a known role.
-  return {
-    kind: 'error',
-    message:
-      `no agent or role matches "${to}". Use the member id (e.g. \`ceo\`, \`toast\`) ` +
-      `or a registered role id (e.g. \`backend-engineer\`).`,
-  };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────

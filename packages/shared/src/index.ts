@@ -194,13 +194,14 @@ export type {
 
 // Role resolver — Project 1.4. Picks an Employee slot for a role-mode
 // hand / block / escalate. Pure; callers apply the resolved target.
-export { resolveRoleToEmployee } from './role-resolver.js';
+export { resolveRoleToEmployee, resolveSlotOrRole } from './role-resolver.js';
 export type {
   RoleResolveResult,
   RoleResolvedResult,
   RolePartnerOnlyResult,
   RoleNoCandidatesResult,
   RoleUnknownResult,
+  SlotOrRoleResolution,
 } from './role-resolver.js';
 
 // Hand core — the shared mechanics for Casket-pointer writes + state
