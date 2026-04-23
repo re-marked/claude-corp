@@ -151,19 +151,72 @@ export type Chit<T extends ChitTypeId = ChitTypeId> = T extends ChitTypeId
 // existing bespoke types (Task, Contract, Observation) currently carry.
 
 /**
- * Fine-grained task workflow state. Distinct from chit.status (which is
- * the coarse universal lifecycle — draft/active/terminal). This enum
- * preserves the richer task-workflow vocabulary from the pre-chits Task
- * type so call sites that check e.g. `task.status === 'blocked'` keep
- * working. The chit-layer query surface filters on chit.status; task-
- * specific logic filters on fields.task.workflowStatus.
+ * Fine-grained task workflow state — the ten-state machine Project 1.3
+ * makes mechanical. Distinct from chit.status (coarse universal
+ * lifecycle: draft/active/terminal). Every transition between these
+ * states is governed by task-state-machine.ts's validator; invalid
+ * attempts throw TaskTransitionError rather than silently mutating.
+ *
+ * The state is observable in cc-cli task list + wtf output so the
+ * founder can see WHAT PHASE a task is in, not just "active or not."
+ *
+ * ## State lifecycle (REFACTOR.md 1.3)
+ *
+ *     draft → queued → dispatched → in_progress
+ *                                       ├─→ blocked ⇄ in_progress
+ *                                       ├─→ under_review → completed | in_progress
+ *                                       └─→ (failed | cancelled)
+ *
+ * - `draft`         — created, no assignee yet. The authoring agent /
+ *                     founder is shaping it; not handed to anyone.
+ * - `queued`        — assignee set (via task-create --assignee OR via
+ *                     `cc-cli hand`). Waiting for the daemon to actually
+ *                     deliver to the assignee's Casket / session.
+ * - `dispatched`    — daemon has delivered. Sits on the target's Casket;
+ *                     target's next session will pick it up.
+ * - `in_progress`   — target agent's session has touched the task (first
+ *                     tool-use observed in dispatch.ts, or explicit claim).
+ * - `blocked`       — a blocker chit was filed against it via
+ *                     `cc-cli block` (1.4.1). Auto-resumes when all
+ *                     blockers reach terminal-success.
+ * - `under_review`  — `cc-cli done` fired; the pending handoff awaits
+ *                     audit-gate approval (0.7.3's Stop hook).
+ * - `completed`     — audit approved; chain walker has advanced Casket.
+ *                     Terminal-success.
+ * - `rejected`      — audit blocked the handoff (e.g. acceptance
+ *                     criteria not met, tier-3 inbox unresolved). The
+ *                     task returns to `in_progress` via a separate
+ *                     transition; `rejected` itself is terminal for
+ *                     chain-walker purposes (downstream tasks blocked)
+ *                     until someone re-opens or substitutes.
+ * - `failed`        — circuit-breaker trip (1.10), repeated audit
+ *                     blocks, or explicit failure declaration.
+ *                     Terminal-failure.
+ * - `cancelled`     — founder-only `cc-cli task cancel` escape hatch.
+ *                     Terminal-failure.
+ *
+ * Terminal states: completed | rejected | failed | cancelled.
+ * chit.status transitions in lockstep: terminal workflowStatus ⇒
+ * non-active chit.status, preventing chit-layer queries from surfacing
+ * finished work as open.
+ *
+ * Design note: `draft` and `queued` replace the earlier `pending` and
+ * `assigned` names. "Pending" was ambiguous (pending assignment?
+ * pending start?); "queued" + "dispatched" split the former "assigned"
+ * into pre-delivery vs post-delivery, which the chain walker needs to
+ * distinguish. Migration path: pre-1.3 tasks with workflowStatus
+ * 'pending' | 'assigned' are mapped at read time (see tasks.ts
+ * deriveTaskStatus) and rewritten to the new names on next update.
  */
 export type TaskWorkflowStatus =
-  | 'pending'
-  | 'assigned'
+  | 'draft'
+  | 'queued'
+  | 'dispatched'
   | 'in_progress'
   | 'blocked'
+  | 'under_review'
   | 'completed'
+  | 'rejected'
   | 'failed'
   | 'cancelled';
 

@@ -187,12 +187,21 @@ function validateTask(fields: unknown): void {
   optionalIsoTimestamp(f.dueAt, 'task.dueAt');
   if (f.loopId !== undefined) requireStringOrNull(f.loopId, 'task.loopId');
   if (f.workflowStatus !== undefined && f.workflowStatus !== null) {
+    // Ten-state machine from REFACTOR.md 1.3. See TaskWorkflowStatus
+    // docstring in types/chit.ts for the lifecycle diagram. Legacy
+    // names 'pending' and 'assigned' are NOT accepted here; pre-1.3
+    // chits carrying those names get remapped to 'draft' / 'queued'
+    // via the tasks.ts read-wrapper (deriveTaskStatus) before hitting
+    // this validator on any write path.
     requireEnum(f.workflowStatus, 'task.workflowStatus', [
-      'pending',
-      'assigned',
+      'draft',
+      'queued',
+      'dispatched',
       'in_progress',
       'blocked',
+      'under_review',
       'completed',
+      'rejected',
       'failed',
       'cancelled',
     ] as const);
