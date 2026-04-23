@@ -32,6 +32,13 @@ export type { EvidenceScanResult } from './evidence.js';
 export { parseTranscript } from './transcript.js';
 export { buildPreCompactInstructions } from './pre-compact-instructions.js';
 export type { PreCompactInstructionsInput } from './pre-compact-instructions.js';
+export { buildCheckpointObservation } from './pre-compact-checkpoint.js';
+export type {
+  CheckpointBuilderInput,
+  CheckpointCasketRef,
+  CheckpointChitSpec,
+  CheckpointRecentActivity,
+} from './pre-compact-checkpoint.js';
 export {
   promotePendingHandoff,
   revertTaskFromUnderReview,
