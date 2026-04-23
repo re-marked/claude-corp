@@ -65,6 +65,10 @@ export function TaskBoard({ onNavigate, onBack }: Props) {
             const statusInfo = TASK_STATUS[t.task.status as keyof typeof TASK_STATUS] ?? TASK_STATUS.pending;
             const priorityColor = PRIORITY[t.task.priority as keyof typeof PRIORITY] ?? COLORS.text;
             const assignee = t.task.assignedTo ? memberMap.get(t.task.assignedTo)?.displayName ?? '?' : '—';
+            const complexityChar = t.task.complexity
+              ? t.task.complexity[0]!.toUpperCase()
+              : '·';
+            const complexityColor = t.task.complexity === 'large' ? COLORS.warning : COLORS.muted;
 
             return (
               <Box key={t.task.id} gap={1}>
@@ -73,6 +77,7 @@ export function TaskBoard({ onNavigate, onBack }: Props) {
                 <Text color={priorityColor} bold={t.task.priority === 'high' || t.task.priority === 'critical'}>
                   {t.task.priority.slice(0, 4).toUpperCase().padEnd(4)}
                 </Text>
+                <Text color={complexityColor}>{complexityChar}</Text>
                 <Text color={isSelected ? COLORS.text : COLORS.subtle} wrap="truncate">
                   {t.task.title}
                 </Text>

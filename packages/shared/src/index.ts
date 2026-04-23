@@ -14,6 +14,7 @@ export type {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskComplexity,
   Team,
   TeamStatus,
   Corporation,
@@ -30,6 +31,21 @@ export type {
   Contract,
   ContractStatus,
   ContractProgress,
+  Chit,
+  ChitTypeId,
+  ChitStatus,
+  ChitScope,
+  ChitCommon,
+  FieldsForType,
+  TaskFields,
+  TaskWorkflowStatus,
+  ContractFields,
+  ObservationFields,
+  CasketFields,
+  HandoffFields,
+  DispatchContextFields,
+  PreBrainEntryFields,
+  StepLogFields,
 } from './types/index.js';
 
 // Parsers
@@ -61,6 +77,116 @@ export {
   tempSuffix,
 } from './id.js';
 export { extractMentionNames, resolveMentions, memberSlug } from './mentions.js';
+export { atomicWriteSync } from './atomic-write.js';
+export {
+  CHIT_TYPES,
+  ChitValidationError,
+  getChitType,
+  isKnownChitType,
+} from './chit-types.js';
+export type { ChitTypeEntry, DestructionPolicy } from './chit-types.js';
+export {
+  isReferenced,
+  isMentioned,
+  hasKeepTag,
+  hasAged,
+  computeVerdict,
+} from './chit-promotion.js';
+export type { ReferenceIndex, PromotionVerdict } from './chit-promotion.js';
+export {
+  migrateTasksToChits,
+  taskToChit,
+} from './migrations/migrate-tasks.js';
+export type { TaskMigrationResult, TaskMigrationOpts } from './migrations/migrate-tasks.js';
+
+export {
+  migrateContractsToChits,
+  contractToChit,
+} from './migrations/migrate-contracts.js';
+export type { ContractMigrationResult, ContractMigrationOpts } from './migrations/migrate-contracts.js';
+
+export {
+  migrateObservationsToChits,
+  bulletToChit,
+} from './migrations/migrate-observations.js';
+export type {
+  ObservationMigrationResult,
+  ObservationMigrationOpts,
+} from './migrations/migrate-observations.js';
+
+export {
+  chitId,
+  casketChitId,
+  isChitIdFormat,
+  chitPath,
+  chitScopeFromPath,
+  createChit,
+  readChit,
+  updateChit,
+  closeChit,
+  promoteChit,
+  archiveChit,
+  queryChits,
+  findChitById,
+  checkConcurrentModification,
+  ChitConcurrentModificationError,
+  ChitMalformedError,
+} from './chits.js';
+export type {
+  CreateChitOpts,
+  UpdateChitOpts,
+  ChitWithBody,
+  QueryChitsOpts,
+  QueryChitsResult,
+  MalformedChit,
+} from './chits.js';
+
+// Casket lifecycle primitives — the durable work-pointer surface that
+// 0.7.3's audit gate reads and that 1.3's chain walker will eventually
+// write. Module docstring explains the "was 1% built, this is the
+// minimum lifecycle to unblock 0.7.3" framing.
+export {
+  casketExists,
+  createCasketIfMissing,
+  getCurrentStep,
+  advanceCurrentStep,
+  incrementSessionCount,
+} from './casket.js';
+
+// Inbox helper — single funnel for all inbox-item chit creation (router
+// on @mention, hand on dispatch, escalate on escalation, system-event
+// emitters). Tier-specific TTL + destructionPolicy rules centralized.
+export { createInboxItem, TIER_TTL } from './inbox.js';
+export type { CreateInboxItemOpts } from './inbox.js';
+// Re-export computeTTL now that it's public (inbox.ts consumes it; other
+// inbox-like helpers may too).
+export { computeTTL } from './chits.js';
+
+// Audit Gate — the 0.7.3 pure decision engine + transcript parser +
+// evidence scanner + prompt template. The cc-cli audit command wires
+// these together at the hook boundary; everything below is pure
+// (except transcript.ts which reads the JSONL file).
+export {
+  runAudit,
+  buildAuditPrompt,
+  scanEvidence,
+  parseTranscript,
+  promotePendingHandoff,
+} from './audit/index.js';
+export type {
+  HookEventName,
+  HookInput,
+  AuditDecision,
+  AuditInput,
+  RecentActivity,
+  ToolCall,
+  TouchedFile,
+  AuditPromptInput,
+  EvidenceScanResult,
+  HandoffPromotionResult,
+  PendingHandoffPayload,
+} from './audit/index.js';
+
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
 export type { FeedbackPolarity, FeedbackMatch } from './feedback-detector.js';
 
@@ -232,7 +358,36 @@ export { USER_TEMPLATE } from './templates/user.js';
 export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarness } from './templates/environment.js';
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
-export { buildClaudeMd, type ClaudeMdTemplateOpts } from './templates/claude-md.js';
+export {
+  buildClaudeMd,
+  buildThinClaudeMd,
+  type ClaudeMdTemplateOpts,
+  type ThinClaudeMdOpts,
+} from './templates/claude-md.js';
+export {
+  buildHookSettings,
+  type HookSettings,
+  type HookSettingsOpts,
+  type HookEntry,
+} from './templates/hook-settings.js';
+export { buildCorpMd, type CorpMdOpts, type CorpMdKind } from './templates/corp-md.js';
+export {
+  buildWtfHeader,
+  type WtfHeaderOpts,
+  type WtfCurrentTask,
+  type WtfInboxPeek,
+  type WtfInboxSummary,
+} from './templates/wtf-header.js';
+export {
+  buildWtfOutput,
+  resolveCurrentTask,
+  readWorklogHandoff,
+  resolveInboxSummary,
+  formatAge,
+  inferKind,
+  type WtfOutputOpts,
+  type WtfOutput,
+} from './wtf-state.js';
 
 // Ranks
 export { canHire } from './ranks.js';
@@ -243,7 +398,7 @@ export type { HierarchyNode } from './hierarchy.js';
 
 // Projects
 export { createProject, listProjects, getProject, getProjectByName } from './projects.js';
-export { createContract, readContract, updateContract, listContracts, listAllContracts, contractPath, getContractProgress } from './contracts.js';
+export { createContract, readContract, updateContract, listContracts, listAllContracts, contractPath, getContractProgress, findContractById } from './contracts.js';
 export type { CreateContractOpts, ContractFilter, ContractWithBody } from './contracts.js';
 export { listBlueprints, getBlueprint, installDefaultBlueprints } from './blueprints.js';
 export type { BlueprintMeta, Blueprint } from './blueprints.js';
@@ -258,7 +413,7 @@ export { getTheme, getAllThemes, rankLabel } from './themes.js';
 export type { Theme, ThemeId } from './themes.js';
 
 // Tasks
-export { createTask, readTask, updateTask, listTasks, taskPath } from './tasks.js';
+export { createTask, readTask, updateTask, listTasks, taskPath, findTaskById } from './tasks.js';
 export type { CreateTaskOpts, TaskFilter, TaskWithBody } from './tasks.js';
 
 // Models

@@ -1,31 +1,37 @@
 /**
- * Observation Log — append-only daily activity records per agent.
+ * observations.ts — thin compatibility wrapper over the chit primitive.
  *
- * Borrowed from Claude Code's memdir/memdir.ts daily log system (lines 318-370).
- * Each agent gets: agents/<name>/observations/YYYY/MM/YYYY-MM-DD.md
+ * Post-0.5-migration, observations live as Chits of type=observation
+ * under agent:<slug> scope. This module preserves the pre-chits external
+ * API (appendObservation / observe / readTodaysObservations /
+ * parseObservations / listObservationLogs / countRecentObservations)
+ * so the 3 daemon callers (dreams.ts, morning-standup.ts) keep working
+ * without edits. Same function signatures, new storage.
  *
- * Observations are the raw signal that Dreams distill into BRAIN/ memory.
- * They're also the primary record of what agents did during SLUMBER sessions.
+ * Semantic preservation notes:
  *
- * Format: timestamped bullets with category tags:
- *   - 14:30 [TASK] Picked up cool-bay, reading competitor docs (files: research/competitors.md)
+ *   - The pre-chits `ObservationCategory` work-activity vocabulary stays
+ *     intact at the external API boundary. Internally, `observe()` stores
+ *     the chit with a translated category (per migrate-observations.ts
+ *     mapping) but also tags it `from-log:<ORIGINAL>` so the original
+ *     is round-trip recoverable.
  *
- * Categories:
- *   [TASK]       — Working on a task
- *   [RESEARCH]   — Reading, exploring, investigating
- *   [DECISION]   — Made a choice or judgment call
- *   [BLOCKED]    — Hit a wall, can't proceed
- *   [LEARNED]    — Discovered new information
- *   [CREATED]    — Created a file, task, agent, or artifact
- *   [REVIEWED]   — Reviewed someone's work
- *   [CHECKPOINT] — Milestone reached, phase boundary
- *   [SLUMBER]    — SLUMBER session start/stop marker
- *   [ERROR]      — Something went wrong
- *   [HANDOFF]    — Delegated or received work from another agent
+ *   - `readTodaysObservations(agentDir): string` synthesizes markdown
+ *     bullets from today's chits, matching the old daily-log format
+ *     so parseObservations and any consumer that string-searches the
+ *     output keep working.
+ *
+ *   - `listObservationLogs(agentDir)` returns date-grouped entries
+ *     derived from chit createdAt timestamps. The `path` field points
+ *     at the agent's chit directory (no single per-day file anymore);
+ *     it's kept populated for callers that want a location to display
+ *     but should not be read directly.
  */
 
-import { existsSync, mkdirSync, appendFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { createChit, queryChits } from './chits.js';
+import type { Chit, ObservationFields } from './types/chit.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -48,7 +54,7 @@ export interface Observation {
   timestamp: string;
   /** Local time string (HH:MM) for display */
   localTime: string;
-  /** Category tag */
+  /** Category tag (work-activity vocabulary) */
   category: ObservationCategory;
   /** Human-readable description */
   description: string;
@@ -59,74 +65,142 @@ export interface Observation {
 }
 
 export interface ObservationLogStats {
-  /** Total entries in the log */
+  /** Total entries for today */
   entryCount: number;
   /** Categories with counts */
   categoryCounts: Partial<Record<ObservationCategory, number>>;
-  /** First entry timestamp */
+  /** First entry time (HH:MM) */
   firstEntry: string | null;
-  /** Last entry timestamp */
+  /** Last entry time (HH:MM) */
   lastEntry: string | null;
-  /** File path of the log */
+  /** Display path — agent's chit directory (not a single file post-chits). */
   logPath: string;
 }
 
-// ── Path Helpers ─────────────────────────────────────────────────────
+// ── Path derivation ──────────────────────────────────────────────────
 
-/** Get the observation log path for an agent on a specific date. */
-export function getObservationLogPath(agentDir: string, date?: Date): string {
-  const d = date ?? new Date();
-  const year = d.getFullYear().toString();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return join(agentDir, 'observations', year, month, `${year}-${month}-${day}.md`);
+/**
+ * Extract corpRoot + agent slug from an agentDir path.
+ * Expected shape: <corpRoot>/agents/<slug>.
+ */
+function parseAgentDir(agentDir: string): { corpRoot: string; slug: string } {
+  const slug = basename(agentDir);
+  const agentsDir = dirname(agentDir);
+  if (basename(agentsDir) !== 'agents') {
+    throw new Error(`expected path to end in agents/<slug>: ${agentDir}`);
+  }
+  const corpRoot = dirname(agentsDir);
+  return { corpRoot, slug };
 }
 
-/** Get the observations root directory for an agent. */
+/**
+ * Pre-chits path helper — retained for API compatibility. Returns the
+ * per-agent chit directory for observations (the closest single-location
+ * analogue to the old daily-log file). The `date` parameter is ignored
+ * since chits are individually filed; callers that need date-filtered
+ * data should use readObservationsForDate / queryChits directly.
+ */
+export function getObservationLogPath(agentDir: string, _date?: Date): string {
+  return getObservationsDir(agentDir);
+}
+
+/**
+ * The agent's observation-chit directory. Replaces the old `observations/`
+ * directory; agents-written raw files at the old path are migrated by
+ * `cc-cli migrate observations` and don't accumulate going forward.
+ */
 export function getObservationsDir(agentDir: string): string {
-  return join(agentDir, 'observations');
+  return join(agentDir, 'chits', 'observation');
+}
+
+// ── Category translation (lossy, matches migrate-observations.ts) ────
+
+function mapToChitCategory(old: ObservationCategory): ObservationFields['category'] {
+  switch (old) {
+    case 'DECISION':
+      return 'DECISION';
+    case 'FEEDBACK':
+      return 'FEEDBACK';
+    case 'RESEARCH':
+    case 'LEARNED':
+      return 'DISCOVERY';
+    case 'ERROR':
+      return 'CORRECTION';
+    default:
+      // TASK, BLOCKED, CREATED, REVIEWED, CHECKPOINT, SLUMBER, HANDOFF.
+      return 'NOTICE';
+  }
+}
+
+// ── Format helpers ───────────────────────────────────────────────────
+
+/** Format an Observation as a markdown bullet. Identical output to pre-chits. */
+export function formatObservation(obs: Observation): string {
+  const filesNote = obs.files?.length ? ` (files: ${obs.files.join(', ')})` : '';
+  return `- ${obs.localTime} [${obs.category}] ${obs.description}${filesNote}`;
+}
+
+/** Parse observation bullets from markdown text. Pure; unchanged from pre-chits. */
+export function parseObservations(content: string): Observation[] {
+  const lines = content.split('\n').filter((l) => l.startsWith('- '));
+  return lines
+    .map((line) => {
+      const match = line.match(
+        /^- (\d{2}:\d{2}) \[(\w+)] (.+?)(?:\s*\(files: (.+?)\))?$/,
+      );
+      if (!match) return null;
+      const obs: Observation = {
+        timestamp: '',
+        localTime: match[1]!,
+        category: match[2] as ObservationCategory,
+        description: match[3]!.trim(),
+        files: match[4]?.split(',').map((f) => f.trim()),
+      };
+      return obs;
+    })
+    .filter((o): o is Observation => o !== null);
 }
 
 // ── Write ────────────────────────────────────────────────────────────
 
-/** Format a single observation entry as a markdown bullet. */
-export function formatObservation(obs: Observation): string {
-  const filesNote = obs.files?.length
-    ? ` (files: ${obs.files.join(', ')})`
-    : '';
-  return `- ${obs.localTime} [${obs.category}] ${obs.description}${filesNote}`;
-}
-
 /**
- * Append an observation entry to today's log file.
- * Creates the directory structure if needed.
- * This is designed to be fast — append-only, no reads.
+ * Append an observation entry. Post-chits, this writes a chit of type=
+ * observation at <corpRoot>/agents/<slug>/chits/observation/<id>.md
+ * instead of appending to a daily-log file. Same call surface: callers
+ * pass an Observation shape, the wrapper handles storage.
  */
 export function appendObservation(agentDir: string, obs: Observation): void {
-  const logPath = getObservationLogPath(agentDir);
-  const dir = dirname(logPath);
+  const { corpRoot, slug } = parseAgentDir(agentDir);
 
-  // Create directory tree if needed
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+  // Ensure target dir exists (atomicWriteSync handles this too but explicit
+  // mkdirSync keeps the setup legible for callers debugging storage layout).
+  mkdirSync(getObservationsDir(agentDir), { recursive: true });
+
+  const mappedCategory = mapToChitCategory(obs.category);
+  const fields: ObservationFields = {
+    category: mappedCategory,
+    subject: obs.agentId ?? slug,
+    importance: 2, // Same default as migration; explicit scoring comes later.
+    title: obs.description.slice(0, 80),
+    context: obs.description,
+  };
+
+  const tags: string[] = [`from-log:${obs.category}`];
+  if (obs.files && obs.files.length > 0) {
+    for (const f of obs.files) tags.push(`file:${f}`);
   }
 
-  // Write header if new file
-  if (!existsSync(logPath)) {
-    const d = new Date(obs.timestamp);
-    const header = `# Observations — ${d.toISOString().slice(0, 10)}\n\n`;
-    appendFileSync(logPath, header, 'utf-8');
-  }
-
-  // Append the entry
-  const line = formatObservation(obs) + '\n';
-  appendFileSync(logPath, line, 'utf-8');
+  createChit(corpRoot, {
+    type: 'observation',
+    scope: `agent:${slug}`,
+    fields: { observation: fields },
+    createdBy: obs.agentId ?? slug,
+    tags,
+    // Observation-chit ephemeral + ttl defaults come from the registry.
+  });
 }
 
-/**
- * Create and append an observation in one call.
- * Convenience wrapper for the common case.
- */
+/** Convenience wrapper: create + append in one call. */
 export function observe(
   agentDir: string,
   category: ObservationCategory,
@@ -147,64 +221,106 @@ export function observe(
 
 // ── Read ─────────────────────────────────────────────────────────────
 
-/** Read today's observation log as raw text. Returns empty string if no log. */
+/**
+ * Convert a chit back to the legacy Observation shape so string-synthesis
+ * matches the pre-chits daily-log format exactly. The original activity
+ * category is recovered from the `from-log:<ORIG>` tag so the wire
+ * format doesn't lose the work-activity vocabulary.
+ */
+function chitToObservation(chit: Chit<'observation'>): Observation {
+  const fromLogTag = chit.tags.find((t) => t.startsWith('from-log:'));
+  const originalCategory = fromLogTag
+    ? fromLogTag.slice('from-log:'.length)
+    : 'TASK'; // no-tag fallback (observation created outside observe() — rare)
+
+  const files = chit.tags
+    .filter((t) => t.startsWith('file:'))
+    .map((t) => t.slice('file:'.length));
+
+  const created = new Date(chit.createdAt);
+  const localTime = `${String(created.getHours()).padStart(2, '0')}:${String(created.getMinutes()).padStart(2, '0')}`;
+
+  return {
+    timestamp: chit.createdAt,
+    localTime,
+    category: originalCategory as ObservationCategory,
+    description:
+      chit.fields.observation.context ?? chit.fields.observation.title ?? '(no description)',
+    files: files.length > 0 ? files : undefined,
+    agentId: chit.createdBy,
+  };
+}
+
+/** Header line matching the pre-chits daily log format. */
+function dailyLogHeader(date: Date): string {
+  return `# Observations — ${date.toISOString().slice(0, 10)}\n\n`;
+}
+
+/**
+ * Read today's observations as a markdown string. Synthesizes the
+ * bullets from chit storage so consumers that string-search or pass
+ * to parseObservations keep working.
+ */
 export function readTodaysObservations(agentDir: string): string {
-  const logPath = getObservationLogPath(agentDir);
-  if (!existsSync(logPath)) return '';
-  return readFileSync(logPath, 'utf-8');
+  return readObservationsForDate(agentDir, new Date());
 }
 
-/** Read an observation log for a specific date. */
+/** Read observations for a specific date. */
 export function readObservationsForDate(agentDir: string, date: Date): string {
-  const logPath = getObservationLogPath(agentDir, date);
-  if (!existsSync(logPath)) return '';
-  return readFileSync(logPath, 'utf-8');
+  const { corpRoot, slug } = parseAgentDir(agentDir);
+  const dateStr = date.toISOString().slice(0, 10);
+  const dayStart = `${dateStr}T00:00:00.000Z`;
+  const dayEnd = `${dateStr}T23:59:59.999Z`;
+
+  const { chits } = queryChits(corpRoot, {
+    types: ['observation'],
+    scopes: [`agent:${slug}`],
+    updatedSince: dayStart,
+    updatedUntil: dayEnd,
+    sortBy: 'createdAt',
+    sortOrder: 'asc',
+    limit: 0,
+    // Include cold observations: a caller asking for "observations on date X"
+    // wants every observation from that date, regardless of whether the
+    // lifecycle scanner has since cooled them. Cold preserves the data;
+    // only the default query surface hides it.
+    includeCold: true,
+  });
+
+  if (chits.length === 0) return '';
+
+  let out = dailyLogHeader(date);
+  for (const { chit } of chits) {
+    const obs = chitToObservation(chit as Chit<'observation'>);
+    out += formatObservation(obs) + '\n';
+  }
+  return out;
 }
 
-/** Parse observation entries from a log file's raw text. */
-export function parseObservations(content: string): Observation[] {
-  const lines = content.split('\n').filter(l => l.startsWith('- '));
-  return lines.map(line => {
-    const match = line.match(
-      /^- (\d{2}:\d{2}) \[(\w+)] (.+?)(?:\s*\(files: (.+?)\))?$/,
-    );
-    if (!match) return null;
-    const obs: Observation = {
-      timestamp: '', // Not available from log format — use date from filename
-      localTime: match[1]!,
-      category: match[2] as ObservationCategory,
-      description: match[3]!.trim(),
-      files: match[4]?.split(', ').map(f => f.trim()),
-    };
-    return obs;
-  }).filter((o): o is Observation => o !== null);
-}
-
-/** Get stats for today's observation log. */
+/** Stats for today's observations via chit query. */
 export function getObservationStats(agentDir: string): ObservationLogStats | null {
-  const logPath = getObservationLogPath(agentDir);
-  if (!existsSync(logPath)) return null;
-
-  const content = readFileSync(logPath, 'utf-8');
+  const content = readTodaysObservations(agentDir);
+  if (!content) return null;
   const observations = parseObservations(content);
-
   const categoryCounts: Partial<Record<ObservationCategory, number>> = {};
   for (const obs of observations) {
     categoryCounts[obs.category] = (categoryCounts[obs.category] ?? 0) + 1;
   }
-
   return {
     entryCount: observations.length,
     categoryCounts,
     firstEntry: observations[0]?.localTime ?? null,
     lastEntry: observations.at(-1)?.localTime ?? null,
-    logPath,
+    logPath: getObservationsDir(agentDir),
   };
 }
 
 /**
- * List all observation log files for an agent, newest first.
- * Returns array of { date: string, path: string, size: number }.
+ * List all dates with observation chits, newest first. Each entry:
+ * { date, path, size }. `path` is the agent's chit directory (shared
+ * across all dates — no single per-day file anymore); `size` is an
+ * approximate sum of chit file sizes for that date, useful for
+ * dashboard rendering.
  */
 export function listObservationLogs(
   agentDir: string,
@@ -212,60 +328,65 @@ export function listObservationLogs(
   const obsDir = getObservationsDir(agentDir);
   if (!existsSync(obsDir)) return [];
 
-  const logs: Array<{ date: string; path: string; size: number }> = [];
-
-  // Walk observations/YYYY/MM/YYYY-MM-DD.md
+  let chits: Array<{ chit: Chit; path: string }>;
   try {
-    const years = readdirSync(obsDir, { withFileTypes: true })
-      .filter(d => d.isDirectory())
-      .map(d => d.name);
+    const { corpRoot, slug } = parseAgentDir(agentDir);
+    const result = queryChits(corpRoot, {
+      types: ['observation'],
+      scopes: [`agent:${slug}`],
+      sortBy: 'createdAt',
+      sortOrder: 'desc',
+      limit: 0,
+      // listObservationLogs is the "all history" enumeration — cold
+      // observations are part of that history and must not disappear.
+      includeCold: true,
+    });
+    chits = result.chits;
+  } catch {
+    return [];
+  }
 
-    for (const year of years) {
-      const yearDir = join(obsDir, year);
-      const months = readdirSync(yearDir, { withFileTypes: true })
-        .filter(d => d.isDirectory())
-        .map(d => d.name);
-
-      for (const month of months) {
-        const monthDir = join(yearDir, month);
-        const files = readdirSync(monthDir)
-          .filter(f => f.endsWith('.md'));
-
-        for (const file of files) {
-          const filePath = join(monthDir, file);
-          const date = file.replace('.md', '');
-          try {
-            const size = statSync(filePath).size;
-            logs.push({ date, path: filePath, size });
-          } catch {}
-        }
-      }
+  // Group by YYYY-MM-DD
+  const byDate = new Map<string, number>(); // date → byte-size accumulator
+  for (const { chit, path } of chits) {
+    const date = chit.createdAt.slice(0, 10); // YYYY-MM-DD
+    let size = 0;
+    try {
+      size = statSync(path).size;
+    } catch {
+      /* non-fatal */
     }
-  } catch {}
+    byDate.set(date, (byDate.get(date) ?? 0) + size);
+  }
 
-  // Sort newest first
-  return logs.sort((a, b) => b.date.localeCompare(a.date));
+  return [...byDate.entries()]
+    .map(([date, size]) => ({ date, path: obsDir, size }))
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /**
- * Count total observations across all log files for an agent.
- * Useful for analytics and dream triggers.
+ * Count observations made within the last N days. Goes direct to
+ * queryChits for efficiency — skips the daily-log materialization path.
  */
-export function countRecentObservations(
-  agentDir: string,
-  sinceDaysAgo = 7,
-): number {
-  const logs = listObservationLogs(agentDir);
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - sinceDaysAgo);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
-
-  let total = 0;
-  for (const log of logs) {
-    if (log.date < cutoffStr) break; // Sorted newest first — stop when too old
-    const content = readFileSync(log.path, 'utf-8');
-    const observations = parseObservations(content);
-    total += observations.length;
+export function countRecentObservations(agentDir: string, sinceDaysAgo = 7): number {
+  let corpRoot: string;
+  let slug: string;
+  try {
+    ({ corpRoot, slug } = parseAgentDir(agentDir));
+  } catch {
+    return 0;
   }
-  return total;
+
+  const cutoff = new Date(Date.now() - sinceDaysAgo * 86_400_000).toISOString();
+  const { chits } = queryChits(corpRoot, {
+    types: ['observation'],
+    scopes: [`agent:${slug}`],
+    updatedSince: cutoff,
+    limit: 0,
+    // Count every observation in the window regardless of lifecycle state.
+    // Dreams use this count to decide whether to schedule an agent; a
+    // heavily-cold agent still has work to distill from their history.
+    includeCold: true,
+  });
+  return chits.length;
 }

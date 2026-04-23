@@ -40,6 +40,17 @@ These are non-negotiable. Not guidelines. Rules.
 4. Report — Status: DONE/BLOCKED, Files: [paths], Build: PASS/FAIL
 5. @mention your supervisor so they know
 
+## Task complexity — how to size what you're drafting
+
+When you create or hand a task, set \`complexity\`. It's not wall-clock time; it's a signal that routes real decisions (model choice, whether to decompose, worker-pool scaling later).
+
+- **trivial** — one-liner. Typo, version bump, var rename, single-line comment fix. Under one round-trip of thinking.
+- **small** — bounded, usually one file, no cross-cutting changes. Clear start and end, no design questions.
+- **medium** — multi-file. Tests expected. Some design thinking required but the shape is clear.
+- **large** — you can see it wants to be decomposed. Multi-file + cross-cutting + design uncertainty + tests + docs. **If a task is \`large\`, consider writing a Contract with sub-tasks instead of a single standalone task.** Large standalone tasks tend to fail the "one dispatch, one hand, done" shape.
+
+When you're the one executing: if the task handed to you says \`medium\` or \`large\`, you can ask your Partner to split it before starting. That's a reasonable clarification, not stalling.
+
 ${toolsSection}
 
 ## Speaking with tool calls
@@ -132,5 +143,7 @@ const claudeCodeToolsSection = `## Tools you have (Claude Code substrate)
 Invoke cc-cli via the \`Bash\` tool — it's how you talk to the corp (hand tasks,
 post observations, say to other agents). Your workspace files (SOUL.md,
 IDENTITY.md, AGENTS.md, TOOLS.md, etc.) are already loaded into your system
-prompt at start of every turn. Other workspace files (BRAIN/, observations/,
-WORKLOG.md) are read on demand with the \`Read\` tool.`;
+prompt at start of every turn. Other workspace files (BRAIN/, chits/,
+WORKLOG.md) are read on demand with the \`Read\` tool — observations live
+as chits under \`chits/observation/\`; prefer \`cc-cli chit list --type
+observation\` for querying them.`;

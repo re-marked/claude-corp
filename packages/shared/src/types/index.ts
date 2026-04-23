@@ -22,6 +22,7 @@ export type {
   Task,
   TaskStatus,
   TaskPriority,
+  TaskComplexity,
 } from './task.js';
 
 export type {
@@ -44,3 +45,21 @@ export type {
   BrainStats,
   BrainSearchResult,
 } from './brain.js';
+
+export type {
+  Chit,
+  ChitTypeId,
+  ChitStatus,
+  ChitScope,
+  ChitCommon,
+  FieldsForType,
+  TaskFields,
+  TaskWorkflowStatus,
+  ContractFields,
+  ObservationFields,
+  CasketFields,
+  HandoffFields,
+  DispatchContextFields,
+  PreBrainEntryFields,
+  StepLogFields,
+} from './chit.js';

@@ -37,7 +37,7 @@ export function defaultEnvironment(
 ## Project
 - Project: ${opts.projectName}
 - Project root: ${opts.corpRoot}/projects/${opts.projectName}/
-- Project tasks: ${opts.corpRoot}/projects/${opts.projectName}/tasks/
+- Project tasks (chits): ${opts.corpRoot}/projects/${opts.projectName}/chits/task/
 - Project deliverables: ${opts.corpRoot}/projects/${opts.projectName}/deliverables/
 - You are scoped to this project. Focus your work here.
 ` : '';
@@ -49,10 +49,26 @@ Your tools and workspace specifics. Update this with anything that helps you wor
 ## Workspace
 - Corp root: ${opts.corpRoot}
 - Your directory: ${opts.agentDir}
-- Tasks: ${opts.projectName ? `${opts.corpRoot}/projects/${opts.projectName}/tasks/` : `${opts.corpRoot}/tasks/`}
+- Tasks (chits): ${opts.projectName ? `${opts.corpRoot}/projects/${opts.projectName}/chits/task/` : `${opts.corpRoot}/chits/task/`}
 - Deliverables: ${opts.projectName ? `${opts.corpRoot}/projects/${opts.projectName}/deliverables/` : `${opts.corpRoot}/deliverables/`}
 - Resources: ${opts.corpRoot}/resources/
 ${projectSection}
+
+**Tasks are chits.** Don't write task files directly with Write —
+always go through the cc-cli surface so ids, status, dependsOn, tags,
+and schema validation land consistently:
+
+- Create: \`cc-cli task create --title "..." --priority high --to <agent>\`
+  OR generic: \`cc-cli chit create --type task --scope corp --title "..." --field priority=high\`
+- Read:   \`cc-cli chit read <id>\`
+- Update: \`cc-cli chit update <id> --status active --from <you>\`
+- Close:  \`cc-cli chit close <id> --from <you>\`
+- List:   \`cc-cli chit list --type task --status active\`
+
+The raw filesystem path above is for reference (debugging, git
+inspection). Direct Write would bypass validation + fail to trigger
+downstream watchers (task assignment DMs, blocker resolution, contract
+progress tracking).
 
 ${resolvedHarness === 'claude-code' ? claudeCodeToolsSection : openclawToolsSection}
 
@@ -136,5 +152,7 @@ const claudeCodeToolsSection = `## Tools Available (Claude Code substrate)
 
 Your workspace files (SOUL/IDENTITY/AGENTS/TOOLS/USER/MEMORY/STATUS/INBOX/
 TASKS/HEARTBEAT) are loaded into your system prompt at the start of every
-turn. Other workspace files (BRAIN/*, observations/*, WORKLOG.md) are read
-on demand with your \`Read\` tool — follow MEMORY.md's wikilinks into BRAIN.`;
+turn. Other workspace files (BRAIN/*, chits/observation/*, WORKLOG.md) are read
+on demand with your \`Read\` tool — follow MEMORY.md's wikilinks into BRAIN.
+For observations, prefer \`cc-cli chit list --type observation --scope agent:self\`
+over direct Read — it handles date filtering and sort order for you.`;

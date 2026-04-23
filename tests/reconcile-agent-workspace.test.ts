@@ -102,25 +102,44 @@ describe('reconcileAgentWorkspace', () => {
   });
 
   describe('CLAUDE.md handling', () => {
-    it('writes CLAUDE.md when target=claude-code', () => {
-      const result = reconcileAgentWorkspace({ agentDir, displayName: 'CEO', harness: 'claude-code' });
+    it('writes CLAUDE.md (thin 0.7 shape) when target=claude-code', () => {
+      const result = reconcileAgentWorkspace({ agentDir, displayName: 'CEO', harness: 'claude-code', rank: 'master' });
 
       expect(existsSync(join(agentDir, 'CLAUDE.md'))).toBe(true);
       const content = readFileSync(join(agentDir, 'CLAUDE.md'), 'utf-8');
-      expect(content).toContain('# I am CEO');
+      // Thin shell: "# <displayName>" heading (not old "# I am X"); keeps
+      // agent-authored @imports; deliberately omits AGENTS.md / TOOLS.md.
+      expect(content).toContain('# CEO');
       expect(content).toContain('@./SOUL.md');
-      expect(content).toContain('@./AGENTS.md');
+      expect(content).not.toContain('@./AGENTS.md');
+      expect(content).not.toContain('@./TOOLS.md');
       expect(result.claudeMdWritten).toBe(true);
       expect(result.claudeMdBackedUp).toBeNull();
+    });
+
+    it('writes .claude/settings.json with hook wiring when target=claude-code', () => {
+      reconcileAgentWorkspace({ agentDir, displayName: 'CEO', harness: 'claude-code', rank: 'master', agentSlug: 'ceo' });
+
+      const settingsPath = join(agentDir, '.claude', 'settings.json');
+      expect(existsSync(settingsPath)).toBe(true);
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      expect(settings.hooks.SessionStart).toBeDefined();
+      expect(settings.hooks.Stop).toBeDefined();
+      // master rank → partner kind → full hook set
+      expect(settings.hooks.PreCompact).toBeDefined();
+      expect(settings.hooks.UserPromptSubmit).toBeDefined();
+      // Nested shape: hooks.Event[0] is a matcher-group whose `hooks`
+      // array holds the actual {type, command} entries.
+      expect(settings.hooks.SessionStart[0].hooks[0].command).toContain('cc-cli wtf --agent ceo');
     });
 
     it('overwrites existing CLAUDE.md with fresh content on every call', () => {
       writeFileSync(join(agentDir, 'CLAUDE.md'), 'old stale content', 'utf-8');
 
-      reconcileAgentWorkspace({ agentDir, displayName: 'Herald', harness: 'claude-code' });
+      reconcileAgentWorkspace({ agentDir, displayName: 'Herald', harness: 'claude-code', rank: 'leader' });
 
       const content = readFileSync(join(agentDir, 'CLAUDE.md'), 'utf-8');
-      expect(content).toContain('# I am Herald');
+      expect(content).toContain('# Herald');
       expect(content).not.toContain('old stale content');
     });
 

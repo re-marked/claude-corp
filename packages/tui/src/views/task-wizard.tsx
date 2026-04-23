@@ -4,9 +4,17 @@ import { TextInput } from '../components/text-input.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
 import type { Member } from '@claudecorp/shared';
 
-type Step = 'title' | 'priority' | 'description' | 'criteria' | 'creating' | 'done' | 'error';
+type Step = 'title' | 'priority' | 'complexity' | 'description' | 'criteria' | 'creating' | 'done' | 'error';
 
 const PRIORITIES = ['normal', 'high', 'critical', 'low'] as const;
+
+const COMPLEXITIES = [
+  { value: 'medium', hint: 'multi-file, tests expected' },
+  { value: 'small', hint: 'bounded, one file, no design questions' },
+  { value: 'trivial', hint: 'one-liner, typo, rename' },
+  { value: 'large', hint: 'decompose into a Contract — don\'t ship standalone' },
+  { value: 'unassessed', hint: 'leave null, the agent will size it' },
+] as const;
 
 interface Props {
   daemonClient: DaemonClient;
@@ -20,6 +28,7 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
   const [step, setStep] = useState<Step>('title');
   const [title, setTitle] = useState('');
   const [priorityIndex, setPriorityIndex] = useState(0);
+  const [complexityIndex, setComplexityIndex] = useState(0);
   const [description, setDescription] = useState('');
   const [criteriaInput, setCriteriaInput] = useState('');
   const [criteria, setCriteria] = useState<string[]>([]);
@@ -35,6 +44,12 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
     if (step === 'priority') {
       if (key.upArrow) setPriorityIndex((i) => Math.max(0, i - 1));
       if (key.downArrow) setPriorityIndex((i) => Math.min(PRIORITIES.length - 1, i + 1));
+      if (key.return) setStep('complexity');
+    }
+
+    if (step === 'complexity') {
+      if (key.upArrow) setComplexityIndex((i) => Math.max(0, i - 1));
+      if (key.downArrow) setComplexityIndex((i) => Math.min(COMPLEXITIES.length - 1, i + 1));
       if (key.return) setStep('description');
     }
   });
@@ -66,10 +81,12 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
     const allCriteria = criteria.length > 0 ? criteria : undefined;
 
     try {
+      const chosenComplexity = COMPLEXITIES[complexityIndex]!.value;
       const result = await daemonClient.createTask({
         title,
         description: description || undefined,
         priority: PRIORITIES[priorityIndex]!,
+        complexity: chosenComplexity === 'unassessed' ? undefined : chosenComplexity as 'trivial' | 'small' | 'medium' | 'large',
         acceptanceCriteria: allCriteria,
         createdBy: founderId,
       });
@@ -116,9 +133,25 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
         </Box>
       )}
 
-      {step === 'description' && (
+      {step === 'complexity' && (
         <Box flexDirection="column">
           <Text>Title: <Text bold>{title}</Text>  Priority: <Text bold>{PRIORITIES[priorityIndex]}</Text></Text>
+          <Box marginTop={1}><Text>Complexity (effort + decomposition signal):</Text></Box>
+          {COMPLEXITIES.map((c, i) => (
+            <Box key={c.value} gap={1}>
+              <Text color={i === complexityIndex ? 'cyan' : undefined} bold={i === complexityIndex}>
+                {i === complexityIndex ? '>' : ' '} {c.value.padEnd(11)}
+              </Text>
+              <Text dimColor>{c.hint}</Text>
+            </Box>
+          ))}
+          <Box marginTop={1}><Text dimColor>up/down, Enter to confirm</Text></Box>
+        </Box>
+      )}
+
+      {step === 'description' && (
+        <Box flexDirection="column">
+          <Text>Title: <Text bold>{title}</Text>  Priority: <Text bold>{PRIORITIES[priorityIndex]}</Text>  Complexity: <Text bold>{COMPLEXITIES[complexityIndex]!.value}</Text></Text>
           <Box marginTop={1}><Text>Description (optional, Enter to skip):</Text></Box>
           <Box>
             <Text bold color="green">&gt; </Text>
@@ -129,7 +162,7 @@ export function TaskWizard({ daemonClient, founderId, members, onClose, onCreate
 
       {step === 'criteria' && (
         <Box flexDirection="column">
-          <Text>Title: <Text bold>{title}</Text>  Priority: <Text bold>{PRIORITIES[priorityIndex]}</Text></Text>
+          <Text>Title: <Text bold>{title}</Text>  Priority: <Text bold>{PRIORITIES[priorityIndex]}</Text>  Complexity: <Text bold>{COMPLEXITIES[complexityIndex]!.value}</Text></Text>
           <Box marginTop={1}><Text>Acceptance criteria (the Warden checks these):</Text></Box>
           <Text dimColor>Type each criterion + Enter. Empty Enter when done.</Text>
           {criteria.map((c, i) => (

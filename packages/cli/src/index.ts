@@ -23,10 +23,20 @@ const { values, positionals } = parseArgs({
     taskId: { type: 'string' },
     reason: { type: 'string' },
     priority: { type: 'string' },
+    complexity: { type: 'string' },
     project: { type: 'string' },
     lead: { type: 'string' },
     type: { type: 'string' },
     wait: { type: 'boolean', default: false },
+    override: { type: 'boolean', default: false },
+    // `cc-cli done` flags — completed is multi-valued so agents can
+    // list each acceptance criterion as a separate --completed "..."
+    // without a manual delimiter.
+    completed: { type: 'string', multiple: true },
+    'next-action': { type: 'string' },
+    'open-question': { type: 'string' },
+    'sandbox-state': { type: 'string' },
+    notes: { type: 'string' },
     timeout: { type: 'string' },
     last: { type: 'string' },
     status: { type: 'string' },
@@ -58,6 +68,7 @@ const { values, positionals } = parseArgs({
     json: { type: 'boolean', default: false },
     pending: { type: 'boolean', default: false },
     culture: { type: 'boolean', default: false },
+    hook: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
   allowPositionals: true,
@@ -72,6 +83,10 @@ if (!cmd || values.help) {
 Usage: cc-cli <command> [options]
 
 Commands:
+  wtf        "Where tf am I, what tf do I do" — emits CORP.md + your situational context
+  audit      Session-end audit gate (Stop / PreCompact hook invokes this). --override --reason "..." for founder bypass.
+  done       Employee "I'm done with this task" signal. Writes pending handoff; audit promotes on approve.
+  inbox      Tiered inbox management. cc-cli inbox <list|respond|dismiss|carry-forward|check>.
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -99,6 +114,9 @@ Commands:
   logs       Show daemon logs
   refresh    Refresh SOUL.md + AGENTS.md from current templates (--all, --force, --dry-run)
   dogfood    Set up dogfood project + dev team + task
+  chit       Unified work-record primitive (create/read/update/close/list/promote/archive)
+  observe    Capture an observation — alias for 'chit create --type observation'
+  migrate    Corp data migrations (migrate tasks: pre-chits Tasks → Chits)
 
 Feedback pipeline:
   feedback                              Corp overview — pending, BRAIN, CULTURE candidates
@@ -154,7 +172,7 @@ Model commands:
   models fallback --chain "sonnet,haiku"    Set fallback chain
 
 Management commands:
-  task create --title "..." [--priority high] [--assigned <id>]
+  task create --title "..." [--priority high] [--complexity medium] [--assigned <id>]
   projects list | projects create --name "..." [--type development]
   teams list | teams create --name "..." --project <id> --lead <id>
   agent start --agent <id> | agent stop --agent <id>
@@ -192,6 +210,35 @@ async function run() {
         user: values.user as string,
         theme: (values.theme as string) ?? 'corporate',
       });
+      break;
+    }
+    case 'chit': {
+      // Each chit subcommand parses its own args to keep the main
+      // dispatcher from needing to know every chit-specific flag.
+      // process.argv.slice(3) = everything after `node cc-cli chit`.
+      const { cmdChit } = await import('./commands/chit.js');
+      await cmdChit(process.argv.slice(3));
+      break;
+    }
+    case 'inbox': {
+      // Same pass-through pattern as chit — each subcommand owns its flags.
+      const { cmdInbox } = await import('./commands/inbox.js');
+      await cmdInbox(process.argv.slice(3));
+      break;
+    }
+    case 'observe': {
+      // Thin alias for `cc-cli chit create --type observation`. Same
+      // pass-through pattern as the chit dispatcher: raw args after
+      // 'observe', the alias handler injects --type and delegates.
+      const { cmdObserve } = await import('./commands/observe.js');
+      await cmdObserve(process.argv.slice(3));
+      break;
+    }
+    case 'migrate': {
+      // Corp data migrations. First target: `migrate tasks` (0.3).
+      // Each migration is idempotent; safe to re-run.
+      const { cmdMigrate } = await import('./commands/migrate.js');
+      await cmdMigrate(process.argv.slice(3));
       break;
     }
     case 'start': {
@@ -517,6 +564,48 @@ async function run() {
       });
       break;
     }
+    case 'wtf': {
+      const { cmdWtf } = await import('./commands/wtf.js');
+      await cmdWtf({
+        agent: values.agent as string | undefined,
+        corp: values.corp as string | undefined,
+        hook: !!values.hook,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'audit': {
+      const { cmdAudit } = await import('./commands/audit.js');
+      await cmdAudit({
+        agent: values.agent as string | undefined,
+        override: !!values.override,
+        reason: values.reason as string | undefined,
+        from: values.from as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
+    case 'done': {
+      const { cmdDone } = await import('./commands/done.js');
+      // `--completed` is multi-valued to mirror the handoff chit's
+      // `completed: string[]` shape — pass it repeatedly, one per
+      // criterion done.
+      const completed = Array.isArray(values.completed)
+        ? (values.completed as string[])
+        : values.completed
+          ? [values.completed as string]
+          : undefined;
+      await cmdDone({
+        from: values.from as string | undefined,
+        completed,
+        nextAction: values['next-action'] as string | undefined,
+        openQuestion: values['open-question'] as string | undefined,
+        sandboxState: values['sandbox-state'] as string | undefined,
+        notes: values.notes as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'task': {
       const action = positionals[1];
       if (action === 'create') {
@@ -525,12 +614,13 @@ async function run() {
           title: values.title as string | undefined,
           description: values.description as string | undefined,
           priority: values.priority as string | undefined,
+          complexity: values.complexity as string | undefined,
           assigned: values.assigned as string | undefined,
           to: values.to as string | undefined,
           json: !!values.json,
         });
       } else {
-        console.error('Usage: cc-cli task create --title "..." [--to <agent>] [--priority high]');
+        console.error('Usage: cc-cli task create --title "..." [--to <agent>] [--priority high] [--complexity medium]');
         process.exit(1);
       }
       break;

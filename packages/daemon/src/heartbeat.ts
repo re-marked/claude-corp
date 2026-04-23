@@ -204,48 +204,20 @@ export class HeartbeatManager {
   refreshAll(): void {
     try {
       const members = readConfig<Member[]>(join(this.daemon.corpRoot, MEMBERS_JSON));
+      // listTasks post-0.3 walks every scope (corp + agents + projects +
+      // teams) via queryChits, so allTasks already includes project-scoped
+      // tasks — the manual "scan <corpRoot>/projects/<name>/tasks/" loop
+      // that used to live here was redundant after the chit migration.
       const allTasks = listTasks(this.daemon.corpRoot);
       const agents = members.filter((m) => m.type === 'agent' && m.agentDir);
       const now = new Date();
       const corpRoot = this.daemon.corpRoot.replace(/\\/g, '/');
 
-      // Also scan project task directories for project-scoped agents
-      const projectTasksCache = new Map<string, typeof allTasks>();
-
       for (const agent of agents) {
-        let myTasks = allTasks.filter((t) => t.task.assignedTo === agent.id);
-        let unassigned = allTasks.filter(
+        const myTasks = allTasks.filter((t) => t.task.assignedTo === agent.id);
+        const unassigned = allTasks.filter(
           (t) => !t.task.assignedTo && t.task.status === 'pending',
         );
-
-        // For project-scoped agents, also include project-specific tasks
-        if (agent.scope === 'project' && agent.scopeId) {
-          try {
-            const { getProject } = require('@claudecorp/shared');
-            const project = getProject(this.daemon.corpRoot, agent.scopeId);
-            if (project) {
-              let projectTasks = projectTasksCache.get(project.name);
-              if (!projectTasks) {
-                const projectTasksDir = join(this.daemon.corpRoot, 'projects', project.name, 'tasks');
-                if (existsSync(projectTasksDir)) {
-                  // listTasks reads from corpRoot/tasks/ — scan project dir manually
-                  const { readdirSync } = require('node:fs');
-                  const files = readdirSync(projectTasksDir).filter((f: string) => f.endsWith('.md'));
-                  projectTasks = files.map((f: string) => {
-                    try { return readTask(join(projectTasksDir, f)); } catch { return null; }
-                  }).filter(Boolean) as typeof allTasks;
-                  projectTasksCache.set(project.name, projectTasks);
-                }
-              }
-              if (projectTasks) {
-                const myProjectTasks = projectTasks.filter(t => t.task.assignedTo === agent.id);
-                const unassignedProject = projectTasks.filter(t => !t.task.assignedTo && t.task.status === 'pending');
-                myTasks = [...myTasks, ...myProjectTasks];
-                unassigned = [...unassigned, ...unassignedProject];
-              }
-            }
-          } catch {}
-        }
 
         const content = this.buildTasksMd(corpRoot, myTasks, unassigned, now, allTasks, members);
 
@@ -318,7 +290,7 @@ export class HeartbeatManager {
         }
         lines.push(`- **[${t.task.id}]** ${t.task.title}`);
         lines.push(`  Status: ${t.task.status} | Priority: ${t.task.priority.toUpperCase()}${note}`);
-        lines.push(`  File: ${corpRoot}/tasks/${t.task.id}.md`);
+        lines.push(`  File: ${corpRoot}/chits/task/${t.task.id}.md`);
 
         // Dependency chain visualization
         if (t.task.blockedBy?.length && allTasks) {
@@ -351,7 +323,7 @@ export class HeartbeatManager {
       lines.push('## Unassigned (you can claim these)', '');
       for (const t of unassigned) {
         lines.push(`- **[${t.task.id}]** ${t.task.title} (${t.task.priority.toUpperCase()})`);
-        lines.push(`  File: ${corpRoot}/tasks/${t.task.id}.md`);
+        lines.push(`  File: ${corpRoot}/chits/task/${t.task.id}.md`);
         lines.push('');
       }
     }
@@ -600,7 +572,7 @@ export class HeartbeatManager {
       if (inProgress.length > 0) {
         const current = inProgress[0]!;
         lines.push(`Working on: **${current.task.title}** (${current.task.status})`);
-        lines.push(`Task file: ${corpRoot.replace(/\\/g, '/')}/tasks/${current.task.id}.md`);
+        lines.push(`Task file: ${corpRoot.replace(/\\/g, '/')}/chits/task/${current.task.id}.md`);
       } else if (myTasks.some(t => t.task.status === 'assigned')) {
         const next = myTasks.find(t => t.task.status === 'assigned')!;
         lines.push(`Next task: **${next.task.title}** (assigned, not started)`);

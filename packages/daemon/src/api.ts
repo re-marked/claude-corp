@@ -332,6 +332,7 @@ export function createApi(daemon: Daemon): Server {
           parentTaskId: (body.parentTaskId as string) ?? undefined,
           blockedBy: (body.blockedBy as string[]) ?? undefined,
           acceptanceCriteria: (body.acceptanceCriteria as string[]) ?? undefined,
+          complexity: (body.complexity as any) ?? undefined,
           dueAt: (body.dueAt as string) ?? undefined,
         });
 

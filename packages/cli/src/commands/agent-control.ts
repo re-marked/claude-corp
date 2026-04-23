@@ -161,6 +161,12 @@ export async function cmdAgentSetHarness(opts: {
       agentDir: agentAbs,
       displayName: member.displayName,
       harness: opts.harness,
+      // Pass corpRoot + agentSlug so reconcile backfills the Casket chit
+      // for existing agents whose workspace pre-dated Casket creation.
+      // Idempotent — a Casket that's already there is left untouched.
+      corpRoot,
+      agentSlug: member.id,
+      casketCreatedBy: member.id,
     });
   }
 

@@ -51,6 +51,7 @@ import {
 } from './harness/index.js';
 import { createApi } from './api.js';
 import { recoverCrashedAgents, recoverCeoGateway, recoverCorpGateway } from './daemon-recovery.js';
+import { scanChitLifecycle } from './chit-lifecycle.js';
 import { corpHasOpenClawAgent } from './harness-resolve.js';
 import { killStaleProcesses } from './stale-cleanup.js';
 import { log, logError } from './logger.js';
@@ -437,6 +438,26 @@ export class Daemon {
       target: 'Workers',
       description: 'Recovers corp gateway after auto-restart exhaustion, reconnects WebSocket',
       callback: () => recoverCorpGateway(this),
+    });
+
+    // Chit lifecycle scanner (0.6) — promotes/destroys/cools ephemeral chits.
+    // 5-minute interval: fast enough that aged handoffs (1h TTL) get reaped
+    // within their window of operational interest, slow enough that the
+    // per-tick work stays trivial at steady state.
+    this.clocks.register({
+      id: 'chit-lifecycle',
+      name: 'Chit Lifecycle',
+      type: 'system',
+      intervalMs: 5 * 60 * 1000,
+      target: 'Daemon',
+      description: 'Scans ephemeral chits: promotes those with signals, destroys transient types that aged out, cools observations',
+      callback: () => {
+        try {
+          scanChitLifecycle(this.corpRoot);
+        } catch (err) {
+          log(`[chit-lifecycle] scan failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      },
     });
 
     // Rehydrate user-created loops and crons from clocks.json

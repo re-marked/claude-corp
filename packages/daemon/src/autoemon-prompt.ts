@@ -226,7 +226,7 @@ export function buildFirstTickMessage(opts: {
     `You are entering ${sourceLabel}. You will receive periodic <tick> prompts.${goalLine}${enrolledLine}`,
     `On each tick, look for useful work. If nothing needs attention, SLEEP with a reason.`,
     `Read your Casket (TASKS.md, INBOX.md, WORKLOG.md) to orient.`,
-    `Write observations to your daily log as you work.`,
+    `Write observations as you work: \`cc-cli observe "..." --from <you> --category <CAT>\`.`,
     `</session-start>`,
   ].join('\n');
 }
@@ -257,7 +257,7 @@ export function buildCompactionRecoveryTick(opts: {
     `<compaction-recovery>`,
     `Your context was compacted. You were already working autonomously — this is NOT a first wake-up.`,
     `Session stats: ${opts.tickCount} ticks fired, ${opts.productiveCount} productive.`,
-    `Read your observations log and WORKLOG.md to pick up where you left off.`,
+    `Read your recent observations (\`cc-cli chit list --type observation --scope agent:<you>\`) and WORKLOG.md to pick up where you left off.`,
     `Continue your work. Do not greet the user or ask what to work on.`,
     `</compaction-recovery>`,
   ].join('\n');

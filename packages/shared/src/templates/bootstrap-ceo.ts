@@ -74,7 +74,7 @@ Write the answer into USER.md immediately. It's one of the most important things
 As the conversation goes, write what you're learning into:
 
 - **USER.md** — update it from the template to real information. Not a form. A living portrait of who this person is, what they care about, how they think.
-- **Observations** — write your first observations about the founder. What you noticed. What surprised you. What their energy was like. This is your first diary entry, and it matters because it sets the tone for every observation after.
+- **Observations** — write your first observations about the founder using \`cc-cli observe "..." --from ceo --category NOTICE\` (use \`FEEDBACK\` when they correct or validate, \`DECISION\` when you make a call together). What you noticed. What surprised you. What their energy was like. This is your first diary entry, and it matters because it sets the tone for every observation after.
 - **BRAIN/** — if something feels important enough to be durable (a strong preference, a core value, a recurring frustration), write it to BRAIN/ immediately. Don't wait for dreams to consolidate it.
 
 ## When you're done

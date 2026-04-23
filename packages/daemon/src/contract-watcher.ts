@@ -8,6 +8,7 @@ import {
   updateContract,
   contractPath,
   readTask,
+  findTaskById,
   readConfig,
   post,
   MEMBERS_JSON,
@@ -60,7 +61,11 @@ export class ContractWatcher {
   }
 
   private watchProjectContracts(projectName: string): void {
-    const contractsDir = join(this.daemon.corpRoot, 'projects', projectName, 'contracts');
+    // Post-0.4 migration: contracts live as chits at
+    // <corpRoot>/projects/<name>/chits/contract/. Watching the old
+    // <corpRoot>/projects/<name>/contracts/ would miss every new contract
+    // + status transition + warden-review trigger.
+    const contractsDir = join(this.daemon.corpRoot, 'projects', projectName, 'chits', 'contract');
     if (!existsSync(contractsDir)) return;
     if (this.watchers.has(projectName)) return;
 
@@ -165,17 +170,13 @@ export class ContractWatcher {
 
     let allDone = true;
     for (const taskId of contract.taskIds) {
-      try {
-        // Check corp-level tasks
-        let taskFile = join(this.daemon.corpRoot, 'tasks', `${taskId}.md`);
-        if (!existsSync(taskFile)) {
-          taskFile = join(this.daemon.corpRoot, 'projects', projectName, 'tasks', `${taskId}.md`);
-        }
-        if (!existsSync(taskFile)) { allDone = false; break; }
-
-        const { task } = readTask(taskFile);
-        if (task.status !== 'completed') { allDone = false; break; }
-      } catch {
+      // findTaskById resolves across all scopes (corp + project + team)
+      // via the chit primitive. Replaces the old "try corp/, fall back to
+      // project/" manual path resolution that broke after 0.3 when tasks
+      // migrated to <corpRoot>/chits/task/ and
+      // <corpRoot>/projects/<name>/chits/task/.
+      const found = findTaskById(this.daemon.corpRoot, taskId);
+      if (!found || found.task.status !== 'completed') {
         allDone = false;
         break;
       }

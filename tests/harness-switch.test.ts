@@ -103,7 +103,7 @@ describe('applyHarnessSwitch', () => {
     expect(readMembers().find(m => m.id === 'pilot')!.harness).toBe('claude-code');
   });
 
-  it('writes CLAUDE.md when switching to claude-code', () => {
+  it('writes CLAUDE.md (thin 0.7 shape) when switching to claude-code', () => {
     const member = seedMember({ id: 'pilot', displayName: 'Pilot', harness: 'openclaw' });
 
     const result = applyHarnessSwitch({ corpRoot, member, targetHarness: 'claude-code' });
@@ -111,7 +111,10 @@ describe('applyHarnessSwitch', () => {
     expect(result.claudeMdWritten).toBe(true);
     expect(existsSync(join(corpRoot, member.agentDir!, 'CLAUDE.md'))).toBe(true);
     const content = readFileSync(join(corpRoot, member.agentDir!, 'CLAUDE.md'), 'utf-8');
-    expect(content).toContain('# I am Pilot');
+    // Thin shell: heading is "# <displayName>" under 0.7 architecture
+    expect(content).toContain('# Pilot');
+    // Dynamic injection section present (survival anchor shape)
+    expect(content).toContain('cc-cli wtf');
   });
 
   it('moves CLAUDE.md aside when switching away from claude-code', () => {

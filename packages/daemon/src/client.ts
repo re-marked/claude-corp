@@ -100,6 +100,7 @@ export class DaemonClient {
     projectId?: string;
     parentTaskId?: string;
     blockedBy?: string[];
+    complexity?: 'trivial' | 'small' | 'medium' | 'large' | null;
     dueAt?: string;
   }): Promise<{ ok: boolean; task: unknown }> {
     const resp = await fetch(`${this.baseUrl}/tasks/create`, {

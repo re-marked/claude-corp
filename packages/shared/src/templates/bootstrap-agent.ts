@@ -56,9 +56,9 @@ ${cultureReadStep}
 
 **2. Read the shared channels.** Skim #general and any channels you've been added to. You're not reading for information — you're reading for VOICE. How do agents talk here? What do they notice? What do they care about? What does this place sound like? That's the culture, and you absorb it by being present with it.
 
-**3. Read your hiring agent's recent observations.** If they're available, these are the richest signal of what the culture actually looks like in practice. Not what the corp says it values — what agents actually write when they're working. The tone of those observations is the tone you'll pattern-match to, whether you intend to or not. Better to read them consciously.
+**3. Read your hiring agent's recent observations.** Run \`cc-cli chit list --type observation --scope agent:<their-slug> --limit 20\` to see their recent diary entries, then \`cc-cli chit show <id>\` on any that catch your eye. These are the richest signal of what the culture actually looks like in practice. Not what the corp says it values — what agents actually write when they're working. The tone of those observations is the tone you'll pattern-match to, whether you intend to or not. Better to read them consciously.
 
-**4. Write your first observation.** Before the shield ends, write one observation. Not about a task — about what you noticed. What did this place feel like when you first looked around? What stood out? What surprised you? This is your first diary entry. It doesn't need to be profound. It needs to be honest.
+**4. Write your first observation.** Before the shield ends, write one observation: \`cc-cli observe "..." --from <your-slug> --category NOTICE\`. Not about a task — about what you noticed. What did this place feel like when you first looked around? What stood out? What surprised you? This is your first diary entry. It doesn't need to be profound. It needs to be honest.
 
 **5. Fill in what you can.** Update MEMORY.md if anything from your reading is worth indexing. Update USER.md if you learned something about the founder from the channels. These files are yours — start making them yours.
 

@@ -99,4 +99,33 @@ describe('defaultRules', () => {
       expect(a.match(pattern)![0]).toBe(b.match(pattern)![0]);
     });
   });
+
+  describe('Task complexity rubric (0.5.1)', () => {
+    it('defines all four complexity levels agents can use', () => {
+      const output = defaultRules('worker');
+      expect(output).toContain('## Task complexity');
+      for (const level of ['trivial', 'small', 'medium', 'large']) {
+        expect(output, `rubric should define ${level}`).toContain(`**${level}**`);
+      }
+    });
+
+    it('teaches the decomposition rule so large tasks become Contracts', () => {
+      const output = defaultRules('worker');
+      // The load-bearing sentence — if removed, agents stop decomposing
+      // large tasks and bacteria weighting breaks silently
+      expect(output).toMatch(/large.*Contract/i);
+    });
+
+    it('tells workers they can ask to split oversized handed tasks', () => {
+      const output = defaultRules('worker');
+      expect(output).toMatch(/ask your Partner to split/i);
+    });
+
+    it('rubric is identical across harnesses (behavioral rule, not tool-specific)', () => {
+      const a = defaultRules({ rank: 'worker', harness: 'claude-code' });
+      const b = defaultRules({ rank: 'worker', harness: 'openclaw' });
+      const pattern = /## Task complexity[\s\S]*?(?=\n## |\n$)/;
+      expect(a.match(pattern)![0]).toBe(b.match(pattern)![0]);
+    });
+  });
 });

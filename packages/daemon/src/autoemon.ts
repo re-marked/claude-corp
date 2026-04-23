@@ -1529,7 +1529,7 @@ export class AutoemonManager {
       agentSummaries,
       recentActions,
       ``,
-      `Read your observation log (observations/) and WORKLOG.md for what you did.`,
+      `Query your observations (cc-cli chit list --type observation --scope agent:self --since 24h) and read WORKLOG.md for what you did.`,
       `Then summarize for the Founder:`,
       `- What tasks did you work on?`,
       `- What decisions did you make?`,
