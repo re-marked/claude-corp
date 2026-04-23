@@ -615,7 +615,15 @@ export function promoteChit<T extends ChitTypeId>(
   id: string,
   opts: { reason: string; updatedBy: string },
 ): Chit<T> {
-  const { chit: current, path } = readChit(corpRoot, scope, type, id);
+  // Single read: frontmatter + body come from the same filesystem
+  // snapshot, so the concurrency check below covers the exact bytes
+  // we'll write over. The previous shape did two reads (frontmatter
+  // here, body right before write) with a concurrency check only
+  // against the FIRST read — a concurrent writer between the check
+  // and the second read would land a newer body we'd silently
+  // overwrite with the stale frontmatter stitched onto it. Lost
+  // update, no error, classic time-of-check/time-of-use split.
+  const { chit: current, body: currentBody, path } = readChit(corpRoot, scope, type, id);
 
   if (!current.ephemeral) {
     throw new ChitValidationError(
@@ -636,8 +644,11 @@ export function promoteChit<T extends ChitTypeId>(
     ? current.tags
     : [...current.tags, promotionTag];
 
-  // Manual flip bypasses the type validator (we're modifying common fields
-  // only, not fields.<type>), but we write through atomic + pre-rename check.
+  // Pre-rename concurrency check against the updatedAt we actually
+  // read above. If anything raced us between our readChit and this
+  // line, the file's updatedAt has moved — we throw
+  // ChitConcurrentModificationError and the caller retries with the
+  // fresh snapshot. No lost updates, no "newer body ghosted away."
   checkConcurrentModification(path, current.updatedAt);
 
   const updated = {
@@ -649,7 +660,6 @@ export function promoteChit<T extends ChitTypeId>(
     updatedAt: new Date().toISOString(),
   } as Chit<T>;
 
-  const { body: currentBody } = readChit(corpRoot, scope, type, id);
   const content = stringifyFrontmatter(updated as unknown as Record<string, unknown>, currentBody);
   atomicWriteSync(path, content);
 
