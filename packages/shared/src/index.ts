@@ -145,6 +145,26 @@ export type {
   MalformedChit,
 } from './chits.js';
 
+// Task state machine — Project 1.3 mechanical enforcement of the 10-state
+// workflow lifecycle. See task-state-machine.ts module docstring for the
+// transition table + design rationale.
+export {
+  validateTransition,
+  resolveTransition,
+  legalTriggersFrom,
+  initialState,
+  isTerminal,
+  isTerminalSuccess,
+  isTerminalFailure,
+  TaskTransitionError,
+  TRANSITION_RULES,
+  TERMINAL_STATES,
+  TERMINAL_SUCCESS_STATES,
+  TERMINAL_FAILURE_STATES,
+  ALL_STATES,
+} from './task-state-machine.js';
+export type { TaskTransitionTrigger } from './task-state-machine.js';
+
 // Casket lifecycle primitives — the durable work-pointer surface that
 // 0.7.3's audit gate reads and that 1.3's chain walker will eventually
 // write. Module docstring explains the "was 1% built, this is the
