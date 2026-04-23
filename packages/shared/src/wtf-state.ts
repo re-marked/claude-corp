@@ -77,8 +77,8 @@ export function resolveCurrentTask(
  * @deprecated Project 1.6 — the handoff chit is the canonical signal
  * now. wtf uses resolveHandoffFromChit() below. This helper stays
  * exported for legacy callers (heartbeat's pre-1.6 observability
- * paths, diagnostic tooling) until 6.1 removes the WORKLOG XML
- * emission entirely.
+ * paths, diagnostic tooling) until the WORKLOG read path is fully
+ * retired (Project 2 cleanup sweep).
  */
 export function readWorklogHandoff(workspacePath: string): string | undefined {
   const worklogPath = join(workspacePath, 'WORKLOG.md');
@@ -112,9 +112,10 @@ function resolveHandoffFromChit(
   corpRoot: string,
   agentSlug: string,
   consume: boolean,
+  consumedBy: string,
 ): string | undefined {
   const chit = consume
-    ? consumeHandoffChit(corpRoot, agentSlug, agentSlug)
+    ? consumeHandoffChit(corpRoot, agentSlug, consumedBy)
     : peekLatestHandoffChit(corpRoot, agentSlug);
   if (!chit) return undefined;
   return handoffChitToXml(chit);
@@ -124,7 +125,11 @@ function handoffChitToXml(chit: Chit<'handoff'>): string {
   const f = chit.fields.handoff as HandoffFields;
   const lines: string[] = ['<handoff>'];
   lines.push(`  <predecessor-session>${xmlEscape(f.predecessorSession)}</predecessor-session>`);
-  lines.push(`  <current-step>${xmlEscape(f.currentStep)}</current-step>`);
+  // currentStep can legitimately be null-ish when an agent cycles
+  // cc-cli done from an idle Casket. renderWorklogMarkdown used to
+  // guard with '(unresolved)'; preserve the same fallback so
+  // xmlEscape doesn't throw on null.
+  lines.push(`  <current-step>${xmlEscape(f.currentStep ?? '(unresolved)')}</current-step>`);
   lines.push(`  <completed>`);
   for (const c of f.completed) lines.push(`    <item>${xmlEscape(c)}</item>`);
   lines.push(`  </completed>`);
@@ -315,6 +320,15 @@ export interface WtfOutputOpts {
    * false and let the SessionStart hook / CLI pipeline handle it.
    */
   consumeHandoff?: boolean;
+  /**
+   * Project 1.6. Identity stamped on the handoff chit when wtf
+   * consumes it. Founder-run inspection (cc-cli wtf --agent toast
+   * --from founder) should not log "toast consumed their own
+   * handoff" — the audit trail deserves the real caller. Defaults
+   * to `agentSlug` when absent (matches the common case of the
+   * agent running wtf themselves).
+   */
+  consumedBy?: string;
 }
 
 export interface WtfOutput {
@@ -345,7 +359,12 @@ export function buildWtfOutput(opts: WtfOutputOpts): WtfOutput {
   // drive by opts.consumeHandoff (default false for peek-safe calls).
   const handoffXml =
     kind === 'employee'
-      ? resolveHandoffFromChit(opts.corpRoot, opts.agentSlug, opts.consumeHandoff ?? false)
+      ? resolveHandoffFromChit(
+          opts.corpRoot,
+          opts.agentSlug,
+          opts.consumeHandoff ?? false,
+          opts.consumedBy ?? opts.agentSlug,
+        )
       : undefined;
   const inboxSummary = resolveInboxSummary(opts.corpRoot, opts.agentSlug, opts.now);
 

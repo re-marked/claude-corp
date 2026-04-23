@@ -414,7 +414,10 @@ export function peekLatestHandoffChit(
     const { chits } = queryChits<'handoff'>(corpRoot, {
       types: ['handoff'],
       statuses: ['active'],
-      scopes: [`agent:${agentSlug}` as const],
+      // Template literal of ChitScope shape — TS narrows the type via
+      // `agent:${string}`'s union inclusion; the prior `as const` was
+      // a no-op on a variable-templated string and read misleadingly.
+      scopes: [(`agent:${agentSlug}`) as `agent:${string}`],
       sortBy: 'createdAt',
       sortOrder: 'desc',
       limit: 1,
@@ -436,9 +439,12 @@ export function peekLatestHandoffChit(
  *
  * The close flips status: 'active' → 'closed' via closeChit (terminal).
  * The chit-lifecycle scanner's destroy-if-not-promoted policy then
- * GCs it at TTL age (24h default). WORKLOG.md preserves the handoff
- * content independently for post-hoc audit — losing the chit at TTL
- * doesn't lose the session-handoff trail.
+ * GCs it at TTL age (24h default). Project 1.6 removed the WORKLOG.md
+ * handoff write — the chit is now the ONLY session-handoff record;
+ * when the chit GCs at TTL, the handoff trail is gone. If multi-day
+ * handoff recall becomes a pain point, flip the handoff type's
+ * destructionPolicy to 'keep-forever' so consumed handoffs go cold
+ * instead of destroying. See the 1.6 PR tradeoff note.
  *
  * Returns the consumed chit so callers (wtf's handoff block) can
  * render its fields into output. Returns null when no active handoff
