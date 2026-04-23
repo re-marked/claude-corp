@@ -46,6 +46,9 @@ export type {
   DispatchContextFields,
   PreBrainEntryFields,
   StepLogFields,
+  InboxItemFields,
+  InboxItemTier,
+  InboxItemSource,
 } from './types/index.js';
 
 // Parsers

@@ -62,4 +62,7 @@ export type {
   DispatchContextFields,
   PreBrainEntryFields,
   StepLogFields,
+  InboxItemFields,
+  InboxItemTier,
+  InboxItemSource,
 } from './chit.js';
