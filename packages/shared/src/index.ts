@@ -50,6 +50,7 @@ export type {
   InboxItemFields,
   InboxItemTier,
   InboxItemSource,
+  EscalationFields,
 } from './types/index.js';
 
 // Parsers
@@ -173,6 +174,9 @@ export {
   analyzeReadiness,
   nextReadyTask,
   advanceChain,
+  applyDependentDelta,
+  applyDependentDeltas,
+  applyChainAdvance,
   ChainCycleError,
 } from './chain.js';
 export type {
@@ -180,7 +184,32 @@ export type {
   ReadinessResult,
   AdvanceChainResult,
   DependentDelta,
+  ApplyDeltaOpts,
+  ApplyDeltaResult,
+  ApplyChainAdvanceOpts,
+  ChainAdvanceApplyResult,
+  ChainAdvanceRedispatchResult,
+  ChainAdvanceCascadeNotification,
 } from './chain.js';
+
+// Role resolver — Project 1.4. Picks an Employee slot for a role-mode
+// hand / block / escalate. Pure; callers apply the resolved target.
+export { resolveRoleToEmployee, resolveSlotOrRole } from './role-resolver.js';
+export type {
+  RoleResolveResult,
+  RoleResolvedResult,
+  RolePartnerOnlyResult,
+  RoleNoCandidatesResult,
+  RoleUnknownResult,
+  SlotOrRoleResolution,
+} from './role-resolver.js';
+
+// Hand core — the shared mechanics for Casket-pointer writes + state
+// machine transitions + announcement. CLI cmdHand and daemon cron
+// task-spawn both use this; the daemon no longer has its own
+// /tasks/:id/hand endpoint.
+export { handChitToSlot, HandNotAllowedError } from './hand-core.js';
+export type { HandChitToSlotOpts, HandChitToSlotResult } from './hand-core.js';
 
 // Casket lifecycle primitives — the durable work-pointer surface that
 // 0.7.3's audit gate reads and that 1.3's chain walker will eventually

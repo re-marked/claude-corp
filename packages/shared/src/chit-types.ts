@@ -28,6 +28,7 @@ import type {
   PreBrainEntryFields,
   StepLogFields,
   InboxItemFields,
+  EscalationFields,
 } from './types/chit.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -298,6 +299,32 @@ function validateStepLog(fields: unknown): void {
   if (f.details !== undefined) requireStringOrNull(f.details, 'step-log.details');
 }
 
+function validateEscalation(fields: unknown): void {
+  const f = requireObject(fields, 'escalation') as Partial<EscalationFields>;
+  requireNonEmptyString(f.originatingChit, 'escalation.originatingChit');
+  requireNonEmptyString(f.reason, 'escalation.reason');
+  requireNonEmptyString(f.from, 'escalation.from');
+  requireNonEmptyString(f.to, 'escalation.to');
+  requireEnum(f.severity, 'escalation.severity', ['blocker', 'question', 'review'] as const);
+  if (f.resolution !== undefined && f.resolution !== null) {
+    requireEnum(f.resolution, 'escalation.resolution', ['resolved', 'dismissed', 'converted-to-task'] as const);
+  }
+  if (f.resolutionNotes !== undefined) requireStringOrNull(f.resolutionNotes, 'escalation.resolutionNotes');
+  if (f.convertedTaskId !== undefined) requireStringOrNull(f.convertedTaskId, 'escalation.convertedTaskId');
+  // Coherence: convertedTaskId only meaningful when resolution === 'converted-to-task'.
+  // We don't strictly reject `convertedTaskId` on other resolutions (caller might
+  // annotate a rejected escalation with a later-created replacement task id for
+  // audit), but we DO require the pairing in one direction: if resolution is
+  // 'converted-to-task' and convertedTaskId is null/empty, the decision record
+  // is incomplete — reject at write time so the audit trail stays honest.
+  if (f.resolution === 'converted-to-task' && (f.convertedTaskId === null || f.convertedTaskId === undefined || f.convertedTaskId === '')) {
+    throw new ChitValidationError(
+      'escalation.convertedTaskId is required when resolution is "converted-to-task"',
+      'escalation.convertedTaskId',
+    );
+  }
+}
+
 function validateInboxItem(fields: unknown): void {
   const f = requireObject(fields, 'inbox-item') as Partial<InboxItemFields>;
   // Tier is the load-bearing discriminant — if it's wrong the whole
@@ -446,6 +473,32 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     // frontmatter. Validation of that override contract is part of 0.7.4.
     destructionPolicy: 'keep-forever',
     validate: validateInboxItem,
+  },
+  {
+    id: 'escalation',
+    idPrefix: 'e',
+    // Ephemeral: escalations are in-flight signals, not soul material.
+    // Once resolved, the outcome either becomes a new task (follow-up
+    // work) or is recorded in the originating chit's audit trail. The
+    // escalation chit itself has no long-term value — destroy on TTL
+    // age when it never reached terminal status (Partner never saw it
+    // / Employee never unblocked). See EscalationFields docstring.
+    defaultEphemeral: true,
+    // 7d TTL matches Tier 2 inbox — "important but not chain-stalling."
+    // Blocker-severity escalations get a Tier 3 inbox companion fire for
+    // founder visibility (done at the CLI boundary in cmdEscalate), not
+    // here — the chit lifecycle is independent of the notification tier.
+    defaultTTL: '7d',
+    defaultStatus: 'active',
+    validStatuses: ['active', 'completed', 'rejected', 'closed'],
+    terminalStatuses: ['completed', 'rejected', 'closed'],
+    // Genuine ephemeral: destroy if never promoted. Unlike observations
+    // (keep-forever / cool-on-age), an abandoned escalation has no audit
+    // value — either the Employee unblocked themselves (closed via
+    // chain walker) or the system failed to deliver (which we want to
+    // log via the destruction entry, then move on).
+    destructionPolicy: 'destroy-if-not-promoted',
+    validate: validateEscalation,
   },
 ];
 

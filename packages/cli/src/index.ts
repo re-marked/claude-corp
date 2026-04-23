@@ -574,12 +574,33 @@ async function run() {
       break;
     }
     case 'hand': {
+      // Project 1.4 rewrite: hand takes --chit (preferred) or --task
+      // (back-compat alias), resolves slot OR role, writes Casket
+      // directly. process.argv.slice(3) = everything after
+      // `cc-cli hand`, including raw flags — matches the pattern used
+      // by cmdChit / cmdInbox / cmdObserve so hand.ts's parseArgs can
+      // own its flag surface without this dispatcher growing per-flag.
       const { cmdHand } = await import('./commands/hand.js');
-      await cmdHand({
-        task: values.task as string | undefined,
-        to: values.to as string | undefined,
-        json: !!values.json,
-      });
+      await cmdHand(process.argv.slice(3));
+      break;
+    }
+    case 'escalate': {
+      // Project 1.4: Employee-to-Partner judgment request. Creates
+      // escalation chit + writes Partner's Casket + fires inbox at
+      // severity-matched tier (blocker → Tier 3, question/review →
+      // Tier 2). Same raw-argv pattern as hand.
+      const { cmdEscalate } = await import('./commands/escalate.js');
+      await cmdEscalate(process.argv.slice(3));
+      break;
+    }
+    case 'block': {
+      // Project 1.4.1: dynamic blocker injection. Files a sub-task,
+      // adds to caller's dependsOn, transitions caller to blocked via
+      // state machine, hands blocker chit to assignee, fires inbox
+      // on caller so wtf surfaces the BLOCKED state. Same raw-argv
+      // pattern as hand / escalate.
+      const { cmdBlock } = await import('./commands/block.js');
+      await cmdBlock(process.argv.slice(3));
       break;
     }
     case 'wtf': {

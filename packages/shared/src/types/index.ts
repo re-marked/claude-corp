@@ -66,4 +66,5 @@ export type {
   InboxItemFields,
   InboxItemTier,
   InboxItemSource,
+  EscalationFields,
 } from './chit.js';

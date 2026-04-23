@@ -759,18 +759,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       const agentInfo = (agentStatus as any)?.agents?.find((a: any) => a.memberId === targetAgent.id);
       const busyWarning = agentInfo?.workStatus === 'busy' ? ' (agent is busy — task will queue in their inbox)' : '';
 
+      // Project 1.4: /hand uses the shared handChitToSlot helper
+      // directly (file-first, no daemon round-trip). Previously went
+      // through daemonClient.handTask → /tasks/:id/hand, both of
+      // which were deleted in 1.4.
+      const founderMember = members.find((m) => m.rank === 'owner');
       try {
-        const result = await daemonClient.handTask(handTaskId, agentSlug);
-        if ((result as any).ok) {
-          const task = (result as any).task;
-          const title = task?.title ?? handTaskId;
-          const priority = task?.priority ?? 'normal';
-          writeSystemMessage(`Handed "${title}" [${priority}] → @${targetAgent.displayName}${busyWarning}. Work begins.`);
-        } else {
-          writeSystemMessage(`Failed to hand: ${(result as any).error ?? 'unknown error'}`);
-        }
+        const { handChitToSlot } = await import('@claudecorp/shared');
+        const result = handChitToSlot({
+          corpRoot,
+          targetSlug: targetAgent.id,
+          chitId: handTaskId,
+          handerId: founderMember?.id ?? 'founder',
+          announce: true,
+        });
+        writeSystemMessage(
+          `Handed ${handTaskId} → @${targetAgent.displayName}${busyWarning}` +
+            (result.finalWorkflowStatus ? ` [${result.finalWorkflowStatus}]` : '') +
+            `. Work begins.`,
+        );
       } catch (err) {
-        writeSystemMessage(`Failed to hand task: ${err instanceof Error ? err.message : String(err)}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        writeSystemMessage(`Failed to hand: ${msg}`);
       }
       return;
     }

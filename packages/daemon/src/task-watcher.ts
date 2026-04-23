@@ -4,15 +4,17 @@ import {
   type TaskStatus,
   type Member,
   readTask,
-  updateTask,
-  taskPath,
   listTasks,
   readConfig,
   MEMBERS_JSON,
+  advanceChain,
+  applyChainAdvance,
+  findChitById,
+  type TaskFields,
 } from '@claudecorp/shared';
 import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm, dispatchBlockerToDm, dispatchCompletionToCeo, dispatchToHander } from './task-events.js';
 import type { Daemon } from './daemon.js';
-import { log } from './logger.js';
+import { log, logError } from './logger.js';
 
 export class TaskWatcher {
   private daemon: Daemon;
@@ -202,40 +204,61 @@ export class TaskWatcher {
             }
           }
 
-          // blockedBy resolution: find tasks blocked by this one
-          if (task.status === 'completed') {
+          // Chain walker cascade — Project 1.3 + 1.4. On terminal
+          // close (completed / failed / cancelled), advanceChain
+          // computes DependentDelta[] for every dependent of this
+          // task; applyChainAdvance transitions each dependent's
+          // workflowStatus via the state machine AND re-dispatches
+          // unblocked tasks (Casket write + inbox). Replaces the
+          // pre-1.4 ad-hoc blockedBy resolver that read the legacy
+          // Task wrapper status field — chit-layer walker is now the
+          // single source of truth.
+          //
+          // The daemon-layer adds DM dispatch here (to wake the
+          // agent's session) that the shared applyChainAdvance can't
+          // do — it stays harness-agnostic. Session wake lives at
+          // the daemon boundary, chain semantics in shared.
+          if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
             try {
-              const allTasks = listTasks(this.daemon.corpRoot);
-              const blocked = allTasks.filter(t =>
-                t.task.blockedBy?.includes(task.id) &&
-                t.task.status !== 'completed' &&
-                t.task.status !== 'cancelled' &&
-                t.task.assignedTo,
-              );
-              for (const downstream of blocked) {
-                // Check if ALL blockers are now completed
-                const allBlockersResolved = (downstream.task.blockedBy ?? []).every(blockerId => {
-                  const blocker = allTasks.find(t => t.task.id === blockerId);
-                  return blocker?.task.status === 'completed';
-                });
-                if (allBlockersResolved) {
-                  // Auto-unblock: update status from blocked → assigned, then hand immediately
-                  try {
-                    const downstreamPath = taskPath(this.daemon.corpRoot, downstream.task.id);
-                    updateTask(downstreamPath, { status: 'assigned' });
-                  } catch {}
+              const advance = advanceChain(this.daemon.corpRoot, task.id);
+              const results = applyChainAdvance(this.daemon.corpRoot, advance, 'system');
+              for (const r of results) {
+                if (!r.transition.applied) {
+                  // transition-rejected is the idempotent re-fire
+                  // case (already unblocked, stacking block). Log
+                  // only genuine substrate gaps.
+                  if (r.transition.skippedReason && r.transition.skippedReason !== 'transition-rejected') {
+                    log(`[chain] skipped ${r.delta.chitId}: ${r.transition.skippedReason} — ${r.transition.detail ?? ''}`);
+                  }
+                  continue;
+                }
+                log(`[chain] ${r.delta.trigger} ${r.delta.chitId}: ${r.transition.fromState} → ${r.transition.toState}`);
 
-                  logTaskAssignment(this.daemon.corpRoot, downstream.task.assignedTo!, downstream.task.title);
-                  dispatchTaskToDm(this.daemon, downstream.task.assignedTo!, downstream.task.title, downstream.task.id);
-                  writeTaskEvent(
-                    this.daemon.corpRoot,
-                    `[TASK] "${downstream.task.title}" UNBLOCKED — all dependencies resolved ("${task.title}" completed) — auto-handed to assignee`,
-                  );
-                  log(`[task-watcher] Auto-unblock: "${downstream.task.title}" unblocked + auto-handed (dependency "${task.title}" completed)`);
+                // Unblocked + re-dispatched → wake the agent's session.
+                if (
+                  r.delta.trigger === 'unblock' &&
+                  r.redispatch?.targetSlug &&
+                  r.redispatch.casketWritten
+                ) {
+                  try {
+                    const hit = findChitById(this.daemon.corpRoot, r.delta.chitId);
+                    if (hit && hit.chit.type === 'task') {
+                      const title = (hit.chit.fields as { task: TaskFields }).task.title;
+                      logTaskAssignment(this.daemon.corpRoot, r.redispatch.targetSlug, title);
+                      dispatchTaskToDm(this.daemon, r.redispatch.targetSlug, title, r.delta.chitId);
+                      writeTaskEvent(
+                        this.daemon.corpRoot,
+                        `[TASK] "${title}" UNBLOCKED — dependency "${task.title}" ${task.status} — re-dispatched to ${r.redispatch.targetSlug}`,
+                      );
+                    }
+                  } catch {
+                    // DM dispatch failure is non-fatal — the Casket
+                    // write IS the delivery; wake is observability.
+                  }
                 }
               }
-            } catch {
-              // Non-fatal
+            } catch (err) {
+              logError(`[task-watcher] chain advance failed for ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
         }

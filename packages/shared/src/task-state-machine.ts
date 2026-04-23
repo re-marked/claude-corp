@@ -137,6 +137,14 @@ export const TRANSITION_RULES: {
     // draft by passing a null assignee (caller's responsibility to clear
     // the assignee field in the same mutation).
     assign: 'queued',
+    // Cascade from a failed upstream dep: even though this task hasn't
+    // been dispatched yet, a failed dependency means the chain is
+    // broken — flip to blocked so the founder can see a stalled chain
+    // instead of a queue item silently sitting on a dead dep. Without
+    // this rule, computeDependentDeltas's block delta on a queued
+    // dependent would get rejected by the state machine and the chain
+    // walker would silently fail to propagate the failure.
+    block: 'blocked',
     cancel: 'cancelled',
     fail: 'failed',
   },
