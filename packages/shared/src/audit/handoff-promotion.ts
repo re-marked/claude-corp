@@ -47,7 +47,6 @@ import {
   chitScopeFromPath,
 } from '../chits.js';
 import { advanceCurrentStep, getCurrentStep } from '../casket.js';
-import { atomicWriteSync } from '../atomic-write.js';
 import { validateTransition, TaskTransitionError } from '../task-state-machine.js';
 import { advanceChain, nextReadyTask, type DependentDelta } from '../chain.js';
 import { queryChits } from '../chits.js';
@@ -67,7 +66,14 @@ export interface PendingHandoffPayload {
 export interface HandoffPromotionResult {
   /** True when a .pending-handoff.json was found and promoted. */
   promoted: boolean;
-  /** Path to the written WORKLOG.md (null when nothing to promote). */
+  /**
+   * Path to the written WORKLOG.md (null when nothing to promote).
+   *
+   * @deprecated Project 1.6 — WORKLOG.md write removed; the handoff
+   * chit is the canonical record. Field preserved as `null` for
+   * backward-compat with audit.ts's observability logging; next
+   * major version removes the field from the type entirely.
+   */
   worklogPath: string | null;
   /** Handoff chit id written (null when nothing to promote). */
   handoffChitId: string | null;
@@ -128,15 +134,27 @@ export function promotePendingHandoff(
     result.errors.push(`read-casket: ${stringify(err)}`);
   }
 
-  // 2. WORKLOG.md — both XML-structured and human-readable markdown.
-  const worklogPath = join(workspacePath, 'WORKLOG.md');
-  try {
-    const worklogContent = renderWorklogMarkdown(payload, currentStepId);
-    atomicWriteSync(worklogPath, worklogContent);
-    result.worklogPath = worklogPath;
-  } catch (err) {
-    result.errors.push(`write-worklog: ${stringify(err)}`);
-  }
+  // 2. WORKLOG.md write REMOVED (Project 1.6). Pre-1.6 this path
+  // overwrote WORKLOG.md with an <handoff> XML block + a Session
+  // Summary markdown section, both machine-readable (Dredge parsed
+  // the markdown; readWorklogHandoff parsed the XML). Now both
+  // readers are gone — wtf reads the handoff CHIT, Dredge is
+  // deleted. The chit is the canonical handoff record.
+  //
+  // Side benefit: the old behavior FULL-OVERWROTE WORKLOG.md,
+  // which destroyed any agent-authored work log content on every
+  // audit approve. Removing the write stops that destruction —
+  // WORKLOG.md now stays a durable agent journal (written by the
+  // agent via their Write tool, read by dreams / context-fragment
+  // / workspace-fragment as "recent history" hints).
+  //
+  // Audit trail tradeoff: handoff chits have 24h TTL with
+  // destroy-if-not-promoted. Consumed handoffs get GC'd one day
+  // later. If indefinite audit visibility on session handoffs
+  // becomes a pain point, flip the handoff type's destructionPolicy
+  // to 'keep-forever' (then consumed handoffs go cold, not
+  // destroyed). Deferred — file-level audit for handoff cadence
+  // hasn't been requested.
 
   // 3. Handoff chit. Ephemeral; the 0.6 lifecycle scanner destroys
   // unconsumed ones, keeping the per-agent chit store tidy across
@@ -245,62 +263,10 @@ export function promotePendingHandoff(
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-/**
- * Render the pending payload as WORKLOG.md. Two representations in
- * one file: the XML <handoff> block for structured consumers
- * (1.6-forward Dredge + audit replay tools) and a human-readable
- * `## Session Summary` section the CURRENT Dredge fragment parses.
- * The two are redundant during the migration window; 1.6 removes the
- * `## Session Summary` half.
- */
-function renderWorklogMarkdown(
-  payload: PendingHandoffPayload,
-  currentStep: string | null,
-): string {
-  const lines: string[] = [];
-  lines.push('<handoff>');
-  lines.push(`  <predecessor-session>${xmlEscape(payload.predecessorSession)}</predecessor-session>`);
-  lines.push(`  <current-step>${xmlEscape(currentStep ?? '(unresolved)')}</current-step>`);
-  lines.push(`  <completed>`);
-  for (const c of payload.completed) lines.push(`    <item>${xmlEscape(c)}</item>`);
-  lines.push(`  </completed>`);
-  lines.push(`  <next-action>${xmlEscape(payload.nextAction)}</next-action>`);
-  if (payload.openQuestion) {
-    lines.push(`  <open-question>${xmlEscape(payload.openQuestion)}</open-question>`);
-  }
-  if (payload.sandboxState) {
-    lines.push(`  <sandbox-state>${xmlEscape(payload.sandboxState)}</sandbox-state>`);
-  }
-  if (payload.notes) lines.push(`  <notes>${xmlEscape(payload.notes)}</notes>`);
-  lines.push(`  <created-at>${payload.createdAt}</created-at>`);
-  lines.push(`  <created-by>${xmlEscape(payload.createdBy)}</created-by>`);
-  lines.push(`</handoff>`);
-  lines.push('');
-  lines.push('## Session Summary');
-  lines.push('');
-  lines.push(`**Session:** ${payload.predecessorSession}`);
-  lines.push(`**Task:** ${currentStep ?? '(none)'}`);
-  lines.push(`**Next action:** ${payload.nextAction}`);
-  if (payload.completed.length > 0) {
-    lines.push('');
-    lines.push('**Completed:**');
-    for (const c of payload.completed) lines.push(`- ${c}`);
-  }
-  if (payload.openQuestion) {
-    lines.push('');
-    lines.push(`**Open question:** ${payload.openQuestion}`);
-  }
-  if (payload.sandboxState) {
-    lines.push('');
-    lines.push(`**Sandbox state:** ${payload.sandboxState}`);
-  }
-  if (payload.notes) {
-    lines.push('');
-    lines.push(`**Notes:** ${payload.notes}`);
-  }
-  lines.push('');
-  return lines.join('\n');
-}
+// renderWorklogMarkdown + xmlEscape deleted in Project 1.6 — the
+// handoff chit is now the canonical record. The matching helper for
+// rendering chit fields as XML (when wtf needs XML output for its
+// handoff block) lives in wtf-state.ts's handoffChitToXml.
 
 function closeTaskAsCompleted(
   corpRoot: string,
@@ -552,14 +518,6 @@ function findNextSameAgentChainStep(
     continue;
   }
   return null;
-}
-
-function xmlEscape(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 function stringify(err: unknown): string {
