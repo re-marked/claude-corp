@@ -57,13 +57,16 @@ the summarizer's best guess.
 
 **Crystallize now — before \`/compact\` fires:**
 
-- \`cc-cli observe "<insight>" --from <you> --category <TASK|DECISION|LEARNED|CHECKPOINT>\`
+- \`cc-cli observe "<insight>" --from <you> --category <DECISION|LEARNED|CHECKPOINT>\`
   for anything you want to remember across the compact boundary.
-- \`cc-cli handoff\` or update your Casket with the current work pointer
-  so the next turn (pre- or post-compact) picks up cleanly.
-- Write any mid-flight reasoning you need to preserve into
-  \`observation\` chits or your BRAIN/ files. Bullet-point notes survive
-  the summary untouched.
+  CHECKPOINT is the dedicated category for "where I am right now" —
+  the Partner equivalent of a handoff note.
+- Write any mid-flight reasoning into your BRAIN/ files directly.
+  Bullet-point notes survive the summary untouched.
+- Your Casket \`current_step\` already tracks the active task chit; it
+  moves via \`cc-cli done\` / \`cc-cli hand\` / chain-walker on task
+  close. No mid-session Casket edit is needed — the pointer is already
+  durable across the compact boundary.
 
 After this turn, continue as normal. The PreCompact hook will shape the
 summary itself when compact fires — but the durable artifacts you write

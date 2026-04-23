@@ -90,10 +90,25 @@ describe('preCompactSignalFragment — render', () => {
     expect(out).toContain('Crystallize now');
   });
 
-  it('mentions BRAIN/ and observation chits as durable storage', () => {
+  it('names CHECKPOINT as the Partner-equivalent-of-handoff category', () => {
+    const out = preCompactSignalFragment.render(baseCtx());
+    expect(out).toContain('CHECKPOINT');
+  });
+
+  it('mentions BRAIN/ as durable storage', () => {
     const out = preCompactSignalFragment.render(baseCtx());
     expect(out).toContain('BRAIN/');
-    expect(out).toContain('observation');
+  });
+
+  it('does NOT suggest cc-cli handoff — renamed to cc-cli done during 0.7.3', () => {
+    const out = preCompactSignalFragment.render(baseCtx());
+    expect(out).not.toMatch(/cc-cli\s+handoff/);
+  });
+
+  it('references the real Casket-moving commands (done / hand / chain-walker)', () => {
+    const out = preCompactSignalFragment.render(baseCtx());
+    expect(out).toContain('cc-cli done');
+    expect(out).toContain('cc-cli hand');
   });
 
   it('has order=5 — renders before workspace/context/history fragments', () => {
