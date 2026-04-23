@@ -43,6 +43,8 @@ import {
   TaskTransitionError,
   type TaskTransitionTrigger,
 } from './task-state-machine.js';
+import { advanceCurrentStep } from './casket.js';
+import { createInboxItem } from './inbox.js';
 
 // ─── Error types ────────────────────────────────────────────────────
 
@@ -482,6 +484,157 @@ export function applyDependentDeltas(
   actor: string,
 ): ApplyDeltaResult[] {
   return deltas.map((delta) => applyDependentDelta({ corpRoot, delta, actor }));
+}
+
+// ─── applyChainAdvance — close the loop after a close event ─────────
+
+/**
+ * Side-effect contract of an unblock delta application. When
+ * applyDependentDelta flips a dependent blocked → in_progress, the
+ * work needs to actually become AVAILABLE to the assignee — which
+ * means writing their Casket (so their next session picks it up) and
+ * notifying them (so they see it in their inbox). Neither side
+ * effect is pure state; neither lives in applyDependentDelta.
+ *
+ * applyChainAdvance composes both: the state transition via
+ * applyDependentDelta, plus the re-dispatch semantics for unblock.
+ * Block deltas get the state transition only (a dependent becoming
+ * blocked doesn't need a Casket write; they'll discover it next tick
+ * via wtf header).
+ */
+export interface ChainAdvanceApplyResult {
+  /** The input delta, for caller cross-reference. */
+  readonly delta: DependentDelta;
+  /** Result of the state-machine transition (applied / skipped + reason). */
+  readonly transition: ApplyDeltaResult;
+  /** Re-dispatch summary — only populated for unblock deltas whose transition applied. */
+  readonly redispatch?: ChainAdvanceRedispatchResult;
+}
+
+export interface ChainAdvanceRedispatchResult {
+  /** Assignee slug that received the Casket pointer + inbox. Null when the task had no assignee. */
+  readonly targetSlug: string | null;
+  /** True when advanceCurrentStep succeeded on the target's Casket. */
+  readonly casketWritten: boolean;
+  /** True when the Tier 2 inbox-item landed. */
+  readonly notified: boolean;
+  /** Aggregated error string if either side effect failed; undefined on full success. */
+  readonly error?: string;
+}
+
+export interface ApplyChainAdvanceOpts {
+  /**
+   * Notify on re-dispatch (unblock). Default true. Pass false for
+   * silent backfill paths (e.g. initial chain resync on daemon
+   * restart where announcing every historical unblock would flood
+   * the inbox).
+   */
+  readonly announce?: boolean;
+}
+
+/**
+ * Apply every delta in an AdvanceChainResult — state transitions for
+ * all, plus re-dispatch side effects (Casket write + inbox) for
+ * unblock deltas whose transition applied.
+ *
+ * The single-call shape task-watcher + handoff-promotion need after
+ * observing a task close. Idempotent by construction: re-running on
+ * the same closed chit hits applyDependentDelta's transition-rejected
+ * path for already-unblocked dependents (validateTransition refuses
+ * unblock from in_progress), and for already-blocked dependents the
+ * stacking rule makes the block write a no-op.
+ *
+ * Errors in re-dispatch (Casket write fails, inbox write fails) are
+ * captured in the per-delta result — they DON'T undo the transition.
+ * The state flip is the canonical side effect; Casket + inbox are
+ * observability that can be retried by subsequent cycles.
+ */
+export function applyChainAdvance(
+  corpRoot: string,
+  advance: AdvanceChainResult,
+  actor: string,
+  opts: ApplyChainAdvanceOpts = {},
+): ChainAdvanceApplyResult[] {
+  const announce = opts.announce ?? true;
+  return advance.dependentDeltas.map((delta) => {
+    const transition = applyDependentDelta({ corpRoot, delta, actor });
+    if (!transition.applied || delta.trigger !== 'unblock') {
+      return { delta, transition };
+    }
+    const redispatch = redispatchUnblocked(corpRoot, delta.chitId, actor, announce);
+    return { delta, transition, redispatch };
+  });
+}
+
+/**
+ * Side-effect helper for a newly-unblocked task: write the assignee's
+ * Casket pointer + optionally fire a Tier 2 inbox-item. Pure re-read
+ * of the just-transitioned chit (could optimize by threading through
+ * applyDependentDelta's read, but the cost is one filesystem hit and
+ * the separation keeps the helper self-contained for reuse).
+ */
+function redispatchUnblocked(
+  corpRoot: string,
+  taskChitId: string,
+  actor: string,
+  announce: boolean,
+): ChainAdvanceRedispatchResult {
+  const hit = findChitById(corpRoot, taskChitId);
+  if (!hit || hit.chit.type !== 'task') {
+    return {
+      targetSlug: null,
+      casketWritten: false,
+      notified: false,
+      error: 'task chit unreadable post-transition (race or corruption)',
+    };
+  }
+  const assignee = (hit.chit.fields.task as TaskFields).assignee;
+  if (!assignee) {
+    // Unblocked task with no assignee — chain walker can't pick the
+    // target. Likely a contract-scoped task waiting for a hand; the
+    // next explicit `cc-cli hand` call will route it correctly.
+    return {
+      targetSlug: null,
+      casketWritten: false,
+      notified: false,
+    };
+  }
+
+  const errors: string[] = [];
+
+  let casketWritten = false;
+  try {
+    advanceCurrentStep(corpRoot, assignee, taskChitId, actor);
+    casketWritten = true;
+  } catch (err) {
+    errors.push(`casket: ${(err as Error).message}`);
+  }
+
+  let notified = false;
+  if (announce) {
+    try {
+      const title = (hit.chit.fields.task as TaskFields).title;
+      createInboxItem({
+        corpRoot,
+        recipient: assignee,
+        tier: 2,
+        from: actor,
+        subject: `UNBLOCKED: ${title} — your previous blocker closed, you can resume`,
+        source: 'system',
+        sourceRef: taskChitId,
+      });
+      notified = true;
+    } catch (err) {
+      errors.push(`inbox: ${(err as Error).message}`);
+    }
+  }
+
+  return {
+    targetSlug: assignee,
+    casketWritten,
+    notified,
+    error: errors.length > 0 ? errors.join('; ') : undefined,
+  };
 }
 
 // ─── Convenience re-exports (save callers a second import) ─────────

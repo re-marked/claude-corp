@@ -176,6 +176,7 @@ export {
   advanceChain,
   applyDependentDelta,
   applyDependentDeltas,
+  applyChainAdvance,
   ChainCycleError,
 } from './chain.js';
 export type {
@@ -185,6 +186,9 @@ export type {
   DependentDelta,
   ApplyDeltaOpts,
   ApplyDeltaResult,
+  ApplyChainAdvanceOpts,
+  ChainAdvanceApplyResult,
+  ChainAdvanceRedispatchResult,
 } from './chain.js';
 
 // Role resolver — Project 1.4. Picks an Employee slot for a role-mode
