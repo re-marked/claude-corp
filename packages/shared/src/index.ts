@@ -270,6 +270,7 @@ export {
   peekLatestHandoffChit,
   consumeHandoffChit,
   buildPreCompactInstructions,
+  buildCheckpointObservation,
 } from './audit/index.js';
 export type {
   HookEventName,
@@ -284,6 +285,11 @@ export type {
   HandoffPromotionResult,
   PendingHandoffPayload,
   RevertUnderReviewResult,
+  PreCompactInstructionsInput,
+  CheckpointBuilderInput,
+  CheckpointCasketRef,
+  CheckpointChitSpec,
+  CheckpointRecentActivity,
 } from './audit/index.js';
 
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';

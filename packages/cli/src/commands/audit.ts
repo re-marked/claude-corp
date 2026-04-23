@@ -54,12 +54,15 @@ import {
   promotePendingHandoff,
   revertTaskFromUnderReview,
   buildPreCompactInstructions,
+  buildCheckpointObservation,
+  createChit,
   type Chit,
   type HookInput,
   type AuditDecision,
   type AuditInput,
   type HookEventName,
   type Member,
+  type CheckpointRecentActivity,
 } from '@claudecorp/shared';
 import { getCorpRoot } from '../client.js';
 import { readFileSync as fsReadSync } from 'node:fs';
@@ -182,6 +185,22 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
   // now), emit nothing — Claude Code treats absent stdout as no extra
   // instructions, same as before the hook existed.
   if (event === 'PreCompact') {
+    // Auto-checkpoint first — write a CHECKPOINT observation chit
+    // capturing the Partner's state at the compact boundary BEFORE
+    // stdout fires. The summary-shaping text biases what survives; the
+    // checkpoint chit guarantees the Partner has a durable
+    // externalization even if the summarizer drops something. Fail-soft:
+    // any error in the checkpoint write falls through to the
+    // summary-shaping path so we never lose that mechanism to a
+    // persistence hiccup.
+    const checkpointChitId = writeAutoCheckpoint(
+      corpRoot,
+      slug,
+      member,
+      kind,
+      hookInput,
+    );
+
     const instructions = buildPreCompactInstructions({
       hookInput,
       kind,
@@ -198,6 +217,7 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
         emitted: instructions.length > 0,
         customInstructionsPresent: typeof hookInput.custom_instructions === 'string'
           && hookInput.custom_instructions.trim().length > 0,
+        checkpointChitId,
       },
     );
     if (instructions) process.stdout.write(instructions + '\n');
@@ -401,6 +421,71 @@ function resolveMember(corpRoot: string, slug: string): Member | null {
  * setting the Casket pointer (task-create does this when --assignee
  * is passed; 1.4's hand rewrite will extend the surface).
  */
+/**
+ * Write the auto-checkpoint observation chit for Project 1.7's
+ * PreCompact path. Pure composition over shared primitives
+ * (buildCheckpointObservation + createChit + parseTranscript +
+ * resolveCurrentTask). Fail-soft: any exception returns null so the
+ * caller can proceed to summary-shaping without losing that mechanism.
+ *
+ * Returns the new chit id on success, null on employee-kind (builder
+ * opted out) or on any caught error. The id is useful for diagnostic
+ * logging in the audit-log.jsonl entry so post-hoc inspection can
+ * follow "PreCompact fired → checkpoint chit X written."
+ */
+function writeAutoCheckpoint(
+  corpRoot: string,
+  slug: string,
+  member: Member,
+  kind: 'partner' | 'employee',
+  hookInput: HookInput,
+): string | null {
+  try {
+    const task = resolveCurrentTask(corpRoot, slug);
+    const casketRef =
+      task && typeof task === 'object' && task !== null
+        ? {
+            chitId: task.id,
+            title:
+              typeof task.fields.task?.title === 'string' ? task.fields.task.title : null,
+          }
+        : null;
+
+    let recent: CheckpointRecentActivity | null = null;
+    const transcriptPath =
+      typeof hookInput.transcript_path === 'string' ? hookInput.transcript_path : '';
+    if (transcriptPath && existsSync(transcriptPath)) {
+      const activity = parseTranscript(transcriptPath);
+      recent = { assistantText: activity.assistantText ?? [] };
+    }
+
+    const spec = buildCheckpointObservation({
+      hookInput,
+      kind,
+      agentDisplayName: member.displayName,
+      agentSlug: slug,
+      casket: casketRef,
+      recent,
+    });
+
+    if (!spec) return null;
+
+    const checkpoint = createChit(corpRoot, {
+      type: 'observation',
+      scope: spec.scope,
+      createdBy: spec.createdBy,
+      tags: [...spec.tags],
+      body: spec.body,
+      ephemeral: spec.ephemeral,
+      fields: spec.fields,
+    });
+    return checkpoint.id;
+  } catch (err) {
+    logAuditError(corpRoot, slug, err instanceof Error ? err : new Error(String(err)));
+    return null;
+  }
+}
+
 function resolveCurrentTask(
   corpRoot: string,
   slug: string,
