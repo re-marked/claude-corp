@@ -89,15 +89,62 @@ function logMalformed(corpRoot: string, entry: MalformedChit): void {
   }
 }
 
+/**
+ * Every ChitCommon field that downstream query/filter/render code
+ * assumes is present and well-typed. Missing or wrong-typed entries
+ * here caused ChitMalformedError to be silently skipped in favor of a
+ * TypeError deep inside matchesFilter (e.g., `chit.tags.includes is
+ * not a function`), which aborted the whole queryChits walk instead
+ * of recording the file as malformed and continuing.
+ */
+const REQUIRED_STRING_FIELDS = ['id', 'type', 'status', 'createdBy', 'createdAt', 'updatedAt'] as const;
+const REQUIRED_ARRAY_FIELDS = ['tags', 'references', 'dependsOn'] as const;
+
 function parseChitFile(path: string): { chit: Chit; body: string } {
   const raw = readFileSync(path, 'utf-8');
   try {
     const parsed = parseFrontmatter<Chit>(raw);
-    // Minimal validity check — a parseable-but-empty frontmatter would
-    // leave meta as an empty object and silently pass later filters.
-    if (!parsed.meta || typeof parsed.meta !== 'object' || !parsed.meta.id || !parsed.meta.type) {
-      throw new Error('missing required chit frontmatter (id, type)');
+    const meta = parsed.meta as unknown;
+
+    // Root shape: the frontmatter MUST deserialize to a plain object.
+    // Arrays, nulls, scalars all trip here — ambiguous enough to catch
+    // early instead of dying in matchesFilter.
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+      throw new Error('chit frontmatter is not an object');
     }
+    const m = meta as Record<string, unknown>;
+
+    // Required string fields — every ChitCommon property the query
+    // engine dereferences unconditionally. We check presence AND type
+    // so a YAML-coerced number or boolean doesn't slip through as an
+    // id and produce cryptic failures downstream.
+    for (const field of REQUIRED_STRING_FIELDS) {
+      const v = m[field];
+      if (typeof v !== 'string' || v.length === 0) {
+        throw new Error(`missing or non-string required field: ${field}`);
+      }
+    }
+
+    // Boolean field. Undefined would default truthy via `??`-chains in
+    // some callers; strict-check catches the ambiguous "it's not a
+    // boolean" case that would otherwise silently become false.
+    if (typeof m.ephemeral !== 'boolean') {
+      throw new Error('missing or non-boolean required field: ephemeral');
+    }
+
+    // Array fields — matchesFilter dereferences .includes() on each.
+    // We accept empty arrays (common for fresh chits) but reject
+    // missing / non-array / array-of-non-strings.
+    for (const field of REQUIRED_ARRAY_FIELDS) {
+      const v = m[field];
+      if (!Array.isArray(v)) {
+        throw new Error(`missing or non-array required field: ${field}`);
+      }
+      if (v.some((item) => typeof item !== 'string')) {
+        throw new Error(`non-string entry in required array field: ${field}`);
+      }
+    }
+
     return { chit: parsed.meta, body: parsed.body };
   } catch (err) {
     throw new ChitMalformedError(path, (err as Error).message);
