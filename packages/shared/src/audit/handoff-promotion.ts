@@ -48,6 +48,7 @@ import {
 import { advanceCurrentStep, getCurrentStep } from '../casket.js';
 import { atomicWriteSync } from '../atomic-write.js';
 import { validateTransition, TaskTransitionError } from '../task-state-machine.js';
+import { advanceChain, type DependentDelta } from '../chain.js';
 import type { Chit, HandoffFields, TaskFields } from '../types/chit.js';
 
 export interface PendingHandoffPayload {
@@ -70,6 +71,15 @@ export interface HandoffPromotionResult {
   handoffChitId: string | null;
   /** Task chit id that was closed (null when no current task or already terminal). */
   closedTaskId: string | null;
+  /**
+   * Chain-walker deltas from the closed task's close event — dependents
+   * that became newly-ready (trigger: 'unblock') or cascaded to blocked
+   * (trigger: 'block'). Surfaced for audit observability; applying the
+   * state transitions named here is the caller's responsibility (audit
+   * command logs them to `.audit-log.jsonl` for the founder / daemon to
+   * consume when the task-events integration lands).
+   */
+  chainDeltas: readonly DependentDelta[];
   /** Errors encountered mid-promotion (continue anyway; observability only). */
   errors: string[];
 }
@@ -89,6 +99,7 @@ export function promotePendingHandoff(
     worklogPath: null,
     handoffChitId: null,
     closedTaskId: null,
+    chainDeltas: [],
     errors: [],
   };
 
@@ -168,9 +179,31 @@ export function promotePendingHandoff(
     }
   }
 
-  // 5. Clear Casket. Next session boots idle; 1.3's chain walker
-  // (when it ships) intercepts here to advance to the next chain
-  // step instead.
+  // 5a. Invoke the 1.3 chain walker on the closed task to compute
+  // dependent deltas (unblock for newly-ready chits, block for
+  // cascaded-failure). We surface the deltas via the result so the
+  // caller can log them; we do NOT apply the state transitions here
+  // because the audit-command layer owns that side (it has the
+  // daemon context for re-dispatching, logging, updating other
+  // Caskets). Future commit wires the delta application into
+  // task-events.ts; for now this gives us real audit observability
+  // of the cascade, bridging 1.3's pure primitive to the real flow.
+  if (currentStepId) {
+    try {
+      const advance = advanceChain(corpRoot, currentStepId);
+      result.chainDeltas = advance.dependentDeltas;
+    } catch (err) {
+      result.errors.push(`advance-chain: ${stringify(err)}`);
+    }
+  }
+
+  // 5b. Clear Casket. Next session boots idle. The chain-walker-
+  // aware Casket-advance ("if next ready task is assigned to this
+  // agent, point Casket at it instead of clearing") lands in a
+  // follow-up commit tied to the daemon task-events integration —
+  // doing it here safely requires role-resolver (Project 1.4) since
+  // the walker returns deltas for ALL dependents, not just the
+  // same-agent ones.
   try {
     advanceCurrentStep(corpRoot, agentSlug, null, payload.createdBy);
   } catch (err) {
