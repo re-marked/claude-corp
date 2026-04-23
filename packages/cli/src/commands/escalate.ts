@@ -86,7 +86,6 @@ export async function cmdEscalate(input: string[] | EscalateOpts): Promise<void>
 
   const corpRoot = await getCorpRoot(opts.corp);
   const members = safeGetMembers(corpRoot);
-  const founder = getFounder(corpRoot);
   const fromId = opts.from ?? fail('--from <your-slug> required — escalations name the Employee') as never;
 
   // 1. Resolve originating chit. Prefer explicit --chit; fall back to
@@ -133,10 +132,27 @@ export async function cmdEscalate(input: string[] | EscalateOpts): Promise<void>
       `## What I hit\n\n${opts.reason.trim()}\n`,
   });
 
-  // 4. Land on target's Casket. Escalation IS work from the Partner's
-  // perspective — they need to resolve it before the Employee can proceed.
+  // 4. Land on target's Casket — conditionally, by severity.
+  //
+  //   - `blocker` severity: ALWAYS overwrite. A stalled chain
+  //     outranks whatever the Partner was doing; the escalation IS
+  //     the Partner's new work until resolved.
+  //   - `question` / `review` severity: overwrite only if the
+  //     Partner is idle. For a busy Partner, the inbox notification
+  //     alone carries the signal — they'll pick up the escalation
+  //     when they finish current work. Silently clobbering a
+  //     critical-priority task for a `question` is the review P3 bug.
+  let casketWritten = false;
+  let casketSkipReason: string | undefined;
   try {
-    advanceCurrentStep(corpRoot, target.member.id, chit.id, fromId);
+    const currentTargetStep = getCurrentStep(corpRoot, target.member.id);
+    const targetIsIdle = currentTargetStep === null || currentTargetStep === undefined;
+    if (severity === 'blocker' || targetIsIdle) {
+      advanceCurrentStep(corpRoot, target.member.id, chit.id, fromId);
+      casketWritten = true;
+    } else {
+      casketSkipReason = `target busy on ${currentTargetStep}; ${severity} escalation surfaces via inbox only`;
+    }
   } catch (err) {
     fail(`casket advance failed: ${(err as Error).message}`);
   }
@@ -161,20 +177,28 @@ export async function cmdEscalate(input: string[] | EscalateOpts): Promise<void>
   }
 
   // Tier 3 also notifies the founder so chain-stalling escalations
-  // reach them without relying on the Partner to forward.
-  if (severity === 'blocker' && founder.id !== target.member.id) {
+  // reach them without relying on the Partner to forward. Founder
+  // lookup is lazy — only needed on blocker severity, moved inside
+  // the conditional so fresh/malformed corps don't fail all
+  // question/review escalations (review P4).
+  if (severity === 'blocker') {
     try {
-      createInboxItem({
-        corpRoot,
-        recipient: founder.id,
-        tier: 3,
-        from: fromId,
-        subject: `CHAIN STALLED: ${target.member.displayName} needs to unblock ${fromId} — ${renderSubject(severity, opts.reason.trim())}`,
-        source: 'escalation',
-        sourceRef: chit.id,
-      });
+      const founder = getFounder(corpRoot);
+      if (founder.id !== target.member.id) {
+        createInboxItem({
+          corpRoot,
+          recipient: founder.id,
+          tier: 3,
+          from: fromId,
+          subject: `CHAIN STALLED: ${target.member.displayName} needs to unblock ${fromId} — ${renderSubject(severity, opts.reason.trim())}`,
+          source: 'escalation',
+          sourceRef: chit.id,
+        });
+      }
     } catch {
-      // non-fatal
+      // non-fatal — founder lookup failure or duplicate-recipient
+      // case shouldn't break the escalation flow. The target Partner
+      // still got their Tier 3 notification above.
     }
   }
 
@@ -189,6 +213,8 @@ export async function cmdEscalate(input: string[] | EscalateOpts): Promise<void>
           severity,
           inboxTier: tier,
           announced,
+          casketWritten,
+          casketSkipReason: casketSkipReason ?? null,
         },
         null,
         2,
@@ -198,6 +224,11 @@ export async function cmdEscalate(input: string[] | EscalateOpts): Promise<void>
     console.log(`escalated ${chit.id} → ${target.member.displayName} [${severity}]`);
     console.log(`  originating: ${originatingChit}`);
     console.log(`  inbox tier: ${tier}${severity === 'blocker' ? ' (founder also notified)' : ''}`);
+    if (casketWritten) {
+      console.log(`  casket: advanced to ${chit.id}`);
+    } else if (casketSkipReason) {
+      console.log(`  casket: skipped — ${casketSkipReason}`);
+    }
   }
 }
 
