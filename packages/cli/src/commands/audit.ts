@@ -50,7 +50,7 @@ import {
   runAudit,
   getCurrentStep,
   casketExists,
-  inferKind,
+  resolveKind,
   promotePendingHandoff,
   revertTaskFromUnderReview,
   buildPreCompactInstructions,
@@ -174,7 +174,12 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
     return;
   }
 
-  const kind = inferKind(member.rank);
+  // Honor the explicit Member.kind field (1.1) when set; fall back to
+  // rank-based inference only for pre-1.1 legacy records. inferKind
+  // alone would silently ignore `cc-cli tame`-promoted Partners whose
+  // rank stays worker — the PreCompact branch would then render the
+  // employee template (empty) and skip the auto-checkpoint write.
+  const kind = resolveKind(member);
 
   // PreCompact branches early — the contract is fundamentally different
   // from Stop. Claude Code merges our stdout into its summarization
