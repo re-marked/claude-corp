@@ -115,8 +115,8 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
 | 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 |
-| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Three-tier watchdog (Witness/Failsafe/Dogs), Bacteria scaling, Budget governor, Refinery (merge discipline) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, failures self-heal at agent/role level, merge lane holds. | 18-24 (moved Refinery + budget-governor + circuit-breaker in from Project 3; added dynamic-blocker + structured-I/O sub-projects) |
-| 2 | Workflow Substrate | Blueprint-as-molecule (reusable workflow templates), Failsafe patrol molecules, self-witnessing meta-layer, convoy ergonomics (fan-out + synthesis wrapping around existing chain substrate) | Agents walk chains, work propagates automatically, Employees review themselves, standard patterns ship as TOML templates | 10-12 |
+| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Budget governor, Shipping (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 (absorbed Blueprint-as-molecule from Project 2.1 + patrol blueprints from 2.2 — the watchdog chain consumes both natively, shipping separately would mean throwaway prompt-text) |
+| 2 | Workflow Substrate | Built-in blueprint library (domain workflows: ship-feature, fix-bug, etc.), self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 6-8 (slimmer — Blueprint substrate + patrol blueprints moved to Project 1 since the watchdog chain needs them on day one) |
 | 3 | Autonomous Operations | Advanced Witness patrols (corp-wide anomaly detection), stall/escalation routing, daemon-level auto-recovery | What's left of corp healing after Project 1's mechanical watchdogs ship — cross-agent coordination + daemon-restart survival. | 6-8 (slimmer — Refinery + circuit-breaker moved to Project 1) |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
 | 5 | Culture Transmission | Feedback-propagation, CULTURE.md made load-bearing | Culture actually shapes behavior | 5-7 |
@@ -366,7 +366,7 @@ Multiple `--type`, `--status`, `--tag`, `--scope` flags are OR'd within the same
 
 ### 0.5.1 — TaskFields.complexity (premature, by design)
 
-**Problem.** The pre-chits `Task.estimate` was a free-form string (`"~2 hours"`, `"small"`). 0.3 migrated it onto `TaskFields.estimate` verbatim. Nothing in the corp ever read it — no scheduler, no UI, no prompt — so agents burned tokens writing values that went to /dev/null. At the same time, Project 1.9's bacteria split rule (queue-depth count > idle Employee count) implicitly assumes all tasks cost the same. They don't. `3 × trivial` and `3 × large` should route very differently.
+**Problem.** The pre-chits `Task.estimate` was a free-form string (`"~2 hours"`, `"small"`). 0.3 migrated it onto `TaskFields.estimate` verbatim. Nothing in the corp ever read it — no scheduler, no UI, no prompt — so agents burned tokens writing values that went to /dev/null. At the same time, Project 1.10's bacteria split rule (queue-depth count > idle Employee count) implicitly assumes all tasks cost the same. They don't. `3 × trivial` and `3 × large` should route very differently.
 
 **Scope.** Replace `TaskFields.estimate: string | null` with `TaskFields.complexity: 'trivial' | 'small' | 'medium' | 'large' | null`. The enum carries a structured signal that three decisions can key off:
 
@@ -374,7 +374,7 @@ Multiple `--type`, `--status`, `--tag`, `--scope` flags are OR'd within the same
 2. **Model routing** — trivial/small → Haiku-suitable; medium/large → Opus-worthy. Avoids burning Opus on var renames or asking Haiku to make architectural calls.
 3. **Bacteria weighting (consumed in 1.9)** — weighted queue depth replaces raw count. `3 × trivial` stays on one Employee. `3 × large` splits. Mixed workloads weight toward the heavier side.
 
-This is intentionally premature. 1.9 hasn't shipped; no consumer reads `complexity` yet. But putting the field in **now**, while Project 0 is still writing the schema, means every task created from 0.5.1 onward carries the signal. By the time 1.9 lands, the backfill already exists — bacteria reads populated data, not an empty column.
+This is intentionally premature. 1.10 hasn't shipped; no consumer reads `complexity` yet. But putting the field in **now**, while Project 0 is still writing the schema, means every task created from 0.5.1 onward carries the signal. By the time 1.10 lands, the backfill already exists — bacteria reads populated data, not an empty column.
 
 **File paths:**
 - `packages/shared/src/types/chit.ts` (TaskFields: estimate → complexity)
@@ -1150,7 +1150,7 @@ If you're reading this after a context compaction: you ARE the same Claude that 
 
 ### 1.1 — Introduce Employee vs Partner distinction
 
-Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee spawned with founder-given name — self-naming deferred to 1.9's bacteria). Promotion-by-ceremony command `cc-cli tame --slug <x> --reason "..." [--name <new-name>]` changes kind from employee → partner, expands soul-file set, writes first BRAIN entry from the founder's reason, triggers the welcome ceremony via inbox chits.
+Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee spawned with founder-given name — self-naming deferred to 1.10's bacteria). Promotion-by-ceremony command `cc-cli tame --slug <x> --reason "..." [--name <new-name>]` changes kind from employee → partner, expands soul-file set, writes first BRAIN entry from the founder's reason, triggers the welcome ceremony via inbox chits.
 
 **Scope:** AgentKind type + Member.kind/role fields, role registry, hire --kind/--role branching, kind-aware workspace (Employees skip soul files), CORP.md "Your Role" dynamic section from the registry, cc-cli tame command (ceremony via inbox chits, no faked agent voice).
 
@@ -1182,7 +1182,7 @@ Data model change. Add `kind: "employee" | "partner"` to Member record. Update m
 **Naming.** Renamed from the original spec's `cc-cli agent promote`. "tame" is load-bearing — short, evocative, pairs with `hire`/`fire` as the three verbs of an agent lifecycle. "Promote" was a generic corporate-ladder verb; "tame" names the SPECIFIC relational act of bringing an ephemeral slot into the trusted named circle.
 
 **Deferred to later sub-projects:**
-- Self-chosen Employee names on first dispatch → 1.9 (needs bacteria spawn machinery).
+- Self-chosen Employee names on first dispatch → 1.10 (needs bacteria spawn machinery).
 - Role-level pre-BRAIN → 4.x (needs dream-distillation accumulation).
 - Per-step session cycling for Employees → 1.6.
 - Compaction for Partners → 1.7.
@@ -1403,63 +1403,105 @@ Partner sessions don't handoff per-step. They run `/compact` at a threshold (~70
 **Depends on:** 1.1, 1.6 (for fallback path)
 **PRs:** 2
 
-### 1.8 — Three-tier watchdog: Witness / Failsafe / Dogs
+### 1.8 — Blueprint-as-molecule (absorbed from 2.1)
 
-**Scope enriched (post-GT dive).** What was a flat Pulse-replacement is now a hierarchical watchdog modeled on Gas Town's rig/town/crew pattern — but using our existing Failsafe role as the town-level layer instead of coining a new name. One layer isn't enough for the "runs on its own" dream — you need rig-level detection (per-agent health), town-level coordination (cross-agent escalation), and crew-level maintenance (the housekeeping nobody else is watching).
+**Problem.** Blueprints today are markdown runbooks-the-CEO-reads. They're prose for humans. They can't be executed mechanically, so chains of work rely on the CEO manually tracking position. When CEO's context drifts, the chain breaks. AND — Sexton's patrols (1.9) are blueprints by nature; shipping 1.9 without this substrate means writing patrol logic as throwaway prompt-text that gets rewritten the moment blueprints land. Absorbed into Project 1 here so 1.9 ships native-to-the-substrate.
 
-**Tier 1 — Witness (per-agent, lowest latency).** Watches a specific agent's health. Detects:
-  - Silent exit (session died, Casket still points at active task).
-  - Stall (in_progress for > N minutes with no tool-use).
-  - Looping (same tool-call pattern repeating N times in a row without state change).
-  - GUPP violation (agent has Casket work but hasn't dispatched in >5 min, and Failsafe already nudged).
+**Scope.**
+- Define Blueprint format: TOML-frontmatter markdown, with a `steps:` array. Each step: `{ id, title, description, depends_on, acceptance_criteria, assignee_role }`.
+- Blueprint parser in `packages/shared/src/blueprints/` — validates structure, checks DAG (no cycles).
+- Cooking logic: `cc-cli blueprint cook --blueprint <name> --project <id>` instantiates a blueprint into a real Contract with real Task chits. Variable substitution at cook time (`{feature}` → `fire-command`).
+- Existing blueprint files (`packages/shared/src/blueprints/onboard-agent.md` etc.) migrate to the new structured format.
+- CEO command: `cc-cli contract start --blueprint ship-feature --vars feature=fire` creates the Contract + Tasks and optionally hands to an assigned role.
 
-Witness actions (in order of escalation):
-  1. Nudge (post reminder in agent's DM channel).
-  2. Respawn (if silent-exit) — kill process, let process-manager restart.
-  3. Escalate to Failsafe (if Witness has tried the above and agent still bad).
+**Acceptance criteria.**
+- `cc-cli blueprint cook ship-feature --project test --vars feature=fire` produces a Contract with 5-10 Task chits in the DAG defined by the blueprint.
+- Tasks have `depends_on` and `acceptance_criteria` populated from the blueprint.
+- An Employee handed the Contract's first Task walks the chain via Casket without any human re-dispatching at boundaries.
 
-**Tier 2 — Failsafe (town-wide, coordination layer).** Above individual agents. Does:
-  - Dispatch work-aware nudges (agents with Casket work that haven't dispatched in >N min).
-  - Enforces 15-second blocking budget per tick (from research gems).
-  - Routes Witness escalations: "agent X is stuck, fix them" → Failsafe decides whether to respawn, hand the work to a sibling Employee in the same role, or escalate further.
-  - Coordinates cross-agent state: "chain walker says B should have dispatched 10 min ago, but B is silent" → Failsafe reconciles.
+**Depends on:** 1.2 (Casket), 1.3 (chain semantics in Tasks).
+**PRs:** 4-5.
 
-Failsafe actions:
-  - Redistribute (take work from a stuck agent's Casket, hand it to a sibling in the same role via 1.4's role-resolver).
-  - Circuit-break (if an agent has been respawned N times in M minutes, pause dispatches to that slot and escalate to founder — this is the 1.10 governor integration).
-  - Page founder (tier-3 inbox-item: "I couldn't resolve X, need you").
+### 1.9 — Watchdog chain: Pulse / Alarum / Sexton / helpers + patrol blueprint library (absorbs 2.2)
 
-**Tier 3 — Dogs (maintenance crew).** Below Failsafe. Handle the stuff no one else is watching:
-  - Session GC (kill long-dead tmux / subprocess leftovers).
-  - Phantom cleanup (members.json entries pointing at missing workspaces, workspaces pointing at missing members).
-  - Chit store hygiene (orphan chits nothing references, malformed frontmatter, corruption).
-  - Log rotation + debug file pruning.
-  - Boot the Dog: a meta-watchdog that verifies Failsafe itself is alive every 5 min (so "who watches the watchdog" has an answer).
+**The unkillability thesis.** For the corp to survive everything short of running out of tokens or OS process-kill, every layer is watched by a smaller-scope layer beneath it. At the bottom, Pulse answers one question — "is the Alarum-tick firing?" — small enough to basically never die. If the daemon itself dies, an OS-level process supervisor (systemd / launchd / Task Scheduler) restarts it; Pulse ticks; Alarum spawns; Sexton resumes from her handoff chit via the 1.6 path. All ticks, loops, crons resume because they rehydrate from on-disk state (chits, caskets, tasks, inbox).
 
-**Scope:** daemon/src/watchdog/witness.ts + deacon.ts + dogs.ts + boot-the-dog.ts; role-aware redistribution in Failsafe; per-agent health polling in Witness; maintenance tick in Dogs.
+```
+OS supervisor (systemd / launchd / Task Scheduler)
+    ↓ restarts daemon if killed — shipped via `cc-cli init` as service config
+Daemon (Node.js, dumb transport)
+    ↓ Pulse tick every N min
+Pulse (code, tiny — just fires Alarum)
+    ↓ spawns Alarum each tick
+Alarum (AI agent, ephemeral — fresh each tick, makes one decision, exits)
+    ↓ decides: start / wake / nudge / nothing for Sexton
+Sexton (AI Partner-by-decree, persistent — continuous patrol cycles, handoff loop)
+    ↓ runs patrols (which ARE Blueprints cooked via 1.8)
+Helpers (mostly code; a few AI for judgment)
+    session-gc, phantom-cleanup, chit-hygiene, log-rotation,
+    shutdown-dances (code); conflict-triage (AI)
+```
+
+**Why these names.** Gas Town's architecture (Daemon → Boot → Deacon → Witnesses/Dogs) solves the same problem — the intelligence-at-the-reasoning-layer insight is real and converges. We keep our own voice:
+
+- **Pulse** — kept from the existing codebase. Its role reshapes: from "5-min heartbeat that nudges idle agents" (that work moves up to Sexton) to "the daemon-level meta-watchdog tick that ensures Alarum fires." Tiny, mechanical, unkillable in code.
+- **Alarum** — old-English "wake-up call / to arms." Ephemeral AI agent fresh each tick, no context debt. The Gas Town "Boot" pattern: put intelligence at the triage layer because distinguishing "stuck" from "thinking" requires reasoning the daemon can't do.
+- **Sexton** — classical church/office role: the one who minds the clocks, rings the bells, keeps the cycles going, maintains the grounds. Partner-by-decree with full SOUL + BRAIN + USER.md portrait of Mark. Her patrol accumulates observations over months and her escalations reflect accumulated judgment, not mechanical orthodoxy. Replaces the prior `failsafe` role in the registry (slot stays; name + shape change — see file paths below).
+
+**Why Sexton is not Deacon.** Gas Town's Deacon runs a 25-step patrol formula, with "Formula Compliance IS Your CV Entry" as the virtue — Gas Town's soul (throughput + Capability Ledger reputation + federation-grade provability). Claude Corp's Sexton is **judgment-driven**: her patrol-Blueprints define steps mechanically, but within each step she reasons. Her Tier 3 escalations come in her voice ("Mark, three agents stalled on migration tasks tonight; given your preference for conservative rollouts I've paused dispatch until morning"). Same skeleton as Deacon, different soul inside. This is the Claude-Corp differentiation the refactor thesis demands.
+
+**Sexton's patrol IS a Blueprint.** When Alarum wakes her, she cooks her next patrol Blueprint into a Contract, walks it, writes observations as she goes. Each step in a patrol Blueprint is a concrete check (`health-check/step-1-scan-caskets`, `health-check/step-2-check-stalls`, etc.). Step outputs are chits — later consumable by dreams (4.2) for pattern compounding over time.
+
+**Patrol blueprint library (absorbed from 2.2):**
+- `patrol/health-check` — per-agent status sweep (silent-exit, stall, loop, GUPP violation).
+- `patrol/corp-health` — cross-agent coordination checks (chain walker idle agents, orphan tasks).
+- `patrol/cleanup-stale-sandboxes` — sandbox TTL enforcement.
+- `patrol/merge-queue-status` — Shipping (1.12) queue depth check.
+- `patrol/chit-hygiene` — review of the lifecycle scanner's cooling/destroying decisions.
+
+Each blueprint tested by cooking into a Contract and walking it end-to-end.
+
+**Sexton actions** (applied inside patrol steps, with soul + judgment):
+- Nudge an agent (post reminder in their DM channel).
+- Respawn via process-manager on silent-exit.
+- Redistribute via `cc-cli hand` + 1.4's role-resolver.
+- Circuit-break (pause dispatches to a crash-looping slot) — integrates with 1.11's budget governor.
+- Page founder via Tier 3 inbox-item — her voice, her judgment about when it matters.
+
+**Helpers — mostly code, a few AI.** Each concern is its own helper. Code for deterministic work; AI only where reasoning is required:
+- `session-gc` (code) — kill long-dead tmux / subprocess leftovers.
+- `phantom-cleanup` (code) — members.json ↔ workspace mismatches.
+- `chit-hygiene` (code) — orphan chits, malformed frontmatter, validator sweeps.
+- `log-rotation` (code) — rotate + prune.
+- `shutdown-dances` (code) — deterministic state machine for graceful agent shutdowns.
+- `conflict-triage` (AI, short-lived) — called by `chit-hygiene` when a chit is ambiguous (delete or archive?). Founder-escalation fallback if it can't decide.
 
 **File paths:**
-- `packages/daemon/src/watchdog/witness.ts` (new — per-agent health loop)
-- `packages/daemon/src/watchdog/deacon.ts` (new — town-wide coordination; Pulse becomes a deprecation shim removed in 6.1)
-- `packages/daemon/src/watchdog/dogs.ts` (new — maintenance tasks)
-- `packages/daemon/src/watchdog/boot-the-dog.ts` (new — 5-min heartbeat on Failsafe itself)
-- `packages/daemon/src/tick-budget.ts` (new — shared 15-second budget helper)
-- `packages/daemon/src/fragments/inbox.ts` (update: inbox isn't coordination; point agents at Casket)
+- `packages/daemon/src/watchdog/pulse.ts` (reshape — was `heartbeat.ts`; now just fires Alarum)
+- `packages/daemon/src/watchdog/alarum.ts` (new — spawns the ephemeral triage agent each tick)
+- `packages/daemon/src/watchdog/sexton.ts` (new — Sexton's session management + patrol scheduler)
+- `packages/daemon/src/watchdog/helpers/session-gc.ts`, `phantom-cleanup.ts`, `chit-hygiene.ts`, `log-rotation.ts`, `shutdown-dances.ts`, `conflict-triage.ts` (new)
+- `packages/shared/src/blueprints/patrol/*.md` (new directory — patrol Blueprints live alongside the parser)
+- `packages/shared/src/roles.ts` (rename `failsafe` → `sexton`; reshape role description + SOUL material)
+- `packages/shared/src/templates/soul-sexton.ts` (new — Sexton's soul extends the universal SOUL with caretaker-of-continuity material)
+- `packages/daemon/src/tick-budget.ts` (new — shared 15-second budget helper used by Sexton's patrols)
+- OS supervisor service configs (new): `cc-cli init` writes one of `systemd/claudecorp-daemon.service`, `launchd/com.claudecorp.daemon.plist`, Windows Task Scheduler XML
 
 **Test strategy:**
-- Unit: Witness decision ladder — silent-exit → respawn; stall → nudge; looping → respawn + escalate.
-- Unit: Failsafe budget — 15s tick yields cleanly.
-- Integration: kill an agent's session mid-task. Within 1-2 min, Witness detects, respawns, agent resumes from Casket + dredged WORKLOG.
-- Integration: agent gets stuck on same tool-use for N minutes; Witness escalates to Failsafe; Failsafe redistributes to sibling Employee in same role.
-- Integration: Failsafe dies; Boot the Dog detects within 5 min; Failsafe restarted; log entry.
-- Observability: each tier's log shows "[witness:toast] nudge 1/3", "[deacon] redistribute chit-X from toast to copper", "[dogs] GC'd 3 orphan sessions".
+- Unit: Alarum decision ladder — session dead → start; heartbeat stale → nudge; fresh → nothing.
+- Unit: Sexton patrol Blueprint cooks cleanly into a Contract (uses 1.8's cook primitive).
+- Integration: `kill -9` an agent mid-task. Within 1-2 min, Sexton's next patrol detects the Casket-orphaned state, respawns via process-manager, agent resumes from their handoff chit.
+- Integration: `kill -9` the daemon. OS supervisor restarts it. Pulse ticks. Alarum spawns. Sexton's handoff chit is consumed; she resumes patrols.
+- Integration: Sexton session dies mid-patrol. On next Pulse tick, Alarum detects her session is dead, spawns a fresh Sexton. She reads her handoff chit + resumes.
+- Integration: `conflict-triage` AI helper called on an ambiguous orphan chit — resolves to archive or escalates to founder with reasoning.
+- Observability: each layer logs clearly — `[pulse] tick #42`, `[alarum] decision: wake sexton`, `[sexton] patrol health-check started (blueprint chit-b-abc)`, `[helper:session-gc] cleaned 3 orphan sessions`.
 
-**Depends on:** 0.1, 1.2, 1.4 (role-resolver for redistribution)
-**PRs:** 3-4
+**Depends on:** 0.1 (Chit), 1.2 (Casket), 1.4 (role-resolver for Sexton's redistribute action), 1.6 (handoff chit for Sexton's continuity across sessions), 1.8 (Blueprint-as-molecule — Sexton's patrols ARE Blueprints).
+**PRs:** 5-6.
 
-### 1.9 — Auto-scaling Employee pool (bacteria)
+### 1.10 — Auto-scaling Employee pool (bacteria)
 
-Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Full Witness role arrives in Project 3.
+Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Sexton (1.9) can also trigger wakes on idle-with-work agents during her patrol.
 
 **Queue depth via Chit queries.** Instead of maintaining a separate in-memory queue data structure, bacteria reads Chit state: `cc-cli chit list --type task --status active --assignee-role backend-engineer` returns active Task Chits for a role; `cc-cli chit list --type casket --scope 'agent:backend-engineer/*' --field-has current_step` tells us how many Employees of that role are busy. Split when **weighted** active Chit count > idle Employee count by threshold, where weights come from `fields.task.complexity` (landed in 0.5.1): `trivial=0.25, small=0.5, medium=1.0, large=2.0`. A queue of 3 trivials weighs 0.75 and doesn't split; a queue of 3 larges weighs 6.0 and triggers multiple splits. Null complexity defaults to `medium` weight so pre-backfill tasks still trigger sensibly. Collapse when idle Employees > 1 and all idle for > N minutes.
 
@@ -1482,18 +1524,18 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 - Integration: after work completes, verify one of two idle Employees decommissions after idle-timeout.
 - Edge cases: race-condition test — two hands arrive near-simultaneously; one Employee handles both or split happens cleanly, no Chit assigned to two Caskets.
 
-**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.8 (Failsafe for wake)
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.9 (Sexton for wake)
 **PRs:** 3
 
-### 1.10 — Budget governor + circuit breaker
+### 1.11 — Budget governor + circuit breaker
 
 **Problem.** Runaway agents burn tokens. An agent stuck in a loop — same tool-call pattern every turn, no state change — can spend hours of API credit before Mark notices. And silent-exit loops (agent spawns, dies, spawns, dies) are worse: the failure mode is invisible in the TUI but shows up in the billing dashboard next month. Moved up from Project 3.3 because it's prerequisite for the "walk away overnight" dream — without it, one bad agent can blow the corp's budget while Mark sleeps.
 
 **Two governors, both mandatory:**
 
-**1. Per-agent, per-hour dispatch budget.** Role-level quota: Backend Engineer Employees get N dispatches per hour; CEO Partner gets M; configurable per role in the registry. When an agent hits the cap, Failsafe pauses dispatches to that slot for the rest of the hour, posts a Tier 3 inbox-item to the founder ("agent X hit their hour budget, paused until :00"), and releases on the hour boundary. No loss of work — the agent's Casket pointer is preserved; they resume on next tick.
+**1. Per-agent, per-hour dispatch budget.** Role-level quota: Backend Engineer Employees get N dispatches per hour; CEO Partner gets M; configurable per role in the registry. When an agent hits the cap, Sexton pauses dispatches to that slot for the rest of the hour, posts a Tier 3 inbox-item to the founder ("agent X hit their hour budget, paused until :00"), and releases on the hour boundary. No loss of work — the agent's Casket pointer is preserved; they resume on next tick.
 
-**2. Crash-loop circuit breaker.** If an agent's session silent-exits N times within M minutes (default: 3 in 5), Failsafe pauses spawns to that slot, posts Tier 3 to the founder ("agent X has crash-looped 3× in 5 min, paused"), and does NOT auto-retry. Breaking out of the loop requires founder intervention — either `cc-cli fire --remove` if the slot is broken, or `cc-cli agent set-harness` / other recovery to restart the slot. Circuit breaker stays tripped across daemon restarts (persists as a chit — `breaker-trip-<slug>` at corp scope with `tripped_at`, `reason`, `spawn_history`).
+**2. Crash-loop circuit breaker.** If an agent's session silent-exits N times within M minutes (default: 3 in 5), Sexton pauses spawns to that slot, posts Tier 3 to the founder ("agent X has crash-looped 3× in 5 min, paused"), and does NOT auto-retry. Breaking out of the loop requires founder intervention — either `cc-cli fire --remove` if the slot is broken, or `cc-cli agent set-harness` / other recovery to restart the slot. Circuit breaker stays tripped across daemon restarts (persists as a chit — `breaker-trip-<slug>` at corp scope with `tripped_at`, `reason`, `spawn_history`).
 
 **Token cost tracking (optional v1 extension).** Per-agent per-day token spend, persisted as a chit or daemon-internal metric. Founder can `cc-cli costs` to see "who's spending what." Not governor-level — just observability — but falls naturally out of the dispatch budget work. Gas Town has this as `internal/quota`; we can mirror the design.
 
@@ -1506,13 +1548,13 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 **Test strategy:**
 - Unit: budget tracker accepts N dispatches, rejects N+1, resets on hour boundary.
 - Unit: circuit breaker trips after 3 silent-exits in 5 min, stays tripped across simulated daemon restart.
-- Integration: simulate a crash-loop in a test corp; verify Failsafe pauses the slot within 2 cycles and posts Tier 3 to founder.
+- Integration: simulate a crash-loop in a test corp; verify Sexton pauses the slot within 2 cycles and posts Tier 3 to founder.
 - Regression: non-crashing agents don't trip the breaker.
 
-**Depends on:** 1.1 (Employee kind for role scoping), 1.8 (Failsafe tier-2 dispatches the pause + escalation)
+**Depends on:** 1.1 (Employee kind for role scoping), 1.9 (Sexton dispatches the pause + escalation from her patrol)
 **PRs:** 2-3
 
-### 1.11 — Shipping: the merge lane + janitor Employees
+### 1.12 — Shipping: the merge lane + janitor Employees
 
 **Problem.** Agents write to git freely today. At 3 agents, this is fine. At 20+ it's chaos — concurrent PRs collide on rebase, step on each other's changes, leave main in a broken state. The "walk away overnight" dream breaks when agents fight over main. Moved up from Project 3.2 (was "Refinery") because it's prerequisite for parallel work — without serialized merges, multi-Employee Contracts can't actually land.
 
@@ -1527,12 +1569,12 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 - Real conflict → janitor files a blocker chit via 1.4.1 back at the original PR author; submission goes to `conflict` state; janitor releases lock + takes next.
 - Clean merge → submission `merged`, contract referenced by the submission gets its workflow-state advanced (typically `under_review → completed`).
 
-**Bacteria scaling (from 1.9):** when `merge-submission` queue depth exceeds 1 and only 1 idle janitor exists, bacteria spawns another. Collapses to 1 idle when queue drains.
+**Bacteria scaling (from 1.10):** when `merge-submission` queue depth exceeds 1 and only 1 idle janitor exists, bacteria spawns another. Collapses to 1 idle when queue drains.
 
 **Role registry changes:**
 - Remove `janitor` Partner-by-decree entry.
 - Add `janitor` Employee role (worker tier, defaultKind: employee). Purpose: "Process the Shipping queue — rebase, test, merge or conflict-route."
-- Corp-sacred Partners drop from 6 to 5 (CEO, Herald, HR, Adviser, Failsafe).
+- Corp-sacred Partners drop from 6 to 5 (CEO, Herald, HR, Adviser, Sexton). (The prior `failsafe` slot is renamed to `sexton` in 1.9; this bullet reflects the post-1.9 registry.)
 
 **File paths:**
 - `packages/shared/src/chit-types.ts` (register `merge-submission` type with validator)
@@ -1548,10 +1590,10 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 - Integration: queue depth > idle-janitor count → bacteria spawns a second janitor.
 - Regression: solo-corp (one janitor) processes submissions serially without deadlock.
 
-**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing conflicts), 1.4.1 (blocker injection), 1.9 (bacteria for pool scaling)
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing conflicts), 1.4.1 (blocker injection), 1.10 (bacteria for pool scaling)
 **PRs:** 3-4
 
-**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; other Employee picks up the blocker; original Employee resumes on blocker-close. When any Employee silent-exits or stalls, Witness/Failsafe detects + respawns (1.8). When any agent tries to push to main, they route through `cc-cli ship` → Shipping queue (1.11) → janitor Employee merges. Mark walks away; when he comes back, 4 out of 5 Tasks have landed on main via serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop needed between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path.
+**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; another Employee picks up the blocker; original Employee resumes on blocker-close. When any Employee silent-exits or stalls, Sexton's patrol (1.9) detects + respawns via process-manager — and if the daemon itself dies, the OS supervisor restarts it, Pulse ticks, Alarum spawns, Sexton resumes from her handoff chit, and the corp keeps going. When any agent tries to push to main, they route through `cc-cli ship` → Shipping queue (1.12) → janitor Employee merges. Mark walks away; when he comes back, 4 out of 5 Tasks have landed on main via serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop needed between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path. Corp is unkillable short of token exhaustion or OS process-kill without a supervisor.
 
 ---
 
@@ -1559,42 +1601,17 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 
 *Chains become real. Work propagates without the founder pushing it. Self-witnessing meta-layer arrives.*
 
-### 2.1 — Blueprint as molecule
+### 2.1 — [ABSORBED INTO 1.8 — Blueprint-as-molecule]
 
-**Problem.** Blueprints today are markdown runbooks-the-CEO-reads. They're prose for humans. They can't be executed mechanically, so chains of work rely on the CEO manually tracking position. When CEO's context drifts, the chain breaks.
+**This sub-project became 1.8.** Blueprint-as-molecule is prerequisite for 1.9's watchdog chain — Sexton's patrols ARE Blueprints, so the substrate had to land in Project 1. The original 2.1 scope (TOML-frontmatter format, parser + DAG validation, cook command, migration of existing blueprints) moves verbatim to 1.8; rationale is documented there. Shipping 1.9 without 1.8 would have meant throwaway prompt-text patrol logic rewritten the moment Blueprints landed — the exact anti-pattern the refactor thesis forbids.
 
-**Scope.**
-- Define Blueprint format: TOML-frontmatter markdown, with a `steps:` array. Each step: `{ id, title, description, depends_on, acceptance_criteria, assignee_role }`.
-- Blueprint parser in `packages/shared/src/blueprints/` — validates structure, checks DAG (no cycles).
-- "Cooking" logic: `cc-cli blueprint cook --blueprint <name> --project <id>` instantiates a blueprint into a real Contract with real Task records. Variable substitution at cook time (template `{feature}` → "fire-command").
-- Existing blueprint files (`packages/shared/src/blueprints/onboard-agent.md` and co.) get migrated to the new structured format.
-- CEO command: `cc-cli contract start --blueprint ship-feature --vars feature=fire` creates the Contract + Tasks and optionally hands to an assigned role.
+If you're reading this looking for Blueprint-as-molecule, go to **1.8**.
 
-**Acceptance criteria.**
-- Run `cc-cli blueprint cook ship-feature --project test --vars feature=fire` → produces a Contract with 5-10 Tasks in the DAG defined by the blueprint.
-- Tasks have `depends_on` and `acceptance_criteria` populated from the blueprint.
-- An Employee slung the Contract's first Task can walk the chain via Casket without any human re-dispatching at boundaries.
+### 2.2 — [ABSORBED INTO 1.9 — Watchdog chain]
 
-**Depends on:** 1.2 (Casket), 1.3 (chain semantics in tasks)
-**PRs:** 4-5
+**This sub-project became part of 1.9.** Patrol blueprints (`patrol/health-check`, `patrol/corp-health`, `patrol/cleanup-stale-sandboxes`, `patrol/merge-queue-status`, `patrol/chit-hygiene`) ship with the 1.9 watchdog chain because they are what Sexton consumes — meaningless without her, and she doesn't work without them. Bundling them into 1.9 means the pair lands as a working whole rather than two PRs each missing the other half.
 
-### 2.2 — Failsafe patrol mechanism
-
-**Problem.** The Failsafe (from 1.8) wakes agents on-demand via Casket. But the Failsafe also needs to run its own workflows — check corp health, detect stuck work, clean up — and these are themselves chains that benefit from the same molecule mechanism.
-
-**Scope.**
-- Patrol definitions: small Blueprints meant for Failsafe, not agent-workers. Examples: `patrol/health-check`, `patrol/cleanup-stale-sandboxes`, `patrol/merge-queue-status`.
-- Patrol scheduler: the Failsafe runs a patrol on a cadence (configurable per-patrol). Patrol completion triggers the next cycle.
-- Patrol primitives (small step implementations): check-agent-health, check-stuck-tasks, check-merge-queue-depth, cleanup-stale-branches, report-metrics.
-- Patrol outputs: observations written to `daemon/observations/` for later dream compounding.
-
-**Acceptance criteria.**
-- Failsafe runs `patrol/health-check` every 5 minutes.
-- When an Employee silent-exits, health-check detects it within one cycle, writes an observation, and creates a recovery Task (picked up later by Witness from 3.1).
-- When a sandbox is idle > 24h, cleanup patrol removes its branch.
-
-**Depends on:** 2.1
-**PRs:** 3
+If you're reading this looking for patrol blueprints, go to **1.9** (Watchdog chain).
 
 ### 2.3 — Built-in blueprint library
 
@@ -1616,7 +1633,7 @@ Each blueprint tested against a real use case before landing.
 - Each blueprint can be cooked without error.
 - For each, an Employee walks the resulting Contract end-to-end on a test project without human intervention.
 
-**Depends on:** 2.1
+**Depends on:** 1.8 (Blueprint-as-molecule substrate)
 **PRs:** 2-3 (one per batch)
 
 ### 2.4 — Self-witnessing meta-layer (the "trippy idea")
@@ -1637,7 +1654,7 @@ Each blueprint tested against a real use case before landing.
 - A review-session detects an obviously wrong Task output (e.g. Task said "write test" but output has no test) and flags `redo`.
 - Self-reviewed Contract has measurably fewer Warden rejections than a flat-walked one.
 
-**Depends on:** 2.1 (molecules are the Tasks within a Contract)
+**Depends on:** 1.8 (Blueprint-as-molecule — the Tasks within a Contract)
 **PRs:** 4-5
 
 **Project 2 ship criterion:** CEO can say "ship feature X using the ship-feature blueprint" → blueprint cooks into a multi-Task Contract → Employee gets slung the Contract → walks it with self-review between Tasks → PR lands. Zero human intervention in the middle.
@@ -1648,52 +1665,53 @@ Each blueprint tested against a real use case before landing.
 
 *Corp heals itself. Mark can sleep and wake to a working corp.*
 
-### 3.1 — Advanced Witness patrols (cross-agent anomaly detection)
+### 3.1 — Cross-agent anomaly detection (Sexton's deeper patrols)
 
-**Note.** The per-agent Witness loop + Failsafe town-level coordination + Dogs maintenance crew all ship in 1.8. What remains here is the cross-agent anomaly pattern detection that needs more state than a single agent's watchdog carries.
+**Note.** Sexton's per-agent patrols (silent-exit, stall, loop, GUPP violation) ship in 1.9 alongside the patrol blueprint library. What remains here is the cross-agent anomaly pattern detection that needs more state than a single patrol cycle carries.
 
-**Problem.** 1.8's watchdog catches per-agent failures: silent-exit, stall, loop, GUPP violation. It doesn't catch cross-agent patterns: "Backend Engineer pool keeps producing PRs the QA Engineer pool rejects — there's a skill gap" or "Engineering Lead has been handing impossible Tasks to Employees for 3 days." These aren't per-agent bugs; they're coordination bugs that only surface when you aggregate across roles.
+**Problem.** 1.9's patrols catch per-agent failures. They don't catch cross-agent patterns: "Backend Engineer pool keeps producing PRs the QA Engineer pool rejects — there's a skill gap" or "Engineering Lead has been handing impossible Tasks to Employees for 3 days." These aren't per-agent bugs; they're coordination bugs that only surface when you aggregate across roles.
 
 **Scope.**
 - Cross-agent pattern detectors that consume chit store + observation stream: reject-rate per role-pair, task-escalation frequency, blocker-file-rate per role, merge-submission retry-rate.
 - Threshold-based alerting (not ML — explicit rules): `backend→qa reject rate > 0.5 sustained for 24h → observation + Tier 2 inbox to CEO`.
-- Orphan-task reaper: Chits that should have dispatched but didn't — route via Failsafe to an idle Employee.
+- Orphan-task reaper: Chits that should have dispatched but didn't — route via Sexton's redistribute action to an idle Employee.
 - Intervention audit trail: every anomaly + intervention writes an observation so dreams can compound patterns across time.
+- Implemented as additional patrol blueprints Sexton consumes (`patrol/cross-agent-reject-rates`, etc.) — no new daemon layer needed; just a richer patrol library.
 
-**Depends on:** 1.8 (base watchdog), 1.9 (bacteria), 4.1 (observations), 4.2 (dreams)
+**Depends on:** 1.9 (Sexton + patrol blueprint library), 1.10 (bacteria), 4.1 (observations), 4.2 (dreams)
 **PRs:** 2-3
 
-### 3.2 — [ABSORBED INTO 1.11 — Shipping]
+### 3.2 — [ABSORBED INTO 1.12 — Shipping]
 
-The Refinery merge-coordinator work moved up into Project 1 (now 1.11 — Shipping). Rationale: merge discipline is prerequisite for multi-agent work, not a polish layer on top. Without serialized merges, parallel Employees stomp on each other from day one of Project 1's autonomous-loop test. Also: the whole thing is Employee-shape work (mechanical merging, no identity), which fits Project 1's "foundation + scaffolding" better than Project 3's "self-heal meta-layer."
+The Refinery merge-coordinator work moved up into Project 1 (now 1.12 — Shipping). Rationale: merge discipline is prerequisite for multi-agent work, not a polish layer on top. Without serialized merges, parallel Employees stomp on each other from day one of Project 1's autonomous-loop test. Also: the whole thing is Employee-shape work (mechanical merging, no identity), which fits Project 1's "foundation + scaffolding" better than Project 3's "self-heal meta-layer."
 
-If you're looking for the merge-queue + janitor-pool design, go to 1.11.
+If you're looking for the merge-queue + janitor-pool design, go to 1.12.
 
-### 3.3 — [ABSORBED INTO 1.8 + 1.10]
+### 3.3 — [ABSORBED INTO 1.9 + 1.11]
 
 The auto-recovery machinery split across two earlier sub-projects:
-- Silent-exit detection + respawn → **1.8** (Witness tier-1).
-- Crash-loop circuit breaker + per-hour dispatch budget → **1.10** (Budget governor + circuit breaker).
-- Daemon-restart survival (reload Casket state on boot, resume patrols) → left here — the genuinely daemon-lifecycle piece that neither 1.8 nor 1.10 covers.
+- Silent-exit detection + respawn → **1.9** (Sexton's patrol via the health-check Blueprint).
+- Crash-loop circuit breaker + per-hour dispatch budget → **1.11** (Budget governor + circuit breaker).
+- Daemon-restart survival (reload state on boot, resume patrols) → left here — the genuinely daemon-lifecycle piece that neither 1.9 nor 1.11 covers.
 
 ### 3.3' — Daemon-restart survival (the remnant)
 
-**Problem.** When the daemon process itself dies + restarts, in-flight Contracts shouldn't lose their place. Chit state is file-first so the substrate survives, but the watchdog + bacteria + shipping queue processors all need to pick up mid-cycle cleanly.
+**Problem.** When the daemon process itself dies + restarts, in-flight Contracts shouldn't lose their place. Chit state is file-first so the substrate survives, but the watchdog + bacteria + shipping queue processors all need to pick up mid-cycle cleanly. 1.9 covers the watchdog-chain-level unkillability (OS supervisor → daemon → Pulse → Alarum → Sexton resuming from handoff chit); this sub-project covers the corp-wide state-rehydration on daemon boot.
 
 **Scope.**
 - Daemon boot walks members.json + Casket chits + merge-submission queue + pending breaker-trip chits, reconstructs in-memory state from disk.
-- Witness patrol resumes (re-registers observers for every agent that has an active Casket).
+- Pulse starts ticking immediately post-boot; Alarum's first tick sees Sexton's existing handoff chit and continues her patrols.
 - Shipping queue picks up where it left off — checks `shipping-lock` chit's `held_by`; if that janitor's session is gone, release the lock and let the next queued janitor take over.
 - Circuit-breaker chits respected across restart (breaker trips persist).
 
 **Acceptance criteria.**
-- Kill daemon mid-Contract. Restart. Agents dispatch on next hand / Witness tick without human action.
+- Kill daemon mid-Contract. Restart. Agents dispatch on next hand / Sexton tick without human action.
 - Breaker tripped before restart stays tripped after restart.
 
-**Depends on:** 1.8, 1.10, 1.11
+**Depends on:** 1.9, 1.11, 1.12
 **PRs:** 1-2
 
-**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Witness respawns them from 1.8). A merge conflict happens (Shipping janitor routes it to the author via a blocker chit from 1.11). A role's Employee keeps crashing (circuit breaker trips from 1.10). The daemon process restarts at 3am from a memory leak (3.3' resumes state cleanly). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
+**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Sexton's patrol from 1.9 respawns them). A merge conflict happens (Shipping janitor from 1.12 routes it to the author via a blocker chit). A role's Employee keeps crashing (circuit breaker from 1.11 trips). The daemon process restarts at 3am from a memory leak (3.3' resumes state cleanly; OS supervisor + 1.9's watchdog chain carry the corp across the restart). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
 
 ---
 
@@ -1847,8 +1865,8 @@ Both are meaningful additions but not blockers — 1.1's shipped tame already fe
 **Problem.** After projects 1-5, many old concepts are replaced by new ones. Leaving them in the codebase as parallel paths is exactly the "vocabulary without capacity" sin the refactor exists to fix. They must go, on purpose, deliberately.
 
 **Scope.** Walk the codebase and delete:
-- Old Pulse implementation (replaced by Failsafe in 1.8)
-- Old Blueprint runbook reader / `cc-cli blueprints run` (replaced by blueprint-as-molecule cooking in 2.1)
+- Old Pulse heartbeat behavior — the 5-min idle-agent nudging (superseded in 1.9 when Sexton absorbed that work; Pulse's NAME persists but its scope shrank to "tick the Alarum")
+- Old Blueprint runbook reader / `cc-cli blueprints run` (replaced by blueprint-as-molecule cooking in 1.8)
 - Fragment injection call for claude-code agents (removed in 1.5); keep fragments for OpenClaw
 - Old Casket-as-four-files structure if migrated to single-pointer hook
 - Old Hand-as-chat-announcement (the legacy chat-delivery path; replaced by durable chit-based Hand in 1.4)
