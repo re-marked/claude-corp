@@ -165,6 +165,23 @@ export {
 } from './task-state-machine.js';
 export type { TaskTransitionTrigger } from './task-state-machine.js';
 
+// Chain walker — pure readiness / propagation primitives over the
+// dependsOn DAG. Task events (daemon) invoke advanceChain on close
+// and apply the returned DependentDeltas via the state machine.
+export {
+  isReady,
+  analyzeReadiness,
+  nextReadyTask,
+  advanceChain,
+  ChainCycleError,
+} from './chain.js';
+export type {
+  ReadinessReason,
+  ReadinessResult,
+  AdvanceChainResult,
+  DependentDelta,
+} from './chain.js';
+
 // Casket lifecycle primitives — the durable work-pointer surface that
 // 0.7.3's audit gate reads and that 1.3's chain walker will eventually
 // write. Module docstring explains the "was 1% built, this is the
