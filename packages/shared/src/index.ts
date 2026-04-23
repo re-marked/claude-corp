@@ -271,6 +271,7 @@ export {
   consumeHandoffChit,
   buildPreCompactInstructions,
   buildCheckpointObservation,
+  extractLatestUsageFromTranscript,
 } from './audit/index.js';
 export type {
   HookEventName,
@@ -290,6 +291,7 @@ export type {
   CheckpointCasketRef,
   CheckpointChitSpec,
   CheckpointRecentActivity,
+  TranscriptUsageSnapshot,
 } from './audit/index.js';
 
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';

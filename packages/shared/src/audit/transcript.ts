@@ -118,6 +118,112 @@ export function parseTranscript(transcriptPath: string): RecentActivity {
   return { toolCalls, touchedFiles, assistantText };
 }
 
+// ─── Token usage extraction (Project 1.7 round 3) ──────────────────
+
+/**
+ * Snapshot of token usage observed in the transcript. Mirrors the
+ * camelCase shape from the Claude Code streaming parser (daemon/harness)
+ * so consumers can treat both sources symmetrically.
+ */
+export interface TranscriptUsageSnapshot {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadInputTokens: number;
+  readonly cacheCreationInputTokens: number;
+}
+
+/**
+ * Walk the transcript backwards and return the most recent usage block
+ * from a `message_start` or `message_delta` event. Returns null when
+ * the file is missing, malformed, or carries no usage events (e.g. an
+ * OpenClaw-era transcript that doesn't emit stream events at all).
+ *
+ * The builder layer (buildCheckpointObservation) consumes this to
+ * render "at ~152k tokens when compact fired" in the auto-checkpoint
+ * body — durable context for the Partner's post-compact self beyond
+ * what Claude Code's summarizer will preserve.
+ *
+ * Fail-soft: any I/O or parse error falls through to null. The
+ * checkpoint write still proceeds without the token line; the
+ * mechanism doesn't break because one optional enrichment failed.
+ */
+export function extractLatestUsageFromTranscript(
+  transcriptPath: string,
+): TranscriptUsageSnapshot | null {
+  if (!transcriptPath || !existsSync(transcriptPath)) return null;
+
+  let content: string;
+  try {
+    content = readFileSync(transcriptPath, 'utf-8');
+  } catch {
+    return null;
+  }
+
+  const lines = content.split(/\r?\n/);
+  // Walk backwards — the latest usage block is the most informative.
+  // message_delta carries final output_tokens; message_start carries
+  // the early snapshot with output_tokens=0. Either is useful; the
+  // most recent one wins.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line || line.trim().length === 0) continue;
+    const parsed = tryParseLine(line);
+    if (!parsed) continue;
+    const usage = extractUsageFromEntry(parsed);
+    if (usage) return usage;
+  }
+  return null;
+}
+
+/**
+ * Pull a TranscriptUsageSnapshot out of a single JSONL entry if it
+ * carries a `message_start` or `message_delta` stream_event. Returns
+ * null for every other entry shape.
+ */
+function extractUsageFromEntry(entry: Record<string, unknown>): TranscriptUsageSnapshot | null {
+  // Shape: {type: 'stream_event', event: {type: 'message_start', message: {usage: {...}}}}
+  // or     {type: 'stream_event', event: {type: 'message_delta', usage: {...}}}
+  // Claude Code forwards the Anthropic streaming protocol verbatim
+  // into the JSONL transcript; daemon/harness/claude-code-stream.ts
+  // already handles these shapes for live parsing.
+  const event = entry.event;
+  if (!event || typeof event !== 'object') return null;
+  const evt = event as Record<string, unknown>;
+  const eventType = evt.type;
+
+  let rawUsage: unknown = null;
+  if (eventType === 'message_start') {
+    const message = evt.message;
+    if (message && typeof message === 'object') {
+      rawUsage = (message as Record<string, unknown>).usage;
+    }
+  } else if (eventType === 'message_delta') {
+    rawUsage = evt.usage;
+  }
+  if (!rawUsage || typeof rawUsage !== 'object') return null;
+
+  const u = rawUsage as Record<string, unknown>;
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const inputTokens = num(u.input_tokens);
+  const outputTokens = num(u.output_tokens);
+  const cacheReadInputTokens = num(u.cache_read_input_tokens);
+  const cacheCreationInputTokens = num(u.cache_creation_input_tokens);
+
+  // Drop the entry if no usage fields were present — prevents a
+  // zero-everywhere snapshot from hiding a real next-match lower down
+  // the file.
+  if (
+    u.input_tokens === undefined &&
+    u.output_tokens === undefined &&
+    u.cache_read_input_tokens === undefined &&
+    u.cache_creation_input_tokens === undefined
+  ) {
+    return null;
+  }
+
+  return { inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────
 
 function tryParseLine(line: string): Record<string, unknown> | null {
