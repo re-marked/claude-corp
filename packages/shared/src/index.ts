@@ -183,6 +183,17 @@ export type {
   DependentDelta,
 } from './chain.js';
 
+// Role resolver — Project 1.4. Picks an Employee slot for a role-mode
+// hand / block / escalate. Pure; callers apply the resolved target.
+export { resolveRoleToEmployee } from './role-resolver.js';
+export type {
+  RoleResolveResult,
+  RoleResolvedResult,
+  RolePartnerOnlyResult,
+  RoleNoCandidatesResult,
+  RoleUnknownResult,
+} from './role-resolver.js';
+
 // Casket lifecycle primitives — the durable work-pointer surface that
 // 0.7.3's audit gate reads and that 1.3's chain walker will eventually
 // write. Module docstring explains the "was 1% built, this is the
