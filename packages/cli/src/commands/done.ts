@@ -207,7 +207,7 @@ function tryTransitionToUnderReview(corpRoot: string, slug: string): TransitionN
     throw err;
   }
 
-  const scope = chitScopeFromPath(hit.path, corpRoot);
+  const scope = chitScopeFromPath(corpRoot, hit.path);
   updateChit(corpRoot, scope, 'task', chit.id, {
     fields: { task: { workflowStatus: nextState } } as never,
     updatedBy: slug,
