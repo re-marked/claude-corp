@@ -896,11 +896,35 @@ function findChitFiles(
     const chitsRoot = join(basePath, 'chits');
     if (!existsSync(chitsRoot)) continue;
 
-    const typeSubdirs = typeFilter
-      ? (typeFilter as readonly string[])
-      : readdirSync(chitsRoot, { withFileTypes: true })
-          .filter((e) => e.isDirectory() && e.name !== '_archive' && e.name !== '_log')
-          .map((e) => e.name);
+    // Enumerate the type subdirs we'll walk. When the caller supplied
+    // a type filter, that list IS the universe — we respect intent.
+    //
+    // When the caller didn't filter types AND asks to include archive,
+    // we union active + _archive subdirs so types whose ONLY files are
+    // archived (e.g. a chit type retired after all its instances were
+    // closed + archived) still contribute to the result. The old code
+    // derived the list from active dirs alone, which silently dropped
+    // archive-only types from audit/history queries.
+    let typeSubdirs: readonly string[];
+    if (typeFilter) {
+      typeSubdirs = typeFilter as readonly string[];
+    } else {
+      const names = new Set<string>();
+      for (const e of readdirSync(chitsRoot, { withFileTypes: true })) {
+        if (e.isDirectory() && e.name !== '_archive' && e.name !== '_log') {
+          names.add(e.name);
+        }
+      }
+      if (includeArchive) {
+        const archiveRoot = join(chitsRoot, '_archive');
+        if (existsSync(archiveRoot)) {
+          for (const e of readdirSync(archiveRoot, { withFileTypes: true })) {
+            if (e.isDirectory()) names.add(e.name);
+          }
+        }
+      }
+      typeSubdirs = [...names];
+    }
 
     for (const typeName of typeSubdirs) {
       const typeDir = join(chitsRoot, typeName);
