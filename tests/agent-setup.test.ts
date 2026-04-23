@@ -242,8 +242,77 @@ describe('setupAgentWorkspace', () => {
       const content = readFileSync(join(agentAbs, 'CLAUDE.md'), 'utf-8');
       // Thin shell: bare "# <displayName>" (was "# I am X" under the fat template)
       expect(content).toContain('# Herald');
-      // Identity line carries kind inferred from rank (worker → employee)
-      expect(content).toContain('You are Herald, a worker (employee)');
+      // Kind omitted → effectiveKind defaults to 'partner' (pre-1.1 compat:
+      // every existing agent is a persistent-named partner). This also
+      // matches the workspace layout (brain/, SOUL.md, etc.) that the
+      // same default produces above.
+      expect(content).toContain('You are Herald, a worker (partner)');
+    });
+
+    it('explicit kind=employee on master rank produces Employee CLAUDE.md + Employee hook set (kind ≠ rank-inferred)', () => {
+      // Guards against the Codex-flagged bug where the claude-code
+      // branch inferred kind from rank instead of using opts.kind. A
+      // master-rank Employee is a pathological combo callers can hit
+      // via `cc-cli hire --kind employee --rank master` or similar;
+      // the workspace must be provisioned and the prompt/hook wiring
+      // must agree on kind=employee.
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          harness: 'claude-code',
+          kind: 'employee' as const,
+          role: 'backend-engineer',
+          rank: 'master' as const,
+          agentName: 'ghost',
+          displayName: 'Ghost',
+        }),
+      );
+      const agentAbs = join(corpRoot, agentDir);
+
+      const claudeMd = readFileSync(join(agentAbs, 'CLAUDE.md'), 'utf-8');
+      expect(claudeMd).toContain('(employee)');
+      expect(claudeMd).not.toContain('(partner)');
+
+      const settings = JSON.parse(
+        readFileSync(join(agentAbs, '.claude', 'settings.json'), 'utf-8'),
+      );
+      // Employees: no PreCompact, no UserPromptSubmit.
+      expect(settings.hooks.PreCompact).toBeUndefined();
+      expect(settings.hooks.UserPromptSubmit).toBeUndefined();
+      // But SessionStart + Stop are universal.
+      expect(settings.hooks.SessionStart).toBeDefined();
+      expect(settings.hooks.Stop).toBeDefined();
+    });
+
+    it('explicit kind=partner on worker rank produces Partner CLAUDE.md + Partner hook set (kind ≠ rank-inferred)', () => {
+      // Mirror case: a worker-rank Partner (common for role-lead Partners
+      // like Engineering Lead). Pre-fix, inferKind(rank='worker') would
+      // have emitted kind=employee, silently disabling PreCompact /
+      // UserPromptSubmit even though the workspace shipped full soul
+      // files. Assert both sides agree on kind=partner.
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          harness: 'claude-code',
+          kind: 'partner' as const,
+          role: 'engineering-lead',
+          rank: 'worker' as const,
+          agentName: 'ada',
+          displayName: 'Ada',
+        }),
+      );
+      const agentAbs = join(corpRoot, agentDir);
+
+      const claudeMd = readFileSync(join(agentAbs, 'CLAUDE.md'), 'utf-8');
+      expect(claudeMd).toContain('(partner)');
+      expect(claudeMd).not.toContain('(employee)');
+
+      const settings = JSON.parse(
+        readFileSync(join(agentAbs, '.claude', 'settings.json'), 'utf-8'),
+      );
+      // Partner hook set: SessionStart + PreCompact + Stop + UserPromptSubmit.
+      expect(settings.hooks.SessionStart).toBeDefined();
+      expect(settings.hooks.PreCompact).toBeDefined();
+      expect(settings.hooks.Stop).toBeDefined();
+      expect(settings.hooks.UserPromptSubmit).toBeDefined();
     });
   });
 
