@@ -38,8 +38,12 @@ export interface WtfOpts {
    * The founder / debug tooling uses --peek for non-destructive
    * inspection ("what's waiting for this agent?") without spending
    * the one-shot signal.
+   *
+   * Optional — legacy callers that predate this flag get the
+   * default-consume behavior (undefined → !undefined → true →
+   * consumeHandoff=true). Only the --peek path needs to pass it.
    */
-  peek: boolean;
+  peek?: boolean;
   json: boolean;
 }
 
