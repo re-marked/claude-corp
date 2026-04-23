@@ -148,7 +148,29 @@ export async function cmdBlock(input: string[] | BlockOpts): Promise<void> {
     );
   }
 
-  // 3. Create the blocker task chit.
+  // 3. Pre-validate the caller's block transition BEFORE any writes.
+  // If caller is in a state where `block` isn't legal (draft, terminal),
+  // we want to reject before creating a blocker chit or mutating the
+  // caller's task. Validation is pure — throws without side effect.
+  const callerFields = callerTaskHit.chit.fields as { task: TaskFields };
+  const callerCurrentWs: TaskWorkflowStatus = callerFields.task.workflowStatus ?? 'in_progress';
+  let callerNextWs: TaskWorkflowStatus;
+  try {
+    callerNextWs = validateTransition(callerCurrentWs, 'block', callerTaskId);
+  } catch (err) {
+    if (err instanceof TaskTransitionError) {
+      fail(
+        `caller's task ${callerTaskId} is in state "${callerCurrentWs}"; ` +
+          `block trigger not legal from there. ${err.message}`,
+      );
+    }
+    throw err;
+  }
+
+  // 4. Create the blocker task chit. If subsequent steps (hand) fail,
+  // the blocker is orphaned — that's recoverable (founder can close
+  // it or re-hand manually). The wedged-caller alternative (create
+  // blocker + mutate caller, then fail on hand) is not.
   const acceptanceList = opts.acceptance?.filter((s) => s.trim().length > 0) ?? [];
   const blocker = createChit(corpRoot, {
     type: 'task',
@@ -180,37 +202,12 @@ export async function cmdBlock(input: string[] | BlockOpts): Promise<void> {
         : ''),
   });
 
-  // 4. Inject blocker id into caller's task dependsOn.
-  const callerScope = chitScopeFromPath(corpRoot, callerTaskHit.path);
-  const existingDeps = callerTaskHit.chit.dependsOn;
-  const newDeps = existingDeps.includes(blocker.id) ? existingDeps : [...existingDeps, blocker.id];
-  updateChit(corpRoot, callerScope, 'task', callerTaskId, {
-    dependsOn: newDeps,
-    updatedBy: fromId,
-  });
-
-  // 5. State machine transition on caller's task: block trigger.
-  const callerFields = callerTaskHit.chit.fields as { task: TaskFields };
-  const callerCurrentWs: TaskWorkflowStatus = callerFields.task.workflowStatus ?? 'in_progress';
-  let callerNextWs: TaskWorkflowStatus;
-  try {
-    callerNextWs = validateTransition(callerCurrentWs, 'block', callerTaskId);
-  } catch (err) {
-    if (err instanceof TaskTransitionError) {
-      fail(
-        `caller's task ${callerTaskId} is in state "${callerCurrentWs}"; ` +
-          `block trigger not legal from there. ${err.message}`,
-      );
-    }
-    throw err;
-  }
-  updateChit(corpRoot, callerScope, 'task', callerTaskId, {
-    fields: { task: { workflowStatus: callerNextWs } } as never,
-    updatedBy: fromId,
-  });
-
-  // 6. Hand the blocker chit to the assignee (handChitToSlot does the
-  // Casket write + queued → dispatched transition + inbox notification).
+  // 5. Hand the blocker chit FIRST — before mutating caller. If hand
+  // fails (assignee stale, state machine reject), the blocker is
+  // orphaned but the caller's task is still clean / still running.
+  // The previous order (caller-mutate THEN hand) left the caller
+  // blocked on a blocker nobody was working on, with no rollback.
+  //
   // Priority-to-tier mapping: critical blockers escalate to Tier 3 on
   // the assignee so they don't sit in a Tier 2 queue while a chain
   // stalls. high/normal/low stay at the default Tier 2 — visible in
@@ -229,10 +226,33 @@ export async function cmdBlock(input: string[] | BlockOpts): Promise<void> {
     });
   } catch (err) {
     if (err instanceof HandNotAllowedError || err instanceof TaskTransitionError) {
-      fail(`hand of blocker chit failed: ${err.message}`);
+      fail(
+        `hand of blocker chit failed: ${err.message}\n\n` +
+          `Caller's task ${callerTaskId} was NOT mutated — it remains ` +
+          `in state "${callerCurrentWs}". The orphaned blocker chit ` +
+          `${blocker.id} can be closed manually if unwanted.`,
+      );
     }
     throw err;
   }
+
+  // 6. Hand succeeded. Now mutate the caller — inject dep + transition
+  // to blocked. If these fail for some reason, the blocker has an
+  // assignee working it, but caller's task isn't yet marked blocked;
+  // agent just works the pre-block state (worst case: duplicate work).
+  // This is strictly better than the pre-fix order.
+  const callerScope = chitScopeFromPath(corpRoot, callerTaskHit.path);
+  const existingDeps = callerTaskHit.chit.dependsOn;
+  const newDeps = existingDeps.includes(blocker.id) ? existingDeps : [...existingDeps, blocker.id];
+  updateChit(corpRoot, callerScope, 'task', callerTaskId, {
+    dependsOn: newDeps,
+    updatedBy: fromId,
+  });
+
+  updateChit(corpRoot, callerScope, 'task', callerTaskId, {
+    fields: { task: { workflowStatus: callerNextWs } } as never,
+    updatedBy: fromId,
+  });
 
   // 7. Tier 2 inbox-item on CALLER'S inbox — "you are blocked on X,"
   // so the agent's wtf header + founder visibility shows the state.
