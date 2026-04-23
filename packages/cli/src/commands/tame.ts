@@ -39,6 +39,7 @@ import {
   createBrainFile,
   ensureBrainDir,
   buildThinClaudeMd,
+  buildHookSettings,
   UNIVERSAL_SOUL,
   defaultIdentity,
   USER_TEMPLATE,
@@ -174,10 +175,18 @@ I don't have to perform this. I just have to remember it honestly.`;
     );
   }
 
-  // 7. Re-render thin CLAUDE.md if the agent is on claude-code harness.
-  //    Pre-tame CLAUDE.md was Employee-shaped (no soul-file @imports);
-  //    post-tame it needs the Partner shape. Only touch if CLAUDE.md
-  //    exists (indicating claude-code harness was set up for this agent).
+  // 7. Re-render claude-code harness files if present. CLAUDE.md and
+  //    .claude/settings.json travel together — both are deterministic
+  //    from kind, so flipping kind requires regenerating both or the
+  //    workspace drifts into a mismatched state (Partner @imports with
+  //    Employee-only hooks, or vice versa). PreCompact + UserPromptSubmit
+  //    hooks are Partner-only and are what gate compaction audits and
+  //    inbox check-ins; without this rewrite a newly-tamed Partner would
+  //    run without either.
+  //
+  //    Detection: CLAUDE.md presence is the claude-code-harness marker.
+  //    If CLAUDE.md doesn't exist, the agent is on OpenClaw (or hasn't
+  //    been set up yet) and there's nothing to regenerate.
   const claudeMdPath = join(workspace, 'CLAUDE.md');
   if (existsSync(claudeMdPath)) {
     writeFileSync(
@@ -189,6 +198,18 @@ I don't have to perform this. I just have to remember it honestly.`;
         corpName: deriveCorpName(corpRoot),
         workspacePath: workspace,
       }),
+      'utf-8',
+    );
+
+    const claudeDir = join(workspace, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(
+      join(claudeDir, 'settings.json'),
+      JSON.stringify(
+        buildHookSettings({ kind: 'partner', agentSlug: slug }),
+        null,
+        2,
+      ) + '\n',
       'utf-8',
     );
   }
