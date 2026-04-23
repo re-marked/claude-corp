@@ -105,8 +105,15 @@ describe('buildCorpMd — the Two Non-Negotiables (load-bearing)', () => {
 
   it('Casket Imperative content is unambiguous about immediate execution', () => {
     const out = buildCorpMd(partnerOpts());
-    expect(out).toMatch(/If your Casket has work, execute it immediately/);
-    expect(out).toMatch(/Dispatch IS your assignment/);
+    // Load-bearing phrasing landed in the soul-level commit that
+    // named the Casket Imperative as cultural law. CORP.md carries
+    // the same language as SOUL.md so agents can cite it from
+    // either substrate. Update the regex if the phrase evolves, but
+    // the SEMANTIC guarantee these assertions pin is:
+    //   (a) unconditional execution — no confirmation gate
+    //   (b) dispatch ITSELF is the assignment, not a prelude to one
+    expect(out).toMatch(/If your Casket has work, you run it/);
+    expect(out).toMatch(/pointer arriving on your Casket IS the assignment/);
   });
 
   it('Audit Gate content lists the specific items the hook checks', () => {

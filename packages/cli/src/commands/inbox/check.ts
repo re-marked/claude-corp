@@ -118,7 +118,7 @@ export async function cmdInboxCheck(rawArgs: string[]): Promise<void> {
   const scope: ChitScope = `agent:${slug}`;
   let items: Chit<'inbox-item'>[];
   try {
-    const result = queryChits(corpRoot, {
+    const result = queryChits<'inbox-item'>(corpRoot, {
       types: ['inbox-item'],
       statuses: ['active'],
       scopes: [scope],
@@ -127,15 +127,17 @@ export async function cmdInboxCheck(rawArgs: string[]): Promise<void> {
       sortBy: 'createdAt',
       sortOrder: 'desc',
     });
-    items = (result.chits as Chit<'inbox-item'>[]).filter((c) => {
-      const t = c.fields['inbox-item']?.tier;
-      // Tier 1 excluded — ambient shouldn't inject. Tier 2/3 surface.
-      // Carry-forward-flagged items also skip: the agent already
-      // acknowledged them once; re-injecting every turn is noise.
-      if (t !== 2 && t !== 3) return false;
-      if (c.fields['inbox-item']?.carriedForward === true) return false;
-      return true;
-    });
+    items = result.chits
+      .map((w) => w.chit)
+      .filter((c) => {
+        const t = c.fields['inbox-item']?.tier;
+        // Tier 1 excluded — ambient shouldn't inject. Tier 2/3 surface.
+        // Carry-forward-flagged items also skip: the agent already
+        // acknowledged them once; re-injecting every turn is noise.
+        if (t !== 2 && t !== 3) return false;
+        if (c.fields['inbox-item']?.carriedForward === true) return false;
+        return true;
+      });
   } catch {
     // Query failure → fail-open on --inject, visible on operator use.
     if (inject) return;

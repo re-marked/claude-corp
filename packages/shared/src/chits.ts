@@ -89,15 +89,62 @@ function logMalformed(corpRoot: string, entry: MalformedChit): void {
   }
 }
 
+/**
+ * Every ChitCommon field that downstream query/filter/render code
+ * assumes is present and well-typed. Missing or wrong-typed entries
+ * here caused ChitMalformedError to be silently skipped in favor of a
+ * TypeError deep inside matchesFilter (e.g., `chit.tags.includes is
+ * not a function`), which aborted the whole queryChits walk instead
+ * of recording the file as malformed and continuing.
+ */
+const REQUIRED_STRING_FIELDS = ['id', 'type', 'status', 'createdBy', 'createdAt', 'updatedAt'] as const;
+const REQUIRED_ARRAY_FIELDS = ['tags', 'references', 'dependsOn'] as const;
+
 function parseChitFile(path: string): { chit: Chit; body: string } {
   const raw = readFileSync(path, 'utf-8');
   try {
     const parsed = parseFrontmatter<Chit>(raw);
-    // Minimal validity check — a parseable-but-empty frontmatter would
-    // leave meta as an empty object and silently pass later filters.
-    if (!parsed.meta || typeof parsed.meta !== 'object' || !parsed.meta.id || !parsed.meta.type) {
-      throw new Error('missing required chit frontmatter (id, type)');
+    const meta = parsed.meta as unknown;
+
+    // Root shape: the frontmatter MUST deserialize to a plain object.
+    // Arrays, nulls, scalars all trip here — ambiguous enough to catch
+    // early instead of dying in matchesFilter.
+    if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+      throw new Error('chit frontmatter is not an object');
     }
+    const m = meta as Record<string, unknown>;
+
+    // Required string fields — every ChitCommon property the query
+    // engine dereferences unconditionally. We check presence AND type
+    // so a YAML-coerced number or boolean doesn't slip through as an
+    // id and produce cryptic failures downstream.
+    for (const field of REQUIRED_STRING_FIELDS) {
+      const v = m[field];
+      if (typeof v !== 'string' || v.length === 0) {
+        throw new Error(`missing or non-string required field: ${field}`);
+      }
+    }
+
+    // Boolean field. Undefined would default truthy via `??`-chains in
+    // some callers; strict-check catches the ambiguous "it's not a
+    // boolean" case that would otherwise silently become false.
+    if (typeof m.ephemeral !== 'boolean') {
+      throw new Error('missing or non-boolean required field: ephemeral');
+    }
+
+    // Array fields — matchesFilter dereferences .includes() on each.
+    // We accept empty arrays (common for fresh chits) but reject
+    // missing / non-array / array-of-non-strings.
+    for (const field of REQUIRED_ARRAY_FIELDS) {
+      const v = m[field];
+      if (!Array.isArray(v)) {
+        throw new Error(`missing or non-array required field: ${field}`);
+      }
+      if (v.some((item) => typeof item !== 'string')) {
+        throw new Error(`non-string entry in required array field: ${field}`);
+      }
+    }
+
     return { chit: parsed.meta, body: parsed.body };
   } catch (err) {
     throw new ChitMalformedError(path, (err as Error).message);
@@ -568,7 +615,15 @@ export function promoteChit<T extends ChitTypeId>(
   id: string,
   opts: { reason: string; updatedBy: string },
 ): Chit<T> {
-  const { chit: current, path } = readChit(corpRoot, scope, type, id);
+  // Single read: frontmatter + body come from the same filesystem
+  // snapshot, so the concurrency check below covers the exact bytes
+  // we'll write over. The previous shape did two reads (frontmatter
+  // here, body right before write) with a concurrency check only
+  // against the FIRST read — a concurrent writer between the check
+  // and the second read would land a newer body we'd silently
+  // overwrite with the stale frontmatter stitched onto it. Lost
+  // update, no error, classic time-of-check/time-of-use split.
+  const { chit: current, body: currentBody, path } = readChit(corpRoot, scope, type, id);
 
   if (!current.ephemeral) {
     throw new ChitValidationError(
@@ -589,8 +644,11 @@ export function promoteChit<T extends ChitTypeId>(
     ? current.tags
     : [...current.tags, promotionTag];
 
-  // Manual flip bypasses the type validator (we're modifying common fields
-  // only, not fields.<type>), but we write through atomic + pre-rename check.
+  // Pre-rename concurrency check against the updatedAt we actually
+  // read above. If anything raced us between our readChit and this
+  // line, the file's updatedAt has moved — we throw
+  // ChitConcurrentModificationError and the caller retries with the
+  // fresh snapshot. No lost updates, no "newer body ghosted away."
   checkConcurrentModification(path, current.updatedAt);
 
   const updated = {
@@ -602,7 +660,6 @@ export function promoteChit<T extends ChitTypeId>(
     updatedAt: new Date().toISOString(),
   } as Chit<T>;
 
-  const { body: currentBody } = readChit(corpRoot, scope, type, id);
   const content = stringifyFrontmatter(updated as unknown as Record<string, unknown>, currentBody);
   atomicWriteSync(path, content);
 
@@ -699,9 +756,9 @@ export function closeChit<T extends ChitTypeId>(
 
 // ─── Query ──────────────────────────────────────────────────────────
 
-export interface QueryChitsOpts {
+export interface QueryChitsOpts<T extends ChitTypeId = ChitTypeId> {
   /** Match ANY of these types. Omit to accept all types. */
-  types?: readonly ChitTypeId[];
+  types?: readonly T[];
   /** Match ANY of these statuses. Omit to accept all statuses. */
   statuses?: readonly ChitStatus[];
   /** Match ANY of these tags. Omit to not filter on tags. */
@@ -714,6 +771,20 @@ export interface QueryChitsOpts {
   updatedSince?: string;
   /** Chits with updatedAt <= this ISO timestamp. */
   updatedUntil?: string;
+  /**
+   * Chits with createdAt >= this ISO timestamp.
+   *
+   * Use this axis — not updatedSince — for "observations/tasks made
+   * ON or AFTER date X" semantics. Lifecycle scanner mutations (cooling,
+   * status flips) bump updatedAt but not createdAt, so created-time
+   * slicing is the stable window for daily-log / recency-counter use
+   * cases. updatedSince is correct for "what has CHANGED since X"
+   * (notification feeds, dredge deltas); createdSince is correct for
+   * "what was AUTHORED since X" (daily logs, birth-date queries).
+   */
+  createdSince?: string;
+  /** Chits with createdAt <= this ISO timestamp. Paired with createdSince for day/range slicing. */
+  createdUntil?: string;
   /** Match chits that reference ANY of these ids. */
   references?: readonly string[];
   /** Match chits that depend_on ANY of these ids. */
@@ -825,11 +896,35 @@ function findChitFiles(
     const chitsRoot = join(basePath, 'chits');
     if (!existsSync(chitsRoot)) continue;
 
-    const typeSubdirs = typeFilter
-      ? (typeFilter as readonly string[])
-      : readdirSync(chitsRoot, { withFileTypes: true })
-          .filter((e) => e.isDirectory() && e.name !== '_archive' && e.name !== '_log')
-          .map((e) => e.name);
+    // Enumerate the type subdirs we'll walk. When the caller supplied
+    // a type filter, that list IS the universe — we respect intent.
+    //
+    // When the caller didn't filter types AND asks to include archive,
+    // we union active + _archive subdirs so types whose ONLY files are
+    // archived (e.g. a chit type retired after all its instances were
+    // closed + archived) still contribute to the result. The old code
+    // derived the list from active dirs alone, which silently dropped
+    // archive-only types from audit/history queries.
+    let typeSubdirs: readonly string[];
+    if (typeFilter) {
+      typeSubdirs = typeFilter as readonly string[];
+    } else {
+      const names = new Set<string>();
+      for (const e of readdirSync(chitsRoot, { withFileTypes: true })) {
+        if (e.isDirectory() && e.name !== '_archive' && e.name !== '_log') {
+          names.add(e.name);
+        }
+      }
+      if (includeArchive) {
+        const archiveRoot = join(chitsRoot, '_archive');
+        if (existsSync(archiveRoot)) {
+          for (const e of readdirSync(archiveRoot, { withFileTypes: true })) {
+            if (e.isDirectory()) names.add(e.name);
+          }
+        }
+      }
+      typeSubdirs = [...names];
+    }
 
     for (const typeName of typeSubdirs) {
       const typeDir = join(chitsRoot, typeName);
@@ -883,6 +978,12 @@ function matchesFilter(chit: Chit, opts: QueryChitsOpts): boolean {
   if (opts.updatedUntil !== undefined && chit.updatedAt > opts.updatedUntil) {
     return false;
   }
+  if (opts.createdSince !== undefined && chit.createdAt < opts.createdSince) {
+    return false;
+  }
+  if (opts.createdUntil !== undefined && chit.createdAt > opts.createdUntil) {
+    return false;
+  }
   if (
     opts.references &&
     opts.references.length > 0 &&
@@ -903,9 +1004,19 @@ function matchesFilter(chit: Chit, opts: QueryChitsOpts): boolean {
   return true;
 }
 
-/** Result of a queryChits call — matches plus any malformed files encountered during the walk. */
-export interface QueryChitsResult {
-  chits: ChitWithBody[];
+/**
+ * Result of a queryChits call — matches plus any malformed files
+ * encountered during the walk. Generic T narrows `chits[i].chit` to a
+ * specific chit variant when the caller constrained the type filter.
+ *
+ * The narrowing is a type-level assertion: runtime still filters by
+ * `opts.types`, which mirrors the static T when the caller passes
+ * `types: ['inbox-item']` + `<'inbox-item'>` together. Passing a type
+ * parameter without a matching runtime filter would lie — caller's
+ * responsibility, same contract shape as lodash's `.map<T>()`.
+ */
+export interface QueryChitsResult<T extends ChitTypeId = ChitTypeId> {
+  chits: ChitWithBody<T>[];
   malformed: MalformedChit[];
 }
 
@@ -926,11 +1037,14 @@ export interface QueryChitsResult {
  * malformed can ignore `result.malformed`; callers that do (TUI health
  * views, daemon monitors, admin commands) surface them directly.
  */
-export function queryChits(corpRoot: string, opts: QueryChitsOpts = {}): QueryChitsResult {
+export function queryChits<T extends ChitTypeId = ChitTypeId>(
+  corpRoot: string,
+  opts: QueryChitsOpts<T> = {},
+): QueryChitsResult<T> {
   const scopesToVisit = resolveScopesToVisit(corpRoot, opts.scopes);
   const paths = findChitFiles(scopesToVisit, opts.types, opts.includeArchive ?? false);
 
-  const matches: ChitWithBody[] = [];
+  const matches: ChitWithBody<T>[] = [];
   const malformed: MalformedChit[] = [];
 
   for (const path of paths) {
@@ -952,7 +1066,7 @@ export function queryChits(corpRoot: string, opts: QueryChitsOpts = {}): QueryCh
     }
 
     if (!matchesFilter(chit, opts)) continue;
-    matches.push({ chit, body, path });
+    matches.push({ chit: chit as Chit<T>, body, path });
   }
 
   // Sort
