@@ -509,6 +509,17 @@ export interface ChainAdvanceApplyResult {
   readonly transition: ApplyDeltaResult;
   /** Re-dispatch summary — only populated for unblock deltas whose transition applied. */
   readonly redispatch?: ChainAdvanceRedispatchResult;
+  /** Cascade notification summary — only populated for block deltas whose transition applied + announce=true. */
+  readonly cascadeNotification?: ChainAdvanceCascadeNotification;
+}
+
+export interface ChainAdvanceCascadeNotification {
+  /** Assignee slug that received the Tier 2 cascade inbox-item. Null when the task had no assignee. */
+  readonly targetSlug: string | null;
+  /** True when the inbox-item landed. */
+  readonly notified: boolean;
+  /** Error text when the notification failed; undefined on success or no-assignee skip. */
+  readonly error?: string;
 }
 
 export interface ChainAdvanceRedispatchResult {
@@ -558,11 +569,28 @@ export function applyChainAdvance(
   const announce = opts.announce ?? true;
   return advance.dependentDeltas.map((delta) => {
     const transition = applyDependentDelta({ corpRoot, delta, actor });
-    if (!transition.applied || delta.trigger !== 'unblock') {
-      return { delta, transition };
+    if (!transition.applied) return { delta, transition };
+
+    if (delta.trigger === 'unblock') {
+      // Unblock: Casket write (so the assignee picks up the work) +
+      // UNBLOCKED inbox item.
+      const redispatch = redispatchUnblocked(corpRoot, delta.chitId, actor, announce);
+      return { delta, transition, redispatch };
     }
-    const redispatch = redispatchUnblocked(corpRoot, delta.chitId, actor, announce);
-    return { delta, transition, redispatch };
+
+    if (delta.trigger === 'block' && announce) {
+      // Failure cascade: upstream terminal-failure propagated the
+      // dependent to blocked. The agent's Casket stays put (they
+      // keep their blocked task), but we fire a Tier 2 inbox-item
+      // so the assignee + founder learn about the cascade without
+      // waiting for the next wtf check-in. Matches the unblock
+      // notification pattern — silent cascades were the pre-audit
+      // gap (5 dependents cascading = 5 silently-blocked Caskets).
+      const notification = notifyBlockedCascade(corpRoot, delta.chitId, actor);
+      return { delta, transition, cascadeNotification: notification };
+    }
+
+    return { delta, transition };
   });
 }
 
@@ -635,6 +663,57 @@ function redispatchUnblocked(
     notified,
     error: errors.length > 0 ? errors.join('; ') : undefined,
   };
+}
+
+/**
+ * Side-effect helper for a dependent that cascaded to blocked due to
+ * a terminal-failure upstream. Fires a Tier 2 inbox-item on the
+ * dependent's assignee so the cascade is observable immediately
+ * (agent + founder both see the chain stalled) instead of waiting
+ * for the agent's next wtf. No Casket write — the agent stays on
+ * whatever they were doing; the blocked state just annotates that
+ * their work can no longer proceed.
+ */
+function notifyBlockedCascade(
+  corpRoot: string,
+  taskChitId: string,
+  actor: string,
+): ChainAdvanceCascadeNotification {
+  const hit = findChitById(corpRoot, taskChitId);
+  if (!hit || hit.chit.type !== 'task') {
+    return {
+      targetSlug: null,
+      notified: false,
+      error: 'task chit unreadable post-transition (race or corruption)',
+    };
+  }
+  const assignee = (hit.chit.fields.task as TaskFields).assignee;
+  if (!assignee) {
+    // Dependent with no assignee — nothing to notify. The cascaded
+    // blocked state still applies at the chit layer; next time a
+    // hand fires on this task, the resolver will see it as blocked.
+    return { targetSlug: null, notified: false };
+  }
+
+  try {
+    const title = (hit.chit.fields.task as TaskFields).title;
+    createInboxItem({
+      corpRoot,
+      recipient: assignee,
+      tier: 2,
+      from: actor,
+      subject: `CASCADE-BLOCKED: ${title} — an upstream dep failed; your task can't proceed until the chain is repaired`,
+      source: 'system',
+      sourceRef: taskChitId,
+    });
+    return { targetSlug: assignee, notified: true };
+  } catch (err) {
+    return {
+      targetSlug: assignee,
+      notified: false,
+      error: (err as Error).message,
+    };
+  }
 }
 
 // ─── Convenience re-exports (save callers a second import) ─────────

@@ -189,6 +189,7 @@ export type {
   ApplyChainAdvanceOpts,
   ChainAdvanceApplyResult,
   ChainAdvanceRedispatchResult,
+  ChainAdvanceCascadeNotification,
 } from './chain.js';
 
 // Role resolver — Project 1.4. Picks an Employee slot for a role-mode

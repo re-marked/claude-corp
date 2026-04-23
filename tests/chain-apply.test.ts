@@ -203,7 +203,7 @@ describe('applyChainAdvance — transition + re-dispatch', () => {
     expect(r.redispatch!.notified).toBe(false);
   });
 
-  it('block delta (failure cascade): transition-only, no redispatch object', () => {
+  it('block delta (failure cascade): transitions child to blocked AND fires CASCADE-BLOCKED inbox on assignee', () => {
     const dep = createChit(corpRoot, {
       type: 'task',
       scope: 'corp',
@@ -226,8 +226,82 @@ describe('applyChainAdvance — transition + re-dispatch', () => {
     expect(r).toBeDefined();
     expect(r!.transition.applied).toBe(true);
     expect(r!.transition.toState).toBe('blocked');
-    // Block deltas don't get redispatch — agent finds out via wtf header.
+    // Block deltas don't get redispatch — agent keeps their current
+    // task, the blocked state just annotates they can't proceed.
     expect(r!.redispatch).toBeUndefined();
+    // But they DO get a cascade notification — the pre-audit gap
+    // where 5 dependents cascaded silently is closed.
+    expect(r!.cascadeNotification).toBeDefined();
+    expect(r!.cascadeNotification!.targetSlug).toBe('agent-alpha');
+    expect(r!.cascadeNotification!.notified).toBe(true);
+
+    // Verify the inbox-item landed.
+    const { chits: inbox } = queryChits(corpRoot, {
+      types: ['inbox-item'],
+      scopes: [`agent:agent-alpha` as const],
+    });
+    const cascadeItem = inbox.find((w) => {
+      const f = w.chit.fields as { 'inbox-item'?: { subject?: string } };
+      return f['inbox-item']?.subject?.includes('CASCADE-BLOCKED');
+    });
+    expect(cascadeItem).toBeDefined();
+  });
+
+  it('block cascade on a task with no assignee: transition applies, no inbox fired', () => {
+    const dep = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 'dep', priority: 'normal', workflowStatus: 'failed' } },
+      createdBy: 'founder',
+      status: 'failed',
+    });
+    createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 'orphan-child', priority: 'normal', workflowStatus: 'queued' } } as never,
+      createdBy: 'founder',
+      status: 'draft',
+      dependsOn: [dep.id],
+    });
+    const advance = advanceChain(corpRoot, dep.id);
+    const results = applyChainAdvance(corpRoot, advance, 'system');
+
+    const r = results[0]!;
+    expect(r.transition.applied).toBe(true);
+    expect(r.cascadeNotification).toBeDefined();
+    expect(r.cascadeNotification!.targetSlug).toBeNull();
+    expect(r.cascadeNotification!.notified).toBe(false);
+  });
+
+  it('announce: false suppresses cascade-blocked notification too', () => {
+    const dep = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 'dep', priority: 'normal', workflowStatus: 'failed' } },
+      createdBy: 'founder',
+      status: 'failed',
+    });
+    createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 'child', priority: 'normal', workflowStatus: 'queued', assignee: 'agent-alpha' } } as never,
+      createdBy: 'founder',
+      status: 'draft',
+      dependsOn: [dep.id],
+    });
+    const advance = advanceChain(corpRoot, dep.id);
+    const results = applyChainAdvance(corpRoot, advance, 'system', { announce: false });
+
+    const r = results[0]!;
+    expect(r.transition.applied).toBe(true);
+    // No cascade notification AND no redispatch when announce:false.
+    expect(r.cascadeNotification).toBeUndefined();
+
+    const { chits: inbox } = queryChits(corpRoot, {
+      types: ['inbox-item'],
+      scopes: [`agent:agent-alpha` as const],
+    });
+    expect(inbox).toHaveLength(0);
   });
 
   it('announce: false suppresses inbox but still writes Casket', () => {
