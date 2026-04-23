@@ -177,12 +177,13 @@ describe('cc-cli migrate tasks', () => {
 
     const chitPath = join(env.corpRoot, 'chits', 'task', 'seed-task0.md');
     const raw = readFileSync(chitPath, 'utf-8');
-    // The source task had status=pending, which maps to chit.status=draft
-    // and fields.task.workflowStatus=pending
+    // The source task had status=pending (legacy TaskStatus).
+    // Post-1.3: legacy `pending` → chit.status=`draft` +
+    // fields.task.workflowStatus=`draft` (the 1.3 rename).
     expect(raw).toContain('id: seed-task0');
     expect(raw).toContain('type: task');
     expect(raw).toContain('status: draft');
-    expect(raw).toContain('workflowStatus: pending');
+    expect(raw).toContain('workflowStatus: draft');
   });
 
   it('dry-run reports planned paths without writing or deleting', async () => {

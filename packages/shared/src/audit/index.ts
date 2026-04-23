@@ -30,8 +30,9 @@ export type { AuditPromptInput } from './prompt.js';
 export { scanEvidence } from './evidence.js';
 export type { EvidenceScanResult } from './evidence.js';
 export { parseTranscript } from './transcript.js';
-export { promotePendingHandoff } from './handoff-promotion.js';
+export { promotePendingHandoff, revertTaskFromUnderReview } from './handoff-promotion.js';
 export type {
   HandoffPromotionResult,
   PendingHandoffPayload,
+  RevertUnderReviewResult,
 } from './handoff-promotion.js';

@@ -187,18 +187,31 @@ function validateTask(fields: unknown): void {
   optionalIsoTimestamp(f.dueAt, 'task.dueAt');
   if (f.loopId !== undefined) requireStringOrNull(f.loopId, 'task.loopId');
   if (f.workflowStatus !== undefined && f.workflowStatus !== null) {
+    // Ten-state machine from REFACTOR.md 1.3. See TaskWorkflowStatus
+    // docstring in types/chit.ts for the lifecycle diagram. Legacy
+    // names 'pending' and 'assigned' are NOT accepted here; pre-1.3
+    // chits carrying those names get remapped to 'draft' / 'queued'
+    // via the tasks.ts read-wrapper (deriveTaskStatus) before hitting
+    // this validator on any write path.
     requireEnum(f.workflowStatus, 'task.workflowStatus', [
-      'pending',
-      'assigned',
+      'draft',
+      'queued',
+      'dispatched',
       'in_progress',
       'blocked',
+      'under_review',
       'completed',
+      'rejected',
       'failed',
       'cancelled',
     ] as const);
   }
   if (f.projectId !== undefined) requireStringOrNull(f.projectId, 'task.projectId');
   if (f.teamId !== undefined) requireStringOrNull(f.teamId, 'task.teamId');
+  // Project 1.3 structured step I/O. Null signals "no output captured"
+  // explicitly (distinct from undefined which means "field not present"
+  // on pre-1.3 chits); both are legal.
+  if (f.output !== undefined) requireStringOrNull(f.output, 'task.output');
 }
 
 function validateContract(fields: unknown): void {

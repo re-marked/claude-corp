@@ -93,10 +93,13 @@ describe('buildThinClaudeMd — workspace discipline', () => {
 });
 
 describe('buildThinClaudeMd — the single critical rule', () => {
-  it('Employees see the hand-complete + Stop-hook rule', () => {
+  it('Employees see the done + Stop-hook rule', () => {
+    // `hand-complete` was the REFACTOR.md draft name; shipped as
+    // `cc-cli done` (simpler, matches the agent's natural verb).
+    // Template uses the shipped name; test catches up.
     const out = buildThinClaudeMd(employeeOpts());
     expect(out).toContain('## The single critical rule');
-    expect(out).toMatch(/cc-cli hand-complete/);
+    expect(out).toMatch(/cc-cli done/);
     expect(out).toMatch(/Stop hook will audit/);
   });
 
@@ -120,12 +123,15 @@ describe('buildThinClaudeMd — the single critical rule', () => {
     expect(criticalBlock).not.toMatch(/Never push to main directly/);
   });
 
-  it('Partners do NOT see the hand-complete rule (Employees use that)', () => {
+  it('Partners do NOT see the done rule (Employees use that)', () => {
+    // Shipped name is `cc-cli done` (was `hand-complete` in the
+    // REFACTOR.md draft). Partners use /compact + PreCompact gating;
+    // `done` is the Employee-only per-step handoff signal.
     const out = buildThinClaudeMd(partnerOpts());
     const criticalBlock = out
       .split('## The single critical rule')[1]!
       .split('## ')[0]!;
-    expect(criticalBlock).not.toMatch(/cc-cli hand-complete/);
+    expect(criticalBlock).not.toMatch(/cc-cli done/);
   });
 });
 
@@ -158,7 +164,10 @@ describe('buildThinClaudeMd — @imports (Project 1.1 kind-aware split)', () => 
 
   it("Employee CLAUDE.md explains why they have no soul files + points at CORP.md", () => {
     const out = buildThinClaudeMd(employeeOpts());
-    expect(out).toMatch(/ephemeral role-slot/);
+    // Template wraps the phrase across a line break: "ephemeral\nrole-slots".
+    // Allow optional whitespace / newline between the two words and tolerate
+    // pluralization so minor copy edits don't re-break the assertion.
+    expect(out).toMatch(/ephemeral\s+role-slots?/);
     expect(out).toMatch(/CORP\.md/);
     // The upgrade path must be named so Employees know tame elevates them.
     expect(out).toMatch(/cc-cli tame/);

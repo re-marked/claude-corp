@@ -52,6 +52,7 @@ import {
   casketExists,
   inferKind,
   promotePendingHandoff,
+  revertTaskFromUnderReview,
   type Chit,
   type HookInput,
   type AuditDecision,
@@ -230,6 +231,22 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
   if (decision.decision === 'approve') {
     approveAndMaybePromote(corpRoot, slug);
   } else {
+    // Block: revert the Casket-current task from under_review back to
+    // in_progress via the 1.3 state machine so the agent sees the
+    // right state after they address the audit reason and retry. Best-
+    // effort — logged on failure, never blocks the block emission.
+    try {
+      const revert = revertTaskFromUnderReview(corpRoot, slug);
+      if (revert.reverted || revert.reason) {
+        logAuditDecision(corpRoot, slug, decision, {
+          event: 'block-revert',
+          revertedTaskId: revert.taskId ?? null,
+          revertedReason: revert.reason ?? null,
+        });
+      }
+    } catch (err) {
+      logAuditError(corpRoot, slug, err);
+    }
     emitDecision(decision);
   }
 }
@@ -266,6 +283,21 @@ function approveAndMaybePromote(corpRoot: string, slug: string): void {
             worklogPath: promotion.worklogPath,
             handoffChitId: promotion.handoffChitId,
             closedTaskId: promotion.closedTaskId,
+            // Project 1.3: chain walker deltas surfaced for founder
+            // visibility. dependentsNowReady + cascadedBlocked get
+            // derived from the deltas the walker returned when the
+            // closed task got promoted. Application of the state
+            // transitions named in these deltas is task-watcher /
+            // task-events' responsibility (they own re-dispatch and
+            // Casket pointer updates); this log entry makes the
+            // cascade observable without coupling.
+            chainDeltas: promotion.chainDeltas,
+            dependentsNowReady: promotion.chainDeltas
+              .filter((d) => d.trigger === 'unblock')
+              .map((d) => d.chitId),
+            cascadedBlocked: promotion.chainDeltas
+              .filter((d) => d.trigger === 'block')
+              .map((d) => d.chitId),
             promotionErrors: promotion.errors,
           },
         );

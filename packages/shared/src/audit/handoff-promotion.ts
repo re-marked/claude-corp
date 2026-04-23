@@ -47,7 +47,9 @@ import {
 } from '../chits.js';
 import { advanceCurrentStep, getCurrentStep } from '../casket.js';
 import { atomicWriteSync } from '../atomic-write.js';
-import type { HandoffFields } from '../types/chit.js';
+import { validateTransition, TaskTransitionError } from '../task-state-machine.js';
+import { advanceChain, type DependentDelta } from '../chain.js';
+import type { Chit, HandoffFields, TaskFields } from '../types/chit.js';
 
 export interface PendingHandoffPayload {
   predecessorSession: string;
@@ -69,6 +71,15 @@ export interface HandoffPromotionResult {
   handoffChitId: string | null;
   /** Task chit id that was closed (null when no current task or already terminal). */
   closedTaskId: string | null;
+  /**
+   * Chain-walker deltas from the closed task's close event — dependents
+   * that became newly-ready (trigger: 'unblock') or cascaded to blocked
+   * (trigger: 'block'). Surfaced for audit observability; applying the
+   * state transitions named here is the caller's responsibility (audit
+   * command logs them to `.audit-log.jsonl` for the founder / daemon to
+   * consume when the task-events integration lands).
+   */
+  chainDeltas: readonly DependentDelta[];
   /** Errors encountered mid-promotion (continue anyway; observability only). */
   errors: string[];
 }
@@ -88,6 +99,7 @@ export function promotePendingHandoff(
     worklogPath: null,
     handoffChitId: null,
     closedTaskId: null,
+    chainDeltas: [],
     errors: [],
   };
 
@@ -152,22 +164,46 @@ export function promotePendingHandoff(
     result.errors.push(`create-handoff-chit: ${stringify(err)}`);
   }
 
-  // 4. Close the current task chit as completed. updateChit is used
-  // directly because closeChit's default status behavior assumes the
-  // caller wants `closed` — we want `completed` for "task done per
-  // acceptance criteria." findChitById → verify type → updateChit.
+  // 4. Close the current task chit as completed AND transition the
+  // 1.3 state machine (under_review → completed via audit-approve
+  // trigger) AND capture the handoff's completed[] into
+  // TaskFields.output so downstream chain steps can read what this
+  // step produced without grepping the body. All three happen in one
+  // updateChit so the terminal write is atomic relative to queries.
   if (currentStepId) {
     try {
-      closeTaskAsCompleted(corpRoot, currentStepId, payload.createdBy);
+      closeTaskAsCompleted(corpRoot, currentStepId, payload);
       result.closedTaskId = currentStepId;
     } catch (err) {
       result.errors.push(`close-task: ${stringify(err)}`);
     }
   }
 
-  // 5. Clear Casket. Next session boots idle; 1.3's chain walker
-  // (when it ships) intercepts here to advance to the next chain
-  // step instead.
+  // 5a. Invoke the 1.3 chain walker on the closed task to compute
+  // dependent deltas (unblock for newly-ready chits, block for
+  // cascaded-failure). We surface the deltas via the result so the
+  // caller can log them; we do NOT apply the state transitions here
+  // because the audit-command layer owns that side (it has the
+  // daemon context for re-dispatching, logging, updating other
+  // Caskets). Future commit wires the delta application into
+  // task-events.ts; for now this gives us real audit observability
+  // of the cascade, bridging 1.3's pure primitive to the real flow.
+  if (currentStepId) {
+    try {
+      const advance = advanceChain(corpRoot, currentStepId);
+      result.chainDeltas = advance.dependentDeltas;
+    } catch (err) {
+      result.errors.push(`advance-chain: ${stringify(err)}`);
+    }
+  }
+
+  // 5b. Clear Casket. Next session boots idle. The chain-walker-
+  // aware Casket-advance ("if next ready task is assigned to this
+  // agent, point Casket at it instead of clearing") lands in a
+  // follow-up commit tied to the daemon task-events integration —
+  // doing it here safely requires role-resolver (Project 1.4) since
+  // the walker returns deltas for ALL dependents, not just the
+  // same-agent ones.
   try {
     advanceCurrentStep(corpRoot, agentSlug, null, payload.createdBy);
   } catch (err) {
@@ -249,7 +285,7 @@ function renderWorklogMarkdown(
 function closeTaskAsCompleted(
   corpRoot: string,
   taskChitId: string,
-  updatedBy: string,
+  payload: PendingHandoffPayload,
 ): void {
   const hit = findChitById(corpRoot, taskChitId);
   if (!hit) return;
@@ -258,11 +294,114 @@ function closeTaskAsCompleted(
   // shouldn't double-close a chit that's already in its resting form.
   const terminal = new Set(['completed', 'rejected', 'failed', 'closed']);
   if (terminal.has(hit.chit.status)) return;
+
+  const chit = hit.chit as Chit<'task'>;
+  const currentWs = chit.fields.task.workflowStatus;
+
+  // 1.3 state machine transition. Under normal flow the task is in
+  // 'under_review' (flipped by `cc-cli done` before it wrote the
+  // pending file). In substrate-gap cases (pre-1.3 chits missing
+  // workflowStatus, override paths that bypassed done.ts's
+  // transition, manual Casket pokes) the state may be whatever —
+  // we still want to mark the task completed. Fall back gracefully:
+  //   - workflowStatus present AND state machine accepts
+  //     audit-approve from it → apply the validated next state
+  //     (always 'completed' per the rules table).
+  //   - workflowStatus missing OR state machine rejects → skip the
+  //     workflowStatus update but still close the chit (chit.status
+  //     moves to 'completed' so queries see it as done).
+  // Either way downstream consumers see a completed task.
+  const fieldUpdate: Partial<TaskFields> = {
+    // Capture the agent's completed[] array as the canonical
+    // task-level output. Joined with newlines for human readability;
+    // Blueprint typed-I/O (Project 2.1) can layer a schema on top.
+    // Empty completed[] → empty string, explicitly distinct from
+    // undefined (the agent said 'done' but listed nothing — rare
+    // but legal).
+    output: payload.completed.join('\n'),
+  };
+  if (currentWs) {
+    try {
+      const nextWs = validateTransition(currentWs, 'audit-approve', chit.id);
+      fieldUpdate.workflowStatus = nextWs;
+    } catch (err) {
+      // Leave workflowStatus at whatever it was; chit.status still
+      // flips to 'completed' below. Surface in audit log for the
+      // founder to inspect later — the promotion isn't rolled back
+      // because audit has already decided to approve.
+      if (err instanceof TaskTransitionError) {
+        // Annotate the output so inspectors see the mismatch.
+        fieldUpdate.output = (fieldUpdate.output ?? '') + `\n[note: workflowStatus transition skipped — ${err.message}]`;
+      } else {
+        throw err;
+      }
+    }
+  }
+
   const scope = chitScopeFromPath(corpRoot, hit.path);
   updateChit(corpRoot, scope, 'task', taskChitId, {
     status: 'completed',
-    updatedBy,
+    fields: { task: fieldUpdate } as never,
+    updatedBy: payload.createdBy,
   });
+}
+
+/**
+ * Audit-block counterpart to the approve-path promotion. Called from
+ * audit.ts when a handoff gets blocked; reverts the Casket-current
+ * task's workflowStatus from under_review back to in_progress so the
+ * agent can address the audit reason and retry `cc-cli done`.
+ *
+ * Best-effort — substrate gaps (missing Casket / task chit / pre-1.3
+ * workflowStatus) skip with a logged reason rather than throw, same
+ * fail-open posture as promotePendingHandoff.
+ */
+export interface RevertUnderReviewResult {
+  reverted: boolean;
+  taskId?: string;
+  reason?: string;
+}
+
+export function revertTaskFromUnderReview(
+  corpRoot: string,
+  agentSlug: string,
+): RevertUnderReviewResult {
+  let currentStep: string | null | undefined;
+  try {
+    const cs = getCurrentStep(corpRoot, agentSlug);
+    currentStep = typeof cs === 'string' ? cs : null;
+  } catch (err) {
+    return { reverted: false, reason: `read-casket: ${stringify(err)}` };
+  }
+  if (!currentStep) return { reverted: false, reason: 'no Casket currentStep to revert' };
+
+  const hit = findChitById(corpRoot, currentStep);
+  if (!hit || hit.chit.type !== 'task') {
+    return { reverted: false, reason: `currentStep ${currentStep} did not resolve to a task chit` };
+  }
+  const chit = hit.chit as Chit<'task'>;
+  const ws = chit.fields.task.workflowStatus;
+  if (!ws) {
+    return { reverted: false, taskId: chit.id, reason: 'task has no workflowStatus (pre-1.3)' };
+  }
+
+  let next;
+  try {
+    next = validateTransition(ws, 'audit-block', chit.id);
+  } catch (err) {
+    if (err instanceof TaskTransitionError) {
+      return { reverted: false, taskId: chit.id, reason: err.message };
+    }
+    throw err;
+  }
+
+  const scope = chitScopeFromPath(corpRoot, hit.path);
+  updateChit(corpRoot, scope, 'task', chit.id, {
+    fields: { task: { workflowStatus: next } } as never,
+    updatedBy: agentSlug,
+  });
+
+  return { reverted: true, taskId: chit.id };
 }
 
 function xmlEscape(s: string): string {
