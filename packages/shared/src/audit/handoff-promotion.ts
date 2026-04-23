@@ -48,7 +48,8 @@ import {
 import { advanceCurrentStep, getCurrentStep } from '../casket.js';
 import { atomicWriteSync } from '../atomic-write.js';
 import { validateTransition, TaskTransitionError } from '../task-state-machine.js';
-import { advanceChain, type DependentDelta } from '../chain.js';
+import { advanceChain, nextReadyTask, type DependentDelta } from '../chain.js';
+import { queryChits } from '../chits.js';
 import type { Chit, HandoffFields, TaskFields } from '../types/chit.js';
 
 export interface PendingHandoffPayload {
@@ -197,17 +198,35 @@ export function promotePendingHandoff(
     }
   }
 
-  // 5b. Clear Casket. Next session boots idle. The chain-walker-
-  // aware Casket-advance ("if next ready task is assigned to this
-  // agent, point Casket at it instead of clearing") lands in a
-  // follow-up commit tied to the daemon task-events integration —
-  // doing it here safely requires role-resolver (Project 1.4) since
-  // the walker returns deltas for ALL dependents, not just the
-  // same-agent ones.
+  // 5b. Advance THIS agent's Casket. Project 1.4 closes the 1.3
+  // gap that used to unconditionally clear here:
+  //
+  //   - If the closed task was part of a Contract, walk the
+  //     Contract's taskIds for the next ready step assigned to
+  //     this same agent → point Casket at it, so the next session
+  //     picks up immediately instead of booting idle.
+  //   - Otherwise (task was standalone, OR next step is for
+  //     someone else, OR contract done) → clear Casket to null,
+  //     next session boots idle.
+  //
+  // We do NOT apply cascade deltas here (applyChainAdvance on
+  // dependents of THIS close). task-watcher observes the terminal
+  // close via fs.watch and fires applyChainAdvance there, which is
+  // the single cascade-application point across the corp — firing
+  // it here too would double-notify dependents' assignees (the
+  // shared helper isn't aware of inter-caller dedup).
+  let nextCasketStep: string | null = null;
+  if (currentStepId) {
+    try {
+      nextCasketStep = findNextSameAgentChainStep(corpRoot, currentStepId, agentSlug);
+    } catch (err) {
+      result.errors.push(`next-chain-step: ${stringify(err)}`);
+    }
+  }
   try {
-    advanceCurrentStep(corpRoot, agentSlug, null, payload.createdBy);
+    advanceCurrentStep(corpRoot, agentSlug, nextCasketStep, payload.createdBy);
   } catch (err) {
-    result.errors.push(`clear-casket: ${stringify(err)}`);
+    result.errors.push(`advance-casket: ${stringify(err)}`);
   }
 
   // 6. Delete pending. Even if previous steps errored, the pending
@@ -402,6 +421,47 @@ export function revertTaskFromUnderReview(
   });
 
   return { reverted: true, taskId: chit.id };
+}
+
+/**
+ * Walk the Contract(s) that contain the just-closed task and return
+ * the id of the next ready task assigned to the same agent — the
+ * Casket-advance target. Returns null when:
+ *   - the closed task isn't in any Contract (standalone work)
+ *   - the Contract has no more ready steps
+ *   - the next ready step exists but is assigned to someone else
+ *     (chain ownership passes to a different agent; this agent's
+ *     Casket clears)
+ *
+ * Uses queryChits + nextReadyTask primitives; no new I/O surface
+ * beyond what existed for 1.3. Tie-breaking on multiple contracts
+ * containing the same task: first matching contract wins. In
+ * practice each task belongs to exactly one contract, so the order
+ * doesn't matter for normal corps.
+ */
+function findNextSameAgentChainStep(
+  corpRoot: string,
+  closedStepId: string,
+  agentSlug: string,
+): string | null {
+  const { chits: contracts } = queryChits(corpRoot, {
+    types: ['contract'],
+    limit: 0,
+  });
+  for (const { chit } of contracts) {
+    const taskIds =
+      ((chit.fields as { contract?: { taskIds?: readonly string[] } }).contract?.taskIds) ?? [];
+    if (!taskIds.includes(closedStepId)) continue;
+    const next = nextReadyTask(corpRoot, chit.id, closedStepId);
+    if (!next) continue;
+    const nextAssignee = (next.fields.task as TaskFields).assignee;
+    if (nextAssignee === agentSlug) return next.id;
+    // Next step is for someone else — chain ownership passes; this
+    // agent's Casket should clear, NOT advance to a task they're
+    // not assigned to. Return null explicitly.
+    return null;
+  }
+  return null;
 }
 
 function xmlEscape(s: string): string {
