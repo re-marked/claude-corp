@@ -1144,7 +1144,11 @@ describe('queryChits', () => {
     // Malformed is surfaced in the return value
     expect(result.malformed).toHaveLength(1);
     expect(result.malformed[0].path).toBe(badPath);
-    expect(result.malformed[0].error).toMatch(/missing required chit frontmatter|frontmatter/i);
+    // Any message funneled through the malformed-chit path is fine;
+    // we assert a stable substring that survived the parseChitFile
+    // tightening ("missing/required/frontmatter" all still possible
+    // depending on which validator branch the corruption trips first).
+    expect(result.malformed[0].error).toMatch(/missing|frontmatter|required/i);
     expect(result.malformed[0].timestamp).toMatch(/^\d{4}-/);
 
     // Malformed is also written to the audit log
@@ -1175,6 +1179,137 @@ describe('queryChits', () => {
     seed();
     const result = queryChits(corpRoot);
     expect(result.malformed).toEqual([]);
+  });
+
+  // ─── Codex P1: parseChitFile strict ChitCommon validation ─────────
+  //
+  // Before the fix, parseChitFile only checked id + type. Frontmatter
+  // missing tags / references / dependsOn arrays passed parse and blew
+  // up in matchesFilter (TypeError on .includes()), aborting the whole
+  // queryChits walk. Now every ChitCommon field is validated at parse
+  // time so corruption funnels through the malformed-chit path.
+
+  it('parseChitFile rejects frontmatter missing the required `tags` array', () => {
+    seed();
+    const badPath = join(corpRoot, 'chits', 'task', 'chit-t-notags.md');
+    mkdirSync(dirname(badPath), { recursive: true });
+    // Valid id + type, but missing tags — would've reached matchesFilter
+    // under the old parse and thrown TypeError on chit.tags.includes.
+    writeFileSync(
+      badPath,
+      [
+        '---',
+        'id: chit-t-notags',
+        'type: task',
+        'status: active',
+        'ephemeral: false',
+        'createdBy: ceo',
+        'createdAt: "2026-04-23T00:00:00.000Z"',
+        'updatedAt: "2026-04-23T00:00:00.000Z"',
+        'references: []',
+        'dependsOn: []',
+        'fields:',
+        '  task:',
+        '    title: bad',
+        '    priority: normal',
+        '---',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = queryChits(corpRoot, { types: ['task'] });
+    // Query walk completes without aborting (valid seed tasks still returned).
+    expect(result.chits.length).toBeGreaterThanOrEqual(2);
+    // Malformed surfaces the specific failure.
+    const entry = result.malformed.find((m) => m.path === badPath);
+    expect(entry).toBeDefined();
+    expect(entry!.error).toMatch(/tags/i);
+  });
+
+  it('parseChitFile rejects non-boolean `ephemeral`', () => {
+    const badPath = join(corpRoot, 'chits', 'task', 'chit-t-badephem.md');
+    mkdirSync(dirname(badPath), { recursive: true });
+    writeFileSync(
+      badPath,
+      [
+        '---',
+        'id: chit-t-badephem',
+        'type: task',
+        'status: active',
+        // Number coerces unambiguously to non-boolean. Quoted "yes"
+        // trips YAML 1.1's implicit boolean coercion and would become
+        // true, defeating the point of the test.
+        'ephemeral: 42',
+        'createdBy: ceo',
+        'createdAt: "2026-04-23T00:00:00.000Z"',
+        'updatedAt: "2026-04-23T00:00:00.000Z"',
+        'references: []',
+        'dependsOn: []',
+        'tags: []',
+        'fields:',
+        '  task:',
+        '    title: bad',
+        '    priority: normal',
+        '---',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    const result = queryChits(corpRoot, { types: ['task'] });
+    const entry = result.malformed.find((m) => m.path === badPath);
+    expect(entry).toBeDefined();
+    expect(entry!.error).toMatch(/ephemeral/i);
+  });
+
+  // ─── Codex P2: findChitFiles archive-only type enumeration ────────
+  //
+  // Before the fix, the type-subdirs set was derived only from active
+  // chits/<type>/ directories when the caller omitted an explicit type
+  // filter. A type with no active directory (e.g. all instances closed
+  // + archived) fell out of the includeArchive universe entirely —
+  // audit/history queries silently skipped it.
+
+  it('includeArchive with no explicit type filter finds archive-only types', () => {
+    // Seed nothing in active/ — create a chit file only under _archive
+    // for a type whose active subdir doesn't exist.
+    const archiveTypeDir = join(corpRoot, 'chits', '_archive', 'observation');
+    mkdirSync(archiveTypeDir, { recursive: true });
+    const archivedPath = join(archiveTypeDir, 'chit-o-lonely.md');
+    writeFileSync(
+      archivedPath,
+      [
+        '---',
+        'id: chit-o-lonely',
+        'type: observation',
+        'status: closed',
+        'ephemeral: false',
+        'createdBy: ceo',
+        'createdAt: "2026-04-20T00:00:00.000Z"',
+        'updatedAt: "2026-04-22T00:00:00.000Z"',
+        'references: []',
+        'dependsOn: []',
+        'tags: []',
+        'fields:',
+        '  observation:',
+        '    category: PREFERENCE',
+        '    subject: mark',
+        '    importance: 3',
+        '---',
+        'archived observation body',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    // Caller asks for everything with includeArchive. Observation type
+    // has no active dir, but the archive-only entry MUST surface.
+    const { chits } = queryChits(corpRoot, { includeArchive: true });
+    expect(chits.some((r) => r.chit.id === 'chit-o-lonely')).toBe(true);
+
+    // Sanity: same query without includeArchive doesn't surface it.
+    const { chits: activeOnly } = queryChits(corpRoot);
+    expect(activeOnly.some((r) => r.chit.id === 'chit-o-lonely')).toBe(false);
   });
 });
 

@@ -131,17 +131,22 @@ describe('createInboxItem', () => {
     });
 
     it('references[] carries caller-supplied pointers', () => {
+      // References must match isChitIdFormat — validated at createChit
+      // boundary via validateChitLinks. Legacy word-pair ids (the
+      // pre-chits task naming) are still accepted for migration
+      // compat; we use one here to exercise a real reference target
+      // that passes validation without fabricating a full chit file.
       const chit = createInboxItem({
         corpRoot,
         recipient: 'toast',
         tier: 2,
         from: 'pilot',
-        subject: 'see #eng:abc',
+        subject: 'see brave-panther',
         source: 'channel',
         sourceRef: 'eng',
-        references: ['eng:abc123'],
+        references: ['brave-panther'],
       });
-      expect(chit.references).toEqual(['eng:abc123']);
+      expect(chit.references).toEqual(['brave-panther']);
     });
   });
 

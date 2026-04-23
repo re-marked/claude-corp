@@ -275,8 +275,15 @@ export function readObservationsForDate(agentDir: string, date: Date): string {
   const { chits } = queryChits(corpRoot, {
     types: ['observation'],
     scopes: [`agent:${slug}`],
-    updatedSince: dayStart,
-    updatedUntil: dayEnd,
+    // Slice by creation — "observations on date X" means "written on
+    // that day," not "touched on that day." Lifecycle scanner cooling
+    // bumps updatedAt, so the old updatedSince/updatedUntil pair made
+    // a cooled-today observation vanish from its original day's log
+    // and appear in today's — the daily-log contract broke silently
+    // as chits aged. createdAt is immutable after initial write, so
+    // the day window is stable for the life of the observation.
+    createdSince: dayStart,
+    createdUntil: dayEnd,
     sortBy: 'createdAt',
     sortOrder: 'asc',
     limit: 0,
@@ -381,7 +388,13 @@ export function countRecentObservations(agentDir: string, sinceDaysAgo = 7): num
   const { chits } = queryChits(corpRoot, {
     types: ['observation'],
     scopes: [`agent:${slug}`],
-    updatedSince: cutoff,
+    // "Recent" means authored-in-the-last-N-days, not touched-in-the-
+    // last-N-days. Lifecycle cooling would otherwise falsely inflate
+    // the count with stale observations whose updatedAt got bumped by
+    // the scanner. Dreams read this count to decide whether an agent
+    // has enough fresh material to distill — that call must track
+    // genuine creative activity, not scanner churn.
+    createdSince: cutoff,
     limit: 0,
     // Count every observation in the window regardless of lifecycle state.
     // Dreams use this count to decide whether to schedule an agent; a

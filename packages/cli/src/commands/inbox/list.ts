@@ -65,7 +65,7 @@ export async function cmdInboxList(rawArgs: string[]): Promise<void> {
   }
 
   const scope: ChitScope = `agent:${slug}`;
-  const result = queryChits(corpRoot, {
+  const result = queryChits<'inbox-item'>(corpRoot, {
     types: ['inbox-item'],
     statuses,
     scopes: [scope],
@@ -79,9 +79,14 @@ export async function cmdInboxList(rawArgs: string[]): Promise<void> {
     sortOrder: 'desc',
   });
 
-  const items = (result.chits as Chit<'inbox-item'>[]).filter(
-    (c) => tierFilter === null || c.fields['inbox-item']?.tier === tierFilter,
-  );
+  // .chits are ChitWithBody<'inbox-item'>; pull the payload, then
+  // optionally narrow to tier. The old cast-to-Chit[] access shape
+  // skipped the wrapper and returned [] at runtime.
+  const items = result.chits
+    .map((w) => w.chit)
+    .filter(
+      (c) => tierFilter === null || c.fields['inbox-item']?.tier === tierFilter,
+    );
 
   if (v.json) {
     console.log(JSON.stringify(items, null, 2));
