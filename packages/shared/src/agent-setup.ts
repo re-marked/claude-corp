@@ -45,7 +45,6 @@ import { defaultHeartbeat as heartbeatTemplate } from './templates/heartbeat.js'
 import { defaultRules as rulesTemplate } from './templates/rules.js';
 import { buildThinClaudeMd } from './templates/claude-md.js';
 import { buildHookSettings } from './templates/hook-settings.js';
-import { inferKind } from './wtf-state.js';
 import { createCasketIfMissing } from './casket.js';
 
 export interface AgentSetupOpts {
@@ -231,12 +230,18 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
   // they're stale-but-harmless until 0.7.5 rewire cleans them up on
   // existing workspaces.
   if (templateHarness === 'claude-code') {
-    const kind = inferKind(rank);
+    // Use effectiveKind (opts.kind ?? 'partner'), NOT inferKind(rank).
+    // When a caller hires with an explicit --kind that diverges from
+    // the rank heuristic (e.g. a worker-rank Partner or a lead-rank
+    // Employee), inferring from rank here would produce a CLAUDE.md
+    // whose @imports and hook wiring contradict the workspace layout
+    // provisioned earlier in this same function. Same source of truth,
+    // every branch.
     const corpName = corpRoot.split(/[/\\]/).pop() ?? 'corp';
     writeFileSync(
       join(agentAbsDir, 'CLAUDE.md'),
       buildThinClaudeMd({
-        kind,
+        kind: effectiveKind,
         displayName,
         role: rank,
         corpName,
@@ -253,7 +258,7 @@ export function setupAgentWorkspace(opts: AgentSetupOpts): AgentSetupResult {
     // this is safe to ship ahead of 0.7.3.
     const claudeDir = join(agentAbsDir, '.claude');
     mkdirSync(claudeDir, { recursive: true });
-    const settings = buildHookSettings({ kind, agentSlug: agentName });
+    const settings = buildHookSettings({ kind: effectiveKind, agentSlug: agentName });
     writeFileSync(
       join(claudeDir, 'settings.json'),
       JSON.stringify(settings, null, 2) + '\n',
