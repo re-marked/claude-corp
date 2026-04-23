@@ -169,6 +169,36 @@ describe('handChitToSlot', () => {
     ).toThrow(TaskTransitionError);
   });
 
+  it('P1: rejected transition does NOT leave Casket pointing at the un-handed chit', () => {
+    // Regression for PR #168 review P1: Casket write was happening
+    // before the state machine validation. A rejected transition
+    // from in_progress / blocked / terminal would throw but leave
+    // the target's Casket dirty, so next session boot would pick
+    // up an undispatched task.
+    const taskId = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      fields: { task: { title: 't', priority: 'normal', workflowStatus: 'in_progress', assignee: 'toast' } } as never,
+      createdBy: 'founder',
+      status: 'active',
+    }).id;
+
+    // Pre-state: Casket is empty (createCasketIfMissing set currentStep=null in beforeEach).
+    expect(getCurrentStep(corpRoot, 'toast')).toBeNull();
+
+    expect(() =>
+      handChitToSlot({
+        corpRoot,
+        targetSlug: 'toast',
+        chitId: taskId,
+        handerId: 'founder',
+      }),
+    ).toThrow(TaskTransitionError);
+
+    // Critical invariant: Casket unchanged after the rejected hand.
+    expect(getCurrentStep(corpRoot, 'toast')).toBeNull();
+  });
+
   it('throws TaskTransitionError when task is in terminal state (completed)', () => {
     const taskId = createChit(corpRoot, {
       type: 'task',

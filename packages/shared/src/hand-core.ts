@@ -88,13 +88,23 @@ export function handChitToSlot(opts: HandChitToSlotOpts): HandChitToSlotResult {
     );
   }
 
-  // Casket write first — intermediate failures leave the Casket on a
-  // real (if not-yet-dispatched) chit rather than a stale id.
+  // Validate the task state machine BEFORE writing anything. If the
+  // transition is illegal (in_progress, blocked, terminal), throw
+  // before touching Casket — the previous ordering wrote Casket first,
+  // so a rejected transition left the target's Casket pointing at an
+  // undispatched task the next session would pick up.
+  let taskPlan: { finalWs: TaskWorkflowStatus; isRestamp: boolean } | null = null;
+  if (hit.chit.type === 'task') {
+    taskPlan = computeTaskHandPlan(hit.chit);
+  }
+
+  // Casket write — all validation has passed; safe to commit. Subsequent
+  // write failures leave Casket pointing at a real, hand-eligible chit.
   advanceCurrentStep(corpRoot, targetSlug, chitId, handerId);
 
   let finalWs: TaskWorkflowStatus | null = null;
-  if (hit.chit.type === 'task') {
-    finalWs = transitionTaskToDispatched(corpRoot, hit, targetSlug, handerId);
+  if (taskPlan) {
+    finalWs = applyTaskHandPlan(corpRoot, hit, taskPlan, targetSlug, handerId);
   }
 
   let announced = false;
@@ -119,25 +129,22 @@ export function handChitToSlot(opts: HandChitToSlotOpts): HandChitToSlotResult {
 }
 
 /**
- * Task-specific transition — two-phase when source is `draft`
- * (draft → assign → queued → dispatch → dispatched), one-phase from
- * `queued`, no-op at `dispatched`. Anything else throws
- * TaskTransitionError with the legal-triggers list in its message.
+ * Pure validation pass for the task hand — runs the state-machine
+ * transitions WITHOUT writing. Throws TaskTransitionError on illegal
+ * source state (in_progress, blocked, under_review, terminal). Returns
+ * the computed target state + whether this is an idempotent re-stamp
+ * (currentWs === 'dispatched').
+ *
+ * Split out of applyTaskHandPlan so the caller (handChitToSlot) can
+ * validate before writing Casket — a rejected transition must not
+ * leave the target's Casket pointing at an undispatched chit.
  */
-function transitionTaskToDispatched(
-  corpRoot: string,
-  hit: { chit: Chit; path: string },
-  targetSlug: string,
-  handerId: string,
-): TaskWorkflowStatus {
-  const fields = hit.chit.fields as { task: TaskFields };
+function computeTaskHandPlan(chit: Chit): { finalWs: TaskWorkflowStatus; isRestamp: boolean } {
+  const fields = chit.fields as { task: TaskFields };
   const currentWs: TaskWorkflowStatus = fields.task.workflowStatus ?? 'draft';
-  const now = new Date().toISOString();
 
   if (currentWs === 'dispatched') {
-    // Idempotent re-hand — re-stamp audit trail without changing state.
-    writeTaskUpdate(corpRoot, hit, { assignee: targetSlug, handedBy: handerId, handedAt: now });
-    return 'dispatched';
+    return { finalWs: 'dispatched', isRestamp: true };
   }
 
   const triggerPath: TaskTransitionTrigger[] =
@@ -147,26 +154,44 @@ function transitionTaskToDispatched(
 
   if (triggerPath.length === 0) {
     // Non-terminal-but-not-pre-delivery state (in_progress, blocked,
-    // under_review). Use the state machine's rejection so the error
-    // message carries the legal-triggers list.
-    validateTransition(currentWs, 'dispatch', hit.chit.id);
-    // Unreachable — validateTransition throws for non-legal pairs —
-    // but type-level exhaustiveness.
-    return currentWs;
+    // under_review) or terminal (completed / rejected / failed /
+    // cancelled). The state machine rejects dispatch from all of
+    // those; the throw carries the legal-triggers list in its
+    // message so the CLI surfaces an actionable error.
+    validateTransition(currentWs, 'dispatch', chit.id);
+    // Unreachable — validateTransition threw — but type-level
+    // exhaustiveness demands a return.
+    return { finalWs: currentWs, isRestamp: false };
   }
 
   let ws: TaskWorkflowStatus = currentWs;
   for (const trigger of triggerPath) {
-    ws = validateTransition(ws, trigger, hit.chit.id);
+    ws = validateTransition(ws, trigger, chit.id);
   }
+  return { finalWs: ws, isRestamp: false };
+}
 
-  writeTaskUpdate(corpRoot, hit, {
-    workflowStatus: ws,
+/**
+ * Write-side companion — applies the pre-validated hand plan. Idempotent
+ * re-stamps just refresh handedBy/handedAt without touching workflowStatus;
+ * real transitions write the new workflowStatus alongside the audit stamp.
+ */
+function applyTaskHandPlan(
+  corpRoot: string,
+  hit: { chit: Chit; path: string },
+  plan: { finalWs: TaskWorkflowStatus; isRestamp: boolean },
+  targetSlug: string,
+  handerId: string,
+): TaskWorkflowStatus {
+  const now = new Date().toISOString();
+  const update: Partial<TaskFields> = {
     assignee: targetSlug,
     handedBy: handerId,
     handedAt: now,
-  });
-  return ws;
+  };
+  if (!plan.isRestamp) update.workflowStatus = plan.finalWs;
+  writeTaskUpdate(corpRoot, hit, update);
+  return plan.finalWs;
 }
 
 function writeTaskUpdate(
