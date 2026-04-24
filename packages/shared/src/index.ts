@@ -238,6 +238,13 @@ export type { CreateInboxItemOpts } from './inbox.js';
 export { coerceVarValue, mergeBlueprintVars, BlueprintVarError } from './blueprint-vars.js';
 export type { BlueprintVarValue } from './blueprint-vars.js';
 
+// Blueprint parser — Handlebars expansion layer on top of the vars
+// merge. Strict-mode catches undeclared references; the cast primitive
+// (next commit) consumes ParsedBlueprint directly and has no Handlebars
+// awareness. Pure.
+export { parseBlueprint, BlueprintParseError } from './blueprint-parser.js';
+export type { ParsedBlueprint, ParsedBlueprintStep } from './blueprint-parser.js';
+
 // Role registry — canonical role metadata for Project 1.1's Employee/
 // Partner split. CORP.md renders role-specific sections from these
 // entries; `cc-cli hire --role` validates against them; `cc-cli tame`
