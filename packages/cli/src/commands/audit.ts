@@ -156,15 +156,6 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
 
   const slug = opts.agent;
 
-  // Check override marker FIRST — even before stop_hook_active. If
-  // the founder explicitly unblocked, the agent should exit cleanly
-  // on this very invocation, not wait for an extra turn.
-  if (consumePendingOverride(corpRoot, slug)) {
-    logAuditDecision(corpRoot, slug, { decision: 'approve' }, { reason: 'override-consumed' });
-    approveAndMaybePromote(corpRoot, slug);
-    return;
-  }
-
   const member = resolveMember(corpRoot, slug);
   if (!member) {
     // Unknown agent; substrate gap. Fail-open. Skip promotion — no
@@ -230,6 +221,24 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
     // Do NOT emit AuditDecision JSON — PreCompact's output protocol is
     // raw text merged into the summary prompt, not the {decision,reason}
     // envelope. Emitting both would confuse the summarizer.
+    //
+    // Note: override markers are intentionally NOT consumed on PreCompact
+    // (Codex P1 reviewer catch, PR #170). A founder-issued one-shot
+    // override is meant to unblock the next Stop gate; burning it on a
+    // PreCompact that doesn't even run the gate defeats the intended
+    // one-shot semantics — the subsequent Stop would block again while
+    // the marker was already gone. Consumption moved to AFTER this
+    // branch so only the Stop-gate path clears it.
+    return;
+  }
+
+  // Check override marker — Stop-only. If the founder explicitly
+  // unblocked this agent, exit cleanly on this very invocation without
+  // running the audit engine. PreCompact paths above don't touch the
+  // marker so a one-shot override survives any intervening compactions.
+  if (consumePendingOverride(corpRoot, slug)) {
+    logAuditDecision(corpRoot, slug, { decision: 'approve' }, { reason: 'override-consumed' });
+    approveAndMaybePromote(corpRoot, slug);
     return;
   }
 
