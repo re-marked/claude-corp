@@ -52,7 +52,7 @@
 import { DAEMON_LOG_PATH } from '@claudecorp/shared';
 import { existsSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { log, logError } from '../../logger.js';
-import type { SweeperContext, SweeperResult, SweeperFinding } from './types.js';
+import type { SweeperContext, SweeperResult } from './types.js';
 
 /**
  * Rotate when the log passes 10 MB. Tuned empirically — smaller
@@ -74,8 +74,6 @@ export async function runLogRotation(ctx: SweeperContext): Promise<SweeperResult
   // — future variants might consume Daemon state to decide
   // (e.g., never rotate mid-incident).
   void ctx;
-
-  const findings: SweeperFinding[] = [];
 
   if (!existsSync(DAEMON_LOG_PATH)) {
     return {
@@ -158,16 +156,26 @@ export async function runLogRotation(ctx: SweeperContext): Promise<SweeperResult
 
   log(`[sweeper:log-rotation] rotated ${DAEMON_LOG_PATH} (was ${formatBytes(size)})`);
 
-  findings.push({
-    subject: DAEMON_LOG_PATH,
-    severity: 'info',
-    title: `Rotated daemon log (was ${formatBytes(size)})`,
-    body: `Rotated ${DAEMON_LOG_PATH} from ${formatBytes(size)} to a fresh empty file. Prior contents archived as ${DAEMON_LOG_PATH}.1; older archives shifted down the chain (up to .${MAX_ARCHIVES}). The daemon's next write recreates the live log automatically.`,
-  });
-
+  // Deliberately NO finding on successful rotation. A completed
+  // rotation is a one-shot state CHANGE, not an ongoing problem —
+  // the kink model is "something is wrong RIGHT NOW," and a
+  // just-rotated log is the system working correctly.
+  //
+  // If we emitted a finding, each rotation would create a new
+  // active kink (closed kinks don't participate in dedup, per the
+  // writeOrBumpKink contract). Over weeks of uptime the kink queue
+  // would accumulate rotation history that Sexton can't resolve
+  // (the thing it describes already happened and is fine). The
+  // summary below + the daemon log line above are the persistent
+  // record; the runner's auto-resolve path correctly closes any
+  // prior error-case rotation kink on this successful run.
+  //
+  // Error cases above DO emit findings — those represent an active
+  // bad state (archive chain in intermediate state) that wants
+  // attention until the next successful rotation clears it.
   return {
     status: 'completed',
-    findings,
+    findings: [],
     summary: `log-rotation: rotated ${formatBytes(size)} → fresh log.`,
   };
 }
