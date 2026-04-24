@@ -686,14 +686,13 @@ async function run() {
       });
       break;
     }
-    case 'blueprint':
-    case 'blueprints': {
+    case 'blueprint': {
+      // Project 1.8: blueprint became a chit-type + a subcommand group
+      // (new / list / show / validate / cast). The dispatcher parses
+      // its own flags from raw argv — the top-level cli stays thin,
+      // same pattern as hand / escalate / chit / inbox.
       const { cmdBlueprint } = await import('./commands/blueprint.js');
-      await cmdBlueprint({
-        action: positionals[1] as string | undefined,
-        name: values.name as string | undefined,
-        json: !!values.json,
-      });
+      await cmdBlueprint(process.argv.slice(3));
       break;
     }
     case 'projects': {
