@@ -19,7 +19,7 @@
  * response bodies without any additional orchestration.
  */
 
-import { createChit } from '@claudecorp/shared';
+import { writeOrBumpKink } from '@claudecorp/shared';
 import type { Daemon } from '../../daemon.js';
 import { log, logError } from '../../logger.js';
 import { SWEEPER_REGISTRY, parseSweeperName, SWEEPER_NAMES } from './registry.js';
@@ -107,37 +107,28 @@ export async function runSweeper(
 }
 
 /**
- * Convert a SweeperFinding into a kink chit. Scope is `corp`
- * (operational kinks belong at the corp level, not per-agent —
- * they're about what's happening in the corp as a whole).
- * createdBy uses the sweeper-name-prefixed id `sweeper:<name>`;
- * the same string lands in fields.kink.source so queries by
- * source work without depending on createdBy.
+ * Project a SweeperFinding onto the shared writeOrBumpKink helper.
+ * The helper owns dedup logic — if an existing active kink matches
+ * (source, subject), it increments occurrenceCount and refreshes
+ * severity/title/body instead of creating a duplicate. This is
+ * what keeps agentstuck from filing 60 identical kinks when the
+ * same 5 slots stay stuck across an hour of patrols.
  *
- * Deduplication is NOT handled here yet — this initial version
- * always creates a new kink per finding. Dedup (looking up an
- * existing active kink with matching source+subject and bumping
- * occurrenceCount instead) lands in the next commit.
+ * Scope is `corp` (enforced by the helper) — operational kinks
+ * belong at the corp level, not per-agent. createdBy + source
+ * both use `sweeper:<name>` so queries filter either way.
  */
 function writeSweeperKink(
   daemon: Daemon,
   sweeperName: SweeperName,
   finding: SweeperFinding,
 ): void {
-  const source = `sweeper:${sweeperName}`;
-  createChit(daemon.corpRoot, {
-    type: 'kink',
-    scope: 'corp',
-    createdBy: source,
-    fields: {
-      kink: {
-        source,
-        subject: finding.subject,
-        severity: finding.severity,
-        title: finding.title,
-        occurrenceCount: 1,
-      },
-    },
+  writeOrBumpKink({
+    corpRoot: daemon.corpRoot,
+    source: `sweeper:${sweeperName}`,
+    subject: finding.subject,
+    severity: finding.severity,
+    title: finding.title,
     body: finding.body,
   });
 }

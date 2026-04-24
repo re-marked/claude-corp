@@ -244,6 +244,17 @@ export {
 export { createInboxItem, TIER_TTL } from './inbox.js';
 export type { CreateInboxItemOpts } from './inbox.js';
 
+// Kink helpers — dedup-aware write + auto-resolve for the kink chit
+// type. Sweepers use these instead of raw createChit; future daemon-
+// internal detectors (boot-time misconfig, harness anomalies) can too.
+export { writeOrBumpKink, resolveKink } from './kinks.js';
+export type {
+  WriteOrBumpKinkOpts,
+  WriteOrBumpKinkResult,
+  ResolveKinkOpts,
+  KinkResolution,
+} from './kinks.js';
+
 // Blueprint var merge + coerce — Project 1.8 PR 2. Bridges CLI-shaped
 // string inputs to the typed Handlebars context the parser needs.
 // Pure; no Handlebars dependency (that lives in blueprint-parser.ts).
