@@ -1494,38 +1494,89 @@ Each blueprint tested by cooking into a Contract and walking it end-to-end.
 - Respawn via process-manager on silent-exit.
 - Redistribute via `cc-cli hand` + 1.4's role-resolver.
 - Circuit-break (pause dispatches to a crash-looping slot) — integrates with 1.11's budget governor.
+- **Flip an agent's model** (e.g. opus → sonnet) when she observes sustained trivial work. Reversible; she flips back if task complexity rises again.
+- **Throttle a clock** when it fires frequently with no meaningful state change between ticks. Reversible; un-throttles if the clock starts producing signal again.
 - Page founder via Tier 3 inbox-item — her voice, her judgment about when it matters.
 
-**Helpers — mostly code, a few AI.** Each concern is its own helper. Code for deterministic work; AI only where reasoning is required:
-- `session-gc` (code) — kill long-dead tmux / subprocess leftovers.
-- `phantom-cleanup` (code) — members.json ↔ workspace mismatches.
-- `chit-hygiene` (code) — orphan chits, malformed frontmatter, validator sweeps.
-- `log-rotation` (code) — rotate + prune.
-- `shutdown-dances` (code) — deterministic state machine for graceful agent shutdowns.
-- `conflict-triage` (AI, short-lived) — called by `chit-hygiene` when a chit is ambiguous (delete or archive?). Founder-escalation fallback if it can't decide.
+**Sweepers — Sexton's workers.** Single-purpose modules invoked by Sexton on her patrol cycle. Each reports findings via observation chits; Sexton reads the trail, judges, escalates when needed. Split: Sexton holds identity + judgment; sweepers do the mechanical work. The naming replaces Gas Town's "Dogs" — sexton-with-sweepers fits the caretaker register, sexton-with-dogs is incongruous.
+
+Shipped sweepers (code by default; `conflict-triage` is the sole AI-by-default):
+- `session-gc` — orphan processes, dead tmux panes, subprocess leftovers
+- `phantom-cleanup` — reconcile members.json ↔ workspace directories
+- `chit-hygiene` — malformed frontmatter, orphan references, missing required fields
+- `log-rotation` — rotate past size limits, prune archives
+- `agentstuck` — Caskets whose currentStep hasn't advanced in N minutes
+- `silentexit` — sessions that died without clean shutdown; respawn within retry budget
+- `orphantask` — task chits with no assignee, not blocked, stuck in limbo
+- `sandbox-ttl` — enforce project sandbox TTLs; archive or cleanup
+- `breaker-reset` — circuit breakers past cooldown; clear if cause resolved
+- `budget-watch` — per-agent token spend; warn on daily-cap approach
+- `model-tuner` — sample recent task complexity vs agent's current model; flag over-provisioned agents so Sexton can flip them down
+- `clock-watcher` — sample clock tick frequency vs downstream state deltas; flag low-signal clocks so Sexton can throttle them
+- `shutdown-dances` — deterministic graceful-shutdown state machine for agents
+- `conflict-triage` (AI) — called by `chit-hygiene` on ambiguous chits
+
+Code sweepers don't bacteria-scale (one module handling a queue is fine). AI sweepers do — under load, bacteria splits spawn additional instances, matching 1.10's semantics.
+
+**Sweepers are blueprints.** A sweeper IS a blueprint chit with `fields.blueprint.kind: sweeper` (vs the default `kind: contract` used by 1.8's Contract-casting). Code sweepers ship as blueprints whose steps carry a `moduleRef: <name>` — cast resolves to a native code invocation. AI sweepers carry regular prompt-based steps that cast into AI agent dispatches. Same blueprint primitive, same parse / validate / lookup pipeline shipped in 1.8; different output at the chit-write step.
+
+Contract-blueprints cast to Contract + Task chits via `castFromBlueprint` (shipped in 1.8, unchanged). Sweeper-blueprints cast to sweeper-run chits via a sibling `castSweeperFromBlueprint` — same parser, same var coercion, same role machinery — diverging at step 7 (chit write). A sweeper-run chit is ephemeral (auto-closes after TTL): carries blueprint id, trigger context, observations produced, final decision. Sexton's patrol loop scans open sweeper-runs to track in-flight work; closed ones feed dreams for pattern synthesis.
+
+**`cc-cli sweeper new --prompt "..."` — authoring AI sweepers on demand.** The capability that lets Sexton grow the corp's immune response instead of being fixed-function. Founder-invoked in v1.
+
+1. `cc-cli sweeper new --prompt "<describe what to sweep for and when>"`.
+2. Generator is one Claude call with blueprint schema + shipped sweeper library as reference. Output: draft blueprint chit, `kind: sweeper`.
+3. Validate via 1.8's existing `cc-cli blueprint validate` — structural errors fail; sound sweepers promote to active.
+4. First N runs surface observations to founder for review; after approval threshold the sweeper runs autonomously.
+5. `cc-cli sweeper list` + `cc-cli sweeper close <id>` for lifecycle — same as any chit.
+
+Sexton-invoke (she calls the same CLI from within her session once she's noticed a pattern no existing sweeper handles) lands in a second iteration. Per-corp cap (default 10 active auto-authored) prevents runaway; cap hit → Sexton escalates "I want a new sweeper but I'm at cap, which existing one should I retire?" Destructive actions (delete, archive, close) always require per-sweeper explicit founder approval on first trigger regardless of authoring path.
+
+Stability boundary sits at the destructive-action boundary and the first-N-runs boundary, NOT at generation. Generation is cheap and reversible — a bad blueprint fails validate and doesn't promote; any sweeper is a chit that can be closed.
+
+**Sexton as corp accountant.** Beyond "keeps the corp alive," Sexton manages its running cost. Two optimization actions she takes on top of the survival layer:
+
+- **Model right-sizing.** The `model-tuner` sweeper samples recent task complexity against each agent's current model. When an agent has sustained a run of trivial-to-small tasks on Opus, Sexton flips them to Sonnet ("Toast has completed 12 consecutive tasks at `complexity: trivial` over the past 4 hours — downgrading opus → sonnet; will revert if task complexity rises"). Reversible on her next observation cycle if complexity climbs. First flip per agent surfaces for founder approval; after threshold, autonomous.
+- **Clock throttling.** The `clock-watcher` sweeper samples clock tick frequency against the state deltas those ticks produce. A clock firing every 5 min that hasn't caused a meaningful change in N cycles gets throttled to 15 min, or 30, or paused until a trigger re-wakes it. Same reversal + approval pattern.
+
+This matters because the corp runs for money. Without Sexton watching costs, a single over-provisioned agent or chatty clock can drain wallet overnight while Mark sleeps. The unkillability thesis is necessary but not sufficient — a corp that survives but drains its founder's budget isn't a corp that runs "on its own" in any meaningful sense. Sexton closes that gap.
+
+Hard caps + crash-loop breaker stay in 1.11 — that's emergency braking, not optimization. Sexton handles the soft layer (spend awareness + judgment) where 1.11 handles the hard layer (cap enforcement + shutoff).
 
 **File paths:**
 - `packages/daemon/src/watchdog/pulse.ts` (reshape — was `heartbeat.ts`; now just fires Alarum)
 - `packages/daemon/src/watchdog/alarum.ts` (new — spawns the ephemeral triage agent each tick)
-- `packages/daemon/src/watchdog/sexton.ts` (new — Sexton's session management + patrol scheduler)
-- `packages/daemon/src/watchdog/helpers/session-gc.ts`, `phantom-cleanup.ts`, `chit-hygiene.ts`, `log-rotation.ts`, `shutdown-dances.ts`, `conflict-triage.ts` (new)
-- `packages/shared/src/blueprints/patrol/*.md` (new directory — patrol Blueprints live alongside the parser)
+- `packages/daemon/src/watchdog/sexton.ts` (new — Sexton's session management + patrol scheduler + sweeper dispatch)
+- `packages/daemon/src/watchdog/sweepers/*.ts` (new — one file per code sweeper: session-gc, phantom-cleanup, chit-hygiene, log-rotation, agentstuck, silentexit, orphantask, sandbox-ttl, breaker-reset, budget-watch, model-tuner, clock-watcher, shutdown-dances, conflict-triage)
+- `packages/shared/src/blueprints/sweeper/*.md` (new directory — shipped sweeper blueprints; code sweepers reference their module via `moduleRef` in frontmatter)
+- `packages/shared/src/blueprints/patrol/*.md` (new directory — patrol blueprints live alongside sweeper blueprints)
+- `packages/shared/src/blueprint-cast.ts` (extend — add `castSweeperFromBlueprint` sibling primitive that reuses parse / var / role machinery and diverges at step 7 to produce sweeper-run chits)
+- `packages/shared/src/types/chit.ts` (add `SweeperRunFields` shape + `kind: 'contract' | 'sweeper'` discriminator on `BlueprintFields`)
+- `packages/shared/src/chit-types.ts` (register `sweeper-run` chit type with validator + ephemeral lifecycle)
+- `packages/cli/src/commands/sweeper/*.ts` (new — `new`, `list`, `show`, `close` subcommands mirroring blueprint CLI; `new` invokes the generator that turns a prompt into a draft sweeper blueprint)
 - `packages/shared/src/roles.ts` (rename `failsafe` → `sexton`; reshape role description + SOUL material)
-- `packages/shared/src/templates/soul-sexton.ts` (new — Sexton's soul extends the universal SOUL with caretaker-of-continuity material)
+- `packages/shared/src/templates/soul-sexton.ts` (new — Sexton's soul extends the universal SOUL with caretaker-of-continuity + corp-accountant material)
 - `packages/daemon/src/tick-budget.ts` (new — shared 15-second budget helper used by Sexton's patrols)
 - OS supervisor service configs (new): `cc-cli init` writes one of `systemd/claudecorp-daemon.service`, `launchd/com.claudecorp.daemon.plist`, Windows Task Scheduler XML
 
 **Test strategy:**
 - Unit: Alarum decision ladder — session dead → start; heartbeat stale → nudge; fresh → nothing.
-- Unit: Sexton patrol Blueprint cooks cleanly into a Contract (uses 1.8's cook primitive).
-- Integration: `kill -9` an agent mid-task. Within 1-2 min, Sexton's next patrol detects the Casket-orphaned state, respawns via process-manager, agent resumes from their handoff chit.
+- Unit: Sexton patrol blueprint casts cleanly via `castFromBlueprint` (patrol = Contract).
+- Unit: sweeper blueprint casts cleanly via `castSweeperFromBlueprint` — produces a sweeper-run chit with the right fields; reuses parse / var / role pipeline identically to contract-casting.
+- Unit: `cc-cli sweeper new --prompt "..."` generates a structurally-valid draft blueprint; validate passes; promotion to active lands.
+- Unit: destructive-action gate — sweeper attempting delete/archive/close on first trigger gates for founder approval; approval persists per-sweeper; subsequent triggers autonomous.
+- Unit: per-corp auto-authored cap — 11th sweeper authoring request returns cap-hit + "which to retire" escalation.
+- Unit: `model-tuner` sweeper — 12 consecutive trivial-complexity tasks on opus triggers a downgrade proposal; 3 consecutive large-complexity tasks on sonnet triggers an upgrade proposal.
+- Unit: `clock-watcher` sweeper — N ticks with zero downstream state delta triggers throttle proposal; first-delta resets the counter.
+- Integration: `kill -9` an agent mid-task. Within 1-2 min, Sexton's next patrol detects via `agentstuck` + `silentexit` sweepers, respawns via process-manager, agent resumes from their handoff chit.
 - Integration: `kill -9` the daemon. OS supervisor restarts it. Pulse ticks. Alarum spawns. Sexton's handoff chit is consumed; she resumes patrols.
 - Integration: Sexton session dies mid-patrol. On next Pulse tick, Alarum detects her session is dead, spawns a fresh Sexton. She reads her handoff chit + resumes.
-- Integration: `conflict-triage` AI helper called on an ambiguous orphan chit — resolves to archive or escalates to founder with reasoning.
-- Observability: each layer logs clearly — `[pulse] tick #42`, `[alarum] decision: wake sexton`, `[sexton] patrol health-check started (blueprint chit-b-abc)`, `[helper:session-gc] cleaned 3 orphan sessions`.
+- Integration: `conflict-triage` AI sweeper called on an ambiguous orphan chit — resolves to archive or escalates to founder with reasoning.
+- Integration: founder authors a sweeper via `cc-cli sweeper new --prompt`. First 3 runs surface findings for review; on 3rd approval the sweeper flips autonomous.
+- Observability: each layer logs clearly — `[pulse] tick #42`, `[alarum] decision: wake sexton`, `[sexton] dispatched sweeper chit-hygiene`, `[sweeper:chit-hygiene] flagged 2 orphan chits`, `[sexton] authored sweeper stale-review-timeout from founder prompt`, `[sexton] model-tuner proposed toast: opus → sonnet (12 trivial tasks over 4h)`.
 
-**Depends on:** 0.1 (Chit), 1.2 (Casket), 1.4 (role-resolver for Sexton's redistribute action), 1.6 (handoff chit for Sexton's continuity across sessions), 1.8 (Blueprint-as-molecule — Sexton's patrols ARE Blueprints).
-**PRs:** 5-6.
+**Depends on:** 0.1 (Chit), 1.2 (Casket), 1.4 (role-resolver for Sexton's redistribute action), 1.6 (handoff chit for Sexton's continuity across sessions), 1.8 (Blueprint-as-molecule — Sexton's patrols + sweepers ARE blueprints).
+**PRs:** 7-8 (bumped from 5-6 to accommodate sweeper substrate, authoring flow, and corp-accountant sweepers).
 
 ### 1.10 — Auto-scaling Employee pool (bacteria)
 
