@@ -682,6 +682,7 @@ async function run() {
         blueprint: values.blueprint as string | undefined,
         status: values.status as string | undefined,
         id: values.id as string | undefined,
+        from: values.from as string | undefined,
         json: !!values.json,
       });
       break;
