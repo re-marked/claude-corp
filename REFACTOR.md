@@ -1487,7 +1487,7 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 
 ```
 OS supervisor (systemd / launchd / Task Scheduler)
-    ↓ restarts daemon if killed — shipped via `cc-cli init` as service config
+    ↓ restarts daemon if killed — installed via `cc-cli daemon install-service` (PR #178)
 Daemon (Node.js, dumb transport)
     ↓ Pulse tick every N min
 Pulse (code, tiny — just fires Alarum)
