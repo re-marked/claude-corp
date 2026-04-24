@@ -73,6 +73,11 @@ describe('CHIT_TYPES registry invariants', () => {
     // promoted, active → closed|burning. Cast via
     // castSweeperFromBlueprint produces one of these per dispatch.
     'sweeper-run',
+    // Project 1.9.5: kink — operational finding emitted by sweepers
+    // (and future daemon-internal detectors). Distinct channel from
+    // observations so soul material stays soul material. Ephemeral
+    // 7d TTL, destroy-if-not-promoted; dedup per (source, subject).
+    'kink',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {
