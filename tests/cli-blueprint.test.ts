@@ -523,4 +523,58 @@ describe('cc-cli blueprint cast', () => {
     expect(stderr).toContain('--vars');
     expect(stderr).toMatch(/key=value/);
   });
+
+  it('--vars k=v flows through to cast-time Handlebars expansion', async () => {
+    // Seed an active blueprint with a declared var + a Handlebars-ref
+    // step title. Then cast with --vars and verify the resulting Task
+    // title has the caller's value substituted in. Proves the CLI's
+    // key=value parsing reaches castFromBlueprint intact AND that
+    // Handlebars expansion happens end-to-end through the cc-cli path.
+    await runCli(['blueprint', 'new', 'vars-flow'], { env: env.homeEnv });
+    const blueprintDir = join(env.corpRoot, 'chits', 'blueprint');
+    const file = readdirSync(blueprintDir)[0]!;
+    const path = join(blueprintDir, file);
+
+    const { readFileSync } = await import('node:fs');
+    const original = readFileSync(path, 'utf-8');
+    // Splice in a var declaration + reference it from the step title.
+    // The YAML frontmatter order matters less than structural
+    // correctness; we're injecting into the one-step scaffold.
+    const patched = original
+      .replace(/assigneeRole: null/, 'assigneeRole: ceo')
+      .replace(/vars: \[\]/, "vars:\n    - { name: feature, type: string }")
+      .replace(
+        /title: First step \(edit me\)/,
+        "title: Ship {{feature}}",
+      );
+    writeFileSync(path, patched, 'utf-8');
+
+    const val = await runCli(['blueprint', 'validate', 'vars-flow'], {
+      env: env.homeEnv,
+    });
+    if (val.exitCode !== 0) {
+      throw new Error(
+        `validate failed in --vars test: ${val.stdout}\n${val.stderr}`,
+      );
+    }
+
+    const { exitCode, stdout } = await runCli(
+      [
+        'blueprint',
+        'cast',
+        'vars-flow',
+        '--scope',
+        'corp',
+        '--vars',
+        'feature=fire',
+        '--json',
+      ],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.tasks).toHaveLength(1);
+    expect(parsed.tasks[0].title).toBe('Ship fire');
+  });
 });
