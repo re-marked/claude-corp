@@ -37,4 +37,8 @@ export async function cmdInit(opts: { name: string; user: string; theme: string 
 
   console.log(`\nCorporation "${opts.name}" ready.`);
   console.log(`Start the daemon: claudecorp-cli start`);
+  console.log(``);
+  console.log(`For the daemon to auto-restart on crash + auto-start on login,`);
+  console.log(`run: cc-cli daemon install-service`);
+  console.log(`(writes an OS-supervisor config; you then run one command to activate it)`);
 }
