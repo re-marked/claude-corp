@@ -81,7 +81,7 @@ ExecStart=/bin/bash -lc '${safeCommand}'
 Restart=always
 RestartSec=5
 # Cap restart loops — if startup fails 5 times in 60s, give up and
-# leave the service in `failed` state (visible via systemctl --user
+# leave the service in failed state (visible via systemctl --user
 # status claudecorp-daemon). A healthy daemon won't hit this.
 StartLimitBurst=5
 StartLimitIntervalSec=60
