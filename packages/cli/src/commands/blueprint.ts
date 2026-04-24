@@ -48,6 +48,16 @@ export async function cmdBlueprint(rawArgs: string[]): Promise<void> {
       await cmdBlueprintShow(subArgs);
       break;
     }
+    case 'validate': {
+      const { cmdBlueprintValidate } = await import('./blueprint/validate.js');
+      await cmdBlueprintValidate(subArgs);
+      break;
+    }
+    case 'cast': {
+      const { cmdBlueprintCast } = await import('./blueprint/cast.js');
+      await cmdBlueprintCast(subArgs);
+      break;
+    }
     default: {
       console.error(`Unknown blueprint subcommand: ${subcommand}`);
       console.error('');
