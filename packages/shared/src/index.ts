@@ -54,6 +54,7 @@ export type {
   BlueprintFields,
   BlueprintStep,
   BlueprintVar,
+  SweeperRunFields,
 } from './types/index.js';
 
 // Parsers
@@ -264,6 +265,16 @@ export { castFromBlueprint, BlueprintCastError } from './blueprint-cast.js';
 export type {
   CastFromBlueprintOpts,
   CastFromBlueprintResult,
+} from './blueprint-cast.js';
+
+// Sweeper cast — Project 1.9. Sibling to castFromBlueprint for
+// kind=sweeper blueprints. Produces one sweeper-run chit (vs Contract
+// + Tasks). Shares the parse / status pipeline; diverges at chit
+// write. See blueprint-cast.ts module docstring for the rationale.
+export { castSweeperFromBlueprint } from './blueprint-cast.js';
+export type {
+  CastSweeperFromBlueprintOpts,
+  CastSweeperFromBlueprintResult,
 } from './blueprint-cast.js';
 
 // Blueprint lookup — Project 1.8 PR 3. Centralizes name → chit resolution
