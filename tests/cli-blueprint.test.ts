@@ -7,6 +7,7 @@ import {
   mkdirSync,
   writeFileSync,
   readdirSync,
+  readFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -576,5 +577,192 @@ describe('cc-cli blueprint cast', () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.tasks).toHaveLength(1);
     expect(parsed.tasks[0].title).toBe('Ship fire');
+  });
+
+  it('--step-role stepId=roleId fills null assigneeRole on the resolved Task', async () => {
+    // Seed a blueprint with assigneeRole: null + use --step-role to
+    // resolve at cast time. Proves the CLI's parseKeyValuePairs for
+    // --step-role threads through to castFromBlueprint's
+    // stepRoleOverrides param.
+    await runCli(['blueprint', 'new', 'role-fill'], { env: env.homeEnv });
+    const blueprintDir = join(env.corpRoot, 'chits', 'blueprint');
+    const file = readdirSync(blueprintDir)[0]!;
+    const path = join(blueprintDir, file);
+    const { readFileSync } = await import('node:fs');
+    const content = readFileSync(path, 'utf-8');
+    // Don't replace the null — that's the whole point; --step-role
+    // fills it at cast time. Just need step id to be deterministic
+    // (scaffold uses 'step-1').
+    writeFileSync(path, content, 'utf-8');
+
+    const val = await runCli(['blueprint', 'validate', 'role-fill'], {
+      env: env.homeEnv,
+    });
+    if (val.exitCode !== 0) {
+      throw new Error(`validate failed: ${val.stdout}\n${val.stderr}`);
+    }
+
+    const { exitCode, stdout } = await runCli(
+      [
+        'blueprint',
+        'cast',
+        'role-fill',
+        '--scope',
+        'corp',
+        '--step-role',
+        'step-1=ceo',
+        '--json',
+      ],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.tasks[0].assignee).toBe('ceo');
+  });
+
+  it('--lead + --deadline contract overrides land on the Contract chit', async () => {
+    await prepareActiveBlueprint('lead-deadline');
+
+    const { exitCode, stdout } = await runCli(
+      [
+        'blueprint',
+        'cast',
+        'lead-deadline',
+        '--scope',
+        'corp',
+        '--lead',
+        'herald',
+        '--deadline',
+        '2026-12-31T00:00:00Z',
+        '--json',
+      ],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.contract.id).toMatch(/^chit-c-/);
+    // --json output shape carries blueprint + contract + tasks; to
+    // verify lead + deadline landed on the Contract we read it back
+    // via blueprint show's JSON-surface equivalent. Simpler: re-read
+    // the contract chit directly from disk.
+    const contractDir = join(env.corpRoot, 'chits', 'contract');
+    const contractFile = readdirSync(contractDir)[0]!;
+    const contractContent = readFileSync(
+      join(contractDir, contractFile),
+      'utf-8',
+    );
+    // Match frontmatter shape loosely — YAML may quote ISO timestamps,
+    // and leadId may or may not be quoted depending on serializer.
+    expect(contractContent).toMatch(/leadId:\s*['"]?herald['"]?/);
+    expect(contractContent).toMatch(/deadline:\s*['"]?2026-12-31T00:00:00Z['"]?/);
+  });
+});
+
+// ─── --scope collision (PR #173 P2 regression) ─────────────────────
+
+describe('cc-cli blueprint validate --scope — collision handling', () => {
+  let env: ReturnType<typeof setupTempCorp>;
+
+  beforeEach(() => {
+    env = setupTempCorp();
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('validate --scope targets the correct scope when the name exists in multiple scopes', async () => {
+    // Reviewer catch (PR #173 P2): `validate --scope X` ignored the
+    // hint and resolved via default, so in collision cases it would
+    // promote the wrong chit. This test:
+    //   1. Seeds two drafts with the same name, one at corp, one
+    //      at project:demo, via direct createChit (the CLI's `new`
+    //      would reject a same-scope duplicate but cross-scope is
+    //      legitimate per the scope-precedence design).
+    //   2. Validates with `--scope project:demo`.
+    //   3. Confirms ONLY the project-scope draft became active;
+    //      the corp-scope one remains draft.
+    //
+    // Because `cc-cli blueprint new` can't easily seed a draft at
+    // project scope without a project directory existing, we mkdir
+    // the path manually; createChit handles the scope tagging.
+    mkdirSync(join(env.corpRoot, 'projects', 'demo'), { recursive: true });
+
+    // Seed corp-scope draft via CLI new.
+    await runCli(['blueprint', 'new', 'collide'], { env: env.homeEnv });
+
+    // Seed project-scope draft via the CLI too, using --scope.
+    // cc-cli blueprint new does support --scope.
+    await runCli(
+      ['blueprint', 'new', 'collide', '--scope', 'project:demo'],
+      { env: env.homeEnv },
+    );
+
+    // Sanity — both drafts exist.
+    const list = await runCli(['blueprint', 'list', '--all', '--json'], {
+      env: env.homeEnv,
+    });
+    const beforeRows = JSON.parse(list.stdout);
+    expect(beforeRows.filter((r: { name: string }) => r.name === 'collide')).toHaveLength(2);
+
+    // Validate with --scope project:demo — should promote ONLY the
+    // project-scope chit.
+    const val = await runCli(
+      ['blueprint', 'validate', 'collide', '--scope', 'project:demo'],
+      { env: env.homeEnv },
+    );
+    expect(val.exitCode).toBe(0);
+    expect(val.stdout).toContain('promoted');
+
+    // Verify: project-scope row is active, corp-scope row is still draft.
+    const list2 = await runCli(['blueprint', 'list', '--all', '--json'], {
+      env: env.homeEnv,
+    });
+    const afterRows = JSON.parse(list2.stdout);
+    const projectRow = afterRows.find(
+      (r: { name: string; scope: string }) =>
+        r.name === 'collide' && r.scope === 'project:demo',
+    );
+    const corpRow = afterRows.find(
+      (r: { name: string; scope: string }) =>
+        r.name === 'collide' && r.scope === 'corp',
+    );
+    expect(projectRow.status).toBe('active');
+    expect(corpRow.status).toBe('draft');
+  });
+});
+
+// ─── list --scope filter (test gap) ─────────────────────────────────
+
+describe('cc-cli blueprint list --scope', () => {
+  let env: ReturnType<typeof setupTempCorp>;
+
+  beforeEach(() => {
+    env = setupTempCorp();
+  });
+
+  afterEach(() => {
+    env.cleanup();
+  });
+
+  it('--scope filters the listing to exactly that scope', async () => {
+    mkdirSync(join(env.corpRoot, 'projects', 'demo'), { recursive: true });
+
+    await runCli(['blueprint', 'new', 'only-corp'], { env: env.homeEnv });
+    await runCli(
+      ['blueprint', 'new', 'only-project', '--scope', 'project:demo'],
+      { env: env.homeEnv },
+    );
+
+    const { exitCode, stdout } = await runCli(
+      ['blueprint', 'list', '--scope', 'project:demo', '--all', '--json'],
+      { env: env.homeEnv },
+    );
+    expect(exitCode).toBe(0);
+    const rows = JSON.parse(stdout);
+    // Only one row, the project-scope blueprint.
+    expect(rows).toHaveLength(1);
+    expect(rows[0].name).toBe('only-project');
+    expect(rows[0].scope).toBe('project:demo');
   });
 });
