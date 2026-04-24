@@ -41,7 +41,35 @@ import type { ServiceOpts, ServiceArtifact } from './types.js';
  * journal via default systemd stdout/stderr capture; the user reads
  * them with `journalctl --user -u claudecorp-daemon`.
  */
+/**
+ * Why ExecStart wraps in `bash -lc` instead of running daemonCommand
+ * directly: systemd user services inherit a minimal PATH. Users who
+ * manage Node via nvm/volta/fnm (very common) have node installed
+ * in a version-manager-specific directory (e.g. ~/.nvm/versions/...)
+ * that's only added to PATH by their shell's init files (.bashrc,
+ * .profile, .zshrc). A non-interactive systemd-spawned process
+ * never sources those, so `cc-cli start` fails with "cc-cli not
+ * found" unless we explicitly load the login-shell environment.
+ *
+ * `bash -lc` forces a login shell which sources the right init
+ * files, getting node and cc-cli onto PATH the way the user's
+ * interactive shell does. Cost: one extra fork at service start
+ * (negligible). Benefit: works out of the box for the dominant
+ * dev-environment shape.
+ *
+ * Why StartLimitBurst + StartLimitIntervalSec: Restart=always loops
+ * indefinitely by default. A daemon with a startup-time bug could
+ * fail-restart thousands of times per hour, burning CPU without
+ * anyone noticing until the 5-minute Pulse tick fires and notices
+ * the daemon's been up for 2 seconds every tick. The burst cap
+ * gives up after 5 failed restarts in 60 seconds, leaving the
+ * service in `failed` state visible in `systemctl --user status`.
+ */
 function renderUnitFile(daemonCommand: string): string {
+  // Escape single quotes in daemonCommand for safe embedding inside
+  // the single-quoted bash -lc payload. End-users rarely have
+  // single quotes in their command, but cheap to do right.
+  const safeCommand = daemonCommand.replace(/'/g, `'\\''`);
   return `[Unit]
 Description=Claude Corp Daemon
 Documentation=https://github.com/re-marked/claude-corp
@@ -49,9 +77,14 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${daemonCommand}
+ExecStart=/bin/bash -lc '${safeCommand}'
 Restart=always
 RestartSec=5
+# Cap restart loops — if startup fails 5 times in 60s, give up and
+# leave the service in `failed` state (visible via systemctl --user
+# status claudecorp-daemon). A healthy daemon won't hit this.
+StartLimitBurst=5
+StartLimitIntervalSec=60
 # Keep stdout/stderr going to the journal. View with:
 #   journalctl --user -u claudecorp-daemon -f
 

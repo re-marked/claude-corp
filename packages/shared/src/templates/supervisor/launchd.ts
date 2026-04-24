@@ -60,6 +60,25 @@ function escapePlist(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
+/**
+ * Why ProgramArguments uses `bash -lc` instead of `/bin/sh -c`:
+ * launchd-spawned processes inherit a minimal PATH. Users managing
+ * Node via nvm/volta/fnm (very common on macOS) have their node
+ * version only on PATH after shell init files (.zshrc / .bash_profile)
+ * run. Non-interactive /bin/sh doesn't source those, so
+ * `cc-cli start` fails with "command not found." `bash -lc` forces
+ * a login shell which loads the user's interactive environment.
+ *
+ * Why ThrottleInterval=10: launchd has an internal 10-second
+ * minimum between restarts, but making it explicit guarantees the
+ * behavior against any future default change and documents the
+ * intent. If the daemon exits instantly, launchd waits 10s before
+ * respawning — enough gap to not burn CPU in a hard crash-loop.
+ * Unlike systemd, launchd has no total-failure-cap primitive; that
+ * trade-off is inherent to the platform. A buggy daemon under
+ * launchd will throttle but still retry forever, which is worse
+ * than systemd's failed-state but better than an unthrottled loop.
+ */
 function renderPlistFile(daemonCommand: string, homeDir: string): string {
   const logDir = join(homeDir, 'Library', 'Logs', 'claudecorp').replace(/\\/g, '/');
   const stdoutPath = `${logDir}/daemon.log`;
@@ -73,14 +92,16 @@ function renderPlistFile(daemonCommand: string, homeDir: string): string {
   <string>com.claudecorp.daemon</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/sh</string>
-    <string>-c</string>
+    <string>/bin/bash</string>
+    <string>-lc</string>
     <string>${escapePlist(daemonCommand)}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>WorkingDirectory</key>
   <string>${escapePlist(homeDir.replace(/\\/g, '/'))}</string>
   <key>StandardOutPath</key>
