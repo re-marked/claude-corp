@@ -63,6 +63,11 @@ describe('CHIT_TYPES registry invariants', () => {
     // Project 1.4: Employee → Partner judgment request. Ephemeral
     // 7d TTL, destroy-if-not-promoted, active → completed|rejected|closed.
     'escalation',
+    // Project 1.8: Blueprint-as-molecule. Non-ephemeral template chit
+    // with origin=authored|builtin, steps DAG validated at write time,
+    // draft → active → closed lifecycle. Cast produces Contract + Task
+    // chits in 1.8 PR 2.
+    'blueprint',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {

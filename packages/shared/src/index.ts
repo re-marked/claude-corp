@@ -51,6 +51,9 @@ export type {
   InboxItemTier,
   InboxItemSource,
   EscalationFields,
+  BlueprintFields,
+  BlueprintStep,
+  BlueprintVar,
 } from './types/index.js';
 
 // Parsers

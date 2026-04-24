@@ -29,6 +29,9 @@ import type {
   StepLogFields,
   InboxItemFields,
   EscalationFields,
+  BlueprintFields,
+  BlueprintStep,
+  BlueprintVar,
 } from './types/chit.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -325,6 +328,209 @@ function validateEscalation(fields: unknown): void {
   }
 }
 
+/**
+ * Blueprint validator — checks the full Blueprint shape the Project 1.8
+ * cast primitive depends on. This runs at chit WRITE time, so every
+ * invariant cast later relies on (unique step ids, valid DAG, referenced
+ * roles, var coverage) must be guaranteed here.
+ *
+ * Heavier than other validators on purpose: a malformed blueprint
+ * discovered at cast-time is a silent corp bug; one rejected at write-
+ * time is loud and fixable.
+ */
+function validateBlueprint(fields: unknown): void {
+  const f = requireObject(fields, 'blueprint') as Partial<BlueprintFields>;
+
+  // name is load-bearing — this is what `cc-cli blueprint cast <name>`
+  // resolves against. Required, kebab-case-ish, allows `/` so category
+  // prefixes (`patrol/health-check`, `patrol/corp-health`) compose
+  // cleanly. Start + end alphanumeric lowercase so `foo-` and `/foo`
+  // and trailing-slash paths are rejected. Uniqueness-per-scope is
+  // enforced at the CLI boundary (validator has no scope access).
+  requireNonEmptyString(f.name, 'blueprint.name');
+  if (!/^[a-z0-9](?:[a-z0-9_/-]*[a-z0-9])?$/.test(f.name!)) {
+    throw new ChitValidationError(
+      `blueprint.name must be kebab-case-ish: lowercase alphanumeric, body may contain - _ / (got ${JSON.stringify(f.name)})`,
+      'blueprint.name',
+    );
+  }
+
+  // origin is load-bearing — drives `cc-cli update --blueprints`
+  // reseed behavior and the list-view badge. Always required.
+  requireEnum(f.origin, 'blueprint.origin', ['authored', 'builtin'] as const);
+
+  // steps must exist and be non-empty. A zero-step blueprint is nonsense
+  // at cast — it would produce a Contract with no Tasks.
+  if (!Array.isArray(f.steps) || f.steps.length === 0) {
+    throw new ChitValidationError(
+      'blueprint.steps must be a non-empty array',
+      'blueprint.steps',
+    );
+  }
+
+  // Validate each step's structural fields + accumulate the id set for
+  // duplicate detection and the subsequent DAG check.
+  const stepIds = new Set<string>();
+  f.steps.forEach((raw, i) => {
+    const stepPath = `blueprint.steps[${i}]`;
+    const step = requireObject(raw, stepPath) as Partial<BlueprintStep>;
+    requireNonEmptyString(step.id, `${stepPath}.id`);
+    // Kebab-case-ish constraint: ids live in file paths + depends_on
+    // references, so disallow whitespace and characters that would
+    // break the rewrite into Task chit ids.
+    if (!/^[a-zA-Z0-9_-]+$/.test(step.id!)) {
+      throw new ChitValidationError(
+        `${stepPath}.id must be alphanumeric + underscore/hyphen only (got ${JSON.stringify(step.id)})`,
+        `${stepPath}.id`,
+      );
+    }
+    if (stepIds.has(step.id!)) {
+      throw new ChitValidationError(
+        `${stepPath}.id "${step.id}" duplicates an earlier step id — step ids must be unique within a blueprint`,
+        `${stepPath}.id`,
+      );
+    }
+    stepIds.add(step.id!);
+
+    requireNonEmptyString(step.title, `${stepPath}.title`);
+    if (step.description !== undefined) optionalString(step.description, `${stepPath}.description`);
+
+    if (step.dependsOn !== undefined && step.dependsOn !== null) {
+      requireStringArray(step.dependsOn, `${stepPath}.dependsOn`);
+    }
+
+    if (step.acceptanceCriteria !== undefined && step.acceptanceCriteria !== null) {
+      requireStringArray(step.acceptanceCriteria, `${stepPath}.acceptanceCriteria`);
+    }
+
+    // assigneeRole can be null (cast-time resolution) or a role-registry
+    // id. Role existence is NOT cross-checked here — the registry lives
+    // in a downstream module and a blueprint might reference a role
+    // added later; cast validates against the live registry when it
+    // matters. What WE enforce is the format invariant: role ids are
+    // kebab-case alphanumeric ('backend-engineer', 'ceo', 'sexton').
+    // Scope-qualified slugs ('agent:toast', 'project:fire/...') are
+    // SLOT references, not role references — accepting them would
+    // over-couple a blueprint to a specific Employee and defeat the
+    // role-abstraction the design depends on. Reject with a message
+    // that teaches the role-vs-slot distinction.
+    if (step.assigneeRole !== undefined) {
+      requireStringOrNull(step.assigneeRole, `${stepPath}.assigneeRole`);
+      if (typeof step.assigneeRole === 'string') {
+        if (!/^[a-z][a-z0-9-]*$/.test(step.assigneeRole)) {
+          const hint = step.assigneeRole.includes(':')
+            ? ' (looks like a scope-qualified slug — blueprints assign to ROLES, not specific slots; use e.g. "backend-engineer" instead of "agent:toast")'
+            : ' (lowercase alphanumeric + hyphens only)';
+          throw new ChitValidationError(
+            `${stepPath}.assigneeRole must be a role id${hint} — got ${JSON.stringify(step.assigneeRole)}`,
+            `${stepPath}.assigneeRole`,
+          );
+        }
+      }
+    }
+  });
+
+  // DAG check pass 2: every dependsOn reference must point at a real
+  // step id within this blueprint, and there must be no cycles. Done
+  // AFTER all step ids are collected so order-of-appearance doesn't
+  // matter (a step can depend on one declared later).
+  const graph = new Map<string, readonly string[]>();
+  f.steps.forEach((raw, i) => {
+    const step = raw as BlueprintStep;
+    const deps = step.dependsOn ?? [];
+    for (const d of deps) {
+      if (!stepIds.has(d)) {
+        throw new ChitValidationError(
+          `blueprint.steps[${i}].dependsOn references unknown step id "${d}" — must match another step's id in this blueprint`,
+          `blueprint.steps[${i}].dependsOn`,
+        );
+      }
+    }
+    graph.set(step.id, deps);
+  });
+
+  // Cycle detection via DFS with coloring: white (unvisited), gray
+  // (on current path), black (fully explored). A gray→gray edge = cycle.
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map<string, number>();
+  for (const id of stepIds) color.set(id, WHITE);
+
+  function visit(id: string, path: string[]): void {
+    if (color.get(id) === BLACK) return;
+    if (color.get(id) === GRAY) {
+      const cycleStart = path.indexOf(id);
+      const cycle = path.slice(cycleStart).concat(id).join(' → ');
+      throw new ChitValidationError(
+        `blueprint.steps contains a dependency cycle: ${cycle}`,
+        'blueprint.steps',
+      );
+    }
+    color.set(id, GRAY);
+    for (const d of graph.get(id) ?? []) visit(d, [...path, id]);
+    color.set(id, BLACK);
+  }
+  for (const id of stepIds) visit(id, []);
+
+  // Vars validation — optional, but if present every entry must be
+  // well-formed. The var-coverage check (every {{name}} reference in
+  // step strings resolves from this list) lives in the parser layer
+  // (next PR), not here — templated strings are allowed through the
+  // chit-type validator so cast-time binding has something to work with.
+  if (f.vars !== undefined && f.vars !== null) {
+    if (!Array.isArray(f.vars)) {
+      throw new ChitValidationError('blueprint.vars must be an array when present', 'blueprint.vars');
+    }
+    const varNames = new Set<string>();
+    f.vars.forEach((raw, i) => {
+      const path = `blueprint.vars[${i}]`;
+      const v = requireObject(raw, path) as Partial<BlueprintVar>;
+      requireNonEmptyString(v.name, `${path}.name`);
+      if (varNames.has(v.name!)) {
+        throw new ChitValidationError(
+          `${path}.name "${v.name}" duplicates an earlier var name — var names must be unique within a blueprint`,
+          `${path}.name`,
+        );
+      }
+      varNames.add(v.name!);
+      requireEnum(v.type, `${path}.type`, ['string', 'int', 'bool'] as const);
+      // Default type must match declared var type. Null is always allowed
+      // (author signaling "optional with no default — caller must pass").
+      // Catching mismatch at write time is the whole point: a `type: 'int'`
+      // var with `default: "5"` is author error, and cast-time coercion
+      // would silently "fix" it while hiding the bug. Fail loudly here.
+      // `requireEnum` above guarantees v.type is one of the three values
+      // by the time we get here.
+      if (v.default !== undefined && v.default !== null) {
+        const actual = typeof v.default;
+        let ok = false;
+        switch (v.type) {
+          case 'string':
+            ok = actual === 'string';
+            break;
+          case 'int':
+            ok = actual === 'number' && Number.isInteger(v.default);
+            break;
+          case 'bool':
+            ok = actual === 'boolean';
+            break;
+        }
+        if (!ok) {
+          const got = actual === 'number' && !Number.isInteger(v.default) ? 'non-integer number' : actual;
+          throw new ChitValidationError(
+            `${path}.default must match type='${v.type}' or be null (got ${got}: ${JSON.stringify(v.default)})`,
+            `${path}.default`,
+          );
+        }
+      }
+      if (v.description !== undefined) optionalString(v.description, `${path}.description`);
+    });
+  }
+
+  // Title + summary are metadata for list views — optional everywhere.
+  if (f.title !== undefined) requireStringOrNull(f.title, 'blueprint.title');
+  if (f.summary !== undefined) requireStringOrNull(f.summary, 'blueprint.summary');
+}
+
 function validateInboxItem(fields: unknown): void {
   const f = requireObject(fields, 'inbox-item') as Partial<InboxItemFields>;
   // Tier is the load-bearing discriminant — if it's wrong the whole
@@ -473,6 +679,28 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     // frontmatter. Validation of that override contract is part of 0.7.4.
     destructionPolicy: 'keep-forever',
     validate: validateInboxItem,
+  },
+  {
+    id: 'blueprint',
+    idPrefix: 'b',
+    // Non-ephemeral. Blueprints are templates the corp ACCUMULATES over
+    // time — the whole point of pattern-capture is that repeating work
+    // becomes a durable blueprint. The lifecycle scanner never visits
+    // them; destructionPolicy is a no-op.
+    defaultEphemeral: false,
+    defaultTTL: null,
+    // New blueprints land in `draft` so the agent who scaffolded has a
+    // chance to fill in steps before cast tries to use them. Promotion
+    // to `active` happens via `cc-cli blueprint validate <id>` (next
+    // PR) — validate runs the parser, and on success flips the status.
+    defaultStatus: 'draft',
+    validStatuses: ['draft', 'active', 'closed'],
+    // closed = retired / superseded. Not `completed` because a blueprint
+    // doesn't complete — it stops being the canonical pattern for
+    // something, which is an archival state.
+    terminalStatuses: ['closed'],
+    destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
+    validate: validateBlueprint,
   },
   {
     id: 'escalation',

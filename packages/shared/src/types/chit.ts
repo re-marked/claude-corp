@@ -30,6 +30,7 @@ export interface FieldsForType {
   'step-log': StepLogFields;
   'inbox-item': InboxItemFields;
   escalation: EscalationFields;
+  blueprint: BlueprintFields;
 }
 
 /**
@@ -525,4 +526,89 @@ export interface InboxItemFields {
   carriedForward?: boolean | null;
   /** Reason if carriedForward. Required when carriedForward is true. */
   carryReason?: string | null;
+}
+
+/**
+ * One step inside a Blueprint — the machine-readable equivalent of a
+ * runbook numbered step. Cast converts each step into a Task chit in
+ * the resulting Contract, preserving the `dependsOn` DAG via step ids.
+ *
+ * Step ids are scoped to THEIR OWN blueprint — they're not chit ids.
+ * When cast produces Task chits, the chain walker rewrites `dependsOn`
+ * from step-id references to Task chit-id references so the DAG
+ * composes with the rest of the chit substrate.
+ */
+export interface BlueprintStep {
+  /** Unique within this blueprint. Referenced by other steps' dependsOn. Kebab-case convention (`scan-caskets`, `detect-stalls`). */
+  id: string;
+  /** Short human-readable label. Becomes the Task chit's `fields.task.title` after cast, with Handlebars expanded. */
+  title: string;
+  /** Longer description of what the step does + why. Becomes the Task chit body after cast. Handlebars-templated. */
+  description?: string;
+  /** Step ids this step waits on. Forms a DAG; cycles are rejected at validate-time. Defaults to [] (top of chain). */
+  dependsOn?: string[];
+  /** Acceptance criteria inherited onto the Task chit. Each item templated through Handlebars with cast-time vars. */
+  acceptanceCriteria?: string[];
+  /** Role registry id the cast-time Task chit is assigned to. Null defers the decision to cast-time via an explicit `--assign-<stepId> <role>` flag. */
+  assigneeRole?: string | null;
+}
+
+/**
+ * A blueprint variable — a slot the caller fills at cast time. Validator
+ * checks that every `{{var}}` reference in the blueprint's strings
+ * resolves from this list (or from a default).
+ */
+export interface BlueprintVar {
+  /** Variable name. Referenced as `{{name}}` inside step strings (title / description / acceptanceCriteria / assigneeRole). */
+  name: string;
+  /** Simple type check at cast time. Strings are the common case; int + bool exist for threshold-style patrol vars. */
+  type: 'string' | 'int' | 'bool';
+  /** When absent and no default, cast fails unless caller provides the var via `--vars name=value`. Null default means "required but user must set null explicitly." */
+  default?: string | number | boolean | null;
+  /** Free-form one-line description rendered in `cc-cli blueprint show` so callers know what the variable is for. */
+  description?: string;
+}
+
+/**
+ * Fields for a blueprint chit — the mold. Cast converts one of these
+ * into a Contract chit + a tree of Task chits that walk via the chain
+ * walker. Blueprints are chits (Project 1.8) so the same query /
+ * lifecycle / scoping substrate applies — `cc-cli chit list --type
+ * blueprint --tag patrol` is a real query, blueprints can reference
+ * each other, and the scope (`agent:<slug>` / `project:<name>` /
+ * corp) determines authorship + override precedence.
+ *
+ * Origin discriminates three paths into the blueprint store:
+ *   - `authored` — a member wrote it via `cc-cli blueprint new` and
+ *     filled in steps. Most common path during the corp's life.
+ *   - `builtin` — seeded on corp init from the claudecorp package.
+ *     Reseeded on `cc-cli update --blueprints`.
+ *
+ * Path 3 from the 1.8 design (AI-assisted pattern capture from
+ * observed repetition) is deferred to 1.9 / 4.2 where the observation
+ * + dream machinery can actually detect the patterns.
+ */
+export interface BlueprintFields {
+  /**
+   * Human-typeable identifier. Kebab-case, unique within the blueprint's
+   * scope (agent / project / corp). This is what `cc-cli blueprint cast
+   * <name>` resolves against — the chit id (`chit-b-a1b2c3d4`) works
+   * too, but nobody wants to type that. Load-bearing: every CLI-side
+   * blueprint reference flows through this field.
+   *
+   * Uniqueness-per-scope is enforced at the CLI boundary (`blueprint
+   * new` / `blueprint cast` lookup), not in the chit-type validator,
+   * because the validator doesn't have access to scope state.
+   */
+  name: string;
+  /** The step DAG — the castable body of the blueprint. Must be non-empty; cycles rejected at validate. */
+  steps: BlueprintStep[];
+  /** Variables the caller fills at cast time. Optional — a blueprint can be fully static. Empty array and absent are equivalent. */
+  vars?: BlueprintVar[];
+  /** Where this blueprint came from. Drives UI hints (builtin shows a badge) + update behavior (builtins get reseeded on `cc-cli update`, authored don't). */
+  origin: 'authored' | 'builtin';
+  /** Short human-readable label shown in `cc-cli blueprint list`. Distinct from the chit body (which holds prose for the human author reading the file). */
+  title?: string | null;
+  /** One-line summary shown in list output. Not Handlebars-templated — this is metadata about the blueprint itself, not a cast-time template. */
+  summary?: string | null;
 }
