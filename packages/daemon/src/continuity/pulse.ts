@@ -35,25 +35,18 @@
  *     Sexton's patrol cycle (via the `agentstuck` + `silentexit`
  *     sweepers) does the per-agent reasoning.
  *
- * This commit lands the reshape. Alarum wiring + Sexton runtime land in
- * subsequent commits of 1.9.3 and 1.9.4 respectively. Until then, Pulse
- * ticks into a no-op logger — observability without action.
- *
- * ### Behavioral gap during the PR series
- *
- * Between this commit and the Sexton-runtime PR landing, there is no
- * per-agent responsiveness check in the corp. Agents that silent-exit
- * won't get auto-restarted; stuck sessions won't get nudged. This is
- * an intentional intermediate state — Claude Corp has no real users
- * yet, and building the Alarum → Sexton → sweepers chain properly
- * matters more than preserving the 1.8-era heartbeat behavior during
- * the transition. When the chain completes, the corp regains
- * (and surpasses) the pre-1.9 self-heal surface.
+ * Project 1.9 landed the reshape across a small PR series: 1.9.3 wired
+ * Pulse → Alarum (decision-logged, no dispatch); 1.9.4 (this commit
+ * closes it) wires Alarum → dispatchSexton so non-'nothing' decisions
+ * actually spawn / wake / nudge Sexton's session. The chain from
+ * Pulse tick to Sexton's dispatch is now whole. Per-agent sweepers
+ * (the layer Sexton herself orchestrates) land in subsequent 1.9 PRs.
  */
 
 import type { Daemon } from '../daemon.js';
 import { log, logError } from '../logger.js';
 import { invokeAlarum } from './alarum.js';
+import { dispatchSexton } from './sexton-runtime.js';
 
 /**
  * Tick cadence. 5 minutes is a reasonable default: short enough that a
@@ -98,17 +91,16 @@ export class Pulse {
 
   /**
    * One tick of the continuity chain. Bumps the tick counter, logs it,
-   * invokes Alarum for a triage decision. Alarum's decision is logged
-   * here; actually acting on it (spawning Sexton, sending her a wake
-   * message) is PR 2's Sexton-runtime territory. For 1.9.3 the chain
-   * stops at "decision logged" — observable, testable, inert.
+   * invokes Alarum for a triage decision, and routes the decision to
+   * Sexton via dispatchSexton. 'nothing' decisions short-circuit inside
+   * dispatchSexton; the others spawn (if needed) and wake her session.
    *
-   * Never throws: any error bubbling out of invokeAlarum is caught +
-   * logged + swallowed. The dispatcher itself already has safe-default
-   * fallback on every exec/parse failure, so this guard is defense-
-   * in-depth — Pulse's one job (keep ticking) must be unkillable
-   * regardless of what happens above it. A broken Alarum takes itself
-   * down, not the tick.
+   * Never throws: any error bubbling out of invokeAlarum OR dispatchSexton
+   * is caught + logged + swallowed. Both callees already have safe-default
+   * fallback on every exec / parse / fetch / spawn failure, so this guard
+   * is defense-in-depth — Pulse's one job (keep ticking) must be
+   * unkillable regardless of what happens above it. A broken Alarum or
+   * broken dispatcher takes itself down, not the tick.
    */
   private async tick(): Promise<void> {
     this.tickCount++;
@@ -117,14 +109,13 @@ export class Pulse {
     try {
       const decision = await invokeAlarum(this.daemon);
       log(`[pulse] tick #${this.tickCount} → alarum decision: ${decision.action} (${decision.reason})`);
-      // TODO(1.9.4 — Sexton runtime): route non-'nothing' decisions
-      // into Sexton's wake/start/nudge paths. For now the decision is
-      // logged and dropped; Sexton's runtime lands in the next PR.
+      await dispatchSexton(this.daemon, decision);
     } catch (err) {
-      // Defense-in-depth: invokeAlarum is supposed to never reject
-      // (it catches + returns a safe default), but if it does anyway,
-      // swallow the error here so Pulse's tick loop keeps running.
-      logError(`[pulse] tick #${this.tickCount} alarum invocation threw (dispatcher bug): ${err instanceof Error ? err.message : String(err)}`);
+      // Defense-in-depth: invokeAlarum and dispatchSexton are both
+      // supposed to never reject (each catches + returns cleanly), but
+      // if either does anyway, swallow the error here so Pulse's tick
+      // loop keeps running.
+      logError(`[pulse] tick #${this.tickCount} continuity chain threw (upstream bug): ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

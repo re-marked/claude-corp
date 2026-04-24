@@ -59,7 +59,13 @@ import { join } from 'node:path';
 export function sextonSessionAlive(daemon: Daemon): boolean {
   try {
     const members = readConfig<Member[]>(join(daemon.corpRoot, MEMBERS_JSON));
-    const sexton = members.find((m) => m.displayName === 'Sexton' && m.type === 'agent');
+    // Filter archived — a fired Sexton shouldn't register as "dead
+    // and needing a start." dispatchSexton applies the same filter;
+    // keeping them consistent means Alarum's decision and the
+    // downstream dispatch agree on whether a Sexton exists to wake.
+    const sexton = members.find(
+      (m) => m.displayName === 'Sexton' && m.type === 'agent' && m.status !== 'archived',
+    );
     if (!sexton) return false;
 
     const proc = daemon.processManager.getAgent(sexton.id);
