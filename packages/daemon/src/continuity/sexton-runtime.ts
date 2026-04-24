@@ -35,7 +35,7 @@
  * putting it between Pulse (must-not-die) and the agent layer.
  */
 
-import { readConfig, agentSessionKey, type Member, MEMBERS_JSON } from '@claudecorp/shared';
+import { readConfig, agentSessionKey, type Member, type Channel, MEMBERS_JSON, CHANNELS_JSON } from '@claudecorp/shared';
 import { join } from 'node:path';
 import type { Daemon } from '../daemon.js';
 import { log, logError } from '../logger.js';
@@ -114,6 +114,36 @@ export async function dispatchSexton(
   const message = dispatchMessageFor(decision.action);
   const sessionKey = agentSessionKey(sexton.displayName);
 
+  // Resolve Sexton's DM channel with the founder so her response +
+  // tool events stream where Mark can see them. Without this, her
+  // patrol output lands only in the daemon log (first 80 chars) —
+  // functionally mute. Same pattern dreams.ts uses.
+  //
+  // Fail-soft: if the channel can't be found (shouldn't happen post-
+  // 1.1's hire flow that creates Partner/founder DMs, but be
+  // defensive), dispatch without channelId. Her response only hits
+  // the log as a fallback — degraded but not broken.
+  let dmChannelId: string | undefined;
+  try {
+    const channels = readConfig<Channel[]>(join(daemon.corpRoot, CHANNELS_JSON));
+    const allMembers = readConfig<Member[]>(join(daemon.corpRoot, MEMBERS_JSON));
+    const founder = allMembers.find((m) => m.rank === 'owner');
+    const dm = channels.find(
+      (c) =>
+        c.kind === 'direct' &&
+        c.memberIds.includes(sexton.id) &&
+        (founder ? c.memberIds.includes(founder.id) : false),
+    );
+    dmChannelId = dm?.id;
+    if (!dmChannelId) {
+      log(`[continuity] dispatchSexton: no founder DM channel resolved for Sexton — dispatching without channelId (response will only hit daemon log)`);
+    }
+  } catch (err) {
+    logError(
+      `[continuity] dispatchSexton: channel resolution failed — ${err instanceof Error ? err.message : String(err)}. Dispatching without channelId.`,
+    );
+  }
+
   // Dispatch via /cc/say — same path dreams.ts uses, routes through
   // the harness + handles streaming / tool events / session
   // continuity transparently. We pass the target by memberId so the
@@ -127,6 +157,7 @@ export async function dispatchSexton(
         target: sexton.id,
         message,
         sessionKey,
+        ...(dmChannelId !== undefined && { channelId: dmChannelId }),
       }),
       signal: AbortSignal.timeout(DISPATCH_TIMEOUT_MS),
     });
