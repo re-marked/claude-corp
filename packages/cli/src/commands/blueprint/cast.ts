@@ -201,8 +201,9 @@ export async function cmdBlueprintCast(rawArgs: string[]): Promise<void> {
       console.log(`      ${t.fields.task.title}`);
     }
     console.log('');
-    console.log(`  All tasks created in 'draft' workflow state. Use 'cc-cli hand'`);
-    console.log(`  to dispatch the first step and start the chain walking.`);
+    console.log(`  All tasks created in 'queued' workflow state. Dispatch the`);
+    console.log(`  head task with 'cc-cli hand --chit <id> --to <assignee>';`);
+    console.log(`  the chain walker transitions downstream tasks as deps close.`);
   } catch (err) {
     emitError(asJson, err);
     process.exit(2);
