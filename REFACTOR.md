@@ -213,7 +213,7 @@ Each type registers its configuration:
 - `handoff` — ephemeral always, destroyed once read by successor session (Dredge consumes it and burns it).
 - `dispatch-context` — ephemeral, tracks an in-flight dispatch between agents; burns on dispatch completion.
 - `pre-brain-entry` — ephemeral by default at the role level; auto-promotes to permanent via 4-signal rule and becomes part of the role's distilled pre-BRAIN library.
-- `step-log` — non-ephemeral (Temporal memoization pattern), one per Task-execution phase, used for crash recovery.
+- `step-log` — non-ephemeral (Temporal memoization pattern), one per Task-execution phase, used for crash recovery. Harness-emitted on every dispatch (not agent-written); see 1.6 for the emission contract + how silent-exit respawn reads it.
 - `inbox-item` — **ephemeral by default**, tier-aware lifecycle (see 0.7 inbox system). Three tiers encoded as per-instance `fields.inbox-item.tier: 1 | 2 | 3`. Policy varies by tier via the per-instance destructionPolicy override:
   - **Tier 1 (ambient)** — `destructionPolicy: 'destroy-if-not-promoted'`, 24h TTL. Broadcast notifications, system events (Failsafe restarts, Herald digests). Genuinely fire-and-forget noise.
   - **Tier 2 (direct)** — `destructionPolicy: 'keep-forever'`, 7d TTL. Peer @mentions, inter-agent DMs, task handoffs from peers. Goes cold on TTL; preserves audit trail.
@@ -1366,7 +1366,13 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 
 **Session-exit protocol.** Employee calls `cc-cli done --completed "..." --next-action "..." --open-question "..." --sandbox-state "..." --notes "..."`. This writes a pending-handoff payload to `<workspace>/.pending-handoff.json`. The Stop hook fires `cc-cli audit`; on audit approve, the audit gate PROMOTES the pending file into a `type: handoff` Chit at scope=`agent:<slug>`, `ephemeral: true`, `references: [<current-step-chit-id>]`, and closes the current Task chit. On audit block, the pending file is preserved and the agent retries. (The original 1.6 spec said `cc-cli handoff` as a standalone producer command — during 0.7.3 implementation, the producer path was absorbed into the `cc-cli done` + audit-gate-promotes-pending pattern. Same semantics, different surface.)
 
-**Scope:** handoff command, Dredge evolution, session-exit protocol, handoff Chit type registration.
+**Silent-exit recovery via step-logs.** Handoff chits cover the clean-exit path. Silent exits (mid-turn crash, timeout, turn-complete-without-`cc-cli-done`) produce no handoff — the respawned Employee would otherwise boot into their Casket task with no memory of what the dead session did. The fix: step-log chits, harness-emitted, not agent-written.
+
+- **Emission.** The dispatch harness buffers significant tool events over the turn — edits, bash invocations, reads of load-bearing files, test output summaries — and emits one `step-log` chit at turn end OR on abnormal exit via the child process's exit handler. Fields: `{ sessionId, taskChitId, toolEvents: [{ kind, argSummary, ts }], partialOutput?, exitReason: 'clean' | 'crashed' | 'timeout' | 'silent-no-done' }`. Scope: `agent:<slug>`. Non-ephemeral by registry (used by post-mortem audits), but 0.6's scanner never visits non-ephemeral chits so they cost nothing per-tick.
+- **Consumption.** When 1.9.5's `silentexit` sweeper respawns a dead slot, it queries the latest step-log scoped to that slot's current Casket task and threads the `toolEvents` summary into the respawn dispatch (same injection path Dredge uses for handoff chits, but with step-log framing: "your predecessor died mid-work; here's what they touched before exiting"). The respawned Employee reconciles with git status before starting new work so partial edits don't get duplicated.
+- **No agent discipline required.** The discipline lives in the harness — agents don't call `cc-cli checkpoint` mid-turn, they don't decide when to snapshot. Claude-code-harness and openclaw-harness both implement the buffer. An agent that crashes in the first tool call still produces a step-log with whatever fired before the crash (even if that's zero events — the exitReason alone tells the respawn "this was a silent exit, distrust the workspace state").
+
+**Scope:** handoff command, Dredge evolution, session-exit protocol, step-log auto-emission (harness), handoff Chit type registration.
 
 **File paths:**
 - `packages/shared/src/chit-types.ts` (register `handoff` type with schema: current_step, completed, next_action, open_question, sandbox_state, notes)
@@ -1513,7 +1519,7 @@ Shipped sweepers (code by default; `conflict-triage` is the sole AI-by-default):
 - `chit-hygiene` — malformed frontmatter, orphan references, missing required fields
 - `log-rotation` — rotate past size limits, prune archives
 - `agentstuck` — Caskets whose currentStep hasn't advanced in N minutes
-- `silentexit` — sessions that died without clean shutdown; respawn within retry budget
+- `silentexit` — sessions that died without clean shutdown; respawn within retry budget. Only reinitializes EXISTING slots (same Member record, same name, same workspace, same Casket); never creates new Members. Spawning new Employees is bacteria's domain (1.10). The two are disjoint — silentexit operates on dead-existing-slots, bacteria on the new-slot set — so no coordination layer is needed between them. `processManager.spawnAgent(memberId)` is the shared primitive: idempotent for existing members, creates-new for novel memberIds; both sweepers call it, the argument distinguishes which path runs.
 - `orphantask` — task chits with no assignee, not blocked, stuck in limbo
 - `sandbox-ttl` — enforce project sandbox TTLs; archive or cleanup
 - `breaker-reset` — circuit breakers past cooldown; clear if cause resolved
@@ -1578,6 +1584,8 @@ Stability boundary sits at the destructive-action boundary and the first-N-runs 
 
 Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Sexton (1.9) can also trigger wakes on idle-with-work agents during her patrol.
 
+**Bacteria only spawns NEW slots; it never reinitializes existing ones.** A dead-but-present slot (silent-exit, crashed mid-turn) is silentexit's domain (1.9). Bacteria's trigger is weighted-queue-depth vs idle-Employee count — measured AFTER silentexit has had a chance to restore any recoverable slots in its current patrol cycle. The two sweepers operate on disjoint sets (existing-dead vs new) and don't race. When an entire role's pool dies simultaneously, the normal sequence is: silentexit respawns each dead slot in place on the next patrol tick; bacteria reassesses depth-vs-idle AFTER that restoration; if the queue is still heavier than the restored pool can absorb, bacteria splits on top of the restored slots.
+
 **Queue depth via Chit queries.** Instead of maintaining a separate in-memory queue data structure, bacteria reads Chit state: `cc-cli chit list --type task --status active --assignee-role backend-engineer` returns active Task Chits for a role; `cc-cli chit list --type casket --scope 'agent:backend-engineer/*' --field-has current_step` tells us how many Employees of that role are busy. Split when **weighted** active Chit count > idle Employee count by threshold, where weights come from `fields.task.complexity` (landed in 0.5.1): `trivial=0.25, small=0.5, medium=1.0, large=2.0`. A queue of 3 trivials weighs 0.75 and doesn't split; a queue of 3 larges weighs 6.0 and triggers multiple splits. Null complexity defaults to `medium` weight so pre-backfill tasks still trigger sensibly. Collapse when idle Employees > 1 and all idle for > N minutes.
 
 **First-session self-naming.** When bacteria spawns a new Employee, the role-resolver allocates a slot without a name; first dispatch prompts the Employee to choose a name (as per Decisions Made section). Name persists to the Employee's Member record + attribution.
@@ -1641,7 +1649,7 @@ Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (ei
 - Priority scoring (Gas Town's formula, adapted): `1000 + convoy_age×10/hr + (4-priority)×100 - min(retries×50, 300) + mr_age×1/hr`. Anti-thrashing via the retry-penalty cap.
 - Shipping lock: a corp-scope `shipping-lock` chit with `held_by: <janitor-slug> | null`. Only the lock-holder processes the queue at any moment. Release happens on merge complete or on janitor session exit.
 - Janitor Employees pull from the lane (pull-based, unlike Hand's push): each janitor's Casket is the shipping-lock. When they have the lock, they take the highest-scored queued submission, rebase, run tests, merge or conflict-route, close the submission, release the lock, next janitor picks up.
-- Real conflict → janitor files a blocker chit via 1.4.1 back at the original PR author; submission goes to `conflict` state; janitor releases lock + takes next.
+- Real conflict → janitor files a blocker chit via 1.4.1 scoped to the PR author's ROLE (e.g. `backend-engineer`), not the specific slot. Role-resolver picks an active Employee via normal precedence (idle-first, least-priority otherwise): if the original author is still alive and idle, they're first-pick; if they've decommissioned, another Employee of the role handles it; if the role is empty, `no-candidates` triggers bacteria to spawn one (1.10). No PR can become permanently stranded by its author's death. Submission goes to `conflict` state; janitor releases lock + takes next. The blocker chit carries `originatingAuthor: <slug>` so the assignee sees "this was Toast's PR" as context even when Toast is gone.
 - Clean merge → submission `merged`, contract referenced by the submission gets its workflow-state advanced (typically `under_review → completed`).
 
 **Bacteria scaling (from 1.10):** when `merge-submission` queue depth exceeds 1 and only 1 idle janitor exists, bacteria spawns another. Collapses to 1 idle when queue drains.
