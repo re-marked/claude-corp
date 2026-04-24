@@ -28,7 +28,7 @@ import { HireWatcher } from './hire-watcher.js';
 import { EventBus, type DaemonEvent } from './events.js';
 import { InboxManager } from './inbox.js';
 import { Pulse } from './pulse.js';
-import { hireFailsafe } from './failsafe.js';
+import { hireSexton } from './sexton.js';
 import { hireJanitor } from './janitor.js';
 import { hireWarden } from './warden.js';
 import { hireHerald } from './herald.js';
@@ -709,17 +709,22 @@ export class Daemon {
     // Initialize work status for all agents
     this.initAgentWorkStatuses();
 
-    // Bootstrap system agents (Failsafe) if missing
+    // Bootstrap system agents (Sexton, Janitor, Warden, Herald, Planner) if missing
     await this.bootstrapSystemAgents();
   }
 
-  /** Ensure system agents (Failsafe, Janitor) exist — auto-hire if missing. */
+  /** Ensure system agents (Sexton, Janitor, Warden, Herald, Planner) exist — auto-hire if missing. */
   private async bootstrapSystemAgents(): Promise<void> {
     try {
-      await hireFailsafe(this);
-      this.pulse.refreshFailsafe();
+      // Project 1.9: Sexton replaces the retired Failsafe slot — see
+      // REFACTOR.md §1.9 for why the shape changed from "watchdog
+      // pinged every 3min by Pulse" to "caretaker orchestrating
+      // sweepers via patrol blueprints, woken by Alarum." The
+      // bootstrap invocation point stays the same; only the spawn
+      // target changed.
+      await hireSexton(this);
     } catch (err) {
-      logError(`[daemon] Failed to bootstrap Failsafe agent: ${err}`);
+      logError(`[daemon] Failed to bootstrap Sexton agent: ${err}`);
     }
     try {
       await hireJanitor(this);
