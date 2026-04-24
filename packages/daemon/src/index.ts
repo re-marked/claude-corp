@@ -18,6 +18,7 @@ export type { DaemonEvent } from './events.js';
 export { InboxManager } from './inbox.js';
 export { Pulse } from './pulse.js';
 export { hireFailsafe, buildFailsafeRules } from './failsafe.js';
+export { hireSexton } from './sexton.js';
 export { hireJanitor, buildJanitorRules } from './janitor.js';
 export { ContractWatcher } from './contract-watcher.js';
 export { hireWarden, buildWardenRules } from './warden.js';

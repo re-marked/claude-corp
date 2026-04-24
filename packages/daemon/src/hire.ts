@@ -35,6 +35,15 @@ export interface HireOpts {
   soulContent?: string;
   agentsContent?: string;
   heartbeatContent?: string;
+  /**
+   * Custom IDENTITY.md content for this agent. When omitted,
+   * setupAgentWorkspace falls back to the generic defaultIdentity
+   * template. Partners-by-decree that carry a specific role shape
+   * (Sexton's caretaker-of-continuity frame, etc.) pass their own
+   * content so the voice is shaped right at hire time rather than
+   * requiring a subsequent edit.
+   */
+  identityContent?: string;
   model?: string;
   provider?: string;
   /**
@@ -130,6 +139,7 @@ export async function hireAgent(
     soulContent,
     agentsContent,
     heartbeatContent,
+    identityContent: opts.identityContent,
     globalConfig,
     remote: true,
     projectName,
