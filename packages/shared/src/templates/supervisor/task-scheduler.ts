@@ -153,5 +153,10 @@ export function renderTaskSchedulerXml(opts: ServiceOpts): ServiceArtifact {
     activationCommand: `schtasks /Create /TN ClaudeCorpDaemon /XML ${activationPath} /F && schtasks /Run /TN ClaudeCorpDaemon`,
     activationDescription:
       'Imports the XML into Task Scheduler as "ClaudeCorpDaemon" (/F overwrites existing), then starts it immediately. Auto-starts on every login thereafter; restart-on-failure every 30s up to 100 retries.',
+    // /End stops any running instance first so /Delete doesn't fail
+    // on "task is running." /F skips the confirmation prompt.
+    deactivationCommand: 'schtasks /End /TN ClaudeCorpDaemon & schtasks /Delete /TN ClaudeCorpDaemon /F',
+    deactivationDescription:
+      'Stops any running instance, then removes the task from Task Scheduler. The XML file on disk is deleted separately by uninstall-service.',
   };
 }

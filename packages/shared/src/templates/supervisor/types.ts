@@ -104,4 +104,21 @@ export interface ServiceArtifact {
    * supervisor semantics.
    */
   activationDescription: string;
+
+  /**
+   * The one-liner the user runs to STOP + UNREGISTER the service
+   * with the OS. Inverse of `activationCommand`. Per-platform:
+   *   - linux:  `systemctl --user disable --now claudecorp-daemon.service && systemctl --user daemon-reload`
+   *   - darwin: `launchctl unload ~/Library/LaunchAgents/com.claudecorp.daemon.plist`
+   *   - win32:  `schtasks /Delete /TN ClaudeCorpDaemon /F`
+   *
+   * uninstall-service runs this (or prints it in --dry-run) and
+   * then deletes the on-disk config file at `path`. The symmetric
+   * shape means install and uninstall use the same artifact without
+   * re-deriving anything.
+   */
+  deactivationCommand: string;
+
+  /** Human-readable description of `deactivationCommand`. */
+  deactivationDescription: string;
 }

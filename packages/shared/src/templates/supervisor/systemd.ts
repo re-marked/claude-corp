@@ -102,5 +102,9 @@ export function renderSystemdService(opts: ServiceOpts): ServiceArtifact {
       'systemctl --user daemon-reload && systemctl --user enable --now claudecorp-daemon.service',
     activationDescription:
       'Reloads systemd to pick up the new unit file, then enables the service (starts it now + auto-starts on login).',
+    deactivationCommand:
+      'systemctl --user disable --now claudecorp-daemon.service && systemctl --user daemon-reload',
+    deactivationDescription:
+      'Stops the running service, disables auto-start on login, then reloads systemd to drop the unit from its cache.',
   };
 }

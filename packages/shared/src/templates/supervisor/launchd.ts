@@ -123,5 +123,8 @@ export function renderLaunchdPlist(opts: ServiceOpts): ServiceArtifact {
     activationCommand: 'launchctl load ~/Library/LaunchAgents/com.claudecorp.daemon.plist',
     activationDescription:
       'Registers the LaunchAgent with launchd and starts it immediately. Auto-starts on every login thereafter. Logs land in ~/Library/Logs/claudecorp/.',
+    deactivationCommand: 'launchctl unload ~/Library/LaunchAgents/com.claudecorp.daemon.plist',
+    deactivationDescription:
+      'Stops the running LaunchAgent and unregisters it from launchd (no more auto-start on login). The plist file on disk is removed separately by uninstall-service.',
   };
 }
