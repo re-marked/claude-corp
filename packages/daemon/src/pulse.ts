@@ -32,11 +32,18 @@ interface AgentHeartbeatState {
  *
  * Tracks responses. If an agent doesn't respond:
  * - 1 miss → logged, retry next cycle
- * - 2 misses → escalated to CEO via Failsafe with reason
+ * - 2 misses → escalated to CEO with reason
  *
- * System agents (Failsafe, Janitor, Warden, Herald) are pinged too.
+ * System agents (Sexton, Janitor, Warden, Herald) are pinged too.
  * The only exception: don't ping an agent that's currently being dispatched to
  * by the heartbeat itself (prevents recursion).
+ *
+ * Project 1.9 shape change (future PR): this whole heartbeat mechanism
+ * becomes a tick-and-fire-Alarum skeleton — Pulse stops pinging agents
+ * directly; Alarum spawns each tick and decides whether to wake Sexton,
+ * who runs patrol blueprints that dispatch sweepers to check agent
+ * state. Current behavior preserved until the runtime-skeleton PR
+ * lands.
  */
 export class Pulse {
   private daemon: Daemon;
@@ -63,11 +70,6 @@ export class Pulse {
 
   stop(): void {
     if (this.interval) clearInterval(this.interval);
-  }
-
-  /** Re-scan members — called after bootstrap adds new agents. */
-  refreshFailsafe(): void {
-    // No-op now — we discover agents dynamically each cycle
   }
 
   // ── Core Heartbeat Cycle ───────────────────────────────────────────
