@@ -15,8 +15,8 @@
  * Pure on top of queryChits / findChitById — no additional I/O.
  */
 
-import type { Chit, ChitScope } from './types/chit.js';
-import { queryChits, findChitById, isChitIdFormat } from './chits.js';
+import type { ChitScope } from './types/chit.js';
+import { queryChits, findChitById, isChitIdFormat, type ChitWithBody } from './chits.js';
 
 // ─── Options ────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ export function findBlueprintByName(
   corpRoot: string,
   name: string,
   opts: BlueprintLookupOpts = {},
-): Chit<'blueprint'> | null {
+): ChitWithBody<'blueprint'> | null {
   const scopes = opts.scopes ?? (['corp'] as const);
   const activeOnly = opts.activeOnly ?? true;
 
@@ -83,7 +83,7 @@ export function findBlueprintByName(
       return true;
     });
 
-    if (match) return match.chit;
+    if (match) return match;
   }
 
   return null;
@@ -105,7 +105,7 @@ export function resolveBlueprint(
   corpRoot: string,
   nameOrId: string,
   opts: BlueprintLookupOpts = {},
-): Chit<'blueprint'> | null {
+): ChitWithBody<'blueprint'> | null {
   if (isChitIdFormat(nameOrId)) {
     const hit = findChitById(corpRoot, nameOrId);
     if (!hit || hit.chit.type !== 'blueprint') return null;
@@ -115,7 +115,7 @@ export function resolveBlueprint(
     if (opts.activeOnly !== false && hit.chit.status !== 'active') {
       return null;
     }
-    return hit.chit as Chit<'blueprint'>;
+    return hit as ChitWithBody<'blueprint'>;
   }
   return findBlueprintByName(corpRoot, nameOrId, opts);
 }
@@ -149,14 +149,14 @@ export interface BlueprintListOpts {
 export function listBlueprintChits(
   corpRoot: string,
   opts: BlueprintListOpts = {},
-): Chit<'blueprint'>[] {
+): ChitWithBody<'blueprint'>[] {
   const result = queryChits<'blueprint'>(corpRoot, {
     types: ['blueprint'],
     ...(opts.scopes ? { scopes: opts.scopes } : {}),
     includeArchive: false,
   });
 
-  return result.chits
-    .filter((cwb) => opts.includeNonActive || cwb.chit.status === 'active')
-    .map((cwb) => cwb.chit);
+  return result.chits.filter(
+    (cwb) => opts.includeNonActive || cwb.chit.status === 'active',
+  );
 }

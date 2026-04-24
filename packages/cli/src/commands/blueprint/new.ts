@@ -102,10 +102,10 @@ export async function cmdBlueprintNew(rawArgs: string[]): Promise<void> {
   if (existing) {
     console.error(
       `error: blueprint '${name}' already exists at scope '${scope}' ` +
-        `(status '${existing.status}', id ${existing.id})`,
+        `(status '${existing.chit.status}', id ${existing.chit.id})`,
     );
     console.error('');
-    console.error(`To edit: open ${chitPath(corpRoot, scope, 'blueprint', existing.id)}`);
+    console.error(`To edit: open ${existing.path}`);
     console.error(`To replace: close the existing one, then create a new one.`);
     process.exit(1);
   }

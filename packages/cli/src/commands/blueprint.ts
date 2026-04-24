@@ -38,6 +38,16 @@ export async function cmdBlueprint(rawArgs: string[]): Promise<void> {
       await cmdBlueprintNew(subArgs);
       break;
     }
+    case 'list': {
+      const { cmdBlueprintList } = await import('./blueprint/list.js');
+      await cmdBlueprintList(subArgs);
+      break;
+    }
+    case 'show': {
+      const { cmdBlueprintShow } = await import('./blueprint/show.js');
+      await cmdBlueprintShow(subArgs);
+      break;
+    }
     default: {
       console.error(`Unknown blueprint subcommand: ${subcommand}`);
       console.error('');
