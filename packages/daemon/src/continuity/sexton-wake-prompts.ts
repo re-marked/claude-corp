@@ -59,7 +59,7 @@ Your immediate task this session:
 1. Read your prior handoff if one exists:
    \`cc-cli wtf\`
 
-   That command surfaces your most recent handoff chit as context. If it returns "no handoff," you're a fresh Sexton — treat this as your first session and orient yourself from the corp state alone.
+   That command surfaces your most recent handoff chit as context and marks it consumed. If it returns "no handoff," you're a fresh Sexton — treat this as your first session and orient yourself from the corp state alone.
 
 2. Read the corp's current state:
    \`cc-cli status\`
@@ -67,11 +67,18 @@ Your immediate task this session:
 
 3. Decide what's worth doing this session. You don't have a patrol blueprint library yet (those land in a later sub-project); for now, integrate what you see and name the most important signal.
 
-4. Write an observation chit summarizing your read + what you're choosing to do about it:
-   \`cc-cli chit create --type observation --scope corp --field category=NOTICE --field subject=sexton-wake --field importance=2 --title "<one line>" --body "<reasoning>"\`
+4. Write an observation summarizing your read + what you're choosing to do about it:
+   \`cc-cli observe "<one-sentence summary>" --from sexton --category NOTICE --subject sexton-wake --importance 2\`
 
 5. Before exiting, write a handoff chit so your next session (minutes from now, or hours) picks up clean:
-   \`cc-cli handoff --current-step "<where you are>" --next-action "<what future-you should do>" --notes "<context>"\`
+   \`\`\`
+   cc-cli chit create --type handoff --scope agent:sexton --from sexton \\
+     --field predecessorSession="\${CLAUDE_SESSION_ID:-sexton-$(date +%s)}" \\
+     --field currentStep="<where you are>" \\
+     --field completed='[]' \\
+     --field nextAction="<what future-you should do first>" \\
+     --field notes="<context — what to watch for, what's unresolved>"
+   \`\`\`
 
 Your permissions (from your IDENTITY.md): you can be quiet when nothing merits attention; you can refuse to escalate when you genuinely think you know what to do; your voice is yours to find. Start thin. Honest is more important than thorough on your first session.
 `;
@@ -90,7 +97,19 @@ Check what's changed:
 
 Decide whether this new signal warrants an action (nudging an agent, escalating via Tier 3 inbox, writing an observation that compounds over time) or is noise to note-and-move-on.
 
-Before exiting: write an observation chit if the signal is worth remembering, and update your handoff chit with where you're leaving things.
+Before exiting:
+
+1. If the signal is worth remembering, write an observation:
+   \`cc-cli observe "<what happened and what it means>" --from sexton --category NOTICE --importance 2\`
+
+2. Update your handoff chit with where you're leaving things:
+   \`\`\`
+   cc-cli chit create --type handoff --scope agent:sexton --from sexton \\
+     --field predecessorSession="\${CLAUDE_SESSION_ID:-sexton-$(date +%s)}" \\
+     --field currentStep="<where you are>" \\
+     --field completed='[]' \\
+     --field nextAction="<what future-you should do first>"
+   \`\`\`
 `;
 
 /**
@@ -103,10 +122,21 @@ const NUDGE_MESSAGE = `Alarum nudged you — your last handoff is stale enough t
 
 Check:
 
-1. \`cc-cli wtf\` — read your own prior handoff
+1. \`cc-cli wtf --peek\` — read your own prior handoff without consuming it (you're mid-life, not starting fresh)
 2. Look at your current work. Does the handoff still describe it?
 
-If yes: update the handoff's timestamp (\`cc-cli handoff\` rewrites it, keeping the same content) and exit. If no: write a fresh handoff reflecting where you actually are. Either way, don't start new work on a nudge — it's a pulse-check, not a wake.
+If yes: exit — no new chit needed. The existing handoff still reflects reality; the next Alarum nudge will re-check.
+
+If no: write a fresh handoff reflecting where you actually are, then exit:
+\`\`\`
+cc-cli chit create --type handoff --scope agent:sexton --from sexton \\
+  --field predecessorSession="\${CLAUDE_SESSION_ID:-sexton-$(date +%s)}" \\
+  --field currentStep="<where you actually are now>" \\
+  --field completed='[]' \\
+  --field nextAction="<what future-you should do first>"
+\`\`\`
+
+Don't start new work on a nudge — it's a pulse-check, not a wake.
 `;
 
 // ─── Resolver ───────────────────────────────────────────────────────
