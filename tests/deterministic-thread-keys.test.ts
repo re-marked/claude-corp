@@ -22,19 +22,13 @@ function readSource(rel: string): string {
   return readFileSync(join(REPO_ROOT, rel), 'utf-8');
 }
 
-describe('pulse escalation/recovery route into CEO main thread', () => {
-  const pulse = readSource('packages/daemon/src/pulse.ts');
-
-  it('escalation uses agentSessionKey — not a timestamp-based key', () => {
-    expect(pulse).not.toMatch(/sessionKey:\s*`pulse-escalation/);
-    expect(pulse).toMatch(/ESCALATION from Pulse[\s\S]*?sessionKey:\s*agentSessionKey\('ceo'\)/);
-  });
-
-  it('recovery uses agentSessionKey — not a timestamp-based key', () => {
-    expect(pulse).not.toMatch(/sessionKey:\s*`pulse-recovery/);
-    expect(pulse).toMatch(/RECOVERY: Agent[\s\S]*?sessionKey:\s*agentSessionKey\('ceo'\)/);
-  });
-});
+// Project 1.9.3 removed: the "pulse escalation/recovery route into CEO
+// main thread" describe block. Those tests pinned the session-key shape
+// of Pulse's agent-ping + escalation loop — the whole mechanism the
+// reshape deleted. Nothing in pulse.ts dispatches anymore; the tests
+// had no code to guard. An equivalent dispatch-path assertion for the
+// new continuity chain (Alarum → Sexton wake) lands in 1.9.4's
+// Sexton-runtime PR.
 
 describe('router @mention lands on the agent session', () => {
   const router = readSource('packages/daemon/src/router.ts');
@@ -66,11 +60,12 @@ describe('ambient work unifies on agent session (one brain per agent)', () => {
     expect(loops).toMatch(/sessionKey:\s*agentSessionKey\(clock\.targetAgent\)/);
   });
 
-  it('pulse heartbeat routes through agentSessionKey', () => {
-    const pulse = readSource('packages/daemon/src/pulse.ts');
-    expect(pulse).not.toMatch(/sessionKey:\s*`heartbeat:/);
-    expect(pulse).toMatch(/sessionKey:\s*agentSessionKey\(agentSlug\)/);
-  });
+  // Project 1.9.3: "pulse heartbeat routes through agentSessionKey"
+  // test removed alongside the Pulse reshape — pulse.ts no longer
+  // dispatches to agents (Alarum + Sexton's patrol cycle own that
+  // work now). The session-key pattern the test guarded has no code
+  // to pin. Equivalent assertion for the new wake path will live in
+  // the Sexton-runtime PR once dispatch exists there.
 
   it('autoemon ticks route through agentSessionKey', () => {
     const autoemon = readSource('packages/daemon/src/autoemon.ts');
