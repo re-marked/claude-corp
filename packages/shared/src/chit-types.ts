@@ -341,6 +341,20 @@ function validateEscalation(fields: unknown): void {
 function validateBlueprint(fields: unknown): void {
   const f = requireObject(fields, 'blueprint') as Partial<BlueprintFields>;
 
+  // name is load-bearing — this is what `cc-cli blueprint cast <name>`
+  // resolves against. Required, kebab-case-ish, allows `/` so category
+  // prefixes (`patrol/health-check`, `patrol/corp-health`) compose
+  // cleanly. Start + end alphanumeric lowercase so `foo-` and `/foo`
+  // and trailing-slash paths are rejected. Uniqueness-per-scope is
+  // enforced at the CLI boundary (validator has no scope access).
+  requireNonEmptyString(f.name, 'blueprint.name');
+  if (!/^[a-z0-9](?:[a-z0-9_/-]*[a-z0-9])?$/.test(f.name!)) {
+    throw new ChitValidationError(
+      `blueprint.name must be kebab-case-ish: lowercase alphanumeric, body may contain - _ / (got ${JSON.stringify(f.name)})`,
+      'blueprint.name',
+    );
+  }
+
   // origin is load-bearing — drives `cc-cli update --blueprints`
   // reseed behavior and the list-view badge. Always required.
   requireEnum(f.origin, 'blueprint.origin', ['authored', 'builtin'] as const);
@@ -389,13 +403,30 @@ function validateBlueprint(fields: unknown): void {
       requireStringArray(step.acceptanceCriteria, `${stepPath}.acceptanceCriteria`);
     }
 
-    // assigneeRole can be null (cast-time resolution) or a string — we
-    // don't cross-check the role registry here because the registry
-    // lives in a downstream module and blueprints are author-time
-    // artifacts; the cast primitive does the role-existence check
-    // against the live registry when it matters.
+    // assigneeRole can be null (cast-time resolution) or a role-registry
+    // id. Role existence is NOT cross-checked here — the registry lives
+    // in a downstream module and a blueprint might reference a role
+    // added later; cast validates against the live registry when it
+    // matters. What WE enforce is the format invariant: role ids are
+    // kebab-case alphanumeric ('backend-engineer', 'ceo', 'sexton').
+    // Scope-qualified slugs ('agent:toast', 'project:fire/...') are
+    // SLOT references, not role references — accepting them would
+    // over-couple a blueprint to a specific Employee and defeat the
+    // role-abstraction the design depends on. Reject with a message
+    // that teaches the role-vs-slot distinction.
     if (step.assigneeRole !== undefined) {
       requireStringOrNull(step.assigneeRole, `${stepPath}.assigneeRole`);
+      if (typeof step.assigneeRole === 'string') {
+        if (!/^[a-z][a-z0-9-]*$/.test(step.assigneeRole)) {
+          const hint = step.assigneeRole.includes(':')
+            ? ' (looks like a scope-qualified slug — blueprints assign to ROLES, not specific slots; use e.g. "backend-engineer" instead of "agent:toast")'
+            : ' (lowercase alphanumeric + hyphens only)';
+          throw new ChitValidationError(
+            `${stepPath}.assigneeRole must be a role id${hint} — got ${JSON.stringify(step.assigneeRole)}`,
+            `${stepPath}.assigneeRole`,
+          );
+        }
+      }
     }
   });
 
@@ -462,15 +493,31 @@ function validateBlueprint(fields: unknown): void {
       }
       varNames.add(v.name!);
       requireEnum(v.type, `${path}.type`, ['string', 'int', 'bool'] as const);
-      // default is optional + loosely typed (string | number | boolean | null).
-      // Type coherence (e.g. `type: 'int'` + `default: "text"`) would be a
-      // useful check, but at cast time we'll coerce via Handlebars helpers
-      // anyway; strict checking here without coercion causes authoring pain.
-      if (v.default !== undefined) {
-        const t = typeof v.default;
-        if (v.default !== null && t !== 'string' && t !== 'number' && t !== 'boolean') {
+      // Default type must match declared var type. Null is always allowed
+      // (author signaling "optional with no default — caller must pass").
+      // Catching mismatch at write time is the whole point: a `type: 'int'`
+      // var with `default: "5"` is author error, and cast-time coercion
+      // would silently "fix" it while hiding the bug. Fail loudly here.
+      // `requireEnum` above guarantees v.type is one of the three values
+      // by the time we get here.
+      if (v.default !== undefined && v.default !== null) {
+        const actual = typeof v.default;
+        let ok = false;
+        switch (v.type) {
+          case 'string':
+            ok = actual === 'string';
+            break;
+          case 'int':
+            ok = actual === 'number' && Number.isInteger(v.default);
+            break;
+          case 'bool':
+            ok = actual === 'boolean';
+            break;
+        }
+        if (!ok) {
+          const got = actual === 'number' && !Number.isInteger(v.default) ? 'non-integer number' : actual;
           throw new ChitValidationError(
-            `${path}.default must be string | number | boolean | null (got ${t})`,
+            `${path}.default must match type='${v.type}' or be null (got ${got}: ${JSON.stringify(v.default)})`,
             `${path}.default`,
           );
         }

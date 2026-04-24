@@ -589,7 +589,19 @@ export interface BlueprintVar {
  * + dream machinery can actually detect the patterns.
  */
 export interface BlueprintFields {
-  /** The step DAG — the cookable body of the blueprint. Must be non-empty; cycles rejected at validate. */
+  /**
+   * Human-typeable identifier. Kebab-case, unique within the blueprint's
+   * scope (agent / project / corp). This is what `cc-cli blueprint cast
+   * <name>` resolves against — the chit id (`chit-b-a1b2c3d4`) works
+   * too, but nobody wants to type that. Load-bearing: every CLI-side
+   * blueprint reference flows through this field.
+   *
+   * Uniqueness-per-scope is enforced at the CLI boundary (`blueprint
+   * new` / `blueprint cast` lookup), not in the chit-type validator,
+   * because the validator doesn't have access to scope state.
+   */
+  name: string;
+  /** The step DAG — the castable body of the blueprint. Must be non-empty; cycles rejected at validate. */
   steps: BlueprintStep[];
   /** Variables the caller fills at cast time. Optional — a blueprint can be fully static. Empty array and absent are equivalent. */
   vars?: BlueprintVar[];
@@ -597,6 +609,6 @@ export interface BlueprintFields {
   origin: 'authored' | 'builtin';
   /** Short human-readable label shown in `cc-cli blueprint list`. Distinct from the chit body (which holds prose for the human author reading the file). */
   title?: string | null;
-  /** One-line summary shown in list output. Supports Handlebars? No — this is metadata about the blueprint itself, not a cast-time template. */
+  /** One-line summary shown in list output. Not Handlebars-templated — this is metadata about the blueprint itself, not a cast-time template. */
   summary?: string | null;
 }
