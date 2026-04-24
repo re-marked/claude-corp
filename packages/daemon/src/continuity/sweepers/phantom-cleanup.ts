@@ -45,7 +45,7 @@
 
 import { readConfig, type Member, MEMBERS_JSON } from '@claudecorp/shared';
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join, isAbsolute } from 'node:path';
+import { join, isAbsolute, normalize } from 'node:path';
 import { log } from '../../logger.js';
 import type { SweeperContext, SweeperResult, SweeperFinding } from './types.js';
 
@@ -106,6 +106,27 @@ function resolveMemberWorkspace(corpRoot: string, agentDir: string): string {
   return isAbsolute(agentDir) ? agentDir : join(corpRoot, agentDir);
 }
 
+/**
+ * Normalize a filesystem path to OS-native separators + resolved
+ * `..` segments, so exact-string Set lookups work across the two
+ * sources of paths in this sweeper:
+ *
+ *   - `member.agentDir` from members.json — stored at hire time,
+ *     may use forward slashes (hand-edited, cross-platform), mixed
+ *     separators, or embedded `./`.
+ *   - `join(containerPath, slug)` from walking the filesystem —
+ *     always produces OS-native separators (backslash on Windows).
+ *
+ * Without normalization, `agents/toast` from members.json and
+ * `agents\toast` from a Windows dir walk wouldn't match, so every
+ * active agent's workspace would get flagged as a phantom
+ * workspace. normalize() on both sides makes the comparison
+ * separator-agnostic.
+ */
+function canonicalizePath(p: string): string {
+  return normalize(p);
+}
+
 export async function runPhantomCleanup(ctx: SweeperContext): Promise<SweeperResult> {
   const { daemon } = ctx;
   const findings: SweeperFinding[] = [];
@@ -155,10 +176,13 @@ export async function runPhantomCleanup(ctx: SweeperContext): Promise<SweeperRes
   // agent-container path, check whether any Member (including
   // archived) claims it. Archived members legitimately hold
   // workspaces — we only flag dirs with NO Member at all.
+  // Canonicalize both sides of the Set so stored separators
+  // (members.json may carry forward-slash paths from a cross-
+  // platform edit) match walk-derived separators (OS-native).
   const knownAgentDirs = new Set<string>();
   for (const member of members) {
     if (member.type !== 'agent' || !member.agentDir) continue;
-    knownAgentDirs.add(resolveMemberWorkspace(daemon.corpRoot, member.agentDir));
+    knownAgentDirs.add(canonicalizePath(resolveMemberWorkspace(daemon.corpRoot, member.agentDir)));
   }
 
   for (const containerPath of agentContainerPaths(daemon.corpRoot)) {
@@ -167,7 +191,7 @@ export async function runPhantomCleanup(ctx: SweeperContext): Promise<SweeperRes
       if (!isDirectory(slotDir)) continue;
       scannedWorkspaces++;
 
-      if (knownAgentDirs.has(slotDir)) continue;
+      if (knownAgentDirs.has(canonicalizePath(slotDir))) continue;
 
       phantomWorkspaces++;
       findings.push({
