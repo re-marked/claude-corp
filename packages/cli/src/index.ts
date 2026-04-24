@@ -125,6 +125,7 @@ Commands:
   observe    Capture an observation — alias for 'chit create --type observation'
   migrate    Corp data migrations (migrate tasks: pre-chits Tasks → Chits)
   daemon     Daemon-level ops (daemon install-service: OS supervisor setup)
+  sweeper    Code sweepers — Sexton's workers (sweeper run <name>)
 
 Feedback pipeline:
   feedback                              Corp overview — pending, BRAIN, CULTURE candidates
@@ -239,6 +240,13 @@ async function run() {
       // status / logs as they land). Pass-through same as chit/inbox.
       const { cmdDaemon } = await import('./commands/daemon.js');
       await cmdDaemon(process.argv.slice(3));
+      break;
+    }
+    case 'sweeper': {
+      // Code sweepers (Sexton's workers). Pass-through same as
+      // chit/inbox — each subcommand owns its flags.
+      const { cmdSweeper } = await import('./commands/sweeper.js');
+      await cmdSweeper(process.argv.slice(3));
       break;
     }
     case 'tame': {

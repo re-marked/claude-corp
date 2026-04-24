@@ -31,6 +31,7 @@ import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm } from './task-events.js';
 import { log, logError } from './logger.js';
+import { runSweeper, UnknownSweeperError, SWEEPER_NAMES } from './continuity/sweepers/index.js';
 
 /** Format tool call into a human-readable description for chat history. */
 import { formatToolMessage as formatToolMsg } from './format-tool.js';
@@ -1008,6 +1009,40 @@ export function createApi(daemon: Daemon): Server {
         }
         const result = await daemon.sendMessage(channelId, content, senderId);
         json(res, result);
+        return;
+      }
+
+      // POST /sweeper/run — invoke a code sweeper by name.
+      //
+      // Body: { name: string } — must be one of SWEEPER_NAMES.
+      // Response shape: SweeperResult { status, observations, summary }.
+      //
+      // runSweeper handles its own error containment — a buggy
+      // sweeper returns status='failed' instead of throwing. The
+      // only path that throws out of runSweeper is UnknownSweeperError
+      // (bad name from caller), which maps to 400 here. Anything
+      // else escaping runSweeper is genuinely unexpected and lands
+      // as 500 — Pulse's tick loop is wrapped separately so a 500
+      // here doesn't propagate into continuity-chain failures.
+      if (method === 'POST' && path === '/sweeper/run') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const rawName = body.name;
+        if (typeof rawName !== 'string' || rawName.length === 0) {
+          json(res, { error: `name is required (known sweepers: ${SWEEPER_NAMES.join(', ')})` }, 400);
+          return;
+        }
+        try {
+          const result = await runSweeper(daemon, rawName);
+          json(res, result);
+        } catch (err) {
+          if (err instanceof UnknownSweeperError) {
+            json(res, { error: err.message }, 400);
+            return;
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          logError(`[api] /sweeper/run unexpected error: ${message}`);
+          json(res, { error: `sweeper dispatch failed: ${message}` }, 500);
+        }
         return;
       }
 

@@ -64,8 +64,20 @@ Your immediate task this session:
 2. Read the corp's current state:
    \`cc-cli status\`
    \`cc-cli chit list --type observation --limit 20\`
+   \`cc-cli chit list --type kink --status active --limit 20\` — open operational findings. This is your main patrol signal: what's currently wrong that hasn't resolved yet.
 
-3. Decide what's worth doing this session. You don't have a patrol blueprint library yet (those land in a later sub-project); for now, integrate what you see and name the most important signal.
+3. Decide what's worth doing this session. You don't have a patrol blueprint library yet (those land in a later sub-project), but you do have six sweepers on tap. Each emits kink chits you'll read on subsequent patrols (dedup + auto-resolve handled by the runner):
+
+   \`cc-cli sweeper run silentexit\`       — respawn dead slots with pending Casket work
+   \`cc-cli sweeper run agentstuck\`       — flag live agents whose current task hasn't moved in 30+ min
+   \`cc-cli sweeper run orphantask\`       — find queued tasks with no assignee or archived assignee
+   \`cc-cli sweeper run phantom-cleanup\`  — reconcile members.json vs on-disk workspaces
+   \`cc-cli sweeper run chit-hygiene\`     — find malformed chits + orphan refs/dependsOn
+   \`cc-cli sweeper run log-rotation\`     — rotate daemon log if it's past 10MB
+
+   Usage pattern: run the sweepers you think are relevant given the kinks + observations you read. silentexit + agentstuck every tick is reasonable; the others only when something hints their domain is in play. Each is cheap and no-ops when clean — running one that finds nothing doesn't cost much.
+
+   Beyond sweepers: integrate what you see in the corp state and name the most important signal.
 
 4. Write an observation summarizing your read + what you're choosing to do about it:
    \`cc-cli observe "<one-sentence summary>" --from sexton --category NOTICE --subject sexton-wake --importance 2\`
@@ -94,10 +106,21 @@ const WAKE_MESSAGE = `Alarum woke you — new activity has landed since your las
 
 Check what's changed:
 
-1. \`cc-cli chit list --type observation --limit 20\` — recent observations, newest first
-2. \`cc-cli status\` — agent statuses (any broken? any stuck?)
+1. \`cc-cli chit list --type kink --status active --limit 20\` — open operational kinks from prior sweeper runs. Start here: these are the issues the corp thinks aren't fixed yet. occurrenceCount tells you "fresh" vs "been happening all day."
+2. \`cc-cli chit list --type observation --limit 20\` — recent observations, newest first
+3. \`cc-cli status\` — agent statuses (any broken? any stuck?)
 
-Decide whether this new signal warrants an action (nudging an agent via \`cc-cli say\`, speaking up to the founder directly, writing an observation that compounds over time) or is noise to note-and-move-on.
+Decide whether this new signal warrants an action (nudging an agent via \`cc-cli say\`, running a sweeper, speaking up to the founder directly, writing an observation that compounds over time) or is noise to note-and-move-on.
+
+Sweepers on tap (each no-ops when everything's healthy):
+  \`cc-cli sweeper run silentexit\`       — respawn dead slots with pending work
+  \`cc-cli sweeper run agentstuck\`       — flag live-but-not-progressing agents (30+ min stale)
+  \`cc-cli sweeper run orphantask\`       — find queued tasks with no assignee
+  \`cc-cli sweeper run phantom-cleanup\`  — reconcile members.json vs workspace dirs
+  \`cc-cli sweeper run chit-hygiene\`     — find malformed chits + orphan refs
+  \`cc-cli sweeper run log-rotation\`     — rotate daemon log past 10MB
+
+Kinks dedup per (source, subject) — re-running a sweeper on a persistent issue bumps occurrenceCount rather than piling duplicates. And when a sweeper stops reporting a subject, the runner auto-closes the prior kink as 'auto-resolved'. Your kink queue stays honest.
 
 Your response text in this session posts to your DM with the founder automatically — that IS how you reach them. If something matters enough to surface, say it in your response. If nothing matters, respond with empty/minimal text and exit; nothing posts when there's nothing to say.
 

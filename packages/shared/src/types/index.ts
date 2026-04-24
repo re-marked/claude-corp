@@ -71,4 +71,5 @@ export type {
   BlueprintStep,
   BlueprintVar,
   SweeperRunFields,
+  KinkFields,
 } from './chit.js';
