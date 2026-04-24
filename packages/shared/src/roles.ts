@@ -134,6 +134,25 @@ export const ROLES: readonly RoleEntry[] = [
     communication:
       'Tier 1 ambient notifications for routine restarts. Tier 3 escalation DMs to the founder only when circuit-breaking an agent pair.',
   },
+  {
+    // Project 1.9 — caretaker of continuity. Replaces the failsafe
+    // slot with a fundamentally different shape: Sexton orchestrates
+    // (dispatches sweepers that do the mechanical maintenance work);
+    // she doesn't execute that work herself. Failsafe still exists in
+    // the registry temporarily so the hire path keeps compiling until
+    // this PR's switch-commit flips corp-init to spawn Sexton instead.
+    // Subsequent commits in this PR delete failsafe entirely.
+    id: 'sexton',
+    displayName: 'Sexton',
+    defaultKind: 'partner',
+    tier: 'decree',
+    description:
+      "The corp's caretaker of continuity. Orchestrates unkillability via patrol blueprints; dispatches sweepers that do the mechanical maintenance work; reads their observations; escalates judgment calls to the founder.",
+    purpose:
+      'Keep the corp alive across restarts, silent exits, and overnight sleep. Notice patterns sweepers cannot name yet and escalate cleanly when a human call is genuinely needed.',
+    communication:
+      "Quiet by default. Tier 3 inbox when a founder decision is required; observation chits for patterns worth remembering; DMs to agents she's nudging back into motion. Never pads, never panics.",
+  },
 
   // ─── Partners by role — named leaders of operational functions ───
   {
