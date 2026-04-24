@@ -52,7 +52,8 @@
  */
 
 import type { Daemon } from '../daemon.js';
-import { log } from '../logger.js';
+import { log, logError } from '../logger.js';
+import { invokeAlarum } from './alarum.js';
 
 /**
  * Tick cadence. 5 minutes is a reasonable default: short enough that a
@@ -96,24 +97,34 @@ export class Pulse {
   }
 
   /**
-   * One tick of the continuity chain. Logs the tick count + invokes the
-   * Alarum dispatcher (wired in a subsequent 1.9.3 commit). Until
-   * Alarum lands, the tick is observable-but-inert — you can see the
-   * daemon is alive via the log line, but nothing downstream fires.
+   * One tick of the continuity chain. Bumps the tick counter, logs it,
+   * invokes Alarum for a triage decision. Alarum's decision is logged
+   * here; actually acting on it (spawning Sexton, sending her a wake
+   * message) is PR 2's Sexton-runtime territory. For 1.9.3 the chain
+   * stops at "decision logged" — observable, testable, inert.
    *
-   * Never throws: any error from the Alarum invocation (parse failure,
-   * subprocess crash, timeout, whatever) is caught + logged + swallowed.
-   * A broken Alarum must not take Pulse down — the whole point of
-   * putting Pulse at the bottom of the chain is that its one job
-   * (tick) is reliable regardless of layers above it.
+   * Never throws: any error bubbling out of invokeAlarum is caught +
+   * logged + swallowed. The dispatcher itself already has safe-default
+   * fallback on every exec/parse failure, so this guard is defense-
+   * in-depth — Pulse's one job (keep ticking) must be unkillable
+   * regardless of what happens above it. A broken Alarum takes itself
+   * down, not the tick.
    */
   private async tick(): Promise<void> {
     this.tickCount++;
     log(`[pulse] tick #${this.tickCount}`);
 
-    // TODO(1.9.3): wire Alarum invocation here. Stubbed until alarum.ts
-    // lands in a subsequent commit of this PR — current behavior is
-    // "Pulse ticks, nothing downstream fires." That's the intended
-    // intermediate state; see module docstring for the rationale.
+    try {
+      const decision = await invokeAlarum(this.daemon);
+      log(`[pulse] tick #${this.tickCount} → alarum decision: ${decision.action} (${decision.reason})`);
+      // TODO(1.9.4 — Sexton runtime): route non-'nothing' decisions
+      // into Sexton's wake/start/nudge paths. For now the decision is
+      // logged and dropped; Sexton's runtime lands in the next PR.
+    } catch (err) {
+      // Defense-in-depth: invokeAlarum is supposed to never reject
+      // (it catches + returns a safe default), but if it does anyway,
+      // swallow the error here so Pulse's tick loop keeps running.
+      logError(`[pulse] tick #${this.tickCount} alarum invocation threw (dispatcher bug): ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 }
