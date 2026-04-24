@@ -690,6 +690,41 @@ describe('castSweeperFromBlueprint — happy paths', () => {
     }
   });
 
+  it('cast-produced sweeper-run inherits registry defaults: ephemeral=true + TTL ~7d', () => {
+    // Load-bearing contract: sweeper-run is registered as defaultEphemeral
+    // with a 7d TTL, so the chit-lifecycle scanner's destroy-if-not-
+    // promoted policy kicks in for unreferenced runs. If createChit ever
+    // stops honoring the registry's defaultEphemeral/defaultTTL for
+    // this type — silently making runs permanent — stale sweeper-runs
+    // would accumulate forever and the 1.9 "sweepers are transient
+    // events" thesis would rot. This test catches that class of regression.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const bp = createActiveSweeperBlueprint(corpRoot);
+      const before = Date.now();
+      const { sweeperRun } = castSweeperFromBlueprint(corpRoot, bp, {}, {
+        scope: 'corp',
+        createdBy: 'sexton',
+      });
+      const after = Date.now();
+
+      expect(sweeperRun.ephemeral).toBe(true);
+      expect(sweeperRun.ttl).toBeDefined();
+
+      // TTL is an ISO timestamp 7 days out. Allow a day of slop on
+      // either side so the test isn't flaky across timezone edges and
+      // doesn't hard-code "exactly 604800000 ms."
+      const ttlMs = Date.parse(sweeperRun.ttl!);
+      expect(Number.isFinite(ttlMs)).toBe(true);
+      const SIX_DAYS_MS = 6 * 24 * 60 * 60 * 1000;
+      const EIGHT_DAYS_MS = 8 * 24 * 60 * 60 * 1000;
+      expect(ttlMs - before).toBeGreaterThanOrEqual(SIX_DAYS_MS);
+      expect(ttlMs - after).toBeLessThanOrEqual(EIGHT_DAYS_MS);
+    } finally {
+      cleanup();
+    }
+  });
+
   it('sweeper-run body is empty when step.description is absent', () => {
     // Code sweepers usually skip description (the module carries its
     // own logic). Body should be an empty string — not "undefined",
