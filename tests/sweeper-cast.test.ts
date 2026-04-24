@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createChit,
+  findChitById,
   castSweeperFromBlueprint,
   BlueprintCastError,
   BlueprintParseError,
@@ -643,7 +644,14 @@ describe('castSweeperFromBlueprint — happy paths', () => {
     }
   });
 
-  it('Handlebars expansion in step.description lands in sweeper-run body', () => {
+  it('Handlebars expansion in step.description lands verbatim in sweeper-run body (disk round-trip)', () => {
+    // Cast hands a parsed.steps[0].description (already Handlebars-
+    // expanded) to createChit as the body. If cast ever passes the raw
+    // template through by mistake, the dispatcher would feed the AI
+    // sweeper a prompt like "Decide what to do about {{target}}." —
+    // the literal mustache. This test catches that by round-tripping
+    // the sweeper-run chit through disk and asserting the body matches
+    // the EXPANDED text, not the template source.
     const { corpRoot, cleanup } = makeCorp();
     try {
       const bp = createActiveSweeperBlueprint(corpRoot, {
@@ -658,23 +666,56 @@ describe('castSweeperFromBlueprint — happy paths', () => {
           },
         ],
       });
-      const { sweeperRun } = castSweeperFromBlueprint(
+      const { sweeperRun, parsed } = castSweeperFromBlueprint(
         corpRoot,
         bp,
         { target: 'orphan chits' },
         { scope: 'corp', createdBy: 'sexton' },
       );
-      // Body reads from disk as the chit's markdown section — for our
-      // purposes we verify the parsed step's description was expanded
-      // and would have been written verbatim to body. The createChit
-      // path doesn't return body, so we inspect the parsed snapshot.
-      expect(sweeperRun.id).toMatch(/^chit-sr-/);
-      // The field doesn't carry body on the chit record itself; we
-      // verified expansion semantics via the parser directly. Sanity-
-      // check that the dispatch target is the expanded text by
-      // parsing the blueprint again and comparing the description:
-      // the cast already did it, so we're protecting against the
-      // wrong shape being passed through.
+
+      // Sanity: parsed snapshot has the expanded text — this is what
+      // cast should have written to body.
+      expect(parsed.steps[0]!.description).toBe('Decide what to do about orphan chits.');
+
+      // Round-trip: read the chit back from disk. findChitById returns
+      // both the chit record and the body (markdown under the YAML
+      // frontmatter). Body must be the expanded text, not the template.
+      const hit = findChitById(corpRoot, sweeperRun.id);
+      expect(hit).not.toBeNull();
+      expect(hit!.body.trim()).toBe('Decide what to do about orphan chits.');
+      // Negative check — the raw template must NOT be in the body.
+      expect(hit!.body).not.toMatch(/\{\{target\}\}/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('sweeper-run body is empty when step.description is absent', () => {
+    // Code sweepers usually skip description (the module carries its
+    // own logic). Body should be an empty string — not "undefined",
+    // not the literal "null". Round-trip proves the write landed clean.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const bp = createActiveSweeperBlueprint(corpRoot, {
+        name: 'bodyless',
+        steps: [
+          {
+            id: 'run',
+            title: 'Run',
+            // description absent
+            moduleRef: 'session-gc',
+          },
+        ],
+      });
+      const { sweeperRun } = castSweeperFromBlueprint(corpRoot, bp, {}, {
+        scope: 'corp',
+        createdBy: 'sexton',
+      });
+
+      const hit = findChitById(corpRoot, sweeperRun.id);
+      expect(hit).not.toBeNull();
+      expect(hit!.body.trim()).toBe('');
+      expect(hit!.body).not.toMatch(/undefined|null/);
     } finally {
       cleanup();
     }
