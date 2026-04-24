@@ -57,7 +57,7 @@ Alarum just started your session — your prior process had died (or this is the
 Your immediate task this session:
 
 1. Read your prior handoff if one exists:
-   \`cc-cli wtf\`
+   \`cc-cli wtf --agent sexton\`
 
    That command surfaces your most recent handoff chit as context and marks it consumed. If it returns "no handoff," you're a fresh Sexton — treat this as your first session and orient yourself from the corp state alone.
 
@@ -122,7 +122,7 @@ const NUDGE_MESSAGE = `Alarum nudged you — your last handoff is stale enough t
 
 Check:
 
-1. \`cc-cli wtf --peek\` — read your own prior handoff without consuming it (you're mid-life, not starting fresh)
+1. \`cc-cli wtf --agent sexton --peek\` — read your own prior handoff without consuming it (you're mid-life, not starting fresh)
 2. Look at your current work. Does the handoff still describe it?
 
 If yes: exit — no new chit needed. The existing handoff still reflects reality; the next Alarum nudge will re-check.
