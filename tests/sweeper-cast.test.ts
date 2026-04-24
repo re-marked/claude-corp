@@ -690,6 +690,72 @@ describe('castSweeperFromBlueprint — happy paths', () => {
     }
   });
 
+  it('cast-produced sweeper-run fields match disk state verbatim (full round-trip)', () => {
+    // The cast primitive returns a Chit<'sweeper-run'> object, but the
+    // "source of truth" is the chit file on disk. If createChit ever
+    // silently normalizes a field (drops empty arrays, coerces null,
+    // re-keys something), the return value could pass all our field-
+    // level assertions while disk state diverges. Downstream consumers
+    // (Sexton's patrol loop, the dispatcher) read from disk — they'd
+    // see the different state. This catches that class of drift.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const bp = createActiveSweeperBlueprint(corpRoot, {
+        name: 'full-roundtrip',
+        steps: [
+          {
+            id: 'run',
+            title: 'Run it',
+            description: 'The description.',
+            moduleRef: 'chit-hygiene',
+          },
+        ],
+      });
+      const { sweeperRun } = castSweeperFromBlueprint(corpRoot, bp, {}, {
+        scope: 'corp',
+        createdBy: 'sexton',
+        triggeredBy: 'sexton',
+        triggerContext: 'patrol:health-check',
+      });
+
+      const hit = findChitById(corpRoot, sweeperRun.id);
+      expect(hit).not.toBeNull();
+
+      // Every field on the disk chit must match what cast claims it
+      // wrote. No normalization drift, no silent drops.
+      const diskFields = hit!.chit.fields['sweeper-run'] as SweeperRunFields;
+      const returnedFields = sweeperRun.fields['sweeper-run'] as SweeperRunFields;
+
+      expect(diskFields.blueprintId).toBe(returnedFields.blueprintId);
+      expect(diskFields.blueprintId).toBe(bp.id);
+
+      expect(diskFields.triggeredBy).toBe(returnedFields.triggeredBy);
+      expect(diskFields.triggeredBy).toBe('sexton');
+
+      expect(diskFields.triggerContext).toBe(returnedFields.triggerContext);
+      expect(diskFields.triggerContext).toBe('patrol:health-check');
+
+      expect(diskFields.moduleRef).toBe(returnedFields.moduleRef);
+      expect(diskFields.moduleRef).toBe('chit-hygiene');
+
+      expect(diskFields.outcome).toBe(returnedFields.outcome);
+      expect(diskFields.outcome).toBe('running');
+
+      expect(diskFields.observationsProduced).toEqual(returnedFields.observationsProduced);
+      expect(diskFields.observationsProduced).toEqual([]);
+
+      // Chit-common fields: ephemeral + tags must round-trip too.
+      expect(hit!.chit.ephemeral).toBe(true);
+      expect(hit!.chit.tags).toEqual(expect.arrayContaining([
+        'blueprint:full-roundtrip',
+        'sweeper:chit-hygiene',
+      ]));
+      expect(hit!.chit.createdBy).toBe('sexton');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('cast-produced sweeper-run inherits registry defaults: ephemeral=true + TTL ~7d', () => {
     // Load-bearing contract: sweeper-run is registered as defaultEphemeral
     // with a 7d TTL, so the chit-lifecycle scanner's destroy-if-not-
