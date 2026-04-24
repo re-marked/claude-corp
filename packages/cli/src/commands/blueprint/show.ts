@@ -195,7 +195,9 @@ function renderStep(step: BlueprintStep, index: number): void {
   if (step.assigneeRole !== undefined && step.assigneeRole !== null) {
     console.log(`     role:     ${step.assigneeRole}`);
   } else if (step.assigneeRole === null) {
-    console.log(`     role:     (deferred — cast-time --stepRoleOverrides.${step.id})`);
+    console.log(
+      `     role:     (deferred — cast-time --step-role ${step.id}=<role>)`,
+    );
   }
   if (step.dependsOn && step.dependsOn.length > 0) {
     console.log(`     depends:  ${step.dependsOn.join(', ')}`);
