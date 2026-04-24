@@ -68,6 +68,11 @@ describe('CHIT_TYPES registry invariants', () => {
     // draft → active → closed lifecycle. Cast produces Contract + Task
     // chits in 1.8 PR 2.
     'blueprint',
+    // Project 1.9: sweeper-run records one dispatch of a sweeper
+    // blueprint (kind=sweeper). Ephemeral 7d TTL, destroy-if-not-
+    // promoted, active → closed|burning. Cast via
+    // castSweeperFromBlueprint produces one of these per dispatch.
+    'sweeper-run',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {
