@@ -120,7 +120,7 @@ export async function cmdDaemonUninstallService(rawArgs: string[]): Promise<void
     console.log(`  ${artifact.path}  ${existsSync(artifact.path) ? '(exists)' : '(not present)'}`);
     console.log('');
     console.log(`Before deleting the file, run (yourself):`);
-    console.log(`  ${artifact.deactivationCommand}`);
+    console.log('  ' + artifact.deactivationCommand.replace(/\n/g, '\n  '));
     console.log('');
     console.log(artifact.deactivationDescription);
     return;
@@ -132,7 +132,7 @@ export async function cmdDaemonUninstallService(rawArgs: string[]): Promise<void
   // retains a reference to a file that no longer exists. Print the
   // command prominently; prompt for file deletion after.
   console.log(`Step 1 — run this to stop + unregister the service from your OS:`);
-  console.log(`  ${artifact.deactivationCommand}`);
+  console.log('  ' + artifact.deactivationCommand.replace(/\n/g, '\n  '));
   console.log('');
   console.log(artifact.deactivationDescription);
   console.log('');

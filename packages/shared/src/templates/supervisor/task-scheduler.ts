@@ -139,36 +139,50 @@ function renderTaskXml(daemonCommand: string, homeDir: string): string {
 
 export function renderTaskSchedulerXml(opts: ServiceOpts): ServiceArtifact {
   const path = join(opts.homeDir, '.claudecorp', 'supervisor', 'claudecorp-daemon.xml');
-  // Use the literal %USERPROFILE% expansion in the activation command
-  // so the user can copy-paste it into any cmd/PowerShell without
-  // needing to know their resolved home path.
-  const activationPath = '%USERPROFILE%\\.claudecorp\\supervisor\\claudecorp-daemon.xml';
+  // Bake the absolute path into the activation command rather than
+  // using `%USERPROFILE%`. Two reasons both surfaced in review:
+  //
+  //  1. Space-in-profile-path (C:\Users\John Doe\...) is common on
+  //     Windows. If %USERPROFILE% expands to a space-containing
+  //     path inside a cmd /c wrapper, the compound quote-escape
+  //     gymnastics (cmd's "" vs schtasks's CommandLineToArgvW)
+  //     don't interact reliably — schtasks ends up with truncated
+  //     /XML arg. Baking the absolute path at render time avoids
+  //     every rung of that ladder.
+  //
+  //  2. PowerShell doesn't expand %USERPROFILE% (only $env:USERPROFILE).
+  //     Pasting a %USERPROFILE%-based command in PS passes the literal
+  //     string to cmd/schtasks, which works iff the final consumer
+  //     expands env vars. Brittle.
+  //
+  // Second shape change: emit TWO SEPARATE LINES rather than a
+  // cmd.exe /c wrapper with && chaining. Each line runs cleanly in
+  // cmd.exe, PowerShell 5, PowerShell 7, and Git Bash without any
+  // shell-specific escape or chaining operator (`&&` is cmd + PS7
+  // only; `;` is PS only; `\n` between commands works everywhere).
+  // User copies and runs both.
+
+  // Use double-quotes around path so any legitimate space is one arg.
+  // Absolute paths never contain unescaped `"` so inner-quote escaping
+  // isn't a concern.
+  const quotedPath = `"${path}"`;
   return {
     content: renderTaskXml(opts.daemonCommand, opts.homeDir),
     path,
-    // Two commands chained: /Create registers the task (LogonTrigger
-    // only fires at next login), /Run starts it immediately. Matches
-    // the systemd `--now` + launchd `RunAtLoad` experience across
-    // platforms — activation both registers and launches.
-    // Wrap in `cmd.exe /c "..."` so the compound command runs
-    // identically regardless of which shell the user pastes into:
-    //   - cmd.exe:      runs as expected
-    //   - PowerShell 5: `&` is the call operator, `%USERPROFILE%`
-    //                   doesn't expand — would break without wrapping
-    //   - PowerShell 7: has &&, but `%USERPROFILE%` still doesn't expand
-    //   - Git Bash:     accepts cmd.exe invocations cleanly
-    // cmd.exe handles the && chaining, %USERPROFILE% expansion, and
-    // /F switch parsing consistently inside its own subprocess.
-    activationCommand: `cmd.exe /c "schtasks /Create /TN ClaudeCorpDaemon /XML ${activationPath} /F && schtasks /Run /TN ClaudeCorpDaemon"`,
+    activationCommand:
+      `schtasks /Create /TN ClaudeCorpDaemon /XML ${quotedPath} /F\n` +
+      `schtasks /Run /TN ClaudeCorpDaemon`,
     activationDescription:
-      'Imports the XML into Task Scheduler as "ClaudeCorpDaemon" (/F overwrites existing), then starts it immediately. Auto-starts on every login thereafter; restart-on-failure every 30s up to 100 retries.',
+      'Run both commands: first imports the XML into Task Scheduler as "ClaudeCorpDaemon" (/F overwrites existing), second starts it immediately. Auto-starts on every login thereafter; restart-on-failure every 30s up to 100 retries.',
     // /End stops any running instance first so /Delete doesn't fail
-    // on "task is running." Using `&` (not `&&`) — we want /Delete
-    // to run even if /End fails (e.g. task wasn't running). /F skips
-    // the confirmation prompt. Wrapped in `cmd.exe /c` for the same
-    // cross-shell reason as activationCommand.
-    deactivationCommand: 'cmd.exe /c "schtasks /End /TN ClaudeCorpDaemon & schtasks /Delete /TN ClaudeCorpDaemon /F"',
+    // on "task is running." /F skips the confirmation prompt. Two
+    // separate lines for the same cross-shell reasons — /End's
+    // failure (if task wasn't running) is expected, so the user
+    // can ignore its exit code and proceed to /Delete.
+    deactivationCommand:
+      `schtasks /End /TN ClaudeCorpDaemon\n` +
+      `schtasks /Delete /TN ClaudeCorpDaemon /F`,
     deactivationDescription:
-      'Stops any running instance, then removes the task from Task Scheduler. The XML file on disk is deleted separately by uninstall-service.',
+      'Run both commands: first stops any running instance (exit code ignorable if task wasn\'t running), second removes the task from Task Scheduler. The XML file on disk is deleted separately by uninstall-service.',
   };
 }

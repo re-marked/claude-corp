@@ -170,7 +170,7 @@ export async function cmdDaemonInstallService(rawArgs: string[]): Promise<void> 
     console.log('--- End content ---');
     console.log('');
     console.log(`After writing, activate with:`);
-    console.log(`  ${artifact.activationCommand}`);
+    console.log('  ' + artifact.activationCommand.replace(/\n/g, '\n  '));
     console.log('');
     console.log(artifact.activationDescription);
     return;
