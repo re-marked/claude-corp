@@ -1,7 +1,7 @@
 import { readConfig, agentSessionKey, type Member, MEMBERS_JSON } from '@claudecorp/shared';
 import { join } from 'node:path';
-import type { Daemon } from './daemon.js';
-import { log, logError } from './logger.js';
+import type { Daemon } from '../daemon.js';
+import { log, logError } from '../logger.js';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // Every 5 minutes
 const PING_TIMEOUT_MS = 30_000; // 30s timeout per agent ping

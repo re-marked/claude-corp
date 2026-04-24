@@ -45,9 +45,9 @@
  * work rather than arriving pre-scripted.
  */
 
-import type { Daemon } from './daemon.js';
-import { hireAgent } from './hire.js';
-import { log } from './logger.js';
+import type { Daemon } from '../daemon.js';
+import { hireAgent } from '../hire.js';
+import { log } from '../logger.js';
 import { defaultRules, type TemplateHarness } from '@claudecorp/shared';
 
 /**
