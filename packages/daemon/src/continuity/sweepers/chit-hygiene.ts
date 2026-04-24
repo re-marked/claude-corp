@@ -41,7 +41,7 @@
  * a finding for that subject → runner closes the prior kink.
  */
 
-import { queryChits, findChitById } from '@claudecorp/shared';
+import { queryChits } from '@claudecorp/shared';
 import { log } from '../../logger.js';
 import type { SweeperContext, SweeperResult, SweeperFinding } from './types.js';
 
@@ -85,10 +85,23 @@ export async function runChitHygiene(ctx: SweeperContext): Promise<SweeperResult
     log(`[sweeper:chit-hygiene] malformed ${m.path}: ${m.error}`);
   }
 
+  // Build the universe of known ids ONCE from the already-loaded
+  // query result. Replaces a prior per-ref findChitById call which
+  // walked the chit store on every lookup — O(N × (R+D)) with a
+  // filesystem-walk constant on each call. On a mature corp with
+  // thousands of chits + typical 1-3 refs per chit, that was 10k+
+  // fs scans per patrol.
+  //
+  // With the Set: O(N + R+D) total, O(1) per membership check.
+  // Malformed chits are intentionally excluded from the set — they
+  // HAVE ids in their (broken) frontmatter, but since no consumer
+  // can load them, a reference pointing at a malformed chit is
+  // effectively broken. Flagging it as orphan is more conservative
+  // than extracting ids from unparseable files.
+  const knownIds = new Set<string>(result.chits.map((c) => c.chit.id));
+
   // Direction 2 + 3: orphan references / dependsOn across all
-  // well-formed chits. We walk what successfully parsed and check
-  // each link against findChitById — the definitive "does this id
-  // resolve" check.
+  // well-formed chits.
   for (const item of result.chits) {
     const chit = item.chit;
     const refs = Array.isArray(chit.references) ? chit.references : [];
@@ -96,11 +109,11 @@ export async function runChitHygiene(ctx: SweeperContext): Promise<SweeperResult
 
     const orphanRefs: string[] = [];
     for (const refId of refs) {
-      if (!findChitById(daemon.corpRoot, refId)) orphanRefs.push(refId);
+      if (!knownIds.has(refId)) orphanRefs.push(refId);
     }
     const orphanDeps: string[] = [];
     for (const depId of deps) {
-      if (!findChitById(daemon.corpRoot, depId)) orphanDeps.push(depId);
+      if (!knownIds.has(depId)) orphanDeps.push(depId);
     }
 
     if (orphanRefs.length > 0) {
