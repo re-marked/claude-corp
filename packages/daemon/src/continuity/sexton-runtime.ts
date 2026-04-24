@@ -68,10 +68,16 @@ export async function dispatchSexton(
   let sexton: Member;
   try {
     const members = readConfig<Member[]>(join(daemon.corpRoot, MEMBERS_JSON));
-    const found = members.find((m) => m.displayName === 'Sexton' && m.type === 'agent');
+    // Filter out archived (fired) Sextons — if the founder fired Sexton,
+    // every Pulse tick would otherwise try to respawn her, defeating
+    // the fire action. Status === 'archived' means "retired, don't
+    // touch"; we treat it the same as "no Sexton exists."
+    const found = members.find(
+      (m) => m.displayName === 'Sexton' && m.type === 'agent' && m.status !== 'archived',
+    );
     if (!found) {
       logError(
-        `[continuity] dispatchSexton: no Sexton member found (expected at corp-init; is hireSexton failing?). Skipping dispatch.`,
+        `[continuity] dispatchSexton: no active Sexton member found (either not hired yet, or fired — archived). Skipping dispatch.`,
       );
       return;
     }
