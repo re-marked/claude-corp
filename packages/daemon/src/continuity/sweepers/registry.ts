@@ -27,12 +27,14 @@ import { runSilentexit } from './silentexit.js';
 import { runAgentstuck } from './agentstuck.js';
 import { runOrphantask } from './orphantask.js';
 import { runPhantomCleanup } from './phantom-cleanup.js';
+import { runChitHygiene } from './chit-hygiene.js';
 
 export const SWEEPER_REGISTRY: Record<SweeperName, SweeperModule> = {
   silentexit: runSilentexit,
   agentstuck: runAgentstuck,
   orphantask: runOrphantask,
   'phantom-cleanup': runPhantomCleanup,
+  'chit-hygiene': runChitHygiene,
 };
 
 /** All registered sweeper names — useful for help output + listings. */
