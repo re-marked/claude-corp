@@ -1149,7 +1149,7 @@ If you're reading this after a context compaction: you ARE the same Claude that 
 
 *Builds on Project 0. Every new primitive in this Project is a Chit of a specific type — Casket is `type: casket`, handoff via Dredge reads `type: handoff` Chits, dispatch-contexts for bacteria scaling are ephemeral Chits. The file-path specs below use the old bespoke-file language where reasonable, but at implementation time everything translates to Chit operations on the primitive from Project 0.*
 
-### 1.1 — Introduce Employee vs Partner distinction
+### 1.1 — Introduce Employee vs Partner distinction **[shipped PR #163]**
 
 Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee spawned with founder-given name — self-naming deferred to 1.10's bacteria). Promotion-by-ceremony command `cc-cli tame --slug <x> --reason "..." [--name <new-name>]` changes kind from employee → partner, expands soul-file set, writes first BRAIN entry from the founder's reason, triggers the welcome ceremony via inbox chits.
 
@@ -1191,7 +1191,7 @@ Data model change. Add `kind: "employee" | "partner"` to Member record. Update m
 **Depends on:** 0.7.4 (createInboxItem — the ceremony uses inbox chits), 0.7.3 (BRAIN + Casket already available).
 **PRs:** 1 (this one).
 
-### 1.2 — Casket: durable hook
+### 1.2 — Casket: durable hook **[shipped alongside 0.7.3]**
 
 **Implemented as Chit of `type: casket`.** Per agent, exactly one Chit with `id: casket-<agent-slug>`, `ephemeral: false`. The only functional field is `fields.casket.current_step: chit-id | null` — the pointer to the agent's current Task Chit. Content body can carry a short "recent activity" log agents append to as they work, but the pointer is the substrate's load-bearing part.
 
@@ -1212,7 +1212,7 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit primitive), 1.1 (Employee/Partner kind — kind-specific Casket defaults may differ)
 **PRs:** 1-2 (simpler because Chit infrastructure already exists)
 
-### 1.3 — Chain semantics on Task Chits + explicit state machine + structured I/O
+### 1.3 — Chain semantics on Task Chits + explicit state machine + structured I/O **[shipped PR #167]**
 
 **Scope enriched (post-Gas Town dive):** chain-walker, PLUS an explicit Task lifecycle state machine (so `blocked` / `under-review` aren't inferred from field presence), PLUS a structured task-output field so step A's result flows into step B's input canonically. Without these, chains walk but agents don't know what to DO at each step — they re-grep the prior task's body for "what happened."
 
@@ -1264,7 +1264,7 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit), 1.2 (Casket)
 **PRs:** 3-4
 
-### 1.4 — Hand: full rewrite for durable chit forwarding
+### 1.4 — Hand: full rewrite for durable chit forwarding **[shipped PR #168]**
 
 **Hand is not a new primitive — it's the name we already have, for the mechanism that failed. The old Hand was chat delivery: a slightly nicer @mention, routed by the daemon but still just a channel message, with no durable target state, no guarantee the recipient ever saw it, no way to inspect the queue without scrolling. The name was right; the mechanism was wrong. This sub-project keeps the name and rewrites the mechanism from scratch on top of Chits + Casket. The old Hand code path dies when this ships — no parallel paths.**
 
@@ -1304,7 +1304,7 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.3 (chain)
 **PRs:** 3-4
 
-### 1.4.1 — Dynamic blocker injection (`cc-cli block`)
+### 1.4.1 — Dynamic blocker injection (`cc-cli block`) **[shipped PR #168]**
 
 **Problem.** Today an agent mid-task realizing "I can't finish X because Y isn't done" has three bad options: (a) escalate to their supervisor and interrupt their work, (b) work around the gap and ship half-done, (c) rationalize the problem away. All three are failure modes the autonomy dream explicitly rejects. Gas Town solves this with gate-bead sub-task filing: the reviewer files a blocker chit, links it as a dependency of the current task, and exits cleanly. The daemon auto-re-dispatches the reviewer once the blocker closes.
 
@@ -1355,7 +1355,7 @@ When the blocker chit closes (completed / rejected), 1.3's chain walker:
 
 If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. The work that was here has been absorbed — do not implement 1.5 as originally written (it would directly conflict with 0.7's architecture).
 
-### 1.6 — Per-step session cycling for Employees (activate Dredge, Chit-ify handoffs)
+### 1.6 — Per-step session cycling for Employees (activate Dredge, Chit-ify handoffs) **[shipped PR #169]**
 
 **Handoffs become Chits of `type: handoff` (ephemeral, always).** Each handoff is a Chit written by the dying session that gets read and burned by the successor session via Dredge. No free-prose WORKLOG.md appending — handoff content is structured Chit frontmatter (from the XML schema in Decisions Made).
 
@@ -1391,7 +1391,7 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 **Depends on:** 0.1 (Chit + handoff type registration), 1.2 (Casket Chit), 1.3 (chain), 1.5 (CLAUDE.md)
 **PRs:** 2-3
 
-### 1.7 — Compaction for Partner sessions
+### 1.7 — Compaction for Partner sessions **[shipped PR #170]**
 
 **As shipped (PR #170).** Partner sessions don't handoff per-step. They ride Claude Code's native `/compact` at Claude Code's own autocompact threshold (`effectiveWindow - AUTOCOMPACT_BUFFER_TOKENS` per the leaked `services/compact/autoCompact.ts`). Claude Corp does NOT trigger compaction — Claude Code does — we layer two complementary mechanisms around the boundary:
 
@@ -1439,7 +1439,7 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 **Depends on:** 1.1, 1.2 (Casket read via `getCurrentStep`), 1.6 (handoff-chit infrastructure on the Employee-side; Partners don't produce handoff chits)
 **PRs:** 1 (PR #170, 15 commits across 3 rounds + polish)
 
-### 1.8 — Blueprint-as-molecule (absorbed from 2.1)
+### 1.8 — Blueprint-as-molecule (absorbed from 2.1) **[shipped PRs #171-173]**
 
 **Problem.** Blueprints today are markdown runbooks-the-CEO-reads. They're prose for humans. They can't be executed mechanically, so chains of work rely on the CEO manually tracking position. When CEO's context drifts, the chain breaks. AND — Sexton's patrols (1.9) are blueprints by nature; shipping 1.9 without this substrate means writing patrol logic as throwaway prompt-text that gets rewritten the moment blueprints land. Absorbed into Project 1 here so 1.9 ships native-to-the-substrate.
 
@@ -1611,7 +1611,7 @@ Stability boundary sits at the destructive-action boundary and the first-N-runs 
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.4 (role-resolver for Sexton's redistribute action), 1.6 (handoff chit for Sexton's continuity across sessions), 1.8 (Blueprint-as-molecule — Sexton's patrols + sweepers ARE blueprints).
 **PRs:** 6-7 (bumped from 5-6 to accommodate sweeper substrate + `cc-cli sweeper new` authoring flow).
 
-### 1.10 — Auto-scaling Employee pool (bacteria)
+### 1.10 — Auto-scaling Employee pool (bacteria) **[pending]**
 
 Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Sexton (1.9) can also trigger wakes on idle-with-work agents during her patrol.
 
@@ -1641,7 +1641,7 @@ Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (ei
 **Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.9 (Sexton for wake)
 **PRs:** 3
 
-### 1.11 — Budget governor + circuit breaker
+### 1.11 — Budget governor + circuit breaker **[pending]**
 
 **Problem.** Runaway agents burn tokens. An agent stuck in a loop — same tool-call pattern every turn, no state change — can spend hours of API credit before Mark notices. And silent-exit loops (agent spawns, dies, spawns, dies) are worse: the failure mode is invisible in the TUI but shows up in the billing dashboard next month. Moved up from Project 3.3 because it's prerequisite for the "walk away overnight" dream — without it, one bad agent can blow the corp's budget while Mark sleeps.
 
@@ -1668,7 +1668,7 @@ Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (ei
 **Depends on:** 1.1 (Employee kind for role scoping), 1.9 (Sexton dispatches the pause + escalation from her patrol)
 **PRs:** 2-3
 
-### 1.12 — Shipping: the merge lane + janitor Employees
+### 1.12 — Shipping: the merge lane + janitor Employees **[pending]**
 
 **Problem.** Agents write to git freely today. At 3 agents, this is fine. At 20+ it's chaos — concurrent PRs collide on rebase, step on each other's changes, leave main in a broken state. The "walk away overnight" dream breaks when agents fight over main. Moved up from Project 3.2 (was "Refinery") because it's prerequisite for parallel work — without serialized merges, multi-Employee Contracts can't actually land.
 
