@@ -81,7 +81,12 @@ function renderTaskXml(daemonCommand: string, homeDir: string): string {
   // forward-slash or backslash path.
   const workingDir = homeDir.replace(/\//g, '\\');
 
-  return `<?xml version="1.0" encoding="UTF-16"?>
+  // Encoding says UTF-8 because we write the file via Node's
+  // writeFileSync with 'utf-8' — no BOM, no UTF-16. schtasks
+  // accepts either, but the declaration must match the actual bytes
+  // or the import errors with "incorrect function" (Windows-ese for
+  // encoding mismatch).
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>Claude Corp Daemon — restarts the claudecorp daemon on login and on failure.</Description>
@@ -141,8 +146,12 @@ export function renderTaskSchedulerXml(opts: ServiceOpts): ServiceArtifact {
   return {
     content: renderTaskXml(opts.daemonCommand, opts.homeDir),
     path,
-    activationCommand: `schtasks /Create /TN ClaudeCorpDaemon /XML ${activationPath} /F`,
+    // Two commands chained: /Create registers the task (LogonTrigger
+    // only fires at next login), /Run starts it immediately. Matches
+    // the systemd `--now` + launchd `RunAtLoad` experience across
+    // platforms — activation both registers and launches.
+    activationCommand: `schtasks /Create /TN ClaudeCorpDaemon /XML ${activationPath} /F && schtasks /Run /TN ClaudeCorpDaemon`,
     activationDescription:
-      'Imports the XML definition into Task Scheduler as "ClaudeCorpDaemon". /F forces overwrite if a task by that name exists. Starts at next login; restart-on-failure every 30s, up to 100 retries.',
+      'Imports the XML into Task Scheduler as "ClaudeCorpDaemon" (/F overwrites existing), then starts it immediately. Auto-starts on every login thereafter; restart-on-failure every 30s up to 100 retries.',
   };
 }
