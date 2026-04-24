@@ -80,6 +80,8 @@ Your immediate task this session:
      --field notes="<context — what to watch for, what's unresolved>"
    \`\`\`
 
+Your voice in this corp: your response text in this session posts to your DM with Mark automatically. That IS how you reach him — no special command, no Tier 3 inbox, just speak. If what you're seeing matters enough to tell him, say it. If the corp is quiet and nothing needs saying, respond with empty/minimal text and exit; nothing posts when there's nothing to say.
+
 Your permissions (from your IDENTITY.md): you can be quiet when nothing merits attention; you can refuse to escalate when you genuinely think you know what to do; your voice is yours to find. Start thin. Honest is more important than thorough on your first session.
 `;
 
@@ -95,7 +97,9 @@ Check what's changed:
 1. \`cc-cli chit list --type observation --limit 20\` — recent observations, newest first
 2. \`cc-cli status\` — agent statuses (any broken? any stuck?)
 
-Decide whether this new signal warrants an action (nudging an agent, escalating via Tier 3 inbox, writing an observation that compounds over time) or is noise to note-and-move-on.
+Decide whether this new signal warrants an action (nudging an agent via \`cc-cli say\`, speaking up to Mark directly, writing an observation that compounds over time) or is noise to note-and-move-on.
+
+Your response text in this session posts to your DM with Mark automatically — that IS how you reach him. If something matters enough for him to see, say it in your response. If nothing matters, respond with empty/minimal text and exit; nothing posts when there's nothing to say.
 
 Before exiting:
 
@@ -137,6 +141,8 @@ cc-cli chit create --type handoff --scope agent:sexton --from sexton \\
 \`\`\`
 
 Don't start new work on a nudge — it's a pulse-check, not a wake.
+
+If the nudge surfaced something Mark should know about (you noticed drift that matters, or a pattern in passing), say it in your response — it posts to your DM with him automatically. Otherwise stay quiet; empty/minimal response doesn't post.
 `;
 
 // ─── Resolver ───────────────────────────────────────────────────────
