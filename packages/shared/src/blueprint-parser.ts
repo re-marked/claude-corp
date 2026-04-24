@@ -85,6 +85,14 @@ export interface ParsedBlueprintStep {
   readonly dependsOn: readonly string[];
   readonly acceptanceCriteria: readonly string[];
   readonly assigneeRole: string | null;
+  /**
+   * Code-module name for kind=sweeper steps (Project 1.9). Carried
+   * through from BlueprintStep.moduleRef untemplated — module names
+   * are structural, not Handlebars-templated. Null / absent on the
+   * source step both normalize to `null` here so consumers don't
+   * pattern-match on optionality.
+   */
+  readonly moduleRef: string | null;
 }
 
 /**
@@ -171,6 +179,11 @@ function expandStep(
       step.assigneeRole == null
         ? null
         : expand(step.assigneeRole, context, step.id, 'assigneeRole'),
+    // moduleRef is structural — a sweeper's code-module reference,
+    // not prose. Copied through untemplated so templating accidents
+    // (a var that happens to match a module name) can't silently
+    // repoint dispatch. Absent and null both normalize to null.
+    moduleRef: step.moduleRef ?? null,
   };
 }
 

@@ -58,7 +58,7 @@
  * order tasks actually get written to disk.
  */
 
-import type { Chit, ChitScope, TaskFields } from './types/chit.js';
+import type { Chit, ChitScope, TaskFields, SweeperRunFields } from './types/chit.js';
 import { createChit, chitId } from './chits.js';
 import { parseBlueprint, type ParsedBlueprint, type ParsedBlueprintStep } from './blueprint-parser.js';
 import { isKnownRole } from './roles.js';
@@ -284,6 +284,162 @@ export function castFromBlueprint(
   });
 
   return { contract, tasks, parsed };
+}
+
+// ─── Sweeper cast — Project 1.9 ─────────────────────────────────────
+
+/**
+ * Caller-facing options for castSweeperFromBlueprint. Simpler than the
+ * Contract-cast opts because sweepers don't have per-step role
+ * resolution (the dispatcher picks the worker, not the blueprint),
+ * no contract-level overrides (no Contract is produced), and no
+ * stepRoleOverrides (single-step constraint makes it meaningless).
+ */
+export interface CastSweeperFromBlueprintOpts {
+  /** Scope where the sweeper-run chit gets created. Usually `corp`. */
+  scope: ChitScope;
+  /** Member id of the cast author — who's creating the run record. */
+  createdBy: string;
+  /**
+   * Member id of the dispatcher — who/what is firing this sweeper.
+   * Usually Sexton on her patrol cycle; founder when `cc-cli sweeper
+   * new` triggers a first-run-after-authoring dispatch for the
+   * approval gate. Defaults to `createdBy` when absent.
+   */
+  triggeredBy?: string;
+  /**
+   * Free-form text capturing why this dispatch happened — the patrol
+   * step id that invoked it, a pattern Sexton noticed, a founder
+   * manual trigger. Surfaces in observability; never load-bearing.
+   */
+  triggerContext?: string;
+}
+
+/**
+ * Return value of a successful sweeper cast. Just the one chit +
+ * parsed blueprint for symmetry with castFromBlueprint. The run
+ * starts in outcome='running'; the dispatcher transitions it to
+ * success/failure/cancelled when the sweeper's execution completes.
+ */
+export interface CastSweeperFromBlueprintResult {
+  readonly sweeperRun: Chit<'sweeper-run'>;
+  readonly parsed: ParsedBlueprint;
+}
+
+/**
+ * Cast a sweeper-run chit from a sweeper blueprint. Sibling to
+ * castFromBlueprint — same parse pipeline (Handlebars expansion + var
+ * coercion), same status + error classes, but produces one sweeper-run
+ * chit instead of a Contract + Task DAG. See 1.9 REFACTOR.md for the
+ * design rationale.
+ *
+ * Validation-first — every failure mode that CAN be caught before
+ * writing the chit IS caught first:
+ *
+ *   1. parseBlueprint (may throw BlueprintVarError / BlueprintParseError)
+ *   2. Blueprint status check — must be `active`
+ *   3. Blueprint kind check — must be `sweeper` (absent or `contract`
+ *      means the caller should be using castFromBlueprint instead;
+ *      fail with a routing error that names the right primitive)
+ *   4. Single-step constraint — sweeper blueprints must have exactly
+ *      one step. Multi-step chains are contract-kind work. The error
+ *      message teaches the distinction.
+ *
+ * Only then is the chit written.
+ *
+ * Throws:
+ *   - BlueprintVarError   — caller vars coercion / missing required
+ *   - BlueprintParseError — Handlebars syntax / strict-mode refs
+ *   - BlueprintCastError  — status, kind, or step-count violations
+ *   - ChitValidationError — if createChit rejects (shouldn't happen
+ *     since we've pre-validated, but propagates cleanly if it does)
+ */
+export function castSweeperFromBlueprint(
+  corpRoot: string,
+  blueprint: Chit<'blueprint'>,
+  callerVars: Record<string, unknown>,
+  opts: CastSweeperFromBlueprintOpts,
+): CastSweeperFromBlueprintResult {
+  // ── Step 1: parse (var coercion + template expansion, strict mode).
+  // Same pipeline as castFromBlueprint — sweeper blueprints can have
+  // vars (e.g. a sweeper authored with `{{agent}}` as a subject var
+  // filled at dispatch time). No chits written yet.
+  const parsed = parseBlueprint(blueprint.fields.blueprint, callerVars);
+
+  // ── Step 2: blueprint must be active.
+  if (blueprint.status !== 'active') {
+    throw new BlueprintCastError(
+      `blueprint '${parsed.name}' is in status '${blueprint.status}' — only 'active' blueprints can be cast. ` +
+        `Promote via \`cc-cli blueprint validate ${blueprint.id}\` (draft → active) or re-open if closed.`,
+    );
+  }
+
+  // ── Step 3: blueprint kind must be 'sweeper'. Contract-kind gets a
+  // routing error that names castFromBlueprint specifically so the
+  // caller can fix their call without tracing through the 1.8 docs.
+  // Absent kind (pre-1.9 blueprints) is treated as 'contract' per the
+  // BlueprintFields.kind docstring.
+  const kind = blueprint.fields.blueprint.kind ?? 'contract';
+  if (kind !== 'sweeper') {
+    throw new BlueprintCastError(
+      `blueprint '${parsed.name}' has kind '${kind}' — castSweeperFromBlueprint requires kind: 'sweeper'. ` +
+        `Use castFromBlueprint for contract-kind blueprints (produces Contract + Task chits).`,
+    );
+  }
+
+  // ── Step 4: single-step constraint. Sweeper blueprints describe one
+  // focused maintenance task. Multi-step chains belong in contract
+  // blueprints, which get cast into Contract + Task DAGs that walk
+  // via the chain walker. Teaching the distinction in the error
+  // message matters — authors who hit this are probably misusing the
+  // sweeper shape for work that should have been a Contract.
+  if (parsed.steps.length !== 1) {
+    throw new BlueprintCastError(
+      `sweeper blueprint '${parsed.name}' has ${parsed.steps.length} steps; sweeper blueprints must have exactly one step. ` +
+        `Multi-step chains belong in contract-kind blueprints (cast via castFromBlueprint); a sweeper is one focused dispatch, not a workflow.`,
+    );
+  }
+
+  const step = parsed.steps[0]!;
+  const triggeredBy = opts.triggeredBy ?? opts.createdBy;
+
+  // ── Step 5: assemble SweeperRunFields + write the chit.
+  // moduleRef is copied from the blueprint step so the sweeper-run
+  // self-describes — the dispatcher doesn't need to re-read the
+  // blueprint to know whether it's a code or AI sweeper. null means
+  // AI dispatch (step.description is the prompt).
+  const moduleRef = step.moduleRef ?? null;
+
+  const runFields: SweeperRunFields = {
+    blueprintId: blueprint.id,
+    triggeredBy,
+    moduleRef,
+    outcome: 'running',
+    ...(opts.triggerContext !== undefined ? { triggerContext: opts.triggerContext } : {}),
+    observationsProduced: [],
+  };
+
+  const sweeperRun = createChit(corpRoot, {
+    type: 'sweeper-run',
+    scope: opts.scope,
+    createdBy: opts.createdBy,
+    // Tags let downstream queries find runs by blueprint name or by
+    // module. `blueprint:<name>` mirrors the contract-cast tag so
+    // existing query patterns keep working; `sweeper:<moduleRef|'ai'>`
+    // makes "show me every conflict-triage run" a one-liner.
+    tags: [
+      `blueprint:${parsed.name}`,
+      `sweeper:${moduleRef ?? 'ai'}`,
+    ],
+    // Body carries the step description — for AI sweepers this IS the
+    // prompt the dispatcher will feed to the Claude session; for code
+    // sweepers it's documentation of what the run is for. Both are
+    // useful when reading the chit post-hoc.
+    body: step.description ?? '',
+    fields: { 'sweeper-run': runFields },
+  });
+
+  return { sweeperRun, parsed };
 }
 
 // ─── Internals ───────────────────────────────────────────────────────
