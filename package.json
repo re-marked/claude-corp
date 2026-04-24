@@ -30,6 +30,8 @@
     "lint": "pnpm -r lint",
     "type-check": "pnpm -r type-check",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude 'tests/cli-*.test.ts'",
+    "test:cli": "vitest run tests/cli-*.test.ts",
     "test:watch": "vitest",
     "prepublishOnly": "pnpm build"
   },
