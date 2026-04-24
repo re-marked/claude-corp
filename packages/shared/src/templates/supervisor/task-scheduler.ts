@@ -150,12 +150,24 @@ export function renderTaskSchedulerXml(opts: ServiceOpts): ServiceArtifact {
     // only fires at next login), /Run starts it immediately. Matches
     // the systemd `--now` + launchd `RunAtLoad` experience across
     // platforms — activation both registers and launches.
-    activationCommand: `schtasks /Create /TN ClaudeCorpDaemon /XML ${activationPath} /F && schtasks /Run /TN ClaudeCorpDaemon`,
+    // Wrap in `cmd.exe /c "..."` so the compound command runs
+    // identically regardless of which shell the user pastes into:
+    //   - cmd.exe:      runs as expected
+    //   - PowerShell 5: `&` is the call operator, `%USERPROFILE%`
+    //                   doesn't expand — would break without wrapping
+    //   - PowerShell 7: has &&, but `%USERPROFILE%` still doesn't expand
+    //   - Git Bash:     accepts cmd.exe invocations cleanly
+    // cmd.exe handles the && chaining, %USERPROFILE% expansion, and
+    // /F switch parsing consistently inside its own subprocess.
+    activationCommand: `cmd.exe /c "schtasks /Create /TN ClaudeCorpDaemon /XML ${activationPath} /F && schtasks /Run /TN ClaudeCorpDaemon"`,
     activationDescription:
       'Imports the XML into Task Scheduler as "ClaudeCorpDaemon" (/F overwrites existing), then starts it immediately. Auto-starts on every login thereafter; restart-on-failure every 30s up to 100 retries.',
     // /End stops any running instance first so /Delete doesn't fail
-    // on "task is running." /F skips the confirmation prompt.
-    deactivationCommand: 'schtasks /End /TN ClaudeCorpDaemon & schtasks /Delete /TN ClaudeCorpDaemon /F',
+    // on "task is running." Using `&` (not `&&`) — we want /Delete
+    // to run even if /End fails (e.g. task wasn't running). /F skips
+    // the confirmation prompt. Wrapped in `cmd.exe /c` for the same
+    // cross-shell reason as activationCommand.
+    deactivationCommand: 'cmd.exe /c "schtasks /End /TN ClaudeCorpDaemon & schtasks /Delete /TN ClaudeCorpDaemon /F"',
     deactivationDescription:
       'Stops any running instance, then removes the task from Task Scheduler. The XML file on disk is deleted separately by uninstall-service.',
   };

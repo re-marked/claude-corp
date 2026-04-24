@@ -163,6 +163,7 @@ export async function cmdDaemonInstallService(rawArgs: string[]): Promise<void> 
   if (v['dry-run']) {
     console.log(`[DRY RUN] Would write ${artifact.content.length} bytes to:`);
     console.log(`  ${artifact.path}`);
+    console.log(`Daemon command that would be baked in: ${daemonCommand}`);
     console.log('');
     console.log('--- File content ---');
     console.log(artifact.content);
@@ -195,6 +196,7 @@ export async function cmdDaemonInstallService(rawArgs: string[]): Promise<void> 
   }
 
   console.log(`Wrote ${artifact.path}`);
+  console.log(`Daemon command baked in: ${daemonCommand}`);
   console.log('');
   console.log(`To activate (run this yourself — not auto-run):`);
   console.log(`  ${artifact.activationCommand}`);
