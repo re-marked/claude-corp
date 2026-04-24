@@ -74,6 +74,13 @@ export function findBlueprintByName(
       types: ['blueprint'],
       scopes: [scope],
       includeArchive: false,
+      // Unlimited: queryChits defaults to 50, which would silently drop
+      // older blueprints once a scope has >50 chits. Name uniqueness +
+      // resolution correctness demand a full scan — CLI false-negatives
+      // on `show`/`validate`/`cast` and false-positives on duplicate
+      // detection in `new` are exactly the silent-regression class we
+      // explicitly don't want.
+      limit: 0,
     });
 
     const match = result.chits.find((cwb) => {
@@ -154,6 +161,10 @@ export function listBlueprintChits(
     types: ['blueprint'],
     ...(opts.scopes ? { scopes: opts.scopes } : {}),
     includeArchive: false,
+    // Unlimited — see findBlueprintByName docstring. Same concern:
+    // `cc-cli blueprint list` silently truncating at 50 would mislead
+    // the founder about what's available.
+    limit: 0,
   });
 
   return result.chits.filter(

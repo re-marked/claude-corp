@@ -89,7 +89,7 @@ export async function cmdBlueprintShow(rawArgs: string[]): Promise<void> {
     ...(scopeHints && scopeHints.length > 0
       ? { scopes: scopeHints as ChitScope[] }
       : {}),
-  }) ?? fallbackSearchAllScopes(corpRoot, nameOrId, includeDraft);
+  }) ?? fallbackSearchAllScopes(corpRoot, nameOrId, includeDraft, scopeHints);
 
   if (!hit) {
     console.error(`error: blueprint '${nameOrId}' not found`);
@@ -159,8 +159,17 @@ function fallbackSearchAllScopes(
   corpRoot: string,
   nameOrId: string,
   includeDraft: boolean,
+  scopeHints?: string[],
 ): ReturnType<typeof resolveBlueprint> {
-  const all = listBlueprintChits(corpRoot, { includeNonActive: includeDraft });
+  const all = listBlueprintChits(corpRoot, {
+    includeNonActive: includeDraft,
+    // Honor --scope hints even in the fallback path — otherwise the
+    // fallback silently widens past the caller's narrowing. Same
+    // symptom class as PR #173 P2 (validate --scope ignored).
+    ...(scopeHints && scopeHints.length > 0
+      ? { scopes: scopeHints as ChitScope[] }
+      : {}),
+  });
   const match = all.find((cwb) => {
     const bp = cwb.chit.fields.blueprint;
     if (bp.name === nameOrId) return true;

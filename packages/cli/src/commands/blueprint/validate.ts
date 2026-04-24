@@ -8,6 +8,7 @@ import {
   BlueprintVarError,
   BlueprintParseError,
   type BlueprintVar,
+  type ChitScope,
 } from '@claudecorp/shared';
 import { getCorpRoot } from '../../client.js';
 
@@ -107,12 +108,22 @@ export async function cmdBlueprintValidate(rawArgs: string[]): Promise<void> {
 
   const asJson = !!parsed.values.json;
   const corpOpt = parsed.values.corp as string | undefined;
+  const scopeHints = parsed.values.scope as string[] | undefined;
   const corpRoot = await getCorpRoot(corpOpt);
 
   // Validate needs to SEE draft blueprints (it's what promotes them),
-  // so activeOnly=false. Falls back to full-scope scan on miss, same
-  // pattern as show.
-  const hit = resolveBlueprint(corpRoot, nameOrId, { activeOnly: false }) ?? fallbackSearchAll(corpRoot, nameOrId);
+  // so activeOnly=false. --scope hints (repeatable) thread through to
+  // resolveBlueprint AND the fallback scan so collision-case promotion
+  // is deterministic — without this, `validate my-bp --scope project:X`
+  // would silently validate+promote the corp-scope chit instead of the
+  // project-scope draft the caller meant (reviewer catch, PR #173 P2).
+  const hit =
+    resolveBlueprint(corpRoot, nameOrId, {
+      activeOnly: false,
+      ...(scopeHints && scopeHints.length > 0
+        ? { scopes: scopeHints as ChitScope[] }
+        : {}),
+    }) ?? fallbackSearchAll(corpRoot, nameOrId, scopeHints);
 
   if (!hit) {
     emit(asJson, {
@@ -217,11 +228,22 @@ function dummyForType(type: BlueprintVar['type']): string | number | boolean {
   }
 }
 
+/**
+ * Fallback scan when resolveBlueprint's targeted lookup misses. Honors
+ * --scope hints (if the caller narrowed the search, don't widen past
+ * their request) but defaults to all discoverable scopes.
+ */
 function fallbackSearchAll(
   corpRoot: string,
   nameOrId: string,
+  scopeHints?: string[],
 ): ReturnType<typeof resolveBlueprint> {
-  const all = listBlueprintChits(corpRoot, { includeNonActive: true });
+  const all = listBlueprintChits(corpRoot, {
+    includeNonActive: true,
+    ...(scopeHints && scopeHints.length > 0
+      ? { scopes: scopeHints as ChitScope[] }
+      : {}),
+  });
   const match = all.find((cwb) => {
     const bp = cwb.chit.fields.blueprint;
     return bp.name === nameOrId || cwb.chit.id === nameOrId;

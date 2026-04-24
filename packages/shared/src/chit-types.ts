@@ -375,12 +375,14 @@ function validateBlueprint(fields: unknown): void {
     const stepPath = `blueprint.steps[${i}]`;
     const step = requireObject(raw, stepPath) as Partial<BlueprintStep>;
     requireNonEmptyString(step.id, `${stepPath}.id`);
-    // Kebab-case-ish constraint: ids live in file paths + depends_on
-    // references, so disallow whitespace and characters that would
-    // break the rewrite into Task chit ids.
-    if (!/^[a-zA-Z0-9_-]+$/.test(step.id!)) {
+    // Kebab-case constraint: ids live in file paths + depends_on
+    // references + CLI arg contexts + chit tags (`blueprint-step:<id>`).
+    // Lowercase-only keeps authored ids uniform with role ids + chit
+    // tag conventions across the corp. Uppercase was silently accepted
+    // in the initial implementation — reviewer catch (PR #171 P2).
+    if (!/^[a-z0-9_-]+$/.test(step.id!)) {
       throw new ChitValidationError(
-        `${stepPath}.id must be alphanumeric + underscore/hyphen only (got ${JSON.stringify(step.id)})`,
+        `${stepPath}.id must be lowercase alphanumeric + underscore/hyphen only (got ${JSON.stringify(step.id)})`,
         `${stepPath}.id`,
       );
     }
