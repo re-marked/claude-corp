@@ -1,0 +1,133 @@
+/**
+ * Dispatch messages Pulse uses to wake Sexton, keyed by Alarum's
+ * decision action. Three prose templates + a resolver — each is the
+ * "user message" content the daemon POSTs to `/cc/say` when the
+ * continuity chain fires.
+ *
+ * ### Why three messages, not one
+ *
+ * The action Alarum chose carries semantics beyond "wake Sexton":
+ *   - `start` means her process was dead and she's just been
+ *     spawned. Fresh session, no prior turn context. She needs the
+ *     fullest orientation — what she IS, what's around her, what
+ *     her handoff chit holds, what her primitives are.
+ *   - `wake` means she's alive and receiving a dispatch mid-life.
+ *     Her session already has context; she only needs the delta:
+ *     "Alarum saw events since your last exit; consult state and
+ *     decide what to do."
+ *   - `nudge` is the lightest case — her handoff is stale but
+ *     nothing dramatic happened. A check-in, not a full wake cycle.
+ *
+ * Tuning the message to the semantic case keeps Partner-tier token
+ * cost honest: `wake` and `nudge` don't re-orient her from scratch
+ * every time.
+ *
+ * ### Why content for Sexton doesn't arrive in her CLAUDE.md
+ *
+ * Per the 1.9.2 + 2.3 design decision captured in REFACTOR.md, no
+ * operating content ships pre-written for any role. Sexton's CLAUDE.md
+ * will be authored by the CEO via 2.3's hire-employee blueprint when
+ * it lands. Until then, these dispatch messages carry the minimum
+ * framing she needs to operate coherently without a manual. The
+ * content here is explicitly *runtime dispatch prose*, not a manual
+ * — it lives in the daemon because it's tick-semantic, not corp-
+ * specific.
+ */
+
+import type { AlarumAction } from './alarum-prompt.js';
+
+// ─── Dispatch message templates ─────────────────────────────────────
+
+/**
+ * Fresh-session message. Assumes no context, gives her the fullest
+ * orientation. Sent after her process has just been spawned (Alarum
+ * returned `start` because her prior process was dead).
+ *
+ * Instruction shape:
+ *   1. Read handoff (if any) via `cc-cli wtf`
+ *   2. Read corp state via `cc-cli status`
+ *   3. Decide what to do — with or without a handoff context
+ *   4. Write an observation chit summarizing her read + next action
+ *   5. Write a handoff chit before exiting
+ */
+const START_MESSAGE = `You are awake.
+
+Alarum just started your session — your prior process had died (or this is the corp's first run). You have no turn context carried over; everything you need is in your workspace files, your handoff chit (if any), and the corp's current state.
+
+Your immediate task this session:
+
+1. Read your prior handoff if one exists:
+   \`cc-cli wtf\`
+
+   That command surfaces your most recent handoff chit as context. If it returns "no handoff," you're a fresh Sexton — treat this as your first session and orient yourself from the corp state alone.
+
+2. Read the corp's current state:
+   \`cc-cli status\`
+   \`cc-cli chit list --type observation --limit 20\`
+
+3. Decide what's worth doing this session. You don't have a patrol blueprint library yet (those land in a later sub-project); for now, integrate what you see and name the most important signal.
+
+4. Write an observation chit summarizing your read + what you're choosing to do about it:
+   \`cc-cli chit create --type observation --scope corp --field category=NOTICE --field subject=sexton-wake --field importance=2 --title "<one line>" --body "<reasoning>"\`
+
+5. Before exiting, write a handoff chit so your next session (minutes from now, or hours) picks up clean:
+   \`cc-cli handoff --current-step "<where you are>" --next-action "<what future-you should do>" --notes "<context>"\`
+
+Your permissions (from your IDENTITY.md): you can be quiet when nothing merits attention; you can refuse to escalate when you genuinely think you know what to do; your voice is yours to find. Start thin. Honest is more important than thorough on your first session.
+`;
+
+/**
+ * Mid-session wake message. Assumes her session has context from
+ * prior turns this life; she only needs the delta — "Alarum saw
+ * events, go look, decide, respond." Shorter than start.
+ */
+const WAKE_MESSAGE = `Alarum woke you — new activity has landed since your last exit.
+
+Check what's changed:
+
+1. \`cc-cli chit list --type observation --limit 20\` — recent observations, newest first
+2. \`cc-cli status\` — agent statuses (any broken? any stuck?)
+
+Decide whether this new signal warrants an action (nudging an agent, escalating via Tier 3 inbox, writing an observation that compounds over time) or is noise to note-and-move-on.
+
+Before exiting: write an observation chit if the signal is worth remembering, and update your handoff chit with where you're leaving things.
+`;
+
+/**
+ * Lightweight check-in. Alarum thinks you might be stuck (stale
+ * handoff + no recent activity) but isn't escalating. Don't do full
+ * wake work — just verify your handoff still reflects reality, then
+ * exit.
+ */
+const NUDGE_MESSAGE = `Alarum nudged you — your last handoff is stale enough to ask: are you still where you were, or did things drift?
+
+Check:
+
+1. \`cc-cli wtf\` — read your own prior handoff
+2. Look at your current work. Does the handoff still describe it?
+
+If yes: update the handoff's timestamp (\`cc-cli handoff\` rewrites it, keeping the same content) and exit. If no: write a fresh handoff reflecting where you actually are. Either way, don't start new work on a nudge — it's a pulse-check, not a wake.
+`;
+
+// ─── Resolver ───────────────────────────────────────────────────────
+
+/**
+ * Pick the dispatch message matching Alarum's action. Throws on
+ * `nothing` because the caller should never dispatch on that action
+ * — it's the "exit cheap" path and should be handled upstream. If
+ * this throws, there's a bug in whoever called it.
+ */
+export function dispatchMessageFor(action: AlarumAction): string {
+  switch (action) {
+    case 'start':
+      return START_MESSAGE;
+    case 'wake':
+      return WAKE_MESSAGE;
+    case 'nudge':
+      return NUDGE_MESSAGE;
+    case 'nothing':
+      throw new Error(
+        `dispatchMessageFor called with action='nothing' — 'nothing' is the no-dispatch case; upstream routing should filter it before reaching here.`,
+      );
+  }
+}
