@@ -2090,17 +2090,29 @@ Hold these throughout:
 
 ---
 
-## Where We Are Right Now (conversation state at time of writing)
+## Where We Are Right Now (updated 2026-04-24)
 
 Decided: everything in the "Decisions Made" section above.
 
 Still being discussed: the two remaining open questions (Partner demotion, voice-preservation invasiveness).
 
 **Implementation-detail depth:**
-- Project 1 sub-projects (1.1 through 1.9) have concrete file paths, test strategy, and dependencies spelled out. Ready to pick up and execute.
+- Project 1 sub-projects (1.1 through 1.9) have concrete file paths, test strategy, and dependencies spelled out. Most have shipped (see per-section [shipped] markers); 1.10-1.12 are spec-complete and ready to pick up.
 - Projects 2 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
 
-**Immediate next step:** start Project 0.1 (Chit core — schema, type registry, read/write primitives, atomic-write helper). Project 0 ships before any of Project 1's sub-projects begin, because Casket, Chain semantics, Hand, Dredge handoff, pre-BRAIN accumulation all become Chit types rather than bespoke file formats. Project 1's scope shrinks somewhat because much of what it would have built (new file shapes, new read/write code paths) disappears into "add a type to the Chit registry."
+**Shipped as of 2026-04-24:**
+- **Project 0** — Chits, lifecycle, wtf + CORP.md + audit gate + inbox — complete.
+- **Project 1** — 1.1 (Employee/Partner), 1.2 (Casket), 1.3 (chain + state machine), 1.4 (Hand rewrite) + 1.4.1 (block), 1.6 (Dredge-via-handoff-chits), 1.7 (Partner compaction), 1.8 (Blueprint-as-molecule), 1.9.0-1.9.4 (sweeper substrate + Sexton role + Pulse/Alarum + Sexton runtime).
+
+**In flight (open PRs, 1.9.5 phase):**
+- PR #178 — OS supervisor configs (systemd/launchd/Task Scheduler install + uninstall).
+- PR #179 — Sweeper execution + 6 code sweepers (silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation) + `kink` chit type + dedup/auto-resolve + wake-message wiring.
+
+**Immediate next steps** (after 1.9.5 PRs land):
+1. Remaining 1.9 follow-ups: `cc-cli sweeper new --prompt` generator, patrol blueprint library (the contract-shaped blueprints Sexton cooks + walks), + `conflict-triage` AI sweeper.
+2. **Project 1.10** — Bacteria (auto-scaling Employee pool via weighted queue depth from TaskFields.complexity, role-resolver spawn integration, self-naming flow). Prerequisite for 1.12. Spec pinned earlier today: silentexit reinitializes existing slots; bacteria only creates new ones; disjoint domains.
+3. **Project 1.11** — Budget governor + crash-loop circuit breaker. Pinned integration point: silentexit retry-budget goes through 1.11's breaker, not a per-sweeper counter. Enables the `breaker-reset` + `budget-watch` sweepers.
+4. **Project 1.12** — Shipping (merge lane + janitor Employees). Pinned spec update earlier today: conflict blockers are role-scoped, not slot-scoped, so no PR gets stranded when its author decommissions.
 
 Claude (not the corp) drives the build — the corp hasn't earned that trust yet. Eventually, once the corp works well on this new substrate, future refactors can be corp-driven. But not this one.
 
