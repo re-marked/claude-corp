@@ -28,7 +28,7 @@ import { HireWatcher } from './hire-watcher.js';
 import { EventBus, type DaemonEvent } from './events.js';
 import { InboxManager } from './inbox.js';
 import { Pulse } from './pulse.js';
-import { hireFailsafe } from './failsafe.js';
+import { hireSexton } from './sexton.js';
 import { hireJanitor } from './janitor.js';
 import { hireWarden } from './warden.js';
 import { hireHerald } from './herald.js';
@@ -456,9 +456,6 @@ export class Daemon {
 
     this.analytics.start();
 
-    // NOTE: Failsafe heartbeat removed — Pulse now handles ALL agent heartbeats
-    // directly (two-state: idle → check casket, busy → quick ping).
-
     // Register Herald narration as a Clock
     this.clocks.register({
       id: 'herald-narration',
@@ -581,63 +578,6 @@ export class Daemon {
   // Recovery methods extracted to daemon-recovery.ts
   // Stale process cleanup extracted to stale-cleanup.ts
 
-  /**
-   * Dispatch monitoring protocol to Failsafe via say() — the proven Jack path.
-   * Calls the daemon's own /cc/say endpoint internally.
-   * This is more reliable than direct dispatchToAgent() because say() handles
-   * session management, status tracking, and inbox logging automatically.
-   */
-  private async dispatchFailsafeHeartbeat(): Promise<void> {
-    try {
-      // Quick checks before making the HTTP call
-      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
-      const failsafe = members.find(m => m.displayName === 'Failsafe' && m.type === 'agent');
-      if (!failsafe) return;
-      if (this.getAgentWorkStatus(failsafe.id) === 'busy') return;
-
-      const agentProc = this.processManager.getAgent(failsafe.id);
-      if (!agentProc || agentProc.status !== 'ready') return;
-
-      // Call our own /cc/say endpoint — same path that Jack uses, proven reliable
-      const resp = await fetch(`http://127.0.0.1:${this.port}/cc/say`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          target: 'failsafe',
-          message: 'Run your monitoring protocol. Check all agent statuses via cc-cli status and report.',
-          sessionKey: agentSessionKey('failsafe'),
-        }),
-        signal: AbortSignal.timeout(90_000), // 90s timeout
-      });
-
-      const data = await resp.json() as any;
-      if (data.ok) {
-        log(`[daemon] Failsafe heartbeat response: ${data.response?.slice(0, 80) ?? 'ok'}`);
-
-        // Write response to Failsafe's DM for TUI visibility
-        const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
-        const founder = members.find(m => m.rank === 'owner');
-        const dmChannel = channels.find(
-          c => c.kind === 'direct' &&
-          c.memberIds.includes(failsafe.id) &&
-          (founder ? c.memberIds.includes(founder.id) : true),
-        );
-        if (dmChannel && data.response?.trim()) {
-          post(dmChannel.id, join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), {
-            senderId: failsafe.id,
-            content: data.response,
-            source: 'system',
-            metadata: { heartbeat: 'failsafe' },
-          });
-        }
-      } else {
-        logError(`[daemon] Failsafe say() failed: ${data.error ?? 'unknown'}`);
-      }
-    } catch (err) {
-      logError(`[daemon] Failsafe heartbeat failed: ${err}`);
-    }
-  }
-
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
   private async connectOpenClawWS(): Promise<void> {
     // User's personal OpenClaw (for tool events on agents dispatched
@@ -709,17 +649,22 @@ export class Daemon {
     // Initialize work status for all agents
     this.initAgentWorkStatuses();
 
-    // Bootstrap system agents (Failsafe) if missing
+    // Bootstrap system agents (Sexton, Janitor, Warden, Herald, Planner) if missing
     await this.bootstrapSystemAgents();
   }
 
-  /** Ensure system agents (Failsafe, Janitor) exist — auto-hire if missing. */
+  /** Ensure system agents (Sexton, Janitor, Warden, Herald, Planner) exist — auto-hire if missing. */
   private async bootstrapSystemAgents(): Promise<void> {
     try {
-      await hireFailsafe(this);
-      this.pulse.refreshFailsafe();
+      // Project 1.9: Sexton replaces the retired Failsafe slot — see
+      // REFACTOR.md §1.9 for why the shape changed from "watchdog
+      // pinged every 3min by Pulse" to "caretaker orchestrating
+      // sweepers via patrol blueprints, woken by Alarum." The
+      // bootstrap invocation point stays the same; only the spawn
+      // target changed.
+      await hireSexton(this);
     } catch (err) {
-      logError(`[daemon] Failed to bootstrap Failsafe agent: ${err}`);
+      logError(`[daemon] Failed to bootstrap Sexton agent: ${err}`);
     }
     try {
       await hireJanitor(this);

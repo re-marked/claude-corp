@@ -57,7 +57,7 @@ ${memberList}
 ## Status Meanings
 - **idle** — ready to receive tasks, not currently working
 - **busy** — actively working on a task (don't interrupt unless urgent)
-- **broken** — crashed or errored (Failsafe will restart)
+- **broken** — crashed or errored (Sexton's silentexit sweeper will respawn)
 - **offline** — not running (needs manual start)
 ${hierarchyHint}
 

@@ -9,8 +9,8 @@
  *
  *   Tier 1 — ambient
  *     TTL: 24h; destructionPolicy: 'destroy-if-not-promoted'.
- *     Broadcast notifications, system events (Failsafe restarts,
- *     Herald digests, cron ticks). Genuinely fire-and-forget.
+ *     Broadcast notifications, system events (Sexton nudges, Herald
+ *     digests, cron ticks). Genuinely fire-and-forget.
  *     Scanner removes after 24h if unpromoted. No cold state.
  *
  *   Tier 2 — direct

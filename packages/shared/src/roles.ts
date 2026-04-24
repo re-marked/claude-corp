@@ -30,7 +30,7 @@ import type { AgentKind } from './types/member.js';
  * Role authority tier — how the role enters the corp.
  *
  *   'decree' — corp-sacred Partners installed by the refactor vision
- *     (CEO, Herald, HR, Failsafe, Janitor, Adviser). Never fired.
+ *     (CEO, Herald, HR, Sexton, Janitor, Adviser). Never fired.
  *     Hired direct as Partners, never through promotion from Employee.
  *
  *   'role-lead' — Partners-by-role. Long-lived named agents holding a
@@ -123,16 +123,25 @@ export const ROLES: readonly RoleEntry[] = [
       'Short status pings in #general. DMs to PR authors on conflicts. Always proposes a resolution, never just reports a problem.',
   },
   {
-    id: 'failsafe',
-    displayName: 'Failsafe',
+    // Project 1.9 — caretaker of continuity. Orchestrates unkillability
+    // via patrol blueprints; dispatches sweepers that do the mechanical
+    // maintenance work; reads their observations; escalates judgment
+    // calls to the founder. Replaced the retired `failsafe` slot in
+    // 1.9.2 — failsafe was a watchdog pinged by Pulse every 3 minutes;
+    // Sexton is a persistent Partner driven by Alarum (ephemeral AI
+    // decision agent) each Pulse tick. Fundamentally different shape,
+    // deleted rather than migrated per the REFACTOR.md thesis on
+    // premature throwaway code.
+    id: 'sexton',
+    displayName: 'Sexton',
     defaultKind: 'partner',
     tier: 'decree',
     description:
-      "The corp's self-heal mechanism. Detects stuck sessions, silent-exits, crash loops; respawns or circuit-breaks.",
+      "The corp's caretaker of continuity. Orchestrates unkillability via patrol blueprints; dispatches sweepers that do the mechanical maintenance work; reads their observations; escalates judgment calls to the founder.",
     purpose:
-      'Keep the corp alive overnight without human intervention. Escalate to the founder only when recovery fails repeatedly.',
+      'Keep the corp alive across restarts, silent exits, and overnight sleep. Notice patterns sweepers cannot name yet and escalate cleanly when a human call is genuinely needed.',
     communication:
-      'Tier 1 ambient notifications for routine restarts. Tier 3 escalation DMs to the founder only when circuit-breaking an agent pair.',
+      "Quiet by default. Tier 3 inbox when a founder decision is required; observation chits for patterns worth remembering; DMs to agents she's nudging back into motion. Never pads, never panics.",
   },
 
   // ─── Partners by role — named leaders of operational functions ───

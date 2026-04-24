@@ -1,6 +1,6 @@
 /** Clock type — what kind of periodic operation this is. */
 export type ClockType =
-  | 'heartbeat'   // Agent wake cycles (Pulse, Failsafe, Tasks refresh, Inbox check)
+  | 'heartbeat'   // Agent wake cycles (Pulse, Tasks refresh, Inbox check)
   | 'timer'       // Recurring system timers (Git snapshots, Gateway health)
   | 'loop'        // User-created recurring commands (@every 5m)
   | 'cron'        // Scheduled jobs (0 9 * * 1, @daily, @weekly)

@@ -154,7 +154,7 @@ function roles(): string {
 | **HR** | Hiring + onboarding. |
 | **Janitor** | Repo hygiene, merge-conflict resolution. |
 | **Adviser** | Strategic counsel for CEO. |
-| **Failsafe** | Agent recovery, restart, health monitoring. |
+| **Sexton** | Caretaker of continuity. Orchestrates patrol blueprints, dispatches sweepers, escalates when a human call is needed. |
 
 ### Project / team level
 

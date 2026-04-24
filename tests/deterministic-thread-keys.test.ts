@@ -84,11 +84,14 @@ describe('ambient work unifies on agent session (one brain per agent)', () => {
     expect(dreams).toMatch(/sessionKey:\s*agentSessionKey\(slug\)/);
   });
 
-  it('herald + failsafe in daemon.ts route through agentSessionKey', () => {
+  it('herald in daemon.ts routes through agentSessionKey', () => {
+    // Project 1.9.2: the failsafe assertion that used to accompany
+    // herald here was removed when hireFailsafe + the
+    // dispatchFailsafeHeartbeat method were deleted. Sexton's dispatch
+    // path lands in a later 1.9 PR (Pulse/Alarum/Sexton runtime
+    // skeleton); when it does, add an equivalent sexton assertion here.
     const daemon = readSource('packages/daemon/src/daemon.ts');
     expect(daemon).not.toMatch(/sessionKey:\s*`herald-narration:/);
-    expect(daemon).not.toMatch(/sessionKey:\s*`failsafe-heartbeat:/);
     expect(daemon).toMatch(/sessionKey:\s*agentSessionKey\('herald'\)/);
-    expect(daemon).toMatch(/sessionKey:\s*agentSessionKey\('failsafe'\)/);
   });
 });

@@ -60,9 +60,9 @@ describe('role registry', () => {
     }
   });
 
-  it('contains all the corp-sacred Partners by decree (CEO, Herald, HR, Adviser, Janitor, Failsafe)', () => {
+  it('contains all the corp-sacred Partners by decree (CEO, Herald, HR, Adviser, Janitor, Sexton)', () => {
     const decrees = ROLES.filter((r) => r.tier === 'decree').map((r) => r.id);
-    for (const required of ['ceo', 'herald', 'hr', 'adviser', 'janitor', 'failsafe']) {
+    for (const required of ['ceo', 'herald', 'hr', 'adviser', 'janitor', 'sexton']) {
       expect(decrees).toContain(required);
     }
   });

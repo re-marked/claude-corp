@@ -1,7 +1,7 @@
 /**
  * Planner — dedicated deep-planning agent.
  *
- * Auto-hired on bootstrap like Failsafe, Warden, Herald.
+ * Auto-hired on bootstrap like Sexton, Warden, Herald.
  * Only activated for /plan (deep plans). /sketch uses whatever
  * agent you're talking to.
  *
