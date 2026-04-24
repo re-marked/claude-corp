@@ -124,6 +124,7 @@ Commands:
   chit       Unified work-record primitive (create/read/update/close/list/promote/archive)
   observe    Capture an observation — alias for 'chit create --type observation'
   migrate    Corp data migrations (migrate tasks: pre-chits Tasks → Chits)
+  daemon     Daemon-level ops (daemon install-service: OS supervisor setup)
   sweeper    Code sweepers — Sexton's workers (sweeper run <name>)
 
 Feedback pipeline:
@@ -232,6 +233,13 @@ async function run() {
       // Same pass-through pattern as chit — each subcommand owns its flags.
       const { cmdInbox } = await import('./commands/inbox.js');
       await cmdInbox(process.argv.slice(3));
+      break;
+    }
+    case 'daemon': {
+      // Daemon-level operations (install-service today; uninstall /
+      // status / logs as they land). Pass-through same as chit/inbox.
+      const { cmdDaemon } = await import('./commands/daemon.js');
+      await cmdDaemon(process.argv.slice(3));
       break;
     }
     case 'sweeper': {
