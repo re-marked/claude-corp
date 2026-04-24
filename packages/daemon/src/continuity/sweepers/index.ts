@@ -19,7 +19,7 @@
  * response bodies without any additional orchestration.
  */
 
-import { writeOrBumpKink } from '@claudecorp/shared';
+import { writeOrBumpKink, resolveKink, queryChits } from '@claudecorp/shared';
 import type { Daemon } from '../../daemon.js';
 import { log, logError } from '../../logger.js';
 import { SWEEPER_REGISTRY, parseSweeperName, SWEEPER_NAMES } from './registry.js';
@@ -90,6 +90,53 @@ export async function runSweeper(
   }
 
   log(`[sweeper] run ${validated} — ${result.status}: ${result.summary}`);
+
+  const source = `sweeper:${validated}`;
+
+  // Auto-resolve any prior active kinks from THIS source whose
+  // subject isn't in the current findings set. "The sweeper ran
+  // again and didn't report you this time" = "the condition you
+  // were tracking cleared." Without this, stale kinks accumulate
+  // up to their 7-day TTL even after the underlying issue
+  // resolved, making Sexton's kink-queue increasingly noisy.
+  //
+  // Scoped to this source only (other sweepers' kinks are
+  // untouched). Best-effort — a resolve failure logs + continues;
+  // the kink will eventually TTL-age out regardless.
+  if (result.status !== 'failed') {
+    const activeSubjects = new Set(result.findings.map((f) => f.subject));
+    try {
+      const priorKinks = queryChits<'kink'>(daemon.corpRoot, {
+        types: ['kink'],
+        scopes: ['corp'],
+        statuses: ['active'],
+      });
+      const toResolve = priorKinks.chits.filter(
+        (c) =>
+          c.chit.fields.kink.source === source &&
+          !activeSubjects.has(c.chit.fields.kink.subject),
+      );
+      for (const cb of toResolve) {
+        try {
+          resolveKink({
+            corpRoot: daemon.corpRoot,
+            source,
+            subject: cb.chit.fields.kink.subject,
+            resolution: 'auto-resolved',
+            updatedBy: source,
+          });
+        } catch (err) {
+          logError(
+            `[sweeper] run ${validated} — auto-resolve failed for ${cb.chit.fields.kink.subject}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    } catch (err) {
+      logError(
+        `[sweeper] run ${validated} — auto-resolve query failed: ${err instanceof Error ? err.message : String(err)}. Proceeding without auto-resolve.`,
+      );
+    }
+  }
 
   // Write findings as kink chits (best-effort per item).
   for (const finding of result.findings) {
