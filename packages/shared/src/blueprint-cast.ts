@@ -38,12 +38,14 @@
  *
  * ### Task initial state
  *
- * Cast creates Task chits with `workflowStatus: 'draft'` — the chain
- * walker / hand mechanism advances them through `queued → dispatched
- * → in_progress` when dispatch actually happens. Cast isn't a hand;
- * it produces the Contract structure for something else to walk.
- * PR 3's `cc-cli contract start` wraps cast + the initial hand into
- * one founder-facing action.
+ * Cast creates Task chits with `workflowStatus: 'queued'` — the state
+ * the 1.3 machine's initialState picks for a task that has an assignee
+ * but hasn't been dispatched yet. (`draft` is the pre-assignee state;
+ * cast always resolves an assignee so draft would be wrong.) Actual
+ * dispatch (`cc-cli hand` / chain-walker) transitions queued →
+ * dispatched. Cast produces the Contract structure for something else
+ * to walk; PR 4's `cc-cli contract start` wraps cast + the initial
+ * hand into one founder-facing action.
  *
  * ### dependsOn rewriting
  *
@@ -60,6 +62,7 @@ import type { Chit, ChitScope, TaskFields } from './types/chit.js';
 import { createChit, chitId } from './chits.js';
 import { parseBlueprint, type ParsedBlueprint, type ParsedBlueprintStep } from './blueprint-parser.js';
 import { isKnownRole } from './roles.js';
+import { initialState } from './task-state-machine.js';
 
 // ─── Error class ────────────────────────────────────────────────────
 
@@ -230,7 +233,14 @@ export function castFromBlueprint(
       title: step.title,
       priority: contractPriority,
       assignee: stepAssignees.get(step.id)!,
-      workflowStatus: 'draft',
+      // Per the 1.3 state machine (task-state-machine.ts initialState):
+      // `queued` is the correct initial state for a task that has an
+      // assignee but hasn't been dispatched yet. `draft` is the state
+      // BEFORE an assignee is picked. Cast guarantees every task has a
+      // resolved assignee (step 3 above — role resolution + registry
+      // check), so `queued` is the honest state. Dispatch (`cc-cli
+      // hand` / chain-walker pickup) transitions queued → dispatched.
+      workflowStatus: initialState(true),
       ...(step.acceptanceCriteria.length > 0
         ? { acceptanceCriteria: [...step.acceptanceCriteria] }
         : {}),

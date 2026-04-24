@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import {
   createChit,
   findChitById,
+  findBlueprintByName,
+  listBlueprintChits,
   castFromBlueprint,
   BlueprintCastError,
   BlueprintParseError,
@@ -109,6 +111,26 @@ describe('castFromBlueprint — minimal blueprint', () => {
       const taskOnDisk = findChitById(corpRoot, result.tasks[0]!.id);
       expect(taskOnDisk).not.toBeNull();
       expect(taskOnDisk!.chit.type).toBe('task');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('tasks land in workflowStatus="queued" (1.3 state machine — assignee set, not dispatched)', () => {
+    // Cast always resolves an assignee (role-resolution + registry check).
+    // Per task-state-machine's initialState, that means `queued` —
+    // distinct from `draft` (which is the PRE-assignee state). A task
+    // created by cast that claimed `draft` would lie about its readiness
+    // to the chain walker.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const blueprint = createActiveBlueprint(corpRoot, minimalFields());
+      const result = castFromBlueprint(corpRoot, blueprint, {}, {
+        scope: 'corp',
+        createdBy: 'founder',
+      });
+      expect(result.tasks[0]!.fields.task.workflowStatus).toBe('queued');
+      expect(result.tasks[0]!.fields.task.assignee).toBeTruthy();
     } finally {
       cleanup();
     }
@@ -534,6 +556,55 @@ describe('castFromBlueprint — error propagation', () => {
       if (existsSync(contractsDir)) {
         expect(readdirSync(contractsDir)).toHaveLength(0);
       }
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// ─── Lookup scale regression (PR #173 P1) ───────────────────────────
+
+describe('blueprint lookup — unlimited scan at corp scale', () => {
+  it('findBlueprintByName + listBlueprintChits return entries past the queryChits 50-item default', () => {
+    // Reviewer catch (PR #173 P1): queryChits defaults to `limit: 50`.
+    // Without `limit: 0`, name-lookup silently misses older entries
+    // in scopes with >50 blueprints — show/validate/cast false
+    // negatives + `new` false-positive duplicate rejection.
+    //
+    // This test seeds 60 blueprints in one scope and proves that:
+    //   (a) listBlueprintChits returns all 60 (not capped at 50)
+    //   (b) findBlueprintByName can still find the FIRST one seeded
+    //       (which would have been dropped by default pagination)
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const SEED_COUNT = 60;
+      for (let i = 0; i < SEED_COUNT; i++) {
+        createChit(corpRoot, {
+          type: 'blueprint',
+          scope: 'corp',
+          createdBy: 'founder',
+          status: 'active',
+          fields: {
+            blueprint: {
+              name: `bp-${String(i).padStart(3, '0')}`,
+              origin: 'authored',
+              steps: [{ id: 's', title: 'T', assigneeRole: 'ceo' }],
+            },
+          },
+        });
+      }
+
+      const all = listBlueprintChits(corpRoot, { scopes: ['corp'] });
+      expect(all).toHaveLength(SEED_COUNT);
+
+      // The earliest-seeded blueprint (bp-000) must be findable —
+      // queryChits sorts by updatedAt desc so bp-000 would be at the
+      // tail; default pagination would have dropped it.
+      const earliest = findBlueprintByName(corpRoot, 'bp-000', {
+        scopes: ['corp'],
+      });
+      expect(earliest).not.toBeNull();
+      expect(earliest!.chit.fields.blueprint.name).toBe('bp-000');
     } finally {
       cleanup();
     }

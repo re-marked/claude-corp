@@ -216,6 +216,21 @@ describe('validateBlueprint — steps structure', () => {
     ).toThrow(/alphanumeric/);
   });
 
+  it('rejects UPPERCASE in step id — kebab-case means lowercase (PR #171 P2 regression)', () => {
+    // Reviewer caught: the initial regex `^[a-zA-Z0-9_-]+$` accepted
+    // uppercase despite the kebab-case docstring. Pinning explicit
+    // uppercase rejection here so the tightened regex stays honest.
+    expect(() =>
+      validate(minimalBlueprint({ steps: [{ id: 'Scan', title: 'X' }] })),
+    ).toThrow(/lowercase/);
+    expect(() =>
+      validate(minimalBlueprint({ steps: [{ id: 'SCAN_CASKETS', title: 'X' }] })),
+    ).toThrow(/lowercase/);
+    expect(() =>
+      validate(minimalBlueprint({ steps: [{ id: 'scanStep', title: 'X' }] })),
+    ).toThrow(/lowercase/);
+  });
+
   it('rejects duplicate step ids within a blueprint', () => {
     expect(() =>
       validate(
