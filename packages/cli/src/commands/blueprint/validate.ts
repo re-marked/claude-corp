@@ -49,6 +49,9 @@ the specific parse/var error and do not promote.
 
 Options:
   --scope <scope>       Scope hint for name resolution (repeatable).
+  --from <member-id>    Audit actor for the promotion write ('founder'
+                        by default). Use an agent's slug when an agent
+                        is self-promoting its own draft blueprint.
   --json                Machine-readable output.
   --corp <name>         Operate on a specific corp (defaults to active).
   --help                Show this help.
@@ -88,6 +91,7 @@ export async function cmdBlueprintValidate(rawArgs: string[]): Promise<void> {
     options: {
       json: { type: 'boolean' },
       scope: { type: 'string', multiple: true },
+      from: { type: 'string' },
       corp: { type: 'string' },
       help: { type: 'boolean' },
     },
@@ -109,6 +113,7 @@ export async function cmdBlueprintValidate(rawArgs: string[]): Promise<void> {
   const asJson = !!parsed.values.json;
   const corpOpt = parsed.values.corp as string | undefined;
   const scopeHints = parsed.values.scope as string[] | undefined;
+  const updatedBy = (parsed.values.from as string | undefined) ?? 'founder';
   const corpRoot = await getCorpRoot(corpOpt);
 
   // Validate needs to SEE draft blueprints (it's what promotes them),
@@ -197,7 +202,7 @@ export async function cmdBlueprintValidate(rawArgs: string[]): Promise<void> {
     const scope = chitScopeFromPath(corpRoot, hit.path);
     updateChit(corpRoot, scope, 'blueprint', hit.chit.id, {
       status: 'active',
-      updatedBy: 'validator',
+      updatedBy,
     });
     newStatus = 'active';
     promoted = true;
