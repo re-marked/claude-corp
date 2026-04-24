@@ -1480,6 +1480,15 @@ Helpers (mostly code; a few AI for judgment)
 
 **Sexton's patrol IS a Blueprint.** When Alarum wakes her, she cooks her next patrol Blueprint into a Contract, walks it, writes observations as she goes. Each step in a patrol Blueprint is a concrete check (`health-check/step-1-scan-caskets`, `health-check/step-2-check-stalls`, etc.). Step outputs are chits — later consumable by dreams (4.2) for pattern compounding over time.
 
+**Sexton's operational "manual" is distributed across mechanisms already shipping in 1.9.** She does NOT get a separate `MANUAL.md`, a pre-authored operating guide, or an `operatingGuide` field on RoleEntry. Her operational surface is:
+
+- Her patrol blueprints — the executable workflows she walks (listed below)
+- Her `IDENTITY.md` — voice, stance, permissions (Partner-only soul file)
+- Her entry in `roles.ts` — structural identity (description / purpose / communication)
+- `CORP.md` — rendered dynamically by `cc-cli wtf`, same as for any agent
+
+Authoring per-role operating manuals is 2.3 territory — the `hire-employee` blueprint there is the mechanism through which the CEO authors a new agent's `CLAUDE.md` based on corp context. Sexton is a Partner-by-decree, not hired through that flow; her work is codified as patrol blueprints, so she has no need for the separate manual mechanism. Nothing ships pre-written for any role — every role manual in a live corp is authored by the CEO (or the relevant Partner lead) through the 2.3 ceremony, when the corp actually hires into that role. See 2.3 for the shape of that ceremony.
+
 **Patrol blueprint library (absorbed from 2.2):**
 - `patrol/health-check` — per-agent status sweep (silent-exit, stall, loop, GUPP violation).
 - `patrol/corp-health` — cross-agent coordination checks (chain walker idle agents, orphan tasks).
@@ -1687,13 +1696,18 @@ If you're reading this looking for patrol blueprints, go to **1.9** (Watchdog ch
 - `ship-feature` — design → plan → implement → test → PR → review
 - `fix-bug` — repro → root-cause → fix → verify → PR
 - `refactor-module` — define-scope → plan → implement-small-steps → tests → PR
-- `hire-employee` — define-role → allocate-slot → first-dispatch-self-naming → onboard
+- `hire-employee` — define-role → **author-operating-manual** → allocate-slot → first-dispatch-self-naming → onboard
+- `create-role` — define-identity → **author-operating-manual** → register-in-roles → first-hire
 - `promote-employee` — founder-reason → data-transition → ceremony-welcomes → first-dispatch
 - `release` — version-bump → changelog → tag → publish → announce
 - `sprint-review` — collect-activity → synthesize → present-to-founder
 - `merge-conflict-resolve` — inspect → decide-strategy → resolve → verify
 
 Each blueprint tested against a real use case before landing.
+
+**The `author-operating-manual` step is load-bearing.** It's the mechanism through which per-role and per-Partner CLAUDE.md files get written. Nothing ships pre-written with Claude Corp — no role manuals, no agent runbooks, no `operatingGuide` field on RoleEntry. When the CEO (or a Partner with hire authority) runs `hire-employee` or `create-role`, the ceremony REFUSES TO COMPLETE until the new agent's or new role's `CLAUDE.md` is authored based on corp context. This is the "earn the operational knowledge, don't install it" thesis applied to hiring — the corp's specific conventions, codebase standards, review bar, and escalation preferences get written down by an agent who actually knows them, at the moment they're needed.
+
+Employees inherit their role's `CLAUDE.md` template when spawned (the CEO wrote it once when creating the role; every Employee of that role gets it). Partners get individually-authored `CLAUDE.md` files at hire (they're individuals, not pool members). Partners-by-decree (CEO / Herald / HR / Adviser / Sexton) operate from their `IDENTITY.md` + role identity + shipped patrol blueprints (for Sexton) without needing the hire ceremony — they're product-universal roles whose work is codified in shipped mechanisms, not corp-specific.
 
 **Acceptance criteria.**
 - Each blueprint can be cooked without error.
