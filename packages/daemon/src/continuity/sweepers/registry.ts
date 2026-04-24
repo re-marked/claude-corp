@@ -25,10 +25,12 @@
 import type { SweeperModule, SweeperName } from './types.js';
 import { runSilentexit } from './silentexit.js';
 import { runAgentstuck } from './agentstuck.js';
+import { runOrphantask } from './orphantask.js';
 
 export const SWEEPER_REGISTRY: Record<SweeperName, SweeperModule> = {
   silentexit: runSilentexit,
   agentstuck: runAgentstuck,
+  orphantask: runOrphantask,
 };
 
 /** All registered sweeper names — useful for help output + listings. */
