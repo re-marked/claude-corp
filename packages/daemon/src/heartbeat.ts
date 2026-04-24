@@ -140,7 +140,12 @@ export class HeartbeatManager {
         supervisorName = sup?.displayName ?? null;
       }
 
-      const lastUsage = this.daemon.getLastAgentUsage(agent.id);
+      // Resolve sessionKey upfront so the pre-compact usage lookup is
+      // scoped to THIS session (Codex P2 fix, PR #170). Heartbeat's
+      // session key is identical to the one the dispatch call below
+      // uses — shared across both sites for correctness.
+      const sessionKey = agentSessionKey(agent.displayName);
+      const lastUsage = this.daemon.getLastAgentUsage(agent.id, sessionKey);
       const context: DispatchContext = {
         agentDir,
         corpRoot,
@@ -164,8 +169,6 @@ export class HeartbeatManager {
       // Mark busy during inbox dispatch
       this.daemon.setAgentWorkStatus(memberId, agent.displayName, 'busy');
 
-      const sessionKey = agentSessionKey(agent.displayName);
-
       try {
         const result = await this.daemon.harness.dispatch({
           agentId: agentProc.memberId,
@@ -174,7 +177,11 @@ export class HeartbeatManager {
           context,
           callbacks: {
             onUsage: (usage, model) => {
-              this.daemon.recordAgentUsage(agent.id, usage, model);
+              // Per-(agent, session) snapshot — same sessionKey read
+              // above for the fragment context + used by dispatch so
+              // both sides of the pre-compact signal address the same
+              // conversation (Codex P2 fix, PR #170).
+              this.daemon.recordAgentUsage(agent.id, sessionKey, usage, model);
             },
           },
         });

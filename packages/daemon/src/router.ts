@@ -395,8 +395,12 @@ export class MessageRouter {
       return `[${name} (${rank})] ${time}: ${m.content}`;
     });
 
+    // Resolve sessionKey upfront so buildContext can scope the usage
+    // snapshot lookup to THIS session (Codex P2, PR #170).
+    const routerSessionKey = agentSessionKey(target.displayName);
+
     // Build context with history
-    const context = this.buildContext(target, channel, members, recentHistory);
+    const context = this.buildContext(target, channel, members, recentHistory, routerSessionKey);
 
     // If message is just a bare @mention, use the previous message as content
     const strippedContent = msg.content.replace(/@"[^"]+"|@[A-Za-z0-9][\w-]*/g, '').trim();
@@ -449,7 +453,6 @@ export class MessageRouter {
       // crons, loops, dreams, and heartbeats. Collapsing scoping
       // surfaces the one-brain principle: same agent, same memory,
       // regardless of how the turn got triggered.
-      const routerSessionKey = agentSessionKey(target.displayName);
       log(`[router] DISPATCHING to ${target.displayName} for msg ${msg.id.slice(0,8)} from ${sender.displayName}`);
       const result = await this.daemon.harness.dispatch({
         agentId: agentProc.memberId,
@@ -533,10 +536,11 @@ export class MessageRouter {
             });
           },
           onUsage: (usage, model) => {
-            // Record per-agent token count for Project 1.7 pre-compact
-            // signal. Fires on message_start (early) + message_delta
-            // (final); latest wins.
-            this.daemon.recordAgentUsage(targetId, usage, model);
+            // Record per-(agent, session) token count for Project 1.7
+            // pre-compact signal. Fires on message_start (early) +
+            // message_delta (final); latest wins. sessionKey scope keeps
+            // concurrent flows from clobbering each other's token state.
+            this.daemon.recordAgentUsage(targetId, routerSessionKey, usage, model);
           },
         },
       });
@@ -738,6 +742,7 @@ export class MessageRouter {
     channel: Channel,
     members: Member[],
     recentHistory: string[] = [],
+    sessionKey: string = agentSessionKey(targetAgent.displayName),
   ): DispatchContext {
     const corpRootDisplay = this.daemon.corpRoot.replace(/\\/g, '/');
     const agentDirDisplay = targetAgent.agentDir
@@ -763,7 +768,7 @@ export class MessageRouter {
       supervisorName = supervisor?.displayName ?? null;
     }
 
-    const lastUsage = this.daemon.getLastAgentUsage(targetAgent.id);
+    const lastUsage = this.daemon.getLastAgentUsage(targetAgent.id, sessionKey);
 
     return {
       agentDir: agentDirDisplay,

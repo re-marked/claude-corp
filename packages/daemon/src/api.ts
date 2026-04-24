@@ -699,7 +699,13 @@ export function createApi(daemon: Daemon): Server {
           supervisorName = sup?.displayName ?? null;
         }
 
-        const lastUsage = daemon.getLastAgentUsage(target.id);
+        // Pre-resolve sessionKey so the fragment context below reads
+        // the usage snapshot scoped to THIS session (not an unrelated
+        // concurrent dispatch against the same agent). Same key used
+        // below for registerInflight + dispatch — Codex P2 (PR #170).
+        const targetSlugNormEarly = normalize(target.displayName);
+        const sessionKey = (body.sessionKey as string) ?? agentSessionKey(targetSlugNormEarly);
+        const lastUsage = daemon.getLastAgentUsage(target.id, sessionKey);
         const context = {
           agentDir,
           corpRoot,
@@ -737,14 +743,11 @@ export function createApi(daemon: Daemon): Server {
         // Cache tool args from start events — end events often lack them
         const toolArgsCache = new Map<string, Record<string, unknown>>();
 
-        // Resolve sessionKey + build an AbortController OUTSIDE the try
-        // so the catch block can reference them (interrupt bookkeeping
-        // needs both, and the catch runs if abort fires).
+        // sessionKey was resolved earlier (during fragment-context
+        // assembly) so the pre-compact usage lookup is scoped to this
+        // session. Reuse it here for inflight bookkeeping + dispatch.
         const saySenderId = (body.senderId as string) ?? 'founder';
         const senderSlug = members.find((m: any) => m.id === saySenderId)?.displayName?.toLowerCase().replace(/\s+/g, '-') ?? 'system';
-        const targetSlugNorm = normalize(target.displayName);
-        const sessionKey = (body.sessionKey as string)
-          ?? agentSessionKey(targetSlugNorm);
         const abortController = new AbortController();
         daemon.registerInflight(sessionKey, abortController);
 
@@ -878,9 +881,11 @@ export function createApi(daemon: Daemon): Server {
               } : undefined,
               onUsage: (usage, model) => {
                 // Project 1.7 pre-compact signal bookkeeping — stash the
-                // latest per-agent usage snapshot so the next dispatch's
-                // FragmentContext can decide whether to inject the nudge.
-                daemon.recordAgentUsage(target.id, usage, model);
+                // latest per-(agent,session) usage snapshot so the next
+                // dispatch's FragmentContext can decide whether to inject
+                // the nudge. sessionKey scope prevents concurrent flows
+                // (say/jack) from clobbering each other's token state.
+                daemon.recordAgentUsage(target.id, sessionKey, usage, model);
               },
             },
           });
