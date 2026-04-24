@@ -529,8 +529,12 @@ export type { HierarchyNode } from './hierarchy.js';
 export { createProject, listProjects, getProject, getProjectByName } from './projects.js';
 export { createContract, readContract, updateContract, listContracts, listAllContracts, contractPath, getContractProgress, findContractById } from './contracts.js';
 export type { CreateContractOpts, ContractFilter, ContractWithBody } from './contracts.js';
-export { listBlueprints, getBlueprint, installDefaultBlueprints } from './blueprints.js';
-export type { BlueprintMeta, Blueprint } from './blueprints.js';
+// Legacy prose-blueprint API (listBlueprints / getBlueprint /
+// installDefaultBlueprints + BlueprintMeta / Blueprint) was removed
+// in Project 1.8 alongside the four prose .md files in
+// packages/shared/src/blueprints/. Blueprints are now chits — see
+// blueprint-chit-type.ts, blueprint-parser.ts, blueprint-cast.ts,
+// and blueprint-lookup.ts for the replacement surface.
 export type { CreateProjectOpts } from './projects.js';
 
 // Teams

@@ -4,7 +4,6 @@ import type { Corporation } from './types/corp.js';
 import type { Member } from './types/member.js';
 import type { Channel } from './types/channel.js';
 import { installDefaultSkills } from './skills.js';
-import { installDefaultBlueprints } from './blueprints.js';
 import { getTheme, type ThemeId } from './themes.js';
 import { memberId, channelId } from './id.js';
 import { writeConfig } from './parsers/config.js';
@@ -65,9 +64,12 @@ export async function scaffoldCorp(
     mkdirSync(dir, { recursive: true });
   }
 
-  // Install default skills from bundled package
+  // Install default skills from bundled package. Default blueprints
+  // (the old prose runbooks) were removed in Project 1.8 — blueprints
+  // are now chits authored via `cc-cli blueprint new`. Agents + founders
+  // scaffold their own patterns as they notice them, rather than
+  // consuming a pre-baked library on init.
   try { installDefaultSkills(corpRoot); } catch {}
-  try { installDefaultBlueprints(corpRoot); } catch {}
 
   // IDs — member slug IS the ID
   const userId = memberId(userName);
