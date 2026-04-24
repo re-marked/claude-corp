@@ -122,11 +122,31 @@ async function handleOverride(opts: AuditOpts): Promise<void> {
 // ─── Hook mode (invoked by Claude Code Stop / PreCompact) ───────────
 
 async function handleHook(opts: AuditOpts): Promise<void> {
+  // Read the hook input up front so the fail-open catch below can
+  // branch its output format on the event name. stdin is read-once —
+  // we can't recover the event after an exception if we don't have it.
+  // readHookInputFromStdin already fail-softs to `{}` on any parse
+  // error, so this read itself can't throw.
+  const hookInput = readHookInputFromStdin();
+  const event = normalizeEvent(hookInput.hook_event_name);
+
   // Every exception in hook mode falls through to fail-open: log the
-  // error, emit approve, exit 0. Trapping a session in a broken state
-  // is the worst failure mode; silent-skipped blocks are recoverable.
+  // error, emit the event-appropriate "do nothing" signal, exit 0.
+  // Trapping a session in a broken state is the worst failure mode;
+  // silent-skipped blocks are recoverable.
+  //
+  // Event-appropriate output (Codex P2 reviewer catch, PR #170):
+  //   - Stop  → emit `{decision:'approve'}` JSON so Claude Code ends
+  //     the gating cleanly. That's the audit envelope the Stop hook
+  //     protocol consumes.
+  //   - PreCompact → emit NOTHING. PreCompact stdout is consumed as
+  //     summary-shaping text merged into the summarization prompt; a
+  //     stray `{decision:'approve'}` would land as policy text inside
+  //     the compaction's merged instructions and corrupt the summary.
+  //     Empty stdout = "no extra instructions," which is exactly the
+  //     fail-open semantics we want at the compact boundary.
   try {
-    await runHookPath(opts);
+    await runHookPath(opts, hookInput, event);
   } catch (err) {
     try {
       const corpRoot = await getCorpRoot();
@@ -134,14 +154,20 @@ async function handleHook(opts: AuditOpts): Promise<void> {
     } catch {
       /* corpRoot resolution itself failed; nothing to log to */
     }
+    if (event === 'PreCompact') {
+      // No stdout. Exit 0 so Claude Code treats it as a clean no-op.
+      return;
+    }
     emitDecision({ decision: 'approve' });
   }
 }
 
-async function runHookPath(opts: AuditOpts): Promise<void> {
-  const hookInput = readHookInputFromStdin();
+async function runHookPath(
+  opts: AuditOpts,
+  hookInput: HookInput,
+  event: HookEventName,
+): Promise<void> {
   const stopHookActive = hookInput.stop_hook_active === true;
-  const event = normalizeEvent(hookInput.hook_event_name);
 
   const corpRoot = await getCorpRoot();
 
