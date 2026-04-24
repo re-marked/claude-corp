@@ -31,7 +31,7 @@ const SOURCE_COLORS: Record<string, string> = {
   gateway:   '#f87171', // Red-400
   daemon:    '#94a3b8', // Slate-400
   hire:      '#a3e635', // Lime-400
-  failsafe:  '#f472b6', // Pink
+  sexton:    '#f472b6', // Pink
   herald:    '#60a5fa', // Blue
   'cc-say':  '#38bdf8', // Sky-400
   'corp-gw': '#fb923c', // Orange

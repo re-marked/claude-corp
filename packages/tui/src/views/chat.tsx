@@ -189,7 +189,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   // Clear thinkingAgents too — otherwise the indicator at the bottom
   // of the channel keeps showing the original send target's name even
   // after their reply lands. Concrete failure mode: Mark @CEO, ceo
-  // responds with "@Failsafe ...", router dispatches Failsafe, but
+  // responds with "@Sexton ...", router dispatches Sexton, but
   // the spinner still says "CEO is mulling..." because thinkingAgents
   // outranks dispatchingAgents in the render predicate.
   //

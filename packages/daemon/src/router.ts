@@ -312,7 +312,7 @@ export class MessageRouter {
     // Previously agent→agent mentions were routed to the inbox to wait
     // for the next heartbeat (~3min latency), to prevent runaway loops
     // where A pings B, B pings A back, A pings B... User experience:
-    // Mark @mentions Failsafe in #general, Failsafe responds with
+    // Mark @mentions Sexton in #general, Sexton responds with
     // @Herald — and Herald just sits silent for 3 minutes. Felt broken.
     //
     // Loop protection moves from system enforcement to agent training:

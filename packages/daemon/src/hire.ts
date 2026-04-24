@@ -211,10 +211,11 @@ export async function hireAgent(
   // OpenClaw corp gateway — they dispatch through HarnessRouter
   // directly (no gateway slot, no listening port). Mirrors the same
   // branching `spawnAgent` does for daemon-startup paths; without it,
-  // hired-post-startup agents (Failsafe, Janitor, Warden, Herald,
+  // hired-post-startup agents (Sexton, Janitor, Warden, Herald,
   // Planner) in a claude-code corp got mode='gateway' status='starting'
-  // and the next dispatch errored "Agent X is not online" — which is
-  // exactly what Mark hit on Failsafe at 15:06 today.
+  // and the next dispatch errored "Agent X is not online" — an
+  // observed regression from a prior debugging session that's
+  // now well-understood.
   if (harness === 'openclaw') {
     const gw = daemon.processManager.corpGateway;
     if (gw) {

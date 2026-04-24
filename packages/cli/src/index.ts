@@ -343,11 +343,6 @@ async function run() {
       await cmdVersion({ json: !!values.json });
       break;
     }
-    case 'failsafe': {
-      const { cmdFailsafe } = await import('./commands/failsafe.js');
-      await cmdFailsafe({ action: positionals[1] as string | undefined, json: !!values.json });
-      break;
-    }
     case 'tm':
     case 'time-machine': {
       const { cmdTimeMachine } = await import('./commands/time-machine.js');
