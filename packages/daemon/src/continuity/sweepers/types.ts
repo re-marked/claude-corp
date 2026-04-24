@@ -124,4 +124,4 @@ export type SweeperModule = (ctx: SweeperContext) => Promise<SweeperResult>;
  * `Record<SweeperName, SweeperModule>` in the registry + narrows
  * cleanly in switches.
  */
-export type SweeperName = 'silentexit' | 'agentstuck' | 'orphantask';
+export type SweeperName = 'silentexit' | 'agentstuck' | 'orphantask' | 'phantom-cleanup';
