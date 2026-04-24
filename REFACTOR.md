@@ -114,8 +114,8 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
-| 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 |
-| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Budget governor, Shipping (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 (absorbed Blueprint-as-molecule from Project 2.1 + patrol blueprints from 2.2 — the watchdog chain consumes both natively, shipping separately would mean throwaway prompt-text) |
+| 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 **[shipped]** |
+| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Budget governor, Shipping (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 **[~70% shipped as of 2026-04-24: 1.1-1.4.1, 1.6, 1.7, 1.8 landed; 1.9.0-1.9.4 landed; 1.9.5 sweeper execution + OS supervisor in flight (PRs #178, #179); 1.10 bacteria + 1.11 budget/breaker + 1.12 Shipping not yet started]** |
 | 2 | Workflow Substrate | Built-in blueprint library (domain workflows: ship-feature, fix-bug, etc.), self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 6-8 (slimmer — Blueprint substrate + patrol blueprints moved to Project 1 since the watchdog chain needs them on day one) |
 | 3 | Autonomous Operations | Advanced Witness patrols (corp-wide anomaly detection), stall/escalation routing, daemon-level auto-recovery | What's left of corp healing after Project 1's mechanical watchdogs ship — cross-agent coordination + daemon-restart survival. | 6-8 (slimmer — Refinery + circuit-breaker moved to Project 1) |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
@@ -214,6 +214,7 @@ Each type registers its configuration:
 - `dispatch-context` — ephemeral, tracks an in-flight dispatch between agents; burns on dispatch completion.
 - `pre-brain-entry` — ephemeral by default at the role level; auto-promotes to permanent via 4-signal rule and becomes part of the role's distilled pre-BRAIN library.
 - `step-log` — ephemeral with 7d TTL + `destroy-if-not-promoted` (Temporal memoization pattern), one per Task-execution phase, used for crash recovery. Harness-emitted on every dispatch (not agent-written); see 1.6 for the emission contract + how silent-exit respawn reads it. Unreferenced step-logs destruct at TTL; cited ones (by observations / post-mortems) promote via the normal 4-signal rule.
+- `kink` — **[shipped 1.9.5]** ephemeral with 7d TTL + `destroy-if-not-promoted`. Operational findings emitted by sweepers (and future daemon-internal detectors). Distinct channel from observations — observations are agent-voice self-witnessing that feeds BRAIN via dreams; kinks are system-voice "something is wrong right now" reports. Mixing them would pollute the observation stream with mechanical noise AND misdirect dream distillation. Dedup per-(source, subject) via `writeOrBumpKink` helper — matching active kinks bump `occurrenceCount` + refresh severity/title/body rather than creating duplicates. Auto-resolve via `resolveKink` (manual) or runner-driven (when a sweeper stops reporting a subject, prior kink closes with `resolution: 'auto-resolved'`). See 1.9.
 - `inbox-item` — **ephemeral by default**, tier-aware lifecycle (see 0.7 inbox system). Three tiers encoded as per-instance `fields.inbox-item.tier: 1 | 2 | 3`. Policy varies by tier via the per-instance destructionPolicy override:
   - **Tier 1 (ambient)** — `destructionPolicy: 'destroy-if-not-promoted'`, 24h TTL. Broadcast notifications, system events (Failsafe restarts, Herald digests). Genuinely fire-and-forget noise.
   - **Tier 2 (direct)** — `destructionPolicy: 'keep-forever'`, 7d TTL. Peer @mentions, inter-agent DMs, task handoffs from peers. Goes cold on TTL; preserves audit trail.
@@ -1459,6 +1460,29 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 
 ### 1.9 — Watchdog chain: Pulse / Alarum / Sexton / helpers + patrol blueprint library (absorbs 2.2)
 
+**Shipping status (2026-04-24).** Most of 1.9 has shipped across a PR series:
+
+- **1.9.0** sweeper substrate (sweeper-run chit + BlueprintFields.kind + castSweeperFromBlueprint) — **shipped** (PR #174).
+- **1.9.2** Sexton registered as Partner-by-decree; failsafe retired — **shipped** (PR #175).
+- **1.9.3** Pulse reshape + Alarum (claude-code haiku subprocess) — **shipped** (PR #176).
+- **1.9.4** Sexton runtime (`dispatchSexton`) + voice-via-DM-channelId + archived-Sexton filter — **shipped** (PR #177).
+- **1.9.5** OS supervisor configs (`cc-cli daemon install-service`/`uninstall-service`) — **in flight** (PR #178).
+- **1.9.5** Sweeper execution + 6 code sweepers (silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation) + kink chit type + dedup/auto-resolve + wake-message wiring — **in flight** (PR #179).
+
+**Not yet in 1.9:** `cc-cli sweeper new --prompt` (AI sweeper authoring), `cc-cli sweeper cast <blueprint>` (blueprint-based invocation — current shape is direct-invoke via `cc-cli sweeper run <name>`), patrol blueprint library, the three deferred code sweepers (session-gc, sandbox-ttl, shutdown-dances — rationale below).
+
+**Design turns taken during implementation:**
+
+1. **New `kink` chit type for sweeper output** (session 2026-04-24). Initial implementation had sweepers writing observation chits. Realized observations are agent-voice self-witnessing that feeds BRAIN via dreams — pollutng that channel with mechanical sweeper findings would misdirect dream distillation. Kinks are their own stream. See the `kink` entry in Project 0.6.
+
+2. **`cc-cli sweeper run <name>` instead of `cc-cli sweeper cast <blueprint-id>`** (session 2026-04-24). The blueprint-based path (sweeper-run chit cast from a blueprint) is the full form per original spec, but implementing it requires a blueprint-seeding flow + blueprint chits for every sweeper. The direct-invoke path is simpler, lives against the sweeper module registry, and lets us ship the operational capability without the blueprint-authoring overhead. The blueprint-based path stays spec'd for future AI-sweeper authoring via `cc-cli sweeper new`.
+
+3. **OS supervisor config as `cc-cli daemon install-service`, not baked into `cc-cli init`** (session 2026-04-24). REFACTOR.md originally said `cc-cli init` writes the supervisor config. But init is per-corp and supervisor is per-machine; wiring them would regenerate the config on every new corp. Moved to a standalone command, init prints a one-line hint pointing at it.
+
+4. **`continuity/` directory, not `watchdog/`** (session 2026-04-22). Renamed during 1.9.2 — "watchdog" has Gas Town flavor; "continuity" matches the Sexton-as-caretaker register. All file paths below use `continuity/`.
+
+5. **Sexton's voice path is DM-via-channelId, not Tier 3 inbox** (session 2026-04-24). Original design said Sexton "pages founder via Tier 3 inbox-item." Investigated: the router filters founder out of inbox-item creation (tier-3 inbox is founder→agent, not the reverse), and `cc-cli escalate` is Employee→Partner. The real path: dispatchSexton passes the Sexton↔founder DM channelId to /cc/say; her response posts to that DM automatically. She stays quiet by default (IDENTITY discipline); speaks when it matters.
+
 **The unkillability thesis.** For the corp to survive everything short of running out of tokens or OS process-kill, every layer is watched by a smaller-scope layer beneath it. At the bottom, Pulse answers one question — "is the Alarum-tick firing?" — small enough to basically never die. If the daemon itself dies, an OS-level process supervisor (systemd / launchd / Task Scheduler) restarts it; Pulse ticks; Alarum spawns; Sexton resumes from her handoff chit via the 1.6 path. All ticks, loops, crons resume because they rehydrate from on-disk state (chits, caskets, tasks, inbox).
 
 ```
@@ -1514,19 +1538,19 @@ Each blueprint tested by cooking into a Contract and walking it end-to-end.
 
 **Sweepers — Sexton's workers.** Single-purpose modules invoked by Sexton on her patrol cycle. Each reports findings via observation chits; Sexton reads the trail, judges, escalates when needed. Split: Sexton holds identity + judgment; sweepers do the mechanical work. The naming replaces Gas Town's "Dogs" — sexton-with-sweepers fits the caretaker register, sexton-with-dogs is incongruous.
 
-Shipped sweepers (code by default; `conflict-triage` is the sole AI-by-default):
-- `session-gc` — orphan processes, dead tmux panes, subprocess leftovers
-- `phantom-cleanup` — reconcile members.json ↔ workspace directories
-- `chit-hygiene` — malformed frontmatter, orphan references, missing required fields
-- `log-rotation` — rotate past size limits, prune archives
-- `agentstuck` — Caskets whose currentStep hasn't advanced in N minutes
-- `silentexit` — sessions that died without clean shutdown; respawn within retry budget. Only reinitializes EXISTING slots (same Member record, same name, same workspace, same Casket); never creates new Members. Spawning new Employees is bacteria's domain (1.10). The two are disjoint — silentexit operates on dead-existing-slots, bacteria on the new-slot set — so no coordination layer is needed between them. `processManager.spawnAgent(memberId)` is the shared primitive: idempotent for existing members, creates-new for novel memberIds; both sweepers call it, the argument distinguishes which path runs. Retry budget = at most one respawn attempt per patrol cycle per slot; silentexit does NOT maintain its own counter. Repeated failures naturally cross 1.11's circuit breaker threshold (3 silent-exits within 5 min — roughly 3 patrol cycles) which trips the breaker chit and pauses further respawn attempts until founder intervention. This keeps the "when to stop trying" logic in one place (the breaker) rather than duplicated in each sweeper.
-- `orphantask` — task chits with no assignee, not blocked, stuck in limbo
-- `sandbox-ttl` — enforce project sandbox TTLs; archive or cleanup
-- `breaker-reset` — circuit breakers past cooldown; clear if cause resolved
-- `budget-watch` — per-agent token spend; warn on daily-cap approach
-- `shutdown-dances` — deterministic graceful-shutdown state machine for agents
-- `conflict-triage` (AI) — called by `chit-hygiene` on ambiguous chits
+Sweeper list (code by default; `conflict-triage` is the sole AI-by-default). Shipping status in brackets:
+- `silentexit` — **[shipped 1.9.5 PR #179]** sessions that died without clean shutdown; respawn within retry budget. Only reinitializes EXISTING slots (same Member record, same name, same workspace, same Casket); never creates new Members. Spawning new Employees is bacteria's domain (1.10). The two are disjoint — silentexit operates on dead-existing-slots, bacteria on the new-slot set — so no coordination layer is needed between them. `processManager.spawnAgent(memberId)` is the shared primitive: idempotent for existing members, creates-new for novel memberIds; both sweepers call it, the argument distinguishes which path runs. Retry budget = at most one respawn attempt per patrol cycle per slot; silentexit does NOT maintain its own counter. Repeated failures naturally cross 1.11's circuit breaker threshold (3 silent-exits within 5 min — roughly 3 patrol cycles) which trips the breaker chit and pauses further respawn attempts until founder intervention. This keeps the "when to stop trying" logic in one place (the breaker) rather than duplicated in each sweeper.
+- `agentstuck` — **[shipped 1.9.5 PR #179]** Caskets whose currentStep hasn't advanced in N minutes (threshold: 30min, reads task chit's updatedAt not Casket's). Complement to silentexit — finds LIVE but NOT-PROGRESSING agents vs silentexit's DEAD processes. Report-only; Sexton decides whether to nudge via `cc-cli say`.
+- `orphantask` — **[shipped 1.9.5 PR #179]** task chits with `workflowStatus='queued'`, no assignee (or assignee archived/missing), no active blocker. Report-only; Sexton reassigns via `cc-cli hand`.
+- `phantom-cleanup` — **[shipped 1.9.5 PR #179]** reconcile members.json ↔ workspace directories. Two-way detection: phantom members (Member with missing agentDir → severity warn) + phantom workspaces (dir with no Member → severity info). Report-only; destructive cleanup needs founder consent.
+- `chit-hygiene` — **[shipped 1.9.5 PR #179]** malformed frontmatter, orphan references, orphan dependsOn. Uses an in-memory id-Set built once from the query result for O(1) lookups (not per-ref findChitById which was O(10k+ fs-walks) per patrol).
+- `log-rotation` — **[shipped 1.9.5 PR #179]** rotate past 10MB size threshold, keep up to 5 archived rotations. The one sweeper with fs side effects. Success case emits NO kink (a completed rotation is state-change not ongoing-wrongness); only the mid-rotation-failure case emits a kink, which auto-resolves on the next successful rotation.
+- `session-gc` — **[deferred]** original spec said "orphan processes, dead tmux panes, subprocess leftovers." Claude Corp doesn't use tmux; claude-code dispatches self-clean per turn; the gateway is daemon-managed. Nothing concrete to GC in the current substrate. Revisit when real orphan state accumulates in practice.
+- `sandbox-ttl` — **[deferred]** requires project metadata to carry a TTL field which doesn't exist yet. Building this against missing data would produce a sweeper that always returns noop. Defer until project metadata grows TTLs.
+- `shutdown-dances` — **[deferred, reshape]** original spec described "deterministic graceful-shutdown state machine for agents." That's not sweeper-shaped — a sweeper is a periodic scan, shutdown is an orchestrated flow triggered by stop. Belongs as a separate primitive, not a module in the sweeper registry.
+- `breaker-reset` — **[pending 1.11]** circuit breakers past cooldown; clear if cause resolved. Depends on 1.11's circuit-breaker chit type existing.
+- `budget-watch` — **[pending 1.11]** per-agent token spend; warn on daily-cap approach. Depends on 1.11's budget governor.
+- `conflict-triage` (AI) — **[pending 1.9.5+]** called by `chit-hygiene` on ambiguous chits. AI sweepers ship via `cc-cli sweeper new --prompt` which isn't wired yet.
 
 Code sweepers don't bacteria-scale (one module handling a queue is fine). AI sweepers do — under load, bacteria splits spawn additional instances, matching 1.10's semantics.
 
@@ -1548,21 +1572,27 @@ Stability boundary sits at the destructive-action boundary and the first-N-runs 
 
 **Post-1.9 sweeper extensions.** Once the substrate lands, new sweeper types become additions-by-configuration rather than additions-by-engineering — `cc-cli sweeper new --prompt "..."` and you have one. Ideas for post-Project-1 additions (corp accountant patterns like model right-sizing and clock throttling, etc.) are not part of 1.9's scope; they are what the substrate enables. 1.9 ships the unkillability floor, nothing more.
 
-**File paths:**
-- `packages/daemon/src/watchdog/pulse.ts` (reshape — was `heartbeat.ts`; now just fires Alarum)
-- `packages/daemon/src/watchdog/alarum.ts` (new — spawns the ephemeral triage agent each tick)
-- `packages/daemon/src/watchdog/sexton.ts` (new — Sexton's session management + patrol scheduler + sweeper dispatch)
-- `packages/daemon/src/watchdog/sweepers/*.ts` (new — one file per code sweeper: session-gc, phantom-cleanup, chit-hygiene, log-rotation, agentstuck, silentexit, orphantask, sandbox-ttl, breaker-reset, budget-watch, shutdown-dances, conflict-triage)
-- `packages/shared/src/blueprints/sweeper/*.md` (new directory — shipped sweeper blueprints; code sweepers reference their module via `moduleRef` in frontmatter)
-- `packages/shared/src/blueprints/patrol/*.md` (new directory — patrol blueprints live alongside sweeper blueprints)
-- `packages/shared/src/blueprint-cast.ts` (extend — add `castSweeperFromBlueprint` sibling primitive that reuses parse / var / role machinery and diverges at step 7 to produce sweeper-run chits)
-- `packages/shared/src/types/chit.ts` (add `SweeperRunFields` shape + `kind: 'contract' | 'sweeper'` discriminator on `BlueprintFields`)
-- `packages/shared/src/chit-types.ts` (register `sweeper-run` chit type with validator + ephemeral lifecycle)
-- `packages/cli/src/commands/sweeper/*.ts` (new — `new`, `list`, `show`, `close` subcommands mirroring blueprint CLI; `new` invokes the generator that turns a prompt into a draft sweeper blueprint)
-- `packages/shared/src/roles.ts` (rename `failsafe` → `sexton`; reshape role description + SOUL material)
-- `packages/shared/src/templates/soul-sexton.ts` (new — Sexton's soul extends the universal SOUL with caretaker-of-continuity material)
-- `packages/daemon/src/tick-budget.ts` (new — shared 15-second budget helper used by Sexton's patrols)
-- OS supervisor service configs (new): `cc-cli init` writes one of `systemd/claudecorp-daemon.service`, `launchd/com.claudecorp.daemon.plist`, Windows Task Scheduler XML
+**File paths** (note: `watchdog/` directory renamed to `continuity/` during 1.9.2 — "continuity" matches the Sexton-as-caretaker register):
+- `packages/daemon/src/continuity/pulse.ts` — **[shipped 1.9.3]** reshape from `heartbeat.ts`; now just fires Alarum each tick.
+- `packages/daemon/src/continuity/alarum.ts` + `alarum-prompt.ts` + `alarum-state.ts` — **[shipped 1.9.3]** ephemeral triage subprocess (claude-code haiku) + its prompt builder + state-read primitives (sextonSessionAlive, sextonLastHandoff, agentStatusCounts, observationCountSince, buildAlarumContext).
+- `packages/daemon/src/continuity/sexton.ts` — **[shipped 1.9.2]** hireSexton + SEXTON_IDENTITY constant.
+- `packages/daemon/src/continuity/sexton-runtime.ts` + `sexton-wake-prompts.ts` — **[shipped 1.9.4]** dispatchSexton + three wake messages (start/wake/nudge) + resolver.
+- `packages/daemon/src/continuity/sweepers/types.ts` + `registry.ts` + `index.ts` — **[shipped 1.9.5 PR #179]** sweeper module contract, static registry, runSweeper runner with auto-resolve.
+- `packages/daemon/src/continuity/sweepers/*.ts` — one file per code sweeper. Shipped (6): silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation. Deferred (3, rationale above): session-gc, sandbox-ttl, shutdown-dances. Pending downstream-dep (3): breaker-reset, budget-watch (1.11), conflict-triage (AI-shape via cc-cli sweeper new).
+- `packages/shared/src/templates/supervisor/*.ts` — **[in flight PR #178]** per-platform renderers (systemd.ts, launchd.ts, task-scheduler.ts) + types.ts + dispatcher in index.ts. `ServiceArtifact` carries both activation + deactivation commands for symmetric install/uninstall.
+- `packages/cli/src/commands/daemon/install-service.ts` + `uninstall-service.ts` — **[in flight PR #178]** the CLI surfaces. Use `cc-cli daemon install-service` / `uninstall-service`; not baked into `cc-cli init` (per design turn #3 above).
+- `packages/cli/src/commands/sweeper.ts` + `sweeper/run.ts` — **[shipped 1.9.5 PR #179]** `cc-cli sweeper run <name>` direct-invoke. `cc-cli sweeper new/cast/list/show/close` — **pending 1.9.5+**.
+- `packages/shared/src/blueprints/sweeper/*.md` — **[pending 1.9.5+]** shipped sweeper blueprints (for the blueprint-invocation path). Not needed for direct-invoke via `cc-cli sweeper run`.
+- `packages/shared/src/blueprints/patrol/*.md` — **[pending 1.9.5+]** patrol blueprint library.
+- `packages/shared/src/blueprint-cast.ts` — **[shipped 1.9]** `castSweeperFromBlueprint` sibling primitive (used by future blueprint-based sweeper invocation; not exercised by the current direct-invoke CLI).
+- `packages/shared/src/types/chit.ts` — **[shipped]** `SweeperRunFields` + `kind: 'contract' | 'sweeper'` discriminator (1.9); `KinkFields` (1.9.5 PR #179).
+- `packages/shared/src/chit-types.ts` — **[shipped]** `sweeper-run` (1.9) + `kink` (1.9.5 PR #179) registered with validators + ephemeral lifecycle.
+- `packages/shared/src/kinks.ts` — **[shipped 1.9.5 PR #179]** `writeOrBumpKink` (dedup per source+subject) + `resolveKink` helpers.
+- `packages/shared/src/roles.ts` — **[shipped 1.9.2]** `failsafe` retired; `sexton` added (tier=decree, defaultKind=partner).
+- `packages/shared/src/templates/soul-sexton.ts` — **[not shipped, design turn]** SEXTON_IDENTITY lives inline in `continuity/sexton.ts` instead. Per the 2.3 decision, no operating content ships pre-written for any role.
+- `packages/daemon/src/tick-budget.ts` — **[pending 1.9.5+]** shared 15-second budget helper for Sexton's patrols.
+
+**Sweeper output channel — kinks, not observations.** Sweepers emit `SweeperFinding` values which the runner converts to kink chits via `writeOrBumpKink` (dedup per (source, subject); refreshes severity/title/body on bump). Kinks are their own chit type — distinct from observations (agent-voice soul material) — so mechanical sweeper findings don't pollute the observation stream or misdirect dream distillation. When a sweeper stops reporting a subject on a subsequent run, the runner auto-closes the prior kink with `resolution: 'auto-resolved'`. See the `kink` entry in Project 0.6.
 
 **Test strategy:**
 - Unit: Alarum decision ladder — session dead → start; heartbeat stale → nudge; fresh → nothing.
