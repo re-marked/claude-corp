@@ -32,6 +32,7 @@ export interface FieldsForType {
   escalation: EscalationFields;
   blueprint: BlueprintFields;
   'sweeper-run': SweeperRunFields;
+  kink: KinkFields;
 }
 
 /**
@@ -713,4 +714,99 @@ export interface BlueprintFields {
   title?: string | null;
   /** One-line summary shown in list output. Not Handlebars-templated — this is metadata about the blueprint itself, not a cast-time template. */
   summary?: string | null;
+}
+
+/**
+ * Kink — an operational problem/finding emitted by sweepers (and
+ * potentially future daemon-internal detectors). Distinct from
+ * observation chits (which are agent-voice self-witnessing that
+ * feeds BRAIN via dreams): kinks are system-voice operational state
+ * that wants attention or records that a mechanical fix happened.
+ *
+ * Mixing the two channels would pollute observation-stream-as-soul-
+ * material with mechanical noise + misdirect dream distillation
+ * into trying to synthesize patterns from "5 slots crashed today"
+ * as if it were preference. Kinks are their own stream.
+ *
+ * Lifecycle: ephemeral, 7d TTL, destroy-if-not-promoted. If a kink
+ * went unreferenced for 7 days, either it got fixed without being
+ * closed explicitly (stale but moot) or nobody cared; scanner
+ * burns it. Promotion via the standard 4-signal rule covers the
+ * "this recurring pattern matters" case — a postmortem observation
+ * that cites the kink id will preserve it.
+ *
+ * Dedup contract: writers (the sweeper runner + any future direct
+ * callers) check for an existing active kink with the same
+ * `(source, subject)` before creating a new one. If found, they
+ * increment `occurrenceCount` + bump `updatedAt` on the existing
+ * kink rather than creating a duplicate. This keeps agentstuck
+ * from filing 60 identical kinks when the same 5 slots stay stuck
+ * across an hour of patrols.
+ */
+export interface KinkFields {
+  /**
+   * Origin of the kink. Convention: `<subsystem>:<detector>`. Examples:
+   *   - `sweeper:silentexit`
+   *   - `sweeper:agentstuck`
+   *   - `sweeper:chit-hygiene`
+   *   - `daemon:boot`                  (future use: startup problems)
+   *   - `harness:claude-code`          (future use: harness anomalies)
+   *
+   * Filterable by prefix, so Sexton can query all sweeper-emitted
+   * kinks separately from daemon-emitted ones.
+   */
+  source: string;
+  /**
+   * What the kink is ABOUT. Typically a member id (`ceo`, `toast-2`)
+   * when the kink concerns an agent's state; a chit id when the
+   * kink concerns a specific chit (e.g. malformed chit flagged by
+   * chit-hygiene). Forms half the dedup key with `source` — two
+   * active kinks with the same `(source, subject)` pair collapse
+   * to one via occurrenceCount-bumping.
+   */
+  subject: string;
+  /**
+   * How loudly this wants attention.
+   *   info   — routine, informational; a normal-path event worth
+   *            recording but not acting on (log rotation fired;
+   *            silentexit respawned a slot cleanly).
+   *   warn   — not a crisis, but something a human should notice
+   *            within hours (agent stuck mid-task; phantom-cleanup
+   *            found a workspace without a member record).
+   *   error  — data integrity / operational hazard (malformed chit
+   *            that breaks query; respawn failed repeatedly). Sexton
+   *            should surface these to the founder promptly.
+   */
+  severity: 'info' | 'warn' | 'error';
+  /**
+   * One-line summary shown in kink-list output. Full context lives
+   * in the chit body (markdown). Title stays short so `cc-cli chit
+   * list --type kink` output is legible at a glance.
+   */
+  title: string;
+  /**
+   * How many times this exact (source, subject) has been hit
+   * while the kink has been in the active state. Starts at 1 on
+   * create; dedup writer increments on each subsequent match.
+   * Lets Sexton see "this is fresh" vs "this has been happening
+   * for 2 hours" without grinding through chit diffs.
+   *
+   * Resets implicitly on close: a new kink after close starts at
+   * 1 again — closed kinks are history; a recurrence is its own
+   * event.
+   */
+  occurrenceCount: number;
+  /**
+   * Why the kink closed. Set on transition to `status: closed`,
+   * null/absent while active. Three reasons we distinguish:
+   *   auto-resolved  — a subsequent sweeper run detected the
+   *                    condition is no longer present (dead slot
+   *                    came back up; malformed chit was fixed).
+   *   acknowledged   — Sexton or founder saw it, accepted the
+   *                    state as known/tolerable ("yes this slot
+   *                    is intentionally offline for the day").
+   *   dismissed      — the kink was noise or a false positive;
+   *                    closed without further action.
+   */
+  resolution?: 'auto-resolved' | 'acknowledged' | 'dismissed' | null;
 }

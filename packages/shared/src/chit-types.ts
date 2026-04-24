@@ -33,6 +33,7 @@ import type {
   BlueprintStep,
   BlueprintVar,
   SweeperRunFields,
+  KinkFields,
 } from './types/chit.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -675,6 +676,45 @@ function validateSweeperRun(fields: unknown): void {
   }
 }
 
+function validateKink(fields: unknown): void {
+  const f = requireObject(fields, 'kink') as Partial<KinkFields>;
+
+  // Dedup key is (source, subject) — both required and non-empty
+  // so that key can never collide with "" or be ambiguous. source
+  // follows the `<subsystem>:<detector>` convention (enforced by
+  // convention, not by regex — new subsystems shouldn't need
+  // validator edits).
+  requireNonEmptyString(f.source, 'kink.source');
+  requireNonEmptyString(f.subject, 'kink.subject');
+
+  // Severity drives how loudly Sexton surfaces the kink. Enum
+  // rather than free-form so filters like "show me open errors"
+  // stay reliable.
+  requireEnum(f.severity, 'kink.severity', ['info', 'warn', 'error'] as const);
+
+  // Title is the one-line summary for list views. Required + non-
+  // empty so `cc-cli chit list --type kink` never renders blank
+  // rows; detailed context goes in the chit body.
+  requireNonEmptyString(f.title, 'kink.title');
+
+  // occurrenceCount tracks dedup bumps while active. Always at
+  // least 1 (the initial create is occurrence #1). Integer-min-1
+  // with a generous ceiling — a kink hitting thousands of
+  // occurrences means something's very wrong with the underlying
+  // condition, not with this field.
+  requireInteger(f.occurrenceCount, 'kink.occurrenceCount', 1, 1_000_000);
+
+  // resolution is set on transition to closed; null/absent while
+  // active. Enum values match the three documented close-reasons.
+  if (f.resolution !== undefined && f.resolution !== null) {
+    requireEnum(f.resolution, 'kink.resolution', [
+      'auto-resolved',
+      'acknowledged',
+      'dismissed',
+    ] as const);
+  }
+}
+
 // ─── Registry ────────────────────────────────────────────────────────
 
 /**
@@ -864,6 +904,35 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     // references them, triggering the 4-signal promotion.
     destructionPolicy: 'destroy-if-not-promoted',
     validate: validateSweeperRun,
+  },
+  {
+    id: 'kink',
+    idPrefix: 'k',
+    // Ephemeral: a kink is operational state ("something is wrong
+    // right now") not soul material. Most kinks get fixed, closed,
+    // and are irrelevant afterward. Keeping them forever would
+    // clog kink queries with history nobody reads.
+    defaultEphemeral: true,
+    // 7d TTL — aligns with step-log. If a kink was neither closed
+    // nor cited by something else in a week, it's forgotten state
+    // (either auto-resolved silently, or nobody cared enough to
+    // acknowledge it). The scanner burns it.
+    defaultTTL: '7d',
+    defaultStatus: 'active',
+    // Two-state lifecycle: active (open problem) / closed
+    // (resolved | acknowledged | dismissed; fields.kink.resolution
+    // carries the "why"). burning is the shared terminal for all
+    // ephemeral chits abort-killed mid-write, included per
+    // convention.
+    validStatuses: ['active', 'closed', 'burning'],
+    terminalStatuses: ['closed', 'burning'],
+    // Destroy-if-not-promoted: unreferenced stale kinks are noise.
+    // A kink that was worth remembering will have something (a
+    // postmortem observation, Sexton's BRAIN entry about a
+    // recurring pattern) referencing it, triggering 4-signal
+    // promotion. Absent that, it burns clean.
+    destructionPolicy: 'destroy-if-not-promoted',
+    validate: validateKink,
   },
 ];
 

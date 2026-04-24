@@ -55,6 +55,7 @@ export type {
   BlueprintStep,
   BlueprintVar,
   SweeperRunFields,
+  KinkFields,
 } from './types/index.js';
 
 // Parsers
