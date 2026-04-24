@@ -73,7 +73,21 @@ function renderUnitFile(daemonCommand: string): string {
   return `[Unit]
 Description=Claude Corp Daemon
 Documentation=https://github.com/re-marked/claude-corp
-After=network.target
+# network-online.target (not plain network.target): network.target
+# fires when the network stack is configured, which is BEFORE
+# connectivity is up. The daemon makes Anthropic API calls at
+# startup — without network-online, slow-DNS / slow-VPN / laptop-
+# resuming-from-sleep boots can burn all 5 restart attempts in
+# 60s (StartLimit below) before the network is actually reachable,
+# leaving the unit in failed state at login.
+#
+# Wants= is paired with After= deliberately. After= only controls
+# ordering — you can't be "after" a target that never gets
+# activated. Wants= pulls network-online.target into the dependency
+# graph so it actually fires. Without Wants=, After= is a no-op on
+# systems where nothing else requires network-online.
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
