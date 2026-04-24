@@ -32,6 +32,7 @@ import type {
   BlueprintFields,
   BlueprintStep,
   BlueprintVar,
+  SweeperRunFields,
 } from './types/chit.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -595,6 +596,68 @@ function validateInboxItem(fields: unknown): void {
   }
 }
 
+/**
+ * Sweeper-run validator (Project 1.9). A sweeper-run records one
+ * dispatch of a sweeper blueprint. Validator enforces the shape
+ * castSweeperFromBlueprint writes, so any manual creation / update
+ * of sweeper-run chits (via `cc-cli chit` tools) stays consistent.
+ *
+ * Chit-id references aren't walked here — the validator is pure on
+ * field shape. The lifecycle scanner + Sexton's patrol reader handle
+ * the "does this id resolve?" question when they're actually using
+ * the reference.
+ */
+function validateSweeperRun(fields: unknown): void {
+  const f = requireObject(fields, 'sweeper-run') as Partial<SweeperRunFields>;
+
+  // blueprintId is load-bearing — every sweeper-run traces to its
+  // source blueprint. Must be a chit id. Format check is loose (we
+  // accept any non-empty string) because chit id format is owned by
+  // chits.ts; stricter validation would duplicate that responsibility.
+  requireNonEmptyString(f.blueprintId, 'sweeper-run.blueprintId');
+
+  // triggeredBy is the member id of the initiator. Sexton on her
+  // patrol cycle; founder when `cc-cli sweeper new` triggers a first-
+  // run dispatch. Non-empty ensures audit trail isn't blank.
+  requireNonEmptyString(f.triggeredBy, 'sweeper-run.triggeredBy');
+
+  // Optional context string — free form.
+  if (f.triggerContext !== undefined) {
+    optionalString(f.triggerContext, 'sweeper-run.triggerContext');
+  }
+
+  // moduleRef: string (code sweeper) | null (AI sweeper) | absent.
+  // Absent and null both mean "no code module" in practice; we accept
+  // either so writers don't have to choose which absent-shape to use.
+  if (f.moduleRef !== undefined) {
+    requireStringOrNull(f.moduleRef, 'sweeper-run.moduleRef');
+  }
+
+  // outcome is the load-bearing state discriminant. Running is the
+  // create-time default; dispatch completion flips to one of the
+  // three terminal values.
+  requireEnum(
+    f.outcome,
+    'sweeper-run.outcome',
+    ['running', 'success', 'failure', 'cancelled'] as const,
+  );
+
+  // observationsProduced is an array of chit ids — same loose
+  // validation as blueprintId (non-empty strings; format owned by
+  // chits.ts). Empty array is legal: "sweeper ran, found nothing
+  // noteworthy."
+  if (f.observationsProduced !== undefined && f.observationsProduced !== null) {
+    requireStringArray(f.observationsProduced, 'sweeper-run.observationsProduced');
+  }
+
+  // decision is free-form text — a sentence or two about what the
+  // sweeper concluded. Optional because some sweeper-runs end in
+  // no-op silence and forcing text would invent words.
+  if (f.decision !== undefined) {
+    optionalString(f.decision, 'sweeper-run.decision');
+  }
+}
+
 // ─── Registry ────────────────────────────────────────────────────────
 
 /**
@@ -759,6 +822,31 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     // log via the destruction entry, then move on).
     destructionPolicy: 'destroy-if-not-promoted',
     validate: validateEscalation,
+  },
+  {
+    id: 'sweeper-run',
+    idPrefix: 'sr',
+    // Ephemeral: a sweeper-run records one dispatch of a sweeper, which
+    // is a transient event, not soul material. The sweeper itself (the
+    // blueprint) is durable; the individual runs are not. Runs that
+    // produced a referenced observation (Sexton noticed a pattern,
+    // wrote it up, the observation cites the sweeper-run) survive via
+    // the 4-signal promotion path; unreferenced runs die at TTL.
+    defaultEphemeral: true,
+    defaultTTL: '7d',
+    defaultStatus: 'active',
+    validStatuses: ['active', 'closed', 'burning'],
+    // closed = normal completion (sweeper ran, recorded its outcome).
+    // burning = aborted (sweeper killed mid-run, daemon shutdown mid-
+    // dispatch, etc). Both are terminal — no legal transitions out.
+    terminalStatuses: ['closed', 'burning'],
+    // Destroy-if-not-promoted: a sweeper-run with no referencing
+    // observation after TTL is noise by definition — the sweeper
+    // looked at the corp and found nothing worth remembering. Runs
+    // that DID produce observations persist because the observation
+    // references them, triggering the 4-signal promotion.
+    destructionPolicy: 'destroy-if-not-promoted',
+    validate: validateSweeperRun,
   },
 ];
 

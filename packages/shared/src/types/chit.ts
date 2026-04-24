@@ -31,6 +31,7 @@ export interface FieldsForType {
   'inbox-item': InboxItemFields;
   escalation: EscalationFields;
   blueprint: BlueprintFields;
+  'sweeper-run': SweeperRunFields;
 }
 
 /**
@@ -600,6 +601,74 @@ export interface BlueprintVar {
  * observed repetition) is deferred to 1.9 / 4.2 where the observation
  * + dream machinery can actually detect the patterns.
  */
+/**
+ * Fields for a sweeper-run chit (Project 1.9). A sweeper-run records
+ * one dispatch of a sweeper — Sexton's worker modules that do the
+ * mechanical maintenance work she orchestrates. Each patrol cycle
+ * produces one or more sweeper-run chits, one per sweeper she
+ * dispatches.
+ *
+ * Ephemeral by default (7d TTL). A sweeper-run that produced no
+ * referenced observations after TTL is noise by definition — the
+ * lifecycle scanner's destroy-if-not-promoted policy clears those
+ * automatically. A sweeper-run that DID spawn a promoted observation
+ * (Sexton noticed a pattern, wrote it up as a non-ephemeral
+ * observation referencing the sweeper-run) survives.
+ *
+ * Sweeper-runs don't participate in the chain walker. They're not
+ * tasks; they don't have dependsOn semantics. Their status lifecycle
+ * is simple: active (running) → closed (done) | burning (aborted).
+ * The outcome field carries the pass/fail/cancelled semantics that
+ * would be workflowStatus on a Task chit.
+ */
+export interface SweeperRunFields {
+  /** Chit id of the sweeper blueprint this run was cast from. Load-bearing: every sweeper-run traces back to its source blueprint. */
+  blueprintId: string;
+  /**
+   * Member id of the initiator. Usually Sexton; can be the founder when
+   * `cc-cli sweeper new --prompt "..."` triggers a first-run-after-
+   * authoring dispatch for approval gating.
+   */
+  triggeredBy: string;
+  /**
+   * Optional free-form text explaining why this dispatch happened —
+   * the patrol step that invoked it, an ad-hoc pattern Sexton noticed,
+   * a founder-initiated re-run. Surfaces in observability so the
+   * founder can trace "why did this sweeper fire at 03:47?"
+   */
+  triggerContext?: string;
+  /**
+   * Code-module name for code sweepers (matches the sweepers registry
+   * key). Null for AI sweepers (dispatch goes to a Claude agent; the
+   * prompt comes from the blueprint step's description). Copied off
+   * the blueprint step at cast time so the sweeper-run is self-
+   * describing without re-reading the blueprint.
+   */
+  moduleRef?: string | null;
+  /**
+   * Terminal outcome of the run. `running` is the default at create
+   * time; transitions to `success` / `failure` / `cancelled` happen
+   * when the sweeper's execution finishes. Distinct from chit status
+   * (active/closed) because chit status describes the chit's
+   * lifecycle, outcome describes what actually happened in the run.
+   */
+  outcome: 'running' | 'success' | 'failure' | 'cancelled';
+  /**
+   * Chit ids of any observation chits the sweeper produced during
+   * this run. Sexton reads these via a query when integrating patrol
+   * results; dreams can traverse them to synthesize patterns across
+   * many sweeper-runs.
+   */
+  observationsProduced?: string[];
+  /**
+   * Free-form conclusion from the sweeper. Short — a sentence or two
+   * about what the sweeper concluded and what action (if any) was
+   * taken. Surfaces in observability and in Sexton's integration of
+   * patrol results.
+   */
+  decision?: string;
+}
+
 export interface BlueprintFields {
   /**
    * Human-typeable identifier. Kebab-case, unique within the blueprint's
