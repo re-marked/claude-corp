@@ -113,6 +113,12 @@ export async function cmdBlueprintNew(rawArgs: string[]): Promise<void> {
   // Scaffold fields. One placeholder step so the author has something
   // to edit; null assigneeRole so the scaffold doesn't encode a wrong
   // default. Empty vars array (authors add as needed).
+  //
+  // The scaffold is deliberately minimal at the FIELDS level — the
+  // authoring guide lives in the BODY where the author will see it
+  // when they open the file. Keeping the scaffolded steps single-entry
+  // avoids tempting authors to leave multiple placeholder-named steps
+  // in their "real" blueprint.
   const scaffoldFields: BlueprintFields = {
     name,
     origin: 'authored',
@@ -132,23 +138,84 @@ export async function cmdBlueprintNew(rawArgs: string[]): Promise<void> {
   const scaffoldBody = `# ${name}
 
 _Edit this description: what does this blueprint do, when should
-someone cast it?_
+someone cast it? Keep it scannable — this is what the founder + CEO
+read when they pick a blueprint off \`cc-cli blueprint list\`._
 
-## Authoring notes
+## Authoring guide
 
-- Each entry in the frontmatter's \`steps\` array becomes a Task chit
-  when this blueprint is cast. Step ids are local (referenced by
-  \`dependsOn\`); cast rewrites them to real chit ids at cast time.
-- Declare typed variables in \`vars\` (\`string\` | \`int\` | \`bool\`).
-  Reference them in step strings via Handlebars: \`{{var_name}}\`.
-  Conditionals supported: \`{{#if touches_tui}}...{{/if}}\`.
-- Set \`assigneeRole\` to a role id from the role registry (e.g.
-  \`backend-engineer\`, \`ceo\`, \`sexton\`) or leave \`null\` to require
-  a \`--stepRoleOverrides\` entry at cast time.
-- \`cc-cli blueprint validate <name>\` parses this blueprint with
-  dummy vars + promotes to \`active\` if the structure is sound.
+A blueprint is a chit whose \`fields.blueprint\` defines a repeatable
+DAG of Tasks. When you \`cc-cli blueprint cast\` it (or
+\`cc-cli contract start --blueprint ...\`), the DAG is instantiated
+into a Contract + Task chits with step ids rewritten to real chit ids.
 
-Delete this section once you've filled in real content.
+### Field reference (in the frontmatter)
+
+- **\`name\`** — kebab-case id used as the human reference. Categories
+  allowed via \`/\` (\`patrol/health-check\`, \`ship/feature\`).
+- **\`origin\`** — \`authored\` (you wrote it) or \`builtin\` (shipped
+  with Claude Corp). Keep \`authored\` unless this blueprint ships
+  with the repo.
+- **\`steps\`** — non-empty array. Each entry becomes ONE Task chit
+  at cast time. Ordering within the array is cosmetic; cast walks
+  \`dependsOn\` to derive the actual DAG.
+- **\`vars\`** — typed variables the caller supplies at cast via
+  \`--vars name=value\`. Each entry: \`{ name, type, default? }\` where
+  \`type\` is \`string\` | \`int\` | \`bool\`. A default makes the var
+  optional at cast time; otherwise the caller must supply it.
+- **\`title\`**, **\`summary\`** — human-readable labels surfaced by
+  \`cc-cli blueprint list\` and \`cc-cli blueprint show\`.
+
+### Step shape
+
+Each step is:
+
+  { id, title, description?, dependsOn?, acceptanceCriteria?, assigneeRole? }
+
+- **\`id\`** — kebab-case local identifier. Used by other steps'
+  \`dependsOn\` to reference this step. Cast rewrites to a real chit
+  id when instantiating.
+- **\`title\`** — short Task chit title. Templated (Handlebars refs
+  allowed, e.g. \`"Ship {{feature}}"\`).
+- **\`description\`** — optional prose body of the Task chit. Templated.
+- **\`dependsOn\`** — optional array of other step ids this step waits
+  on. Empty / absent = head step (no predecessors). The chit-type
+  validator checks every reference, and rejects blueprints with
+  cycles or references to non-existent step ids before the blueprint
+  can be promoted to \`active\`.
+- **\`acceptanceCriteria\`** — optional string array the Task must
+  satisfy. Each entry is templated. Carries through to
+  \`task.fields.acceptanceCriteria\` — the audit gate reads these
+  when the Task hits \`cc-cli done\`.
+- **\`assigneeRole\`** — role id from the registry (\`ceo\`, \`sexton\`,
+  \`backend-engineer\`, etc.) OR \`null\` to defer to cast time. Null
+  requires the caster to supply \`--step-role <step-id>=<role>\` at
+  cast. Never use a scope-qualified slug (\`agent:toast\`) — blueprints
+  assign to ROLES; role-resolver picks an Employee at cast.
+
+### Handlebars templating
+
+Every templated field (\`title\`, \`description\`, \`acceptanceCriteria\`,
+\`assigneeRole\`) is run through Handlebars with strict mode + noEscape:
+
+- \`{{var_name}}\` — substitutes the var's cast-time value.
+- \`{{#if flag}}A{{else}}B{{/if}}\` — conditionals on bool vars.
+- Strict mode means referencing an undeclared var throws at validate
+  or cast time with \`blueprint.vars[].name\` field-path context.
+- Step ids and \`dependsOn\` are NOT templated — they're structural,
+  not prose, and must be stable across casts.
+
+### Typical authoring flow
+
+1. Scaffold: \`cc-cli blueprint new <name> --title "..."\`
+2. Open the \`file:\` printed by \`new\`, flesh out steps + vars.
+3. Validate: \`cc-cli blueprint validate <name>\` — parses against
+   synthesized dummy vars; on success, promotes \`draft\` → \`active\`.
+4. Cast: \`cc-cli contract start --blueprint <name> --project <p>
+   --vars <k>=<v>...\` — creates the Contract + Tasks at project
+   scope, ready for \`cc-cli hand\` to dispatch the head task.
+
+Delete this section once you've filled in real content — it lands in
+the chit's body and isn't load-bearing for cast.
 `;
 
   try {
