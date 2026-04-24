@@ -446,16 +446,33 @@ function validateBlueprint(fields: unknown): void {
     // blueprints (Project 1.9). Format is kebab-case (`session-gc`,
     // `phantom-cleanup`). Module existence is NOT cross-checked here —
     // the sweepers registry lives in a downstream package and is
-    // resolved at dispatch time, where a missing module fails loudly
-    // with a clear error. Cross-field check (moduleRef meaningless on
-    // kind=contract blueprints) is the cast primitive's job, not
-    // validator's — keeping validator pure on fields.
+    // resolved at dispatch time, where a missing module fails loudly.
+    //
+    // Cross-field check: a non-null moduleRef is only meaningful on
+    // kind=sweeper blueprints. Setting it on a contract-kind blueprint
+    // (or leaving kind absent — which defaults to contract) is almost
+    // certainly an authoring mistake — the author wrote a sweeper-
+    // shaped step but forgot to tag the blueprint as kind=sweeper, so
+    // castFromBlueprint would cast it as Task chits that silently
+    // ignore moduleRef. Rejecting at write time surfaces the mistake
+    // loudly, right where the author can fix it — instead of leaving
+    // them wondering weeks later why their sweeper never fires.
     if (step.moduleRef !== undefined) {
       requireStringOrNull(step.moduleRef, `${stepPath}.moduleRef`);
       if (typeof step.moduleRef === 'string') {
         if (!/^[a-z][a-z0-9-]*$/.test(step.moduleRef)) {
           throw new ChitValidationError(
             `${stepPath}.moduleRef must be kebab-case lowercase alphanumeric + hyphens (got ${JSON.stringify(step.moduleRef)})`,
+            `${stepPath}.moduleRef`,
+          );
+        }
+        // Non-null moduleRef requires kind=sweeper. Absent kind or
+        // 'contract' both mean "not a sweeper" per the BlueprintFields.kind
+        // semantics documented on the type.
+        if (f.kind !== 'sweeper') {
+          throw new ChitValidationError(
+            `${stepPath}.moduleRef is set (${JSON.stringify(step.moduleRef)}) but blueprint.kind is '${f.kind ?? 'contract (default)'}' — moduleRef is only meaningful on kind=sweeper blueprints. ` +
+              `Either set blueprint.kind: 'sweeper' (if this is a sweeper), or remove moduleRef from the step (if this is a contract blueprint).`,
             `${stepPath}.moduleRef`,
           );
         }

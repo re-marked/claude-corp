@@ -311,6 +311,92 @@ describe('validateBlueprint — step.moduleRef', () => {
       cleanup();
     }
   });
+
+  it('rejects moduleRef on kind=contract blueprint (authoring mistake guard)', () => {
+    // Cross-field check: setting moduleRef on a non-sweeper blueprint
+    // is almost certainly an authoring mistake. Catch at write time
+    // with a message that teaches the fix, rather than silently casting
+    // as a contract-task that ignores moduleRef and leaves the author
+    // wondering weeks later why their sweeper never fires.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      expect(() =>
+        createChit(corpRoot, {
+          type: 'blueprint',
+          scope: 'corp',
+          createdBy: 'founder',
+          fields: {
+            blueprint: {
+              name: 'mismatched-kind',
+              origin: 'authored',
+              kind: 'contract',
+              steps: [
+                { id: 's1', title: 'Step', moduleRef: 'session-gc', assigneeRole: 'ceo' },
+              ],
+            },
+          },
+        }),
+      ).toThrowError(/only meaningful on kind=sweeper blueprints/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('rejects moduleRef when kind is absent (defaults to contract)', () => {
+    // Same authoring mistake, absent-kind variant — an author writing
+    // a sweeper and forgetting the kind field entirely. Same error
+    // fires, teaching the fix in the same place.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      expect(() =>
+        createChit(corpRoot, {
+          type: 'blueprint',
+          scope: 'corp',
+          createdBy: 'founder',
+          fields: {
+            blueprint: {
+              name: 'absent-kind-with-modref',
+              origin: 'authored',
+              // kind absent → defaults to contract → moduleRef invalid
+              steps: [
+                { id: 's1', title: 'Step', moduleRef: 'session-gc', assigneeRole: 'ceo' },
+              ],
+            },
+          },
+        }),
+      ).toThrowError(/only meaningful on kind=sweeper blueprints/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('allows explicit null moduleRef on kind=contract (cross-field check skips null)', () => {
+    // Null moduleRef is semantically "no module" — legal on any kind.
+    // The cross-field guard only fires when moduleRef is a non-null
+    // string (the actual authoring-mistake signal).
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      expect(() =>
+        createChit(corpRoot, {
+          type: 'blueprint',
+          scope: 'corp',
+          createdBy: 'founder',
+          fields: {
+            blueprint: {
+              name: 'null-modref-contract',
+              origin: 'authored',
+              kind: 'contract',
+              steps: [
+                { id: 's1', title: 'Step', moduleRef: null, assigneeRole: 'ceo' },
+              ],
+            },
+          },
+        }),
+      ).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 // ─── Registry: sweeper-run chit type ────────────────────────────────
