@@ -232,6 +232,30 @@ export {
 export { createInboxItem, TIER_TTL } from './inbox.js';
 export type { CreateInboxItemOpts } from './inbox.js';
 
+// Blueprint var merge + coerce — Project 1.8 PR 2. Bridges CLI-shaped
+// string inputs to the typed Handlebars context the parser needs.
+// Pure; no Handlebars dependency (that lives in blueprint-parser.ts).
+export { coerceVarValue, mergeBlueprintVars, BlueprintVarError } from './blueprint-vars.js';
+export type { BlueprintVarValue } from './blueprint-vars.js';
+
+// Blueprint parser — Handlebars expansion layer on top of the vars
+// merge. Strict-mode catches undeclared references; the cast primitive
+// (next commit) consumes ParsedBlueprint directly and has no Handlebars
+// awareness. Pure.
+export { parseBlueprint, BlueprintParseError } from './blueprint-parser.js';
+export type { ParsedBlueprint, ParsedBlueprintStep } from './blueprint-parser.js';
+
+// Blueprint cast — Project 1.8 PR 2. Validation-first primitive that
+// composes parser + chit CRUD into Contract + Task chits. All failure
+// modes that CAN be caught before any chit write ARE caught (var coercion,
+// template syntax, strict-mode refs, status check, role resolution,
+// registry existence). CLI in PR 3 wraps this.
+export { castFromBlueprint, BlueprintCastError } from './blueprint-cast.js';
+export type {
+  CastFromBlueprintOpts,
+  CastFromBlueprintResult,
+} from './blueprint-cast.js';
+
 // Role registry — canonical role metadata for Project 1.1's Employee/
 // Partner split. CORP.md renders role-specific sections from these
 // entries; `cc-cli hire --role` validates against them; `cc-cli tame`
