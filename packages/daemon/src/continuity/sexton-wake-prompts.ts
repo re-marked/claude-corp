@@ -65,7 +65,13 @@ Your immediate task this session:
    \`cc-cli status\`
    \`cc-cli chit list --type observation --limit 20\`
 
-3. Decide what's worth doing this session. You don't have a patrol blueprint library yet (those land in a later sub-project); for now, integrate what you see and name the most important signal.
+3. Decide what's worth doing this session. You don't have a patrol blueprint library yet (those land in a later sub-project), but you do have one sweeper at your disposal:
+
+   \`cc-cli sweeper run silentexit\`
+
+   silentexit respawns agents whose process died with pending Casket work. Cheap to run, no-op if everything is healthy. Use it when \`cc-cli status\` shows crashed/stopped slots, or whenever you want a proactive sweep of the agent pool. The output tells you what it did (or found nothing). It writes its own observation chits, so running it leaves a trail.
+
+   Beyond sweepers: integrate what you see in the corp state and name the most important signal.
 
 4. Write an observation summarizing your read + what you're choosing to do about it:
    \`cc-cli observe "<one-sentence summary>" --from sexton --category NOTICE --subject sexton-wake --importance 2\`
@@ -97,7 +103,10 @@ Check what's changed:
 1. \`cc-cli chit list --type observation --limit 20\` — recent observations, newest first
 2. \`cc-cli status\` — agent statuses (any broken? any stuck?)
 
-Decide whether this new signal warrants an action (nudging an agent via \`cc-cli say\`, speaking up to the founder directly, writing an observation that compounds over time) or is noise to note-and-move-on.
+Decide whether this new signal warrants an action (nudging an agent via \`cc-cli say\`, running a sweeper, speaking up to the founder directly, writing an observation that compounds over time) or is noise to note-and-move-on.
+
+Sweepers available right now:
+  \`cc-cli sweeper run silentexit\` — respawn any agent whose process died with pending Casket work. If \`cc-cli status\` showed crashed/stopped slots above, this is the first thing to try. No-op if every slot is healthy.
 
 Your response text in this session posts to your DM with the founder automatically — that IS how you reach them. If something matters enough to surface, say it in your response. If nothing matters, respond with empty/minimal text and exit; nothing posts when there's nothing to say.
 
