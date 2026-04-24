@@ -136,6 +136,30 @@ export async function cmdBlueprintCast(rawArgs: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // Patrol guardrail (Project 1.9.6). Blueprints whose name starts
+  // with `patrol/` are designed to be READ + WALKED by Sexton in-
+  // session, not materialized into a Contract + Task chain via cast.
+  // Contract lifecycle (Warden sign-off, acceptance criteria per
+  // step, draft → active → review → completed) doesn't fit a 5-minute
+  // repeating sweep; the kink + auto-resolve machinery does the real
+  // audit trail. See REFACTOR.md 1.9 for the design turn.
+  //
+  // Check the resolved blueprint's own .name field rather than the
+  // user-supplied input — catches the chit-id-input case where the
+  // user passes `chit-b-abc123` that resolves to a patrol blueprint.
+  const resolvedName = hit.chit.fields.blueprint.name;
+  if (resolvedName.startsWith('patrol/')) {
+    console.error(`error: patrol blueprints are walked in-session, not cast.`);
+    console.error(``);
+    console.error(`       Sexton reads this blueprint + executes each step's description:`);
+    console.error(`         cc-cli blueprint show ${resolvedName}`);
+    console.error(``);
+    console.error(`       Contract semantics (Warden sign-off, per-step acceptance`);
+    console.error(`       criteria, draft → active → review → completed) don't fit a`);
+    console.error(`       repeating patrol. See REFACTOR.md 1.9 for the design turn.`);
+    process.exit(1);
+  }
+
   // Parse --vars key=value repeated flags into a caller-vars record.
   const callerVars = parseKeyValuePairs(
     (parsed.values.vars as string[] | undefined) ?? [],
