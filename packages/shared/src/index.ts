@@ -518,6 +518,16 @@ export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarne
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
 export {
+  renderServiceForPlatform,
+  renderSystemdService,
+  renderLaunchdPlist,
+  renderTaskSchedulerXml,
+  UnsupportedPlatformError,
+  type SupervisorPlatform,
+  type ServiceOpts,
+  type ServiceArtifact,
+} from './templates/supervisor/index.js';
+export {
   buildClaudeMd,
   buildThinClaudeMd,
   type ClaudeMdTemplateOpts,
