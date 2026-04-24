@@ -256,6 +256,19 @@ export type {
   CastFromBlueprintResult,
 } from './blueprint-cast.js';
 
+// Blueprint lookup — Project 1.8 PR 3. Centralizes name → chit resolution
+// with scope precedence, so every CLI command + Sexton's patrol cooking
+// uses one consistent lookup path.
+export {
+  findBlueprintByName,
+  resolveBlueprint,
+  listBlueprintChits,
+} from './blueprint-lookup.js';
+export type {
+  BlueprintLookupOpts,
+  BlueprintListOpts,
+} from './blueprint-lookup.js';
+
 // Role registry — canonical role metadata for Project 1.1's Employee/
 // Partner split. CORP.md renders role-specific sections from these
 // entries; `cc-cli hire --role` validates against them; `cc-cli tame`
