@@ -440,6 +440,26 @@ function validateBlueprint(fields: unknown): void {
         }
       }
     }
+
+    // moduleRef targets a code sweeper module for kind=sweeper
+    // blueprints (Project 1.9). Format is kebab-case (`session-gc`,
+    // `phantom-cleanup`). Module existence is NOT cross-checked here —
+    // the sweepers registry lives in a downstream package and is
+    // resolved at dispatch time, where a missing module fails loudly
+    // with a clear error. Cross-field check (moduleRef meaningless on
+    // kind=contract blueprints) is the cast primitive's job, not
+    // validator's — keeping validator pure on fields.
+    if (step.moduleRef !== undefined) {
+      requireStringOrNull(step.moduleRef, `${stepPath}.moduleRef`);
+      if (typeof step.moduleRef === 'string') {
+        if (!/^[a-z][a-z0-9-]*$/.test(step.moduleRef)) {
+          throw new ChitValidationError(
+            `${stepPath}.moduleRef must be kebab-case lowercase alphanumeric + hyphens (got ${JSON.stringify(step.moduleRef)})`,
+            `${stepPath}.moduleRef`,
+          );
+        }
+      }
+    }
   });
 
   // DAG check pass 2: every dependsOn reference must point at a real

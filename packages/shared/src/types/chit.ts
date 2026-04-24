@@ -551,6 +551,18 @@ export interface BlueprintStep {
   acceptanceCriteria?: string[];
   /** Role registry id the cast-time Task chit is assigned to. Null defers the decision to cast-time via an explicit `--assign-<stepId> <role>` flag. */
   assigneeRole?: string | null;
+  /**
+   * Code-module name for kind=sweeper blueprints (Project 1.9). When set,
+   * cast dispatches a native code module (registered in the sweepers
+   * registry at `packages/daemon/src/watchdog/sweepers/index.ts`) rather
+   * than an AI agent. Absent on a sweeper-step means AI dispatch —
+   * step.description becomes the agent prompt.
+   *
+   * Kebab-case, matches the module's exported name. Meaningless on
+   * kind=contract blueprints; the validator permits it but the cast
+   * primitives enforce kind-routing at dispatch. Absent by default.
+   */
+  moduleRef?: string | null;
 }
 
 /**
