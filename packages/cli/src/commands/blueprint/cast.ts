@@ -116,9 +116,19 @@ export async function cmdBlueprintCast(rawArgs: string[]): Promise<void> {
   const createdBy = (parsed.values.from as string | undefined) ?? 'founder';
   const corpRoot = await getCorpRoot(corpOpt);
 
-  // Resolve the blueprint (active only — cast requires active). Fall
-  // back to a full-scope scan on miss for name lookups.
-  const hit = resolveBlueprint(corpRoot, nameOrId, { activeOnly: true }) ?? fallbackSearchActive(corpRoot, nameOrId);
+  // Resolve the blueprint (active only — cast requires active). Honor
+  // the caller's --scope as the primary lookup target (Codex P1
+  // reviewer catch, PR #173 round 2): without it, name collisions
+  // across scopes would silently cast the wrong blueprint into the
+  // target scope. Precedence: target scope first, then corp as the
+  // natural fallback for shared blueprints; finally a full scan for
+  // the rare out-of-band case where the name lives in some other
+  // scope (agent-authored) the caller didn't hint at.
+  const hit =
+    resolveBlueprint(corpRoot, nameOrId, {
+      activeOnly: true,
+      scopes: scope === 'corp' ? ['corp'] : [scope, 'corp'],
+    }) ?? fallbackSearchActive(corpRoot, nameOrId);
 
   if (!hit) {
     console.error(`error: active blueprint '${nameOrId}' not found`);
