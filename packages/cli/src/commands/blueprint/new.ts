@@ -238,7 +238,11 @@ the chit's body and isn't load-bearing for cast.
     console.log(`Next steps:`);
     console.log(`  1. Open ${path} in your editor and flesh out steps + vars.`);
     console.log(`  2. cc-cli blueprint validate ${name}`);
-    console.log(`  3. cc-cli blueprint cast ${name} --project <id> [--vars k=v]`);
+    // Two cast entry points — surface both so the author picks by intent:
+    // blueprint cast is the lower-level primitive (any scope, Contract
+    // lands in 'draft'); contract start casts + activates into a project.
+    console.log(`  3a. cc-cli blueprint cast ${name} --scope ${scope} [--vars k=v]`);
+    console.log(`  3b. cc-cli contract start --blueprint ${name} --project <id> [--vars k=v]`);
   } catch (err) {
     if (err instanceof ChitValidationError) {
       console.error(`error: ${err.message}`);
