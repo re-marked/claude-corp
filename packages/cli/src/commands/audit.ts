@@ -47,18 +47,24 @@ import {
   findChitById,
   queryChits,
   parseTranscript,
+  parseTranscriptBeforeCompact,
   runAudit,
   getCurrentStep,
   casketExists,
-  inferKind,
+  resolveKind,
   promotePendingHandoff,
   revertTaskFromUnderReview,
+  buildPreCompactInstructions,
+  buildCheckpointObservation,
+  createChit,
+  extractLatestUsageFromTranscript,
   type Chit,
   type HookInput,
   type AuditDecision,
   type AuditInput,
   type HookEventName,
   type Member,
+  type CheckpointRecentActivity,
 } from '@claudecorp/shared';
 import { getCorpRoot } from '../client.js';
 import { readFileSync as fsReadSync } from 'node:fs';
@@ -117,11 +123,31 @@ async function handleOverride(opts: AuditOpts): Promise<void> {
 // ─── Hook mode (invoked by Claude Code Stop / PreCompact) ───────────
 
 async function handleHook(opts: AuditOpts): Promise<void> {
+  // Read the hook input up front so the fail-open catch below can
+  // branch its output format on the event name. stdin is read-once —
+  // we can't recover the event after an exception if we don't have it.
+  // readHookInputFromStdin already fail-softs to `{}` on any parse
+  // error, so this read itself can't throw.
+  const hookInput = readHookInputFromStdin();
+  const event = normalizeEvent(hookInput.hook_event_name);
+
   // Every exception in hook mode falls through to fail-open: log the
-  // error, emit approve, exit 0. Trapping a session in a broken state
-  // is the worst failure mode; silent-skipped blocks are recoverable.
+  // error, emit the event-appropriate "do nothing" signal, exit 0.
+  // Trapping a session in a broken state is the worst failure mode;
+  // silent-skipped blocks are recoverable.
+  //
+  // Event-appropriate output (Codex P2 reviewer catch, PR #170):
+  //   - Stop  → emit `{decision:'approve'}` JSON so Claude Code ends
+  //     the gating cleanly. That's the audit envelope the Stop hook
+  //     protocol consumes.
+  //   - PreCompact → emit NOTHING. PreCompact stdout is consumed as
+  //     summary-shaping text merged into the summarization prompt; a
+  //     stray `{decision:'approve'}` would land as policy text inside
+  //     the compaction's merged instructions and corrupt the summary.
+  //     Empty stdout = "no extra instructions," which is exactly the
+  //     fail-open semantics we want at the compact boundary.
   try {
-    await runHookPath(opts);
+    await runHookPath(opts, hookInput, event);
   } catch (err) {
     try {
       const corpRoot = await getCorpRoot();
@@ -129,14 +155,20 @@ async function handleHook(opts: AuditOpts): Promise<void> {
     } catch {
       /* corpRoot resolution itself failed; nothing to log to */
     }
+    if (event === 'PreCompact') {
+      // No stdout. Exit 0 so Claude Code treats it as a clean no-op.
+      return;
+    }
     emitDecision({ decision: 'approve' });
   }
 }
 
-async function runHookPath(opts: AuditOpts): Promise<void> {
-  const hookInput = readHookInputFromStdin();
+async function runHookPath(
+  opts: AuditOpts,
+  hookInput: HookInput,
+  event: HookEventName,
+): Promise<void> {
   const stopHookActive = hookInput.stop_hook_active === true;
-  const event = normalizeEvent(hookInput.hook_event_name);
 
   const corpRoot = await getCorpRoot();
 
@@ -151,15 +183,6 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
 
   const slug = opts.agent;
 
-  // Check override marker FIRST — even before stop_hook_active. If
-  // the founder explicitly unblocked, the agent should exit cleanly
-  // on this very invocation, not wait for an extra turn.
-  if (consumePendingOverride(corpRoot, slug)) {
-    logAuditDecision(corpRoot, slug, { decision: 'approve' }, { reason: 'override-consumed' });
-    approveAndMaybePromote(corpRoot, slug);
-    return;
-  }
-
   const member = resolveMember(corpRoot, slug);
   if (!member) {
     // Unknown agent; substrate gap. Fail-open. Skip promotion — no
@@ -169,7 +192,83 @@ async function runHookPath(opts: AuditOpts): Promise<void> {
     return;
   }
 
-  const kind = inferKind(member.rank);
+  // Honor the explicit Member.kind field (1.1) when set; fall back to
+  // rank-based inference only for pre-1.1 legacy records. inferKind
+  // alone would silently ignore `cc-cli tame`-promoted Partners whose
+  // rank stays worker — the PreCompact branch would then render the
+  // employee template (empty) and skip the auto-checkpoint write.
+  const kind = resolveKind(member);
+
+  // PreCompact branches early — the contract is fundamentally different
+  // from Stop. Claude Code merges our stdout into its summarization
+  // prompt via mergeHookInstructions (leaked source:
+  // services/compact/autoCompact.ts). So instead of running the audit
+  // gate + emitting {decision}, we emit summary-shaping instructions
+  // that bias what the summarizer preserves across the compact boundary.
+  // Fail-open: if the template returns empty (e.g. employee kind for
+  // now), emit nothing — Claude Code treats absent stdout as no extra
+  // instructions, same as before the hook existed.
+  if (event === 'PreCompact') {
+    // Auto-checkpoint first — write a CHECKPOINT observation chit
+    // capturing the Partner's state at the compact boundary BEFORE
+    // stdout fires. The summary-shaping text biases what survives; the
+    // checkpoint chit guarantees the Partner has a durable
+    // externalization even if the summarizer drops something. Fail-soft:
+    // any error in the checkpoint write falls through to the
+    // summary-shaping path so we never lose that mechanism to a
+    // persistence hiccup.
+    const checkpointChitId = writeAutoCheckpoint(
+      corpRoot,
+      slug,
+      member,
+      kind,
+      hookInput,
+    );
+
+    const instructions = buildPreCompactInstructions({
+      hookInput,
+      kind,
+      agentDisplayName: member.displayName,
+      agentSlug: slug,
+    });
+    logAuditDecision(
+      corpRoot,
+      slug,
+      { decision: 'approve' },
+      {
+        event: 'pre-compact-instructions',
+        trigger: hookInput.trigger ?? null,
+        emitted: instructions.length > 0,
+        customInstructionsPresent: typeof hookInput.custom_instructions === 'string'
+          && hookInput.custom_instructions.trim().length > 0,
+        checkpointChitId,
+      },
+    );
+    if (instructions) process.stdout.write(instructions + '\n');
+    // Do NOT emit AuditDecision JSON — PreCompact's output protocol is
+    // raw text merged into the summary prompt, not the {decision,reason}
+    // envelope. Emitting both would confuse the summarizer.
+    //
+    // Note: override markers are intentionally NOT consumed on PreCompact
+    // (Codex P1 reviewer catch, PR #170). A founder-issued one-shot
+    // override is meant to unblock the next Stop gate; burning it on a
+    // PreCompact that doesn't even run the gate defeats the intended
+    // one-shot semantics — the subsequent Stop would block again while
+    // the marker was already gone. Consumption moved to AFTER this
+    // branch so only the Stop-gate path clears it.
+    return;
+  }
+
+  // Check override marker — Stop-only. If the founder explicitly
+  // unblocked this agent, exit cleanly on this very invocation without
+  // running the audit engine. PreCompact paths above don't touch the
+  // marker so a one-shot override survives any intervening compactions.
+  if (consumePendingOverride(corpRoot, slug)) {
+    logAuditDecision(corpRoot, slug, { decision: 'approve' }, { reason: 'override-consumed' });
+    approveAndMaybePromote(corpRoot, slug);
+    return;
+  }
+
   const currentTask = resolveCurrentTask(corpRoot, slug);
   const openTier3Inbox = queryOpenTier3Inbox(corpRoot, slug);
 
@@ -364,6 +463,90 @@ function resolveMember(corpRoot: string, slug: string): Member | null {
  * setting the Casket pointer (task-create does this when --assignee
  * is passed; 1.4's hand rewrite will extend the surface).
  */
+/**
+ * Write the auto-checkpoint observation chit for Project 1.7's
+ * PreCompact path. Pure composition over shared primitives
+ * (buildCheckpointObservation + createChit + parseTranscript +
+ * resolveCurrentTask). Fail-soft: any exception returns null so the
+ * caller can proceed to summary-shaping without losing that mechanism.
+ *
+ * Returns the new chit id on success, null on employee-kind (builder
+ * opted out) or on any caught error. The id is useful for diagnostic
+ * logging in the audit-log.jsonl entry so post-hoc inspection can
+ * follow "PreCompact fired → checkpoint chit X written."
+ */
+function writeAutoCheckpoint(
+  corpRoot: string,
+  slug: string,
+  member: Member,
+  kind: 'partner' | 'employee',
+  hookInput: HookInput,
+): string | null {
+  try {
+    const task = resolveCurrentTask(corpRoot, slug);
+    const casketRef =
+      task && typeof task === 'object' && task !== null
+        ? {
+            chitId: task.id,
+            title:
+              typeof task.fields.task?.title === 'string' ? task.fields.task.title : null,
+          }
+        : null;
+
+    let recent: CheckpointRecentActivity | null = null;
+    const transcriptPath =
+      typeof hookInput.transcript_path === 'string' ? hookInput.transcript_path : '';
+    if (transcriptPath && existsSync(transcriptPath)) {
+      // Codex P2 (PR #170): on manual-compact the most recent user turn
+      // IS the `/compact` command, so plain parseTranscript returns
+      // activity since that turn — usually empty (hook fires before the
+      // assistant responds). Use the before-compact variant to skip
+      // past the `/compact` turn and capture the agent's real last-
+      // intent activity. On auto-compact (threshold-triggered, no user
+      // turn), the variant's behavior matches parseTranscript — same
+      // last user turn, same slice.
+      const activity =
+        hookInput.trigger === 'manual'
+          ? parseTranscriptBeforeCompact(transcriptPath)
+          : parseTranscript(transcriptPath);
+      recent = { assistantText: activity.assistantText ?? [] };
+    }
+    // Token snapshot at the compact boundary. Fail-soft — extractor
+    // returns null if the transcript is absent/malformed/emits no
+    // usage events; the checkpoint still writes without the Token
+    // snapshot line. The daemon's in-memory lastAgentUsage map is
+    // richer but lives in a separate process — reading the transcript
+    // keeps this CLI-process-local.
+    const tokens = transcriptPath ? extractLatestUsageFromTranscript(transcriptPath) : null;
+
+    const spec = buildCheckpointObservation({
+      hookInput,
+      kind,
+      agentDisplayName: member.displayName,
+      agentSlug: slug,
+      casket: casketRef,
+      recent,
+      tokens,
+    });
+
+    if (!spec) return null;
+
+    const checkpoint = createChit(corpRoot, {
+      type: 'observation',
+      scope: spec.scope,
+      createdBy: spec.createdBy,
+      tags: [...spec.tags],
+      body: spec.body,
+      ephemeral: spec.ephemeral,
+      fields: spec.fields,
+    });
+    return checkpoint.id;
+  } catch (err) {
+    logAuditError(corpRoot, slug, err instanceof Error ? err : new Error(String(err)));
+    return null;
+  }
+}
+
 function resolveCurrentTask(
   corpRoot: string,
   slug: string,

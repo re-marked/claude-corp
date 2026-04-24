@@ -20,6 +20,22 @@ export interface FragmentContext {
   autoemonEnrolled?: boolean;
   /** Harness executing this agent — fragments can skip content that's already in the system prompt for a given harness */
   harness?: 'openclaw' | 'claude-code';
+  /**
+   * Latest observed input-token count for this agent's session. Populated
+   * by the daemon from ClaudeCodeUsage on message_start / message_delta.
+   * Used by Project 1.7's pre-compact signal fragment to decide whether
+   * the context is full enough to warrant nudging the Partner to
+   * crystallize memory before autocompact fires. Undefined when the
+   * daemon has no usage snapshot yet (first turn of a session, or an
+   * OpenClaw agent that doesn't emit usage).
+   */
+  sessionTokens?: number;
+  /**
+   * Model id for the latest observed usage snapshot. Threaded alongside
+   * sessionTokens so the threshold math (which varies by model's context
+   * window — 200k vs 1M) can be applied correctly.
+   */
+  sessionModel?: string;
 }
 
 export type FragmentFn = (ctx: FragmentContext) => string;

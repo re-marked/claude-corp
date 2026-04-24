@@ -123,21 +123,21 @@ export function buildHookSettings(opts: HookSettingsOpts): HookSettings {
   //   - Employees don't compact (per-step handoff via WORKLOG instead)
   //   - Employees don't receive founder DMs mid-session (Partners broker)
   //
-  // PreCompact gets a two-command sequence: audit first (gates
-  // compaction — if audit blocks, compact doesn't happen), then wtf
-  // (refreshes CORP.md + situational header so the post-compact
-  // summary is built against current context, not stale fragments).
-  // Order matters: audit must run before wtf so a blocked compact
-  // doesn't waste the wtf render. Claude Code executes hook entries
-  // sequentially within an event, and a block decision on audit
-  // short-circuits — wtf won't run if audit blocked.
+  // PreCompact runs ONLY `cc-cli audit`. Claude Code's PreCompact
+  // protocol merges hook stdout into the summarization prompt via
+  // mergeHookInstructions (leaked source: services/compact/autoCompact.ts)
+  // — it's a summary-SHAPING channel, not a decision envelope. `cc-cli
+  // audit` on PreCompact emits a kind-aware template biasing what the
+  // summarizer preserves (Casket pointer, chit ids, open questions,
+  // founder's /compact arg). Adding `cc-cli wtf --hook` here would
+  // pipe the FULL CORP.md + system-reminder payload into the same
+  // merged prompt, flooding the summarizer with unrelated policy text
+  // and diluting — or overriding — the targeted summary shaping
+  // (including founder-supplied /compact asks). CORP.md freshness
+  // post-compact is already covered by the SessionStart hook, which
+  // fires `cc-cli wtf` when the new post-compact session boots.
   if (opts.kind === 'partner') {
-    hooks.PreCompact = [
-      commandEntry(
-        `cc-cli audit --agent ${slug}`,
-        `cc-cli wtf --agent ${slug} --hook`,
-      ),
-    ];
+    hooks.PreCompact = [commandEntry(`cc-cli audit --agent ${slug}`)];
     hooks.UserPromptSubmit = [commandEntry(`cc-cli inbox check --agent ${slug} --inject`)];
   }
 

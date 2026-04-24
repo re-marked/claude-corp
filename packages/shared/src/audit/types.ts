@@ -79,6 +79,17 @@ export interface HookInput {
    */
   trigger?: 'manual' | 'auto';
   /**
+   * PreCompact-only. When the user invokes `/compact <extra prompt>`,
+   * Claude Code forwards the extra prompt here verbatim (null when the
+   * user just typed `/compact` with no argument, or when the invocation
+   * was auto-compact). Our PreCompact hook may echo / amend this into
+   * its summary-shaping stdout so agent-authored instructions survive
+   * alongside Claude Corp's kind-aware template.
+   *
+   * Name matches Claude Code's snake_case over-the-wire shape.
+   */
+  custom_instructions?: string | null;
+  /**
    * Allow unknown fields through without type errors. Claude Code
    * may add more context in future versions; we capture it all in
    * the probe's .probe-stdin.jsonl for future reference.

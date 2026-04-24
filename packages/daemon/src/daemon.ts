@@ -44,6 +44,7 @@ import { OpenClawWS } from './openclaw-ws.js';
 import { InflightRegistry } from './inflight-registry.js';
 import {
   type AgentHarness,
+  type ClaudeCodeUsage,
   ClaudeCodeHarness,
   HarnessRouter,
   OpenClawHarness,
@@ -112,6 +113,35 @@ export class Daemon {
   harness: HarnessRouter;
   /** Track consecutive overloaded errors per agent for gateway restart logic */
   overloadCounts = new Map<string, number>();
+  /**
+   * Per-session latest usage snapshot from the Claude Code stream.
+   * Populated via recordAgentUsage on every `message_start` /
+   * `message_delta` the harness emits. Consumed by Project 1.7's
+   * pre-compact signal fragment (through FragmentContext.sessionTokens
+   * + sessionModel) to decide whether the Partner has crossed into the
+   * "crystallize memories" window before Claude Code's autocompact
+   * fires.
+   *
+   * Keyed on `${memberId}|${sessionKey}` (composite). Keying ONLY on
+   * memberId would overwrite across concurrent session flows — an
+   * agent can legitimately have multiple simultaneous sessions (the
+   * jack DM loop + a cc-say-invoked side turn), each with its own
+   * session key and its own token budget. Overwrite-by-memberId would
+   * let one session's token count clobber another's and the fragment
+   * gate would fire (or fail to fire) in the wrong conversation
+   * (Codex P2 reviewer catch, PR #170).
+   *
+   * `at` is the wall-clock ms of the snapshot — kept for diagnostics
+   * ("signal fired on stale usage from 20 min ago") rather than
+   * staleness gating; even old usage approximates context size well
+   * enough to justify the signal.
+   */
+  private lastAgentUsage = new Map<string, { usage: ClaudeCodeUsage; model: string; at: number }>();
+
+  /** Compose the composite key used by lastAgentUsage. */
+  private usageKey(memberId: string, sessionKey: string): string {
+    return `${memberId}|${sessionKey}`;
+  }
   /** Founder presence tracking for autoemon — when was the last user interaction? */
   lastFounderInteractionAt = 0;
   private server: Server | null = null;
@@ -230,6 +260,39 @@ export class Daemon {
   /** Diagnostic — list all currently in-flight session keys. */
   listInflight(): string[] {
     return this.inflightRegistry.list();
+  }
+
+  /**
+   * Record a usage snapshot observed by the Claude Code harness for a
+   * given (agent, session) pair. Keeps the latest — message_delta
+   * overwrites the early message_start snapshot once output tokens are
+   * known. Called by the harness callback wiring on each dispatch.
+   *
+   * The sessionKey argument scopes the snapshot so concurrent sessions
+   * against the same agent (jack DM + cc-say side turn) don't clobber
+   * each other's token/model state — essential for the pre-compact
+   * signal to fire in the right conversation. See the lastAgentUsage
+   * docstring for the full rationale.
+   */
+  recordAgentUsage(
+    memberId: string,
+    sessionKey: string,
+    usage: ClaudeCodeUsage,
+    model: string,
+  ): void {
+    this.lastAgentUsage.set(this.usageKey(memberId, sessionKey), { usage, model, at: Date.now() });
+  }
+
+  /**
+   * Latest observed usage for an (agent, session) pair, or null when
+   * no dispatch on that session has produced a usage event yet (first
+   * turn of a session, or OpenClaw agent that doesn't emit usage).
+   */
+  getLastAgentUsage(
+    memberId: string,
+    sessionKey: string,
+  ): { usage: ClaudeCodeUsage; model: string; at: number } | null {
+    return this.lastAgentUsage.get(this.usageKey(memberId, sessionKey)) ?? null;
   }
 
   /** Update agent work status + broadcast event + fire transition callbacks + analytics */

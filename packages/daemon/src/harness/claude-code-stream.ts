@@ -19,6 +19,28 @@
  * streaming test (see claude -p --output-format stream-json output).
  */
 
+/**
+ * Token usage snapshot emitted by the Anthropic streaming protocol.
+ * Appears at `message_start` (early — input_tokens known, output_tokens
+ * still zero) and `message_delta` (final — output_tokens populated by
+ * message_stop). Fields mirror the raw API shape so downstream callers
+ * don't have to know the over-the-wire JSON.
+ *
+ * For compaction-threshold reasoning (Project 1.7), `inputTokens` on
+ * the LATEST message_delta approximates "size of the context the model
+ * is operating on" — a cheap proxy for what `tokenCountWithEstimation`
+ * would return over the full message list. Good enough for deciding
+ * whether the agent is in the pre-compact signal window.
+ */
+export interface ClaudeCodeUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+  /** Source event: 'message_start' (early snapshot) or 'message_delta' (final). */
+  source: 'message_start' | 'message_delta';
+}
+
 /** Discriminated union of every event the harness reacts to. */
 export type ClaudeCodeEvent =
   | { type: 'init'; sessionId: string; model: string; tools: string[]; apiKeySource?: string }
@@ -26,6 +48,7 @@ export type ClaudeCodeEvent =
   | { type: 'text_block_complete'; text: string; blockIndex: number }
   | { type: 'tool_call'; toolCallId: string; name: string; args: Record<string, unknown> }
   | { type: 'lifecycle'; phase: 'message_start' | 'message_stop' | 'content_block_start' | 'content_block_stop' | 'message_delta' }
+  | { type: 'usage'; usage: ClaudeCodeUsage }
   | { type: 'rate_limit'; info: Record<string, unknown> }
   | { type: 'assistant_message'; content: string }
   | { type: 'result_success'; content: string; sessionId: string; durationMs: number; cost?: number }
@@ -54,6 +77,13 @@ export class ClaudeCodeStreamParser {
    */
   private accumulated = '';
   private finished = false;
+  /**
+   * Latest usage snapshot observed in the stream. Populated on
+   * message_start (early) and overwritten on message_delta (final).
+   * null until the first message event arrives. Consumers polling
+   * for compaction-threshold decisions read this between dispatches.
+   */
+  private lastUsage: ClaudeCodeUsage | null = null;
 
   /**
    * Concatenation of every text block observed so far. Used as the
@@ -71,12 +101,23 @@ export class ClaudeCodeStreamParser {
   }
 
   /**
+   * Latest usage snapshot or null when no message_start/delta has
+   * been parsed yet. Caller pattern: harness polls this after a
+   * dispatch completes to record the turn's context size for the
+   * next dispatch's pre-compact signal decision.
+   */
+  getLastUsage(): ClaudeCodeUsage | null {
+    return this.lastUsage;
+  }
+
+  /**
    * Reset internal state. Useful between dispatches if a single parser
    * instance is reused (the harness creates a fresh parser per dispatch
    * by default, so this is mostly here for tests).
    */
   reset(): void {
     this.blocks.clear();
+    this.lastUsage = null;
     this.accumulated = '';
     this.finished = false;
   }
@@ -184,9 +225,18 @@ export class ClaudeCodeStreamParser {
 
   private handleStreamEvent(ev: Record<string, unknown>, listener: ClaudeCodeEventListener): void {
     switch (ev.type) {
-      case 'message_start':
+      case 'message_start': {
         listener({ type: 'lifecycle', phase: 'message_start' });
+        // Early usage snapshot — input_tokens populated; output_tokens
+        // zero until the turn runs. Capturing both edges (start +
+        // delta) lets downstream reason about "what the model saw on
+        // input" even if the turn aborts before message_delta fires.
+        const msg = ev.message as Record<string, unknown> | undefined;
+        const usage = msg ? extractUsage(msg.usage, 'message_start') : null;
+        if (usage) this.lastUsage = usage;
+        if (usage) listener({ type: 'usage', usage });
         break;
+      }
 
       case 'content_block_start': {
         const idx = typeof ev.index === 'number' ? ev.index : 0;
@@ -261,9 +311,18 @@ export class ClaudeCodeStreamParser {
         break;
       }
 
-      case 'message_delta':
+      case 'message_delta': {
         listener({ type: 'lifecycle', phase: 'message_delta' });
+        // Final-of-turn usage update. Anthropic emits the finalized
+        // output_tokens here; input_tokens on message_delta matches
+        // message_start's (the input was fixed before the turn ran).
+        // Emit the usage event so downstream (harness / compaction
+        // threshold watchers) reads the authoritative count.
+        const usage = extractUsage(ev.usage, 'message_delta');
+        if (usage) this.lastUsage = usage;
+        if (usage) listener({ type: 'usage', usage });
         break;
+      }
 
       case 'message_stop':
         listener({ type: 'lifecycle', phase: 'message_stop' });
@@ -311,4 +370,44 @@ function pickErrorMessage(p: any): string {
 function detectOverloaded(p: any): boolean {
   const text = JSON.stringify(p).toLowerCase();
   return /overload|529/.test(text);
+}
+
+/**
+ * Parse an Anthropic streaming-protocol usage payload into a typed
+ * ClaudeCodeUsage. Returns null when the input isn't a plausible
+ * usage object — defensive for forward-compat (new fields land) and
+ * for partial events where usage is absent (content-only deltas).
+ *
+ * The API shape uses snake_case (input_tokens / cache_read_input_tokens);
+ * we rename to camelCase at the harness boundary since everything
+ * downstream is TS-native. Missing numeric fields default to 0 so
+ * consumers can sum safely without null-checks.
+ */
+function extractUsage(
+  raw: unknown,
+  source: 'message_start' | 'message_delta',
+): ClaudeCodeUsage | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const u = raw as Record<string, unknown>;
+  const readNum = (k: string): number => {
+    const v = u[k];
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  };
+  // Require at least one recognizable field to confirm this is a
+  // usage object (not some other payload we got fed by accident).
+  if (
+    u.input_tokens === undefined &&
+    u.output_tokens === undefined &&
+    u.cache_read_input_tokens === undefined &&
+    u.cache_creation_input_tokens === undefined
+  ) {
+    return null;
+  }
+  return {
+    inputTokens: readNum('input_tokens'),
+    outputTokens: readNum('output_tokens'),
+    cacheReadInputTokens: readNum('cache_read_input_tokens'),
+    cacheCreationInputTokens: readNum('cache_creation_input_tokens'),
+    source,
+  };
 }

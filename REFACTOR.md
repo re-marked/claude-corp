@@ -1364,7 +1364,7 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 - On injection, Dredge updates the handoff Chit's status to `closed` (consumed). Ephemeral expiry cleans it up shortly after (0.6 lifecycle scanner — but since it's already closed, it falls out of working-set queries immediately).
 - Legacy `## Session Summary` in WORKLOG.md becomes deprecated, deleted in 6.1.
 
-**Session-exit protocol.** Employee calls `cc-cli handoff --current-step <chit-id> --completed "..." --next-action "..." --open-question "..." --sandbox-state "..." --notes "..."`. This creates the handoff Chit as `type: handoff`, `ephemeral: true`, scope=`agent:<slug>`, `references: [<current-step-chit-id>]`. Then signals session exit cleanly.
+**Session-exit protocol.** Employee calls `cc-cli done --completed "..." --next-action "..." --open-question "..." --sandbox-state "..." --notes "..."`. This writes a pending-handoff payload to `<workspace>/.pending-handoff.json`. The Stop hook fires `cc-cli audit`; on audit approve, the audit gate PROMOTES the pending file into a `type: handoff` Chit at scope=`agent:<slug>`, `ephemeral: true`, `references: [<current-step-chit-id>]`, and closes the current Task chit. On audit block, the pending file is preserved and the agent retries. (The original 1.6 spec said `cc-cli handoff` as a standalone producer command — during 0.7.3 implementation, the producer path was absorbed into the `cc-cli done` + audit-gate-promotes-pending pattern. Same semantics, different surface.)
 
 **Scope:** handoff command, Dredge evolution, session-exit protocol, handoff Chit type registration.
 
@@ -1385,23 +1385,51 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 
 ### 1.7 — Compaction for Partner sessions
 
-Partner sessions don't handoff per-step. They run `/compact` at a threshold (~70% of context). Integration: daemon detects session size, triggers compaction via claude-code's native command. Fallback to handoff only when compaction fails (e.g. org-level 1M context overage rejected).
+**As shipped (PR #170).** Partner sessions don't handoff per-step. They ride Claude Code's native `/compact` at Claude Code's own autocompact threshold (`effectiveWindow - AUTOCOMPACT_BUFFER_TOKENS` per the leaked `services/compact/autoCompact.ts`). Claude Corp does NOT trigger compaction — Claude Code does — we layer two complementary mechanisms around the boundary:
 
-**Scope:** size-threshold monitor, compact-trigger via claude-code, fallback path to Dredge handoff.
+**Mechanism 1 — proactive nudge (the 17k-token runway).** We fire our own pre-compact signal at `effectiveWindow - PRE_COMPACT_SIGNAL_BUFFER_TOKENS` (30k), 17k tokens EARLIER than Claude Code's autocompact (13k). The gap is deliberate: that's the runway a Partner gets to externalize soul material (observation chits, BRAIN/ files) BEFORE the summarizer flattens raw context. The fragment renders inline in the agent's next dispatch with concrete crystallization guidance (`cc-cli observe --category CHECKPOINT`, BRAIN/ edits, casket already durable).
+
+**Mechanism 2 — PreCompact hook does both summary-shaping AND auto-checkpoint.** When Claude Code fires its PreCompact hook, `cc-cli audit` branches on `hook_event_name === 'PreCompact'` and does two things in order:
+  1. **Auto-writes a CHECKPOINT observation chit** at `agent:<slug>` scope, non-ephemeral, capturing: trigger (auto vs manual), founder's `/compact <arg>` verbatim, Casket `current_step` + title, last ~3 assistant-text excerpts from the transcript, and the token snapshot at boundary (pulled from the transcript's latest `message_start`/`message_delta` usage block via `extractLatestUsageFromTranscript`). Self-witnessing that survives regardless of whether the Partner noticed the fragment nudge.
+  2. **Emits summary-shaping text on stdout.** Claude Code's `mergeHookInstructions` merges our stdout into the summarization prompt itself, biasing what survives the compact boundary: Casket pointer verbatim, in-flight reasoning, open questions, chit ids and file paths. Founder's `/compact <arg>` (if any) echoes FIRST with "Honor this above all else" so manual asks dominate defaults.
+
+**Architectural note — PreCompact does NOT gate compaction.** An earlier design iteration (pre-1.7 commit `8d61291`) wired PreCompact to the Stop-style `{decision: block}` JSON envelope on the assumption that audit gating would work symmetrically. During 1.7 implementation, the leaked `services/compact/autoCompact.ts` showed PreCompact's output protocol is `mergeHookInstructions` (raw text merged into the summary prompt), not a decision envelope — Claude Code's Stop hook accepts block decisions; PreCompact does not. Commit 4 revised: the branch emits raw text only, skipping the gate logic. Net effect: Partners compact freely even with unresolved Tier 3 inbox items. This is acceptable because Tier 3 inbox items survive across compact independently (`fields.inbox-item.carriedForward` pattern; the inbox is its own substrate, not raw context). If real blocking is ever wanted, it belongs in a pre-`/compact` CLI wrapper the agent invokes explicitly — not in PreCompact.
+
+**Pure primitives shipped (all in shared, all tested):**
+- `calculateCompactionThreshold` — threshold math primitive (frozen-result, 200k and 1M windows, exact-boundary semantics)
+- `ClaudeCodeStreamParser.getLastUsage()` — parser-side extraction of usage from `message_start`/`message_delta`
+- `preCompactSignalFragment` — Partner+claude-code-only fragment gate
+- `buildPreCompactInstructions` — summary-shaping template builder
+- `buildCheckpointObservation` — auto-checkpoint chit body + field builder
+- `extractLatestUsageFromTranscript` — walk the transcript JSONL for the latest usage block
+
 **File paths:**
-- `packages/daemon/src/harness/claude-code-harness.ts` (extend existing session-size warning from v2.5.3; on threshold, send compaction command rather than only warning)
-- `packages/daemon/src/compact-trigger.ts` (new: interface to claude-code's `/compact` command; detect success vs rejection)
-- `packages/daemon/src/harness/claude-code-stream.ts` (handle compaction events in the stream parser if they emit)
-- Fallback: on compact rejection, tear down session and fall into Dredge-handoff path (1.6 infrastructure)
+- `packages/shared/src/compaction-threshold.ts` — threshold math
+- `packages/daemon/src/harness/claude-code-stream.ts` — usage extraction in stream parser
+- `packages/daemon/src/harness/types.ts` — `DispatchCallbacks.onUsage(usage, model)`
+- `packages/daemon/src/daemon.ts` — per-agent `lastAgentUsage` map + `recordAgentUsage` / `getLastAgentUsage`
+- `packages/daemon/src/fragments/pre-compact-signal.ts` — the Partner-facing nudge
+- `packages/daemon/src/fragments/types.ts` — `FragmentContext.sessionTokens` / `sessionModel`
+- `packages/shared/src/audit/pre-compact-instructions.ts` — summary-shaping builder
+- `packages/shared/src/audit/pre-compact-checkpoint.ts` — auto-checkpoint builder
+- `packages/shared/src/audit/transcript.ts` — `extractLatestUsageFromTranscript` helper
+- `packages/cli/src/commands/audit.ts` — PreCompact branch: writeAutoCheckpoint + stdout summary-shaping emission
 
-**Test strategy:**
-- Unit: size monitor triggers at 70% threshold exactly once per session.
-- Integration (mock claude): send mock session-big event; compact-trigger emits the right command; session resumes.
-- Integration (real, cautiously): use a test corp with an artificially-lowered threshold to exercise the path.
-- Regression: Employee sessions (not Partner) do NOT trigger compaction; they still use per-step cycling from 1.6.
+**Test coverage (6 files, 93 cases):**
+- `tests/compaction-threshold.test.ts` (15) — math primitive, both windows, every branch
+- `tests/claude-code-stream-usage.test.ts` (5) — parser usage extraction + defensive parsing
+- `tests/pre-compact-instructions.test.ts` (10) — summary-shaping builder (kind gate, founder-ask threading, substrate anchors)
+- `tests/pre-compact-fragment.test.ts` (17) — four-gate fragment predicate + render + regression guard against reintroducing dead `cc-cli handoff`
+- `tests/pre-compact-checkpoint.test.ts` (35) — checkpoint builder (kind, observation fields, tags, casket anchor, founder ask threading, assistant excerpts, token snapshot, timestamp)
+- `tests/extract-latest-usage-from-transcript.test.ts` (11) — extractor happy + fail-soft paths
 
-**Depends on:** 1.1, 1.6 (for fallback path)
-**PRs:** 2
+**Explicitly NOT shipped (deferred):**
+- Employee auto-checkpoint (Employees don't compact today; kind gate returns null)
+- Pre-compact gating (see architectural note above — would require a new invocation surface, not a PreCompact hook)
+- Live-probe integration test (like 0.7.3's Stop-hook probe) — valuable but out of scope for 1.7
+
+**Depends on:** 1.1, 1.2 (Casket read via `getCurrentStep`), 1.6 (handoff-chit infrastructure on the Employee-side; Partners don't produce handoff chits)
+**PRs:** 1 (PR #170, 15 commits across 3 rounds + polish)
 
 ### 1.8 — Blueprint-as-molecule (absorbed from 2.1)
 
