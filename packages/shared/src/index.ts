@@ -232,6 +232,12 @@ export {
 export { createInboxItem, TIER_TTL } from './inbox.js';
 export type { CreateInboxItemOpts } from './inbox.js';
 
+// Blueprint var merge + coerce — Project 1.8 PR 2. Bridges CLI-shaped
+// string inputs to the typed Handlebars context the parser needs.
+// Pure; no Handlebars dependency (that lives in blueprint-parser.ts).
+export { coerceVarValue, mergeBlueprintVars, BlueprintVarError } from './blueprint-vars.js';
+export type { BlueprintVarValue } from './blueprint-vars.js';
+
 // Role registry — canonical role metadata for Project 1.1's Employee/
 // Partner split. CORP.md renders role-specific sections from these
 // entries; `cc-cli hire --role` validates against them; `cc-cli tame`
