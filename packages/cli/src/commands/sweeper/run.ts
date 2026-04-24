@@ -10,7 +10,7 @@
  *
  * Output modes:
  *   - Default: human-readable. Prints status, summary, and a
- *     per-observation line showing category + subject + title.
+ *     per-finding line showing severity + subject + title.
  *   - --json: raw SweeperResult JSON. For scripting + for Sexton
  *     herself if she wants to parse the output in a structured way.
  *
@@ -29,13 +29,11 @@ import { getClient } from '../../client.js';
 interface SweeperResultShape {
   status: 'completed' | 'failed' | 'noop';
   summary: string;
-  observations: ReadonlyArray<{
-    category: string;
+  findings: ReadonlyArray<{
     subject: string;
+    severity: 'info' | 'warn' | 'error';
     title: string;
     body: string;
-    importance: number;
-    tags?: readonly string[];
   }>;
 }
 
@@ -118,11 +116,11 @@ export async function cmdSweeperRun(rawArgs: string[]): Promise<void> {
     // when the CLI is captured by an agent's tool output and parsed
     // as prose. Plain text; Sexton reads it fine either way.
     console.log(`[${result.status}] ${result.summary}`);
-    if (result.observations.length > 0) {
+    if (result.findings.length > 0) {
       console.log('');
-      console.log(`Observations written (${result.observations.length}):`);
-      for (const obs of result.observations) {
-        console.log(`  [${obs.category}] (imp ${obs.importance}) ${obs.subject} — ${obs.title}`);
+      console.log(`Kinks recorded (${result.findings.length}):`);
+      for (const f of result.findings) {
+        console.log(`  [${f.severity}] ${f.subject} — ${f.title}`);
       }
     }
   }

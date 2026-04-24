@@ -39,11 +39,11 @@ import { readConfig, type Member, MEMBERS_JSON } from '@claudecorp/shared';
 import { join } from 'node:path';
 import { log } from '../../logger.js';
 import { getCurrentStep } from '@claudecorp/shared';
-import type { SweeperContext, SweeperResult, SweeperObservation } from './types.js';
+import type { SweeperContext, SweeperResult, SweeperFinding } from './types.js';
 
 export async function runSilentexit(ctx: SweeperContext): Promise<SweeperResult> {
   const { daemon } = ctx;
-  const observations: SweeperObservation[] = [];
+  const findings: SweeperFinding[] = [];
   let respawned = 0;
   let failed = 0;
 
@@ -56,7 +56,7 @@ export async function runSilentexit(ctx: SweeperContext): Promise<SweeperResult>
   } catch (err) {
     return {
       status: 'failed',
-      observations: [],
+      findings: [],
       summary: `silentexit: members.json read failed — ${err instanceof Error ? err.message : String(err)}`,
     };
   }
@@ -99,24 +99,20 @@ export async function runSilentexit(ctx: SweeperContext): Promise<SweeperResult>
     try {
       await daemon.processManager.spawnAgent(proc.memberId);
       respawned++;
-      observations.push({
-        category: 'NOTICE',
+      findings.push({
         subject: proc.memberId,
+        severity: 'info',
         title: `Respawned silent-exit slot ${member.displayName}`,
-        importance: 3,
         body: `Slot ${member.displayName} (${proc.memberId}) was in '${proc.status}' status with Casket currentStep=${currentStep}. silentexit called processManager.spawnAgent to reinitialize the slot. Next dispatch will resume from the Casket pointer; no handoff chit exists (silent exit by definition).`,
-        tags: ['sweeper:silentexit', 'respawn'],
       });
       log(`[sweeper:silentexit] respawned ${proc.memberId} (was ${proc.status}, currentStep=${currentStep})`);
     } catch (err) {
       failed++;
-      observations.push({
-        category: 'NOTICE',
+      findings.push({
         subject: proc.memberId,
+        severity: 'error',
         title: `Respawn failed for silent-exit slot ${member.displayName}`,
-        importance: 4,
         body: `Attempted to respawn slot ${member.displayName} (${proc.memberId}) after detecting it in '${proc.status}' status with pending Casket work (currentStep=${currentStep}). processManager.spawnAgent threw: ${err instanceof Error ? err.message : String(err)}. If this repeats across several patrol cycles, circuit-breaker territory (1.11).`,
-        tags: ['sweeper:silentexit', 'respawn-failed'],
       });
       log(`[sweeper:silentexit] respawn failed for ${proc.memberId}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -125,14 +121,14 @@ export async function runSilentexit(ctx: SweeperContext): Promise<SweeperResult>
   if (respawned === 0 && failed === 0) {
     return {
       status: 'noop',
-      observations: [],
+      findings: [],
       summary: `silentexit: no dead slots detected (scanned ${procs.length} process entries).`,
     };
   }
 
   return {
     status: failed > 0 && respawned === 0 ? 'failed' : 'completed',
-    observations,
+    findings,
     summary: `silentexit: respawned ${respawned} slot(s), ${failed} respawn failure(s). Scanned ${procs.length} process entries.`,
   };
 }

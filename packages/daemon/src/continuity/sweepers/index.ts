@@ -23,9 +23,9 @@ import { createChit } from '@claudecorp/shared';
 import type { Daemon } from '../../daemon.js';
 import { log, logError } from '../../logger.js';
 import { SWEEPER_REGISTRY, parseSweeperName, SWEEPER_NAMES } from './registry.js';
-import type { SweeperResult, SweeperName, SweeperObservation } from './types.js';
+import type { SweeperResult, SweeperName, SweeperFinding } from './types.js';
 
-export type { SweeperContext, SweeperResult, SweeperModule, SweeperName, SweeperObservation, SweeperStatus } from './types.js';
+export type { SweeperContext, SweeperResult, SweeperModule, SweeperName, SweeperFinding, SweeperStatus } from './types.js';
 export { SWEEPER_REGISTRY, SWEEPER_NAMES, parseSweeperName } from './registry.js';
 
 /**
@@ -44,25 +44,25 @@ export class UnknownSweeperError extends Error {
 
 /**
  * Invoke a sweeper by name. Validates the name, runs the module,
- * writes its observations as chits, returns the result.
+ * writes its findings as kink chits, returns the result.
  *
  * Behavior on sweeper-internal failures:
  *   - If the module throws (programming error / unexpected state):
  *     catch, log, return a synthetic SweeperResult { status:
- *     'failed', observations: [], summary: '<error message>' }.
+ *     'failed', findings: [], summary: '<error message>' }.
  *     A single broken sweeper never propagates its error up past
  *     the runtime boundary.
  *   - If the module returns { status: 'failed' } explicitly: pass
- *     through. Any observations it emitted still get written —
- *     failure + observations is a valid combination (a respawn
- *     attempt that itself failed still wants to leave a breadcrumb).
+ *     through. Any findings it emitted still get written —
+ *     failure + findings is a valid combination (a respawn attempt
+ *     that itself failed still wants to leave a kink breadcrumb).
  *
- * Observation writes are best-effort per chit: one write failure
- * logs + skips that observation, doesn't abort the run. A sweeper
- * that produced 5 observations and had 1 chit write fail still
- * returns a completed SweeperResult with the 5 observations in its
- * response — the caller sees what was intended; the logs show what
- * actually landed on disk.
+ * Kink writes are best-effort per chit: one write failure logs +
+ * skips that finding, doesn't abort the run. A sweeper that
+ * produced 5 findings and had 1 chit write fail still returns a
+ * completed SweeperResult with the 5 findings in its response —
+ * the caller sees what was intended; the logs show what actually
+ * landed on disk.
  */
 export async function runSweeper(
   daemon: Daemon,
@@ -84,22 +84,22 @@ export async function runSweeper(
     logError(`[sweeper] run ${validated} — threw: ${message}`);
     return {
       status: 'failed',
-      observations: [],
+      findings: [],
       summary: `${validated}: internal error — ${message}`,
     };
   }
 
   log(`[sweeper] run ${validated} — ${result.status}: ${result.summary}`);
 
-  // Write observations as chits (best-effort per item).
-  for (const obs of result.observations) {
+  // Write findings as kink chits (best-effort per item).
+  for (const finding of result.findings) {
     try {
-      writeSweeperObservation(daemon, validated, obs);
+      writeSweeperKink(daemon, validated, finding);
     } catch (err) {
       logError(
-        `[sweeper] run ${validated} — observation-write failed: ${err instanceof Error ? err.message : String(err)} (title=${JSON.stringify(obs.title)})`,
+        `[sweeper] run ${validated} — kink-write failed: ${err instanceof Error ? err.message : String(err)} (title=${JSON.stringify(finding.title)})`,
       );
-      // Intentionally swallowed — other observations still get a chance.
+      // Intentionally swallowed — other findings still get a chance.
     }
   }
 
@@ -107,30 +107,37 @@ export async function runSweeper(
 }
 
 /**
- * Convert a SweeperObservation into a chit-create call. Scope is
- * `corp` (observations the sweeper writes are corp-wide patrol
- * findings, not per-agent diary entries). createdBy uses the
- * sweeper-run-style id `sweeper:<name>` so the observations are
- * attributable + filterable.
+ * Convert a SweeperFinding into a kink chit. Scope is `corp`
+ * (operational kinks belong at the corp level, not per-agent —
+ * they're about what's happening in the corp as a whole).
+ * createdBy uses the sweeper-name-prefixed id `sweeper:<name>`;
+ * the same string lands in fields.kink.source so queries by
+ * source work without depending on createdBy.
+ *
+ * Deduplication is NOT handled here yet — this initial version
+ * always creates a new kink per finding. Dedup (looking up an
+ * existing active kink with matching source+subject and bumping
+ * occurrenceCount instead) lands in the next commit.
  */
-function writeSweeperObservation(
+function writeSweeperKink(
   daemon: Daemon,
   sweeperName: SweeperName,
-  obs: SweeperObservation,
+  finding: SweeperFinding,
 ): void {
+  const source = `sweeper:${sweeperName}`;
   createChit(daemon.corpRoot, {
-    type: 'observation',
+    type: 'kink',
     scope: 'corp',
-    createdBy: `sweeper:${sweeperName}`,
+    createdBy: source,
     fields: {
-      observation: {
-        title: obs.title,
-        category: obs.category,
-        subject: obs.subject,
-        importance: obs.importance,
+      kink: {
+        source,
+        subject: finding.subject,
+        severity: finding.severity,
+        title: finding.title,
+        occurrenceCount: 1,
       },
     },
-    body: obs.body,
-    ...(obs.tags && obs.tags.length > 0 ? { tags: [...obs.tags] } : {}),
+    body: finding.body,
   });
 }

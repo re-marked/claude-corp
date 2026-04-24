@@ -49,36 +49,47 @@ export interface SweeperContext {
 }
 
 /**
- * A single observation a sweeper wants written to the corp's chit
- * store. The runtime maps these onto `createChit` calls after the
- * sweeper returns; the sweeper itself never touches filesystem
- * directly (pure in terms of side effects it chooses to take —
- * e.g. spawnAgent — but doesn't own chit writes).
+ * A single finding a sweeper wants persisted to the corp's chit
+ * store as a kink chit. The runtime maps these onto createChit
+ * calls after the sweeper returns; the sweeper itself never
+ * touches filesystem directly (pure in terms of side effects it
+ * chooses to take — e.g. spawnAgent — but doesn't own chit writes).
  *
- * Matches the shape `cc-cli observe` produces so the observations
- * are queryable alongside human + agent ones without any special
- * category.
+ * Matches the KinkFields shape one-to-one so the runtime's
+ * writer is a trivial projection. The `source` field on the kink
+ * chit is filled in by the runtime from the sweeper name
+ * (`sweeper:<name>`), so findings don't need to self-identify —
+ * the runtime owns attribution.
  */
-export interface SweeperObservation {
-  /** Observation category — ObservationFields.category enum values. */
-  readonly category: 'FEEDBACK' | 'DECISION' | 'DISCOVERY' | 'PREFERENCE' | 'NOTICE' | 'CORRECTION';
-  /** Subject — who / what the observation is about. Typically a slug. */
+export interface SweeperFinding {
+  /**
+   * What the finding is ABOUT. Typically a member id (`ceo`,
+   * `toast-2`) or a chit id. Forms half the dedup key — two
+   * active kinks with the same (source, subject) collapse via
+   * occurrenceCount-bumping rather than creating duplicates.
+   */
   readonly subject: string;
-  /** Short title, shown in list views. */
+  /**
+   * How loudly this wants attention.
+   *   info   — routine state change worth recording (respawn
+   *            succeeded, log rotated, cleanup fired).
+   *   warn   — something a human should notice soon (stuck slot,
+   *            orphaned task, phantom workspace).
+   *   error  — data integrity / operational hazard (malformed
+   *            chit, repeated respawn failure).
+   */
+  readonly severity: 'info' | 'warn' | 'error';
+  /** Short one-liner for kink-list output. Full context goes in body. */
   readonly title: string;
-  /** Markdown body — the substantive observation. */
+  /** Markdown body — the substantive detail the finding wants to carry. */
   readonly body: string;
-  /** 1-5; higher = more important. Sexton uses this to prioritize. */
-  readonly importance: 1 | 2 | 3 | 4 | 5;
-  /** Tags to thread the observation through queries. Optional. */
-  readonly tags?: readonly string[];
 }
 
 export type SweeperStatus = 'completed' | 'failed' | 'noop';
 
 /**
  * What a sweeper returns. Structured so the runtime can:
- *   - Write each `SweeperObservation` as an observation chit
+ *   - Write each `SweeperFinding` as a kink chit (with dedup)
  *   - Surface `summary` in logs + /sweeper/run's JSON response
  *   - Distinguish "ran and did work" (completed), "ran and found
  *     nothing" (noop), and "ran and hit an error" (failed) cleanly
@@ -86,7 +97,7 @@ export type SweeperStatus = 'completed' | 'failed' | 'noop';
  */
 export interface SweeperResult {
   readonly status: SweeperStatus;
-  readonly observations: readonly SweeperObservation[];
+  readonly findings: readonly SweeperFinding[];
   /** One-line human summary of what happened this run. */
   readonly summary: string;
 }
