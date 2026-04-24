@@ -29,7 +29,11 @@ export { buildAuditPrompt } from './prompt.js';
 export type { AuditPromptInput } from './prompt.js';
 export { scanEvidence } from './evidence.js';
 export type { EvidenceScanResult } from './evidence.js';
-export { parseTranscript, extractLatestUsageFromTranscript } from './transcript.js';
+export {
+  parseTranscript,
+  parseTranscriptBeforeCompact,
+  extractLatestUsageFromTranscript,
+} from './transcript.js';
 export type { TranscriptUsageSnapshot } from './transcript.js';
 export { buildPreCompactInstructions } from './pre-compact-instructions.js';
 export type { PreCompactInstructionsInput } from './pre-compact-instructions.js';

@@ -47,6 +47,7 @@ import {
   findChitById,
   queryChits,
   parseTranscript,
+  parseTranscriptBeforeCompact,
   runAudit,
   getCurrentStep,
   casketExists,
@@ -496,7 +497,18 @@ function writeAutoCheckpoint(
     const transcriptPath =
       typeof hookInput.transcript_path === 'string' ? hookInput.transcript_path : '';
     if (transcriptPath && existsSync(transcriptPath)) {
-      const activity = parseTranscript(transcriptPath);
+      // Codex P2 (PR #170): on manual-compact the most recent user turn
+      // IS the `/compact` command, so plain parseTranscript returns
+      // activity since that turn — usually empty (hook fires before the
+      // assistant responds). Use the before-compact variant to skip
+      // past the `/compact` turn and capture the agent's real last-
+      // intent activity. On auto-compact (threshold-triggered, no user
+      // turn), the variant's behavior matches parseTranscript — same
+      // last user turn, same slice.
+      const activity =
+        hookInput.trigger === 'manual'
+          ? parseTranscriptBeforeCompact(transcriptPath)
+          : parseTranscript(transcriptPath);
       recent = { assistantText: activity.assistantText ?? [] };
     }
     // Token snapshot at the compact boundary. Fail-soft — extractor

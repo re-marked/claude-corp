@@ -265,6 +265,7 @@ export {
   buildAuditPrompt,
   scanEvidence,
   parseTranscript,
+  parseTranscriptBeforeCompact,
   promotePendingHandoff,
   revertTaskFromUnderReview,
   peekLatestHandoffChit,

@@ -118,6 +118,171 @@ export function parseTranscript(transcriptPath: string): RecentActivity {
   return { toolCalls, touchedFiles, assistantText };
 }
 
+/**
+ * PreCompact-manual-trigger variant of parseTranscript.
+ *
+ * When a Partner types `/compact` the transcript's final user turn IS
+ * the `/compact` command — meaning plain `parseTranscript()` returns
+ * activity between `/compact` and the hook invocation, which is
+ * usually empty. The auto-checkpoint then loses the "what was the
+ * agent JUST doing" context exactly when we most want to preserve it
+ * (Codex P2 reviewer catch, PR #170).
+ *
+ * This variant walks backward through user turns, skipping any that
+ * look like a `/compact` invocation, and returns activity since the
+ * first REAL user turn — i.e. the work-in-progress right before the
+ * founder interrupted with `/compact`. Fail-open identical to
+ * parseTranscript (empty RecentActivity on any I/O / parse error).
+ *
+ * For auto-compact (threshold-triggered, no user turn), the terminal
+ * user turn is already a real one; behavior is identical to
+ * parseTranscript.
+ */
+export function parseTranscriptBeforeCompact(transcriptPath: string): RecentActivity {
+  const empty: RecentActivity = { toolCalls: [], touchedFiles: [], assistantText: [] };
+
+  if (!transcriptPath || !existsSync(transcriptPath)) return empty;
+
+  let content: string;
+  try {
+    content = readFileSync(transcriptPath, 'utf-8');
+  } catch {
+    return empty;
+  }
+
+  const lines = content.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return empty;
+
+  // Two-phase walk:
+  //   Phase A: backward from EOF to the nearest user turn. If it's a
+  //   `/compact` invocation, mark its index and keep walking; otherwise
+  //   we use that turn as the boundary (same semantics as parseTranscript).
+  //
+  //   Phase B: collect entries AFTER the chosen boundary, up to (but
+  //   not including) the `/compact` turn if one was found in Phase A —
+  //   i.e. the activity between the real user turn and the founder's
+  //   /compact interrupt.
+  let compactTurnIdx: number | null = null;
+  let boundaryIdx: number | null = null;
+
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const parsed = tryParseLine(lines[i]!);
+    if (!parsed) continue;
+    if (!isUserTurn(parsed)) continue;
+
+    if (isCompactInvocation(parsed)) {
+      // First /compact turn encountered; remember its index so Phase B
+      // can stop the slice before it.
+      if (compactTurnIdx === null) compactTurnIdx = i;
+      // Keep walking — we need a pre-compact user turn as the boundary.
+      continue;
+    }
+    // First non-/compact user turn — this is the real boundary.
+    boundaryIdx = i;
+    break;
+  }
+
+  if (boundaryIdx === null && compactTurnIdx === null) {
+    // No user turn at all (transcript open before any user input) — same
+    // behavior as parseTranscript returning an empty slice.
+    return empty;
+  }
+
+  // If we saw only /compact turns and never reached a real user turn,
+  // fall back to slicing after the latest /compact — better to surface
+  // whatever minimal activity exists than return truly empty. This is
+  // rare (would require a fresh session where the very first user input
+  // was /compact) but the fallback is more useful than a dead empty.
+  const sliceStart = (boundaryIdx ?? compactTurnIdx!) + 1;
+  const sliceEnd = compactTurnIdx ?? lines.length;
+
+  const recent: Array<Record<string, unknown>> = [];
+  for (let i = sliceStart; i < sliceEnd; i++) {
+    const parsed = tryParseLine(lines[i]!);
+    if (parsed) recent.push(parsed);
+  }
+
+  // Reuse the same extraction pipeline as parseTranscript so both paths
+  // produce identical RecentActivity shapes.
+  return extractActivityFromEntries(recent);
+}
+
+/**
+ * Detect a `/compact` user-turn envelope. Heuristic: any user-turn
+ * whose text content (top-level string or text-block content) starts
+ * with `/compact` (with or without an argument). Handles both shapes
+ * observed in the wild — `{message: {content: "..."}}` and
+ * `{message: {content: [{type: "text", text: "..."}]}}`.
+ */
+function isCompactInvocation(entry: Record<string, unknown>): boolean {
+  for (const block of iterateContentBlocks(entry)) {
+    if (block.type === 'text' && typeof block.text === 'string') {
+      if (/^\s*\/compact(\s|$)/.test(block.text)) return true;
+    }
+  }
+  // Handle the shape where content is directly a string (no blocks).
+  const msg = entry.message as Record<string, unknown> | undefined;
+  const stringContent =
+    typeof entry.content === 'string'
+      ? entry.content
+      : msg && typeof msg.content === 'string'
+        ? msg.content
+        : null;
+  if (stringContent !== null && /^\s*\/compact(\s|$)/.test(stringContent)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Extract RecentActivity from an already-sliced list of transcript
+ * entries. Factored out of parseTranscript so both the default path
+ * and the before-compact variant share the same block-handling logic.
+ */
+function extractActivityFromEntries(
+  recent: Array<Record<string, unknown>>,
+): RecentActivity {
+  const toolCalls: ToolCall[] = [];
+  const touched = new Map<string, Set<TouchedFile['via'][number]>>();
+  const assistantText: string[] = [];
+  const pending = new Map<string, ToolCall>();
+
+  for (const entry of recent) {
+    for (const block of iterateContentBlocks(entry)) {
+      if (block.type === 'text' && typeof block.text === 'string') {
+        assistantText.push(block.text);
+      } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+        const call: ToolCall = {
+          name: block.name,
+          input: (block.input as Record<string, unknown>) ?? {},
+        };
+        toolCalls.push(call);
+        if (typeof block.id === 'string') pending.set(block.id, call);
+        const filePath = extractFilePathFromInput(block.name, call.input);
+        if (filePath && TOUCH_TOOLS.has(block.name)) {
+          if (!touched.has(filePath)) touched.set(filePath, new Set());
+          touched.get(filePath)!.add(block.name as TouchedFile['via'][number]);
+        }
+      } else if (block.type === 'tool_result') {
+        const id = typeof block.tool_use_id === 'string' ? block.tool_use_id : null;
+        const call = id ? pending.get(id) : undefined;
+        if (call) {
+          call.output = truncate(stringifyContent(block.content));
+          if (block.is_error === true) call.isError = true;
+          if (id) pending.delete(id);
+        }
+      }
+    }
+  }
+
+  const touchedFiles: TouchedFile[] = [];
+  for (const [path, viaSet] of touched) {
+    touchedFiles.push({ path, via: [...viaSet] });
+  }
+
+  return { toolCalls, touchedFiles, assistantText };
+}
+
 // ─── Token usage extraction (Project 1.7 round 3) ──────────────────
 
 /**
