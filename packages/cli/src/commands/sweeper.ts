@@ -55,14 +55,28 @@ Usage:
 Subcommands:
   run <name>          Invoke a code sweeper by name. Posts to the
                       daemon's /sweeper/run endpoint; prints the
-                      SweeperResult (status, observations written,
+                      SweeperResult (status, kinks recorded,
                       one-line summary).
 
 Known sweepers (v1):
-  silentexit          Respawn slots whose process died without clean
-                      exit + pending Casket work. Honors fire/archive.
-                      No-op on pure-claude-code corps where no long-
-                      running process dies.
+  silentexit          Respawn slots whose process died without
+                      clean exit + pending Casket work. Honors
+                      fire/archive. No-op on pure-claude-code
+                      corps where no long-running process dies.
+  agentstuck          Flag live agents whose current task hasn't
+                      moved in 30+ min (not dead — stuck).
+  orphantask          Find queued tasks with no assignee or an
+                      archived assignee + no active blocker.
+  phantom-cleanup     Reconcile members.json against on-disk
+                      agent workspace dirs (both directions).
+  chit-hygiene        Walk the chit store; flag malformed chits
+                      + orphan references/dependsOn pointers.
+  log-rotation        Rotate the daemon log when it grows past
+                      10MB; keep up to 5 archived rotations.
+
+Findings are written as kink chits with per-(source,subject)
+dedup + runner-driven auto-resolve. Query open kinks via
+\`cc-cli chit list --type kink --status active\`.
 
 Flags are per-subcommand. Try \`cc-cli sweeper run --help\`.
 `);
