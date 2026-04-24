@@ -601,6 +601,27 @@ export interface BlueprintFields {
    * because the validator doesn't have access to scope state.
    */
   name: string;
+  /**
+   * What shape the blueprint casts into. Drives which cast primitive
+   * the CLI routes to:
+   *   - `contract` (default when absent) — casts into Contract + Task
+   *     chits via `castFromBlueprint`. The 1.8-shipped shape. Used by
+   *     `cc-cli contract start --blueprint ...` and by Sexton's patrol
+   *     blueprints (patrol blueprints ARE Contract-cast because each
+   *     patrol is a walk through N checks, one per step).
+   *   - `sweeper` — casts into a single `sweeper-run` chit via
+   *     `castSweeperFromBlueprint` (Project 1.9). A sweeper blueprint
+   *     describes one focused maintenance task; the sweeper-run chit
+   *     records one dispatch of that task. Dispatch fans out to either
+   *     a code module (step.moduleRef set) or an AI agent (moduleRef
+   *     absent, step.description becomes the prompt).
+   *
+   * Absent-as-contract (rather than requiring `kind: 'contract'` on
+   * every existing blueprint) keeps 1.8-era blueprints from needing a
+   * migration write. The cast primitives both check this field; the
+   * wrong cast path for a given kind rejects with a clear error.
+   */
+  kind?: 'contract' | 'sweeper';
   /** The step DAG — the castable body of the blueprint. Must be non-empty; cycles rejected at validate. */
   steps: BlueprintStep[];
   /** Variables the caller fills at cast time. Optional — a blueprint can be fully static. Empty array and absent are equivalent. */

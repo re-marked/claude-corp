@@ -359,6 +359,16 @@ function validateBlueprint(fields: unknown): void {
   // reseed behavior and the list-view badge. Always required.
   requireEnum(f.origin, 'blueprint.origin', ['authored', 'builtin'] as const);
 
+  // kind discriminates cast-path. Optional for backwards compat —
+  // 1.8-era blueprints (pre-1.9) have no `kind` field and default to
+  // 'contract' at cast time. New 1.9+ sweeper blueprints set
+  // `kind: 'sweeper'` explicitly. The cast primitives enforce that
+  // each kind routes to its own cast path; this validator only
+  // enforces the value is one of the two legal shapes when present.
+  if (f.kind !== undefined) {
+    requireEnum(f.kind, 'blueprint.kind', ['contract', 'sweeper'] as const);
+  }
+
   // steps must exist and be non-empty. A zero-step blueprint is nonsense
   // at cast — it would produce a Contract with no Tasks.
   if (!Array.isArray(f.steps) || f.steps.length === 0) {
