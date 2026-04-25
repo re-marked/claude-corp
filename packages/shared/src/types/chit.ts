@@ -33,6 +33,7 @@ export interface FieldsForType {
   blueprint: BlueprintFields;
   'sweeper-run': SweeperRunFields;
   kink: KinkFields;
+  'breaker-trip': BreakerTripFields;
 }
 
 /**
@@ -809,4 +810,105 @@ export interface KinkFields {
    *                    closed without further action.
    */
   resolution?: 'auto-resolved' | 'acknowledged' | 'dismissed' | null;
+}
+
+/**
+ * Fields for a `breaker-trip` chit (Project 1.11).
+ *
+ * Records that a slot's crash-loop breaker has tripped — silent-exit
+ * sweeper saw the same slug die N consecutive times and is asking the
+ * spawn surface to refuse further respawns until the founder resets.
+ *
+ * ### Lifecycle
+ * - `active`  — trip is live; ProcessManager.spawnAgent refuses for
+ *               the slug; bacteria pickFreshSlug avoids it; sweeper
+ *               skips respawn.
+ * - `closed`  — founder reset (or auto-cleanup on slot removal). No
+ *               further blocking; a recurrence creates a fresh trip.
+ *
+ * ### Identity + dedup
+ * Identity is `(slug)` while active. `tripBreaker` is idempotent:
+ * second trip on a slug with an existing active trip BUMPS
+ * `triggerCount` and appends to `recentSilentexitKinks` rather than
+ * creating a duplicate. Mirrors the kink dedup contract.
+ *
+ * ### Persistence
+ * Non-ephemeral. A trip surviving for weeks is a feature: the
+ * founder needs to see the loop history. Stored at corp scope.
+ */
+export interface BreakerTripFields {
+  /**
+   * The slot's Member.id this trip is for. Combined with chit.status
+   * === 'active' is the lookup key. Same value as the silentexit
+   * kink's `subject` field — that's what wires detection to refusal.
+   */
+  slug: string;
+  /**
+   * ISO 8601 timestamp the trip first fired. Stays stable across
+   * idempotent re-trips (which bump triggerCount + recentSilentexitKinks
+   * but NOT this field). Lets audit reads see "this slot's loop
+   * started at T" cleanly.
+   */
+  trippedAt: string;
+  /**
+   * Number of silent-exit signals that have triggered this trip. On
+   * first creation, equals `triggerThreshold`. On re-trigger (more
+   * silent-exits arrive while the trip is still active), this bumps
+   * past the threshold so the founder can see severity at a glance.
+   */
+  triggerCount: number;
+  /**
+   * Window the trigger evaluated within, in milliseconds. Snapshot
+   * of the role's effective `crashLoopWindowMs` at trip time, so
+   * audit reads stay coherent even if the role's config changes
+   * later.
+   */
+  triggerWindowMs: number;
+  /**
+   * Threshold the trigger crossed. Snapshot of the role's effective
+   * `crashLoopThreshold` at trip time. Same audit-coherence motive
+   * as triggerWindowMs.
+   */
+  triggerThreshold: number;
+  /**
+   * Chit ids of the silent-exit kinks that triggered this trip.
+   * `cc-cli chit read <kink-id>` walks the failure history; the
+   * trip is the index. On idempotent re-trigger, additional kink
+   * ids append (deduped via Set semantics at the writer).
+   *
+   * Note: silentexit's writeOrBumpKink keeps ONE active kink per
+   * slug at a time, so this array typically holds exactly one id —
+   * the persistent-active kink whose occurrenceCount crossed the
+   * threshold. The array shape leaves room for future detectors
+   * that emit multiple kinks per trigger.
+   */
+  recentSilentexitKinks: string[];
+  /**
+   * Forensic context — when the looping started in clock time.
+   * Populated from the triggering silent-exit kink's `createdAt`,
+   * so it captures the first crash in the loop (not the most
+   * recent). Lets the founder see "this has been looping since
+   * 14:32" without walking the kink chit.
+   *
+   * Future enhancement: ProcessManager could track per-slug spawn
+   * timestamps in a ring buffer; this field would then carry the
+   * exact spawn-attempt history. v1 reads from kink createdAt.
+   */
+  spawnHistory: string[];
+  /**
+   * Free-form prose. The detector writes a default summary
+   * ("crash-loop breaker tripped: N silent exits in M minutes");
+   * founder reset adds context via `cc-cli breaker reset --reason`.
+   */
+  reason: string;
+  /**
+   * Set when chit.status flips to 'closed' — who closed, when, why.
+   * Three close paths: founder reset (`cc-cli breaker reset`),
+   * auto-cleanup on slot removal (`cc-cli fire --remove`,
+   * `cc-cli bacteria evict`), and the rare manual `cc-cli chit
+   * update` audit override.
+   */
+  clearedAt?: string;
+  clearedBy?: string;
+  clearReason?: string;
 }

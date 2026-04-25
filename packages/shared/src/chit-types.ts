@@ -34,6 +34,7 @@ import type {
   BlueprintVar,
   SweeperRunFields,
   KinkFields,
+  BreakerTripFields,
 } from './types/chit.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -676,6 +677,58 @@ function validateSweeperRun(fields: unknown): void {
   }
 }
 
+function validateBreakerTrip(fields: unknown): void {
+  const f = requireObject(fields, 'breaker-trip') as Partial<BreakerTripFields>;
+
+  // slug is the dedup key (combined with status='active'). Required +
+  // non-empty so findActiveBreaker can never collide on "" or be
+  // ambiguous. Member ids ARE the slug here — same string the
+  // silent-exit kink's `subject` carries.
+  requireNonEmptyString(f.slug, 'breaker-trip.slug');
+
+  // trippedAt is the audit anchor. Required ISO timestamp so the
+  // founder always knows when the loop started. Strict format —
+  // optionalIsoTimestamp accepts undefined; we want it always set.
+  if (f.trippedAt === undefined || f.trippedAt === null) {
+    throw new ChitValidationError(
+      'breaker-trip.trippedAt is required (ISO 8601 timestamp)',
+      'breaker-trip.trippedAt',
+    );
+  }
+  optionalIsoTimestamp(f.trippedAt, 'breaker-trip.trippedAt');
+
+  // triggerCount must be ≥1 (the trip itself counts as occurrence 1)
+  // and within a sane ceiling. A loop with thousands of crashes
+  // means something pathological and we want loud audit, not a
+  // validator overflow.
+  requireInteger(f.triggerCount, 'breaker-trip.triggerCount', 1, 1_000_000);
+
+  // triggerWindowMs + triggerThreshold are config snapshots — must
+  // be present and positive. Zero or negative would mean a trip
+  // fired with nonsensical config; reject loudly.
+  requireInteger(f.triggerWindowMs, 'breaker-trip.triggerWindowMs', 1, Number.MAX_SAFE_INTEGER);
+  requireInteger(f.triggerThreshold, 'breaker-trip.triggerThreshold', 1, 1_000_000);
+
+  // recentSilentexitKinks + spawnHistory are arrays of chit ids /
+  // ISO timestamps respectively. Format check is loose (string
+  // arrays); semantic correctness is the writer's responsibility.
+  requireStringArray(f.recentSilentexitKinks, 'breaker-trip.recentSilentexitKinks');
+  requireStringArray(f.spawnHistory, 'breaker-trip.spawnHistory');
+
+  // reason is the prose summary. Required + non-empty so audit
+  // reads always have something — even the auto-detector writes
+  // a default sentence, so empty here means a writer skipped it.
+  requireNonEmptyString(f.reason, 'breaker-trip.reason');
+
+  // Close-path fields are optional while active, populated on
+  // close. Format-only validation here; the cross-field "if
+  // status=closed then clearedAt+clearedBy must be set" rule
+  // belongs to the close-helper, not the chit validator.
+  optionalIsoTimestamp(f.clearedAt, 'breaker-trip.clearedAt');
+  if (f.clearedBy !== undefined) requireStringOrNull(f.clearedBy, 'breaker-trip.clearedBy');
+  if (f.clearReason !== undefined) requireStringOrNull(f.clearReason, 'breaker-trip.clearReason');
+}
+
 function validateKink(fields: unknown): void {
   const f = requireObject(fields, 'kink') as Partial<KinkFields>;
 
@@ -933,6 +986,24 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     // promotion. Absent that, it burns clean.
     destructionPolicy: 'destroy-if-not-promoted',
     validate: validateKink,
+  },
+  {
+    id: 'breaker-trip',
+    idPrefix: 'bt',
+    // Non-ephemeral. A trip is durable forensic state — surviving
+    // for weeks is a feature, not noise. The founder needs to see
+    // the loop history; the lifecycle scanner never visits these.
+    defaultEphemeral: false,
+    defaultTTL: null,
+    // Two-state lifecycle: active (refusing spawns for the slug) /
+    // closed (founder reset, or auto-cleanup on slot removal).
+    // burning is the shared abort-mid-write terminal that all
+    // chit types tolerate by convention.
+    defaultStatus: 'active',
+    validStatuses: ['active', 'closed', 'burning'],
+    terminalStatuses: ['closed', 'burning'],
+    destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
+    validate: validateBreakerTrip,
   },
 ];
 
