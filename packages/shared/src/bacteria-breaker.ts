@@ -53,7 +53,6 @@
  */
 
 import { queryChits, createChit, updateChit } from './chits.js';
-import { ChitValidationError } from './chit-types.js';
 import type { Chit } from './types/chit.js';
 
 // ─── Defaults ────────────────────────────────────────────────────────
@@ -274,25 +273,20 @@ export function closeBreakerForSlug(opts: CloseBreakerOpts): ReadonlyArray<Chit<
 
   const closed: Chit<'breaker-trip'>[] = [];
   for (const target of matches) {
-    try {
-      const existing = target.chit.fields['breaker-trip'];
-      const updated = updateChit<'breaker-trip'>(opts.corpRoot, 'corp', 'breaker-trip', target.chit.id, {
-        status: 'closed',
-        updatedBy: writer,
-        fields: {
-          'breaker-trip': {
-            ...existing,
-            clearedAt,
-            clearedBy: writer,
-            clearReason: opts.reason,
-          },
+    const existing = target.chit.fields['breaker-trip'];
+    const updated = updateChit<'breaker-trip'>(opts.corpRoot, 'corp', 'breaker-trip', target.chit.id, {
+      status: 'closed',
+      updatedBy: writer,
+      fields: {
+        'breaker-trip': {
+          ...existing,
+          clearedAt,
+          clearedBy: writer,
+          clearReason: opts.reason,
         },
-      });
-      closed.push(updated);
-    } catch (err) {
-      if (err instanceof ChitValidationError) throw err;
-      throw err;
-    }
+      },
+    });
+    closed.push(updated);
   }
   return closed;
 }
@@ -323,8 +317,6 @@ export function findActiveBreaker(
 }
 
 export interface ListActiveBreakersOpts {
-  /** Filter by role (matches Member.role lookup at the caller — we only know the slug). Caller does role resolution. */
-  includeRoles?: ReadonlyArray<string>;
   /** Include cleared trips for audit views. Default false. */
   includeCleared?: boolean;
 }
