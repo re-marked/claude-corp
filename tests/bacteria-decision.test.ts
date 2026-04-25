@@ -6,6 +6,7 @@ import {
   createChit,
   createCasketIfMissing,
   advanceCurrentStep,
+  pauseRole,
   type Member,
 } from '../packages/shared/src/index.js';
 import { decideBacteriaActions } from '../packages/daemon/src/bacteria/decision.js';
@@ -357,6 +358,47 @@ describe('decideBacteriaActions', () => {
       now: NOW_PLUS_1_MIN,
     });
     expect(tick2.nextState.idleSince.has('backend-engineer-aa')).toBe(false);
+  });
+
+  // ─── pause-skip (Project 1.10.4) ─────────────────────────────────
+
+  it('skips paused roles entirely — no actions emitted even with queued work', () => {
+    writeMembers([]);
+    pauseRole(corpRoot, 'backend-engineer');
+    // Three mediums queued — without the pause this would mitose 2 slots.
+    makeTaskChit({ assignee: 'backend-engineer', complexity: 'medium' });
+    makeTaskChit({ assignee: 'backend-engineer', complexity: 'medium' });
+    makeTaskChit({ assignee: 'backend-engineer', complexity: 'medium' });
+
+    const result = decideBacteriaActions({
+      corpRoot,
+      previousState: emptyBacteriaState(),
+      now: NOW,
+    });
+
+    const backendActions = result.actions.filter(
+      (a) => (a.kind === 'mitose' && a.role === 'backend-engineer') ||
+        (a.kind === 'apoptose' && a.slug.startsWith('backend-engineer')),
+    );
+    expect(backendActions).toEqual([]);
+  });
+
+  it('paused role is skipped while another role still acts', () => {
+    writeMembers([]);
+    pauseRole(corpRoot, 'qa-engineer');
+    // Backend has work; QA has work but is paused.
+    makeTaskChit({ assignee: 'backend-engineer', complexity: 'medium' });
+    makeTaskChit({ assignee: 'qa-engineer', complexity: 'medium' });
+
+    const result = decideBacteriaActions({
+      corpRoot,
+      previousState: emptyBacteriaState(),
+      now: NOW,
+    });
+
+    const mitoses = result.actions.filter((a) => a.kind === 'mitose');
+    expect(mitoses).toHaveLength(1);
+    if (mitoses[0]?.kind === 'mitose') expect(mitoses[0].role).toBe('backend-engineer');
   });
 
   // ─── multi-role independence ──────────────────────────────────────
