@@ -199,6 +199,22 @@ export const TARGET_WEIGHTED_PER_SLOT = 1.5;
 export const APOPTOSIS_HYSTERESIS_MS = 3 * 60 * 1000;
 
 /**
+ * Reactor cadence — how often the bacteria tick fires when no
+ * external event triggers it. 5 seconds is fast enough that a task
+ * landing in an empty queue gets a slot spawned within 5s of the
+ * write, slow enough that a quiet corp doesn't burn disk-read cycles
+ * scanning chits hundreds of times per minute.
+ *
+ * v1 is interval-only (no fs.watch event hook); future iterations
+ * may overlay an event-driven trigger atop the safety tick when
+ * sub-second responsiveness becomes worth the Windows fs.watch
+ * complexity (the existing watchers in this daemon all carry workarounds
+ * for "fires 3-5 times per change" / "misses appends" — bacteria avoids
+ * that surface by polling.)
+ */
+export const BACTERIA_TICK_INTERVAL_MS = 5_000;
+
+/**
  * Per-complexity weight lookup. Null/undefined complexity defaults
  * to medium so pre-0.5.1 tasks (or tasks an agent forgot to assess)
  * still trigger sensible scaling instead of silently weighting zero.
