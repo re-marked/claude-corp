@@ -20,7 +20,6 @@ import {
   findChitById,
   getCurrentStep,
   getRole,
-  type Chit,
   type Member,
   type TaskFields,
 } from '@claudecorp/shared';
@@ -200,5 +199,3 @@ function parseOpts(rawArgs: string[]): WhoamiOpts {
   };
 }
 
-// Re-export for tests + future PR 3 (whoami rename) to share helpers.
-export type { Chit };
