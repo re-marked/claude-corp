@@ -165,13 +165,22 @@ export function emptyBacteriaState(): BacteriaState {
  *   1 medium    = 1.00 units
  *   1 large     = 2.00 units
  *
- * Default 2.0: a slot is "owed" up to two medium-equivalent tasks
- * before splitting. Lower (1.0) means more aggressive parallelism
- * and higher token spend on context-loads; higher (4.0) means lazier
- * splitting, longer wall-clock, fewer slots active. 2.0 is a starting
- * point; Project 4 may adapt this from observed corp behavior.
+ * Default 1.5: aggressive-leaning scaling, chosen for VISIBILITY in
+ * v1. Bacteria fires often enough that the founder watches it work
+ * (mitoses + apoptoses observable in the TUI / Sexton's summaries)
+ * rather than rarely enough that the organism feels dormant. Cost
+ * trade-off: each marginal slot pays one context-load; 1.5 spends a
+ * bit more on parallelism than the strict cost-optimal middle (2.0)
+ * would. That's a deliberate v1 choice — "see it move" beats "save
+ * tokens you didn't notice."
+ *
+ * Tuning intuition: each context-load is roughly 1 medium-task's
+ * worth of tokens, so TARGET=1.5 means "spawn a new slot when work
+ * exceeds ~1.5 medium-equivalents — saves 1.5 medium of wall-clock
+ * for 1 medium of context-load. ~1.5:1 trade." Future: per-role
+ * override on RoleEntry, observation-driven auto-tuning in Project 4.
  */
-export const TARGET_WEIGHTED_PER_SLOT = 2.0;
+export const TARGET_WEIGHTED_PER_SLOT = 1.5;
 
 /**
  * How long a slot must be continuously idle before apoptosis. The
