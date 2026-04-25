@@ -1676,7 +1676,16 @@ export interface BreakerTripFields {
   triggerThreshold: number;
   /** Chit ids of the silent-exit kinks that triggered the trip. `cc-cli chit list --depends-on <trip-id>` returns the failure history in one query. */
   recentSilentexitKinks: string[];
-  /** Last N spawn timestamps before the trip. Forensic context — was this a cold loop, or a slot that worked then started failing? */
+  /**
+   * Forensic context — was this a cold loop, or a slot that worked
+   * then started failing? processManager doesn't currently track
+   * per-slug spawn timestamps; for v1, populate this from the
+   * triggering silentexit kinks' `createdAt` fields (each kink is
+   * recorded when the sweeper detected the crash, ≈ within seconds
+   * of the actual exit). Future enhancement: process-manager keeps
+   * a small ring buffer of per-slug spawn events that feeds this
+   * field directly.
+   */
   spawnHistory: string[];
   /** Free-form prose. The detector writes a default summary; founder reset adds context. */
   reason: string;
@@ -1712,6 +1721,13 @@ Three call sites need the check:
 3. **Bacteria's `pickFreshSlug`** — when generating a fresh 2-letter suffix for a new mitose, the candidate must NOT collide with any active breaker's slug. Add tripped slugs to the avoid-set alongside the existing taken-slug set. Rare collision case (recycled name happens to land on a tripped slug) but real.
 
 Bacteria's apoptose path doesn't need the check — apoptose is removing a slot, not spawning one. The breaker-trip chit gets auto-cleaned (see "Auto-cleanup" below) when the slot is fully removed.
+
+**In-flight work fate when a trip fires.** A slot can trip with `casket.currentStep` set — the chit it was working on when the loop took it down. The breaker explicitly does NOT touch the casket: the trip's job is "stop the spawn loop," not "re-route the orphaned chit." Consequence: the chit is stranded (no slot will pick it up while the breaker holds, and bacteria's pickFreshSlug avoids the tripped slug). The founder has two paths:
+
+  1. **`cc-cli breaker reset --slug <slug>`** — clears the trip, slot resumes its current casket on next dispatch. Use when the underlying cause is fixed (harness regression patched, bad task chit deleted, etc.).
+  2. **`cc-cli fire --remove --slug <slug>`** — removes the slot entirely. Existing fire logic handles the orphaned casket chit (sets workflowStatus back to queued, clears assignee — the founder can then re-hand it). The auto-cleanup hook closes the breaker chit too.
+
+This is a deliberate scoping choice: chit re-routing is a richer state machine (dispatched → queued, assignee rewrite, blocker handling) that already lives in fire. The breaker doesn't reinvent it.
 
 #### Surfacing — three layers
 
@@ -1777,8 +1793,10 @@ Beyond the spec basics, the v1 robustness fence:
 
 #### Test strategy
 
+> **Pattern note.** Both PR 1.10.3 (rename eligibility) and PR 1.10.4 (status / lineage helpers) earned coverage by extracting load-bearing logic into pure functions called from the I/O wrapper. Apply the same pattern here: the silentexit-sweeper's detection step lives in a pure helper `evaluateBreakerTrigger(silentexitKinks, threshold, windowMs, now): TriggerDecision` (in `bacteria-breaker.ts`), and the sweeper just composes it with the kink query + `tripBreaker` write. Keeps the math testable without spinning up the full sweeper or mocking the patrol cycle. Same shape as `decideBacteriaActions` / `checkRenameEligibility` / `computeRoleStats`.
+
 - Unit (`bacteria-breaker.ts`): trip writes a chit with the right shape; second trip on same slug bumps existing instead of creating duplicate; close flips status to cleared with timestamps; list returns only active by default.
-- Unit (silentexit detector): 3 silent-exit kinks in 5min trip; 3 in 6min don't; per-role threshold override honored.
+- Unit (`evaluateBreakerTrigger` pure helper): 3 silent-exit kinks in 5min trip; 3 in 6min don't; per-role threshold override honored; threshold respects role config snapshot at trip time, not check time.
 - Integration (process-manager): spawn refuses with `BreakerTrippedError` when active trip exists for the slug.
 - Integration (silentexit respawn): when breaker active, sweeper logs + skips, doesn't call spawnAgent.
 - Integration (bacteria slug avoidance): `pickFreshSlug` retries past tripped slug.
