@@ -631,11 +631,11 @@ async function run() {
     }
     case 'whoami': {
       const { cmdWhoami } = await import('./commands/whoami.js');
-      await cmdWhoami({
-        agent: values.agent as string | undefined,
-        corp: values.corp as string | undefined,
-        json: !!values.json,
-      });
+      // Route through the rawArgs overload so the command's own
+      // `strict: true` parseOpts runs (typo rejection, value validation).
+      // The top-level parseArgs is strict:false; passing pre-parsed values
+      // bypasses whoami's own validator.
+      await cmdWhoami(process.argv.slice(3));
       break;
     }
     case 'audit': {
