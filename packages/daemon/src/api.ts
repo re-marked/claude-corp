@@ -20,6 +20,7 @@ import {
   writeGlobalConfig,
   readGlobalConfig,
   agentSessionKey,
+  closeBreakerForSlug,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -301,6 +302,22 @@ export function createApi(daemon: Daemon): Server {
               // Remove: permanent deletion
               try { rmSync(agentAbs, { recursive: true, force: true }); } catch {}
             }
+          }
+
+          // 6. Project 1.11: close any active crash-loop breaker for this
+          // slug. Without this, an orphan trip would block the slug from
+          // being reused by bacteria (pickFreshSlug avoid-set) and clutter
+          // `cc-cli breaker list`. Best-effort — fire's success doesn't
+          // hinge on the breaker close.
+          try {
+            closeBreakerForSlug({
+              corpRoot: daemon.corpRoot,
+              slug: agent.id,
+              reason: `slot ${action === 'fire' ? 'archived' : 'removed'} via cc-cli agent ${action}`,
+              clearedBy: `cli:${action}`,
+            });
+          } catch {
+            // swallow — chit-hygiene will surface any anomaly
           }
 
           firedIds.push(agent.id);
