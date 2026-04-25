@@ -31,6 +31,16 @@ export async function cmdBacteria(rawArgs: string[]): Promise<void> {
       await cmdBacteriaLineage(subArgs);
       break;
     }
+    case 'pause': {
+      const { cmdBacteriaPause } = await import('./bacteria/pause.js');
+      await cmdBacteriaPause(subArgs);
+      break;
+    }
+    case 'resume': {
+      const { cmdBacteriaResume } = await import('./bacteria/pause.js');
+      await cmdBacteriaResume(subArgs);
+      break;
+    }
     default: {
       console.error(`cc-cli bacteria: unknown subcommand "${subcommand}"`);
       console.error('');
@@ -51,6 +61,11 @@ Subcommands:
                       mitoses/apoptoses, mean lifespan, peak count.
   lineage <role>      Family tree of a worker-tier pool, rendered
                       from the bacteria-events log.
+  pause <role>        Stop bacteria from mitose/apoptose for a role.
+                      Live slots keep working; no new spawns; no
+                      decommissions. Idempotent.
+  resume <role>       Resume bacteria for a paused role. Decision
+                      module reassesses on next tick (~5s).
 
 Flags are per-subcommand. Try \`cc-cli bacteria status --help\`.
 `);
