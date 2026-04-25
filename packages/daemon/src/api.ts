@@ -33,6 +33,7 @@ import { hireAgent } from './hire.js';
 import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm } from './task-events.js';
 import { log, logError } from './logger.js';
 import { runSweeper, UnknownSweeperError, SWEEPER_NAMES } from './continuity/sweepers/index.js';
+import { BreakerTrippedError } from './process-manager.js';
 
 /** Format tool call into a human-readable description for chat history. */
 import { formatToolMessage as formatToolMsg } from './format-tool.js';
@@ -1634,6 +1635,24 @@ export function createApi(daemon: Daemon): Server {
 
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
+      // Project 1.11: BreakerTrippedError is a client-actionable
+      // refusal, not a server fault. Return 409 Conflict with a
+      // structured payload so CLI surfaces (cc-cli agent start /
+      // restart, etc.) can show the founder the path forward
+      // instead of a generic 500.
+      if (err instanceof BreakerTrippedError) {
+        json(
+          res,
+          {
+            error: err.message,
+            breakerTripped: true,
+            slug: err.slug,
+            tripChitId: err.tripChitId,
+          },
+          409,
+        );
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       logError(`[daemon] API error: ${message}`);
       json(res, { error: message }, 500);
