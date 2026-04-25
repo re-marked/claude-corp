@@ -24,9 +24,9 @@ steps:
   - id: review-findings
     title: Read the kinks the sweep just produced
     description: |
-			Run `cc-cli chit list --type kink --status active --created-by sweeper:chit-hygiene --limit 20` to filter to this patrol's output.
+      Run `cc-cli chit list --type kink --status active --created-by sweeper:chit-hygiene --limit 20` to filter to this patrol's output.
 
-			(The runner sets createdBy='sweeper:chit-hygiene' on every kink it emits.)
+      (The runner sets createdBy='sweeper:chit-hygiene' on every kink it emits.)
 
       For malformed chits: review the path + parser error. Usually the
       fix is manual — someone edits the bad YAML or `rm`s the file. Don't
