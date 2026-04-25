@@ -224,12 +224,15 @@ function parseOpts(rawArgs: string[]): WhoamiOpts {
     strict: true,
   });
   // Subcommand detection: `cc-cli whoami rename <name>` →
-  // positionals = ['rename', '<name>']. Other positionals are
-  // ignored (no other subcommands today; future extensions add
-  // explicit cases here).
+  // positionals = ['rename', '<name>']. When the user runs
+  // `cc-cli whoami rename --agent <slug>` (no <name>), positionals[1]
+  // is undefined; coerce to empty string so cmdWhoami enters the
+  // rename branch and validateRenameName rejects with "name is
+  // required" — surfacing the missing argument as a hard error
+  // instead of silently falling through to read-mode (Codex P2).
   let rename: string | undefined;
   if (parsed.positionals[0] === 'rename') {
-    rename = parsed.positionals[1];
+    rename = parsed.positionals[1] ?? '';
   }
   return {
     agent: parsed.values.agent as string | undefined,
