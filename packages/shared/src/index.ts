@@ -260,6 +260,18 @@ export type {
   KinkResolution,
 } from './kinks.js';
 
+// Project 1.10.4: bacteria observability substrate. Events log shape +
+// read/write helpers consumed by status command, lineage view, Sexton's
+// wake prompts, TUI sidebar aggregation. Append-only JSONL — bacteria
+// executor writes; everyone else reads.
+export { appendBacteriaEvent, readBacteriaEvents } from './bacteria-events.js';
+export type {
+  BacteriaEvent,
+  MitoseEvent,
+  ApoptoseEvent,
+  ReadBacteriaEventsOpts,
+} from './bacteria-events.js';
+
 // Project 1.9.6: seed bundled built-in blueprint markdown files
 // into a fresh corp's chit store at init. Mirrors installDefaultSkills —
 // the bundled `blueprints/` dir ships with the package, seeded once
