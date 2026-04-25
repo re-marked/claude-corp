@@ -39,6 +39,7 @@ import { LoopManager } from './loops.js';
 import { CronManager } from './crons.js';
 import { DreamManager } from './dreams.js';
 import { AutoemonManager } from './autoemon.js';
+import { BacteriaReactor } from './bacteria/index.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { InflightRegistry } from './inflight-registry.js';
@@ -74,6 +75,7 @@ export class Daemon {
   dreams: DreamManager;
   autoemon: AutoemonManager;
   analytics: AnalyticsEngine;
+  bacteria: BacteriaReactor;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -164,6 +166,11 @@ export class Daemon {
     this.dreams = new DreamManager(this);
     this.autoemon = new AutoemonManager(this);
     this.analytics = new AnalyticsEngine(this);
+    this.bacteria = new BacteriaReactor({
+      corpRoot: this.corpRoot,
+      globalConfig: this.globalConfig,
+      processManager: this.processManager,
+    });
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
 
     // Harness abstraction — every dispatch flows through this.
@@ -651,6 +658,12 @@ export class Daemon {
 
     // Bootstrap system agents (Sexton, Janitor, Warden, Herald, Planner) if missing
     await this.bootstrapSystemAgents();
+
+    // Bacteria reactor — starts polling once the corp's substrate is
+    // alive. Boots after agent spawn so the first tick reads a fully-
+    // populated members.json + caskets rather than mid-init state.
+    // Idempotent — safe across re-init paths.
+    this.bacteria.start();
   }
 
   /** Ensure system agents (Sexton, Janitor, Warden, Herald, Planner) exist — auto-hire if missing. */
@@ -778,6 +791,7 @@ export class Daemon {
   }
 
   async stop(): Promise<void> {
+    this.bacteria.stop(); // Stop reactor before processManager — pending mitose actions need spawn primitives alive
     this.heartbeat.stop();
     this.taskWatcher.stop();
     this.hireWatcher.stop();
