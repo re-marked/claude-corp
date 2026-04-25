@@ -90,6 +90,7 @@ Usage: cc-cli <command> [options]
 
 Commands:
   wtf        "Where tf am I, what tf do I do" — emits CORP.md + your situational context
+  whoami     "Who am I" — slug, role, kind, lineage, current casket. Read-only introspection.
   audit      Session-end audit gate (Stop / PreCompact hook invokes this). --override --reason "..." for founder bypass.
   done       Employee "I'm done with this task" signal. Writes pending handoff; audit promotes on approve.
   inbox      Tiered inbox management. cc-cli inbox <list|respond|dismiss|carry-forward|check>.
@@ -626,6 +627,15 @@ async function run() {
         peek: !!values.peek,
         json: !!values.json,
       });
+      break;
+    }
+    case 'whoami': {
+      const { cmdWhoami } = await import('./commands/whoami.js');
+      // Route through the rawArgs overload so the command's own
+      // `strict: true` parseOpts runs (typo rejection, value validation).
+      // The top-level parseArgs is strict:false; passing pre-parsed values
+      // bypasses whoami's own validator.
+      await cmdWhoami(process.argv.slice(3));
       break;
     }
     case 'audit': {
