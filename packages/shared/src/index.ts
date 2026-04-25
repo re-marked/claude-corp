@@ -213,8 +213,13 @@ export type {
 // machine transitions + announcement. CLI cmdHand and daemon cron
 // task-spawn both use this; the daemon no longer has its own
 // /tasks/:id/hand endpoint.
-export { handChitToSlot, HandNotAllowedError } from './hand-core.js';
-export type { HandChitToSlotOpts, HandChitToSlotResult } from './hand-core.js';
+export { handChitToSlot, handChitToRoleQueue, HandNotAllowedError } from './hand-core.js';
+export type {
+  HandChitToSlotOpts,
+  HandChitToSlotResult,
+  HandChitToRoleQueueOpts,
+  HandChitToRoleQueueResult,
+} from './hand-core.js';
 
 // Project 1.7: pre-compact threshold math. Pure; mirrors Claude Code's
 // autocompact formula + adds our wider signal-window buffer so the

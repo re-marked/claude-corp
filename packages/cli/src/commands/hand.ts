@@ -48,6 +48,7 @@ import {
   type Member,
   resolveSlotOrRole,
   handChitToSlot,
+  handChitToRoleQueue,
   HandNotAllowedError,
   TaskTransitionError,
 } from '@claudecorp/shared';
@@ -79,6 +80,51 @@ export async function cmdHand(input: string[] | HandOpts): Promise<void> {
   // 1. Resolve target.
   const resolution = resolveTarget(corpRoot, members, opts.to);
   if (resolution.kind === 'error') fail(resolution.message);
+
+  // 1a. Bacteria cold-start path — empty worker-tier pool. Persist
+  // the chit as queued for the role and return; bacteria's next tick
+  // mitoses a slot to claim it (~5s).
+  if (resolution.kind === 'queue-for-role') {
+    let queueResult;
+    try {
+      queueResult = handChitToRoleQueue({
+        corpRoot,
+        roleId: resolution.roleId,
+        chitId: opts.chit,
+        handerId,
+        reason: opts.reason,
+      });
+    } catch (err) {
+      if (err instanceof HandNotAllowedError) fail(err.message);
+      if (err instanceof TaskTransitionError) {
+        fail(`task ${opts.chit} can't be handed from state "${err.from}". ${err.message}`);
+      }
+      throw err;
+    }
+    if (opts.json) {
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            chit: opts.chit,
+            queuedForRole: resolution.roleId,
+            finalWorkflowStatus: queueResult.finalWorkflowStatus,
+            note: 'bacteria will spawn a slot within ~5s',
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      console.log(
+        `queued ${opts.chit} → role "${resolution.roleId}" (no Employees yet — bacteria will spawn a slot within ~5s)`,
+      );
+      console.log(`  workflowStatus: ${queueResult.finalWorkflowStatus}`);
+      if (opts.reason) console.log(`  reason: ${opts.reason}`);
+    }
+    return;
+  }
+
   const target = resolution.target;
   const targetMode = resolution.mode;
 
@@ -140,6 +186,7 @@ export async function cmdHand(input: string[] | HandOpts): Promise<void> {
 
 type TargetResolution =
   | { kind: 'resolved'; target: Member; mode: 'slot' | 'role' }
+  | { kind: 'queue-for-role'; roleId: string }
   | { kind: 'error'; message: string };
 
 /**
@@ -169,12 +216,12 @@ function resolveTarget(
       };
     }
     case 'role-no-candidates':
-      return {
-        kind: 'error',
-        message:
-          `no Employees of role "${to}" exist yet. Hire one with ` +
-          `\`cc-cli hire --role ${to} --kind employee\` or wait for bacteria (Project 1.9).`,
-      };
+      // Bacteria cold-start path (Project 1.10). Worker-tier roles
+      // with empty pools queue the chit for the role; bacteria sees
+      // it on next tick (~5s) and mitoses a slot to claim it. Return
+      // a discriminated variant so cmdHand routes to handChitToRoleQueue
+      // instead of the slot-mode handChitToSlot.
+      return { kind: 'queue-for-role', roleId: to };
     case 'unknown':
       return {
         kind: 'error',

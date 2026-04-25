@@ -26,6 +26,7 @@ import {
   type TaskTransitionTrigger,
 } from './task-state-machine.js';
 import { createInboxItem } from './inbox.js';
+import { getRole } from './roles.js';
 import type { Chit, TaskFields, TaskWorkflowStatus, InboxItemTier } from './types/chit.js';
 
 export interface HandChitToSlotOpts {
@@ -212,6 +213,109 @@ function renderSubject(chit: Chit, reason?: string): string {
       ? (chit.fields as { task: TaskFields }).task.title
       : chit.id;
   return reason ? `${title} — handed (${reason})` : `${title} — handed to you`;
+}
+
+// ─── Role-queue path (Project 1.10 bacteria cold-start) ────────────
+
+export interface HandChitToRoleQueueOpts {
+  corpRoot: string;
+  /** Bacteria-eligible role id (worker tier). */
+  roleId: string;
+  /** Chit id being queued. */
+  chitId: string;
+  /** Member id of the hander — stamped on task.handedBy. */
+  handerId: string;
+  /** Optional free-form reason — recorded on the task for audit, no inbox surface. */
+  reason?: string;
+}
+
+export interface HandChitToRoleQueueResult {
+  /** Final workflowStatus on the chit (always 'queued' on success). */
+  finalWorkflowStatus: TaskWorkflowStatus;
+}
+
+/**
+ * Persist a task chit as queued for a role pool when no Employee exists
+ * yet to receive the hand. Bacteria sees the chit on its next tick
+ * (`assignee === roleId`, `workflowStatus === 'queued'`) and mitoses a
+ * slot to claim it.
+ *
+ * No Casket write — there's no slot to advance. No inbox-item — there's
+ * no recipient. Just the chit-side state mutation.
+ *
+ * Restricted to draft / queued source states. Re-routing a chit
+ * already in 'dispatched' or later through a role queue would mean
+ * stripping it from a slot's Casket, which is a richer state
+ * machine the bacteria cold-start path doesn't need to solve. The
+ * caller should `cc-cli task cancel` and re-create if they want to
+ * forcibly reroute an in-flight task.
+ */
+export function handChitToRoleQueue(opts: HandChitToRoleQueueOpts): HandChitToRoleQueueResult {
+  const { corpRoot, roleId, chitId, handerId } = opts;
+
+  // Bacteria-eligibility guard. Bacteria's decision module filters to
+  // worker-tier roles only — queueing a chit for a decree / role-lead
+  // role would leave it sitting forever (silent stall), since neither
+  // bacteria nor a hand-time slot pickup would ever claim it. Reject
+  // at the helper boundary so future callers (cron paths, automated
+  // pipelines) can't silently misuse this.
+  const role = getRole(roleId);
+  if (!role) {
+    throw new HandNotAllowedError(
+      chitId,
+      `unknown role "${roleId}" — see \`cc-cli help\` for the role registry`,
+    );
+  }
+  if (role.tier !== 'worker') {
+    throw new HandNotAllowedError(
+      chitId,
+      `role "${roleId}" is tier=${role.tier}, not worker — only worker-tier roles ` +
+        `are bacteria-eligible. Address Partners by name with \`cc-cli hand --to <slug>\`.`,
+    );
+  }
+
+  const hit = findChitById(corpRoot, chitId);
+  if (!hit) {
+    throw new HandNotAllowedError(chitId, 'chit not found');
+  }
+  if (hit.chit.type !== 'task') {
+    throw new HandNotAllowedError(
+      chitId,
+      `chit type "${hit.chit.type}" can't be queued for a role (only tasks)`,
+    );
+  }
+
+  const fields = (hit.chit.fields as { task: TaskFields }).task;
+  const currentWs: TaskWorkflowStatus = fields.workflowStatus ?? 'draft';
+
+  // Allowed source states for role-queue: draft (transition draft →
+  // queued via 'assign' trigger) and queued (idempotent re-stamp).
+  // Anything else (dispatched / in_progress / blocked / under_review /
+  // terminal) needs the slot-level rerouting path, which doesn't
+  // exist for v1.
+  if (currentWs !== 'draft' && currentWs !== 'queued') {
+    throw new HandNotAllowedError(
+      chitId,
+      `chit is in '${currentWs}' state — only draft / queued tasks can be queued for a role. ` +
+        `Cancel + recreate if you need to reroute.`,
+    );
+  }
+
+  // Use the state machine even for the simple draft → queued case so
+  // the audit trail goes through the same validator as slot-mode hand.
+  const finalWs: TaskWorkflowStatus =
+    currentWs === 'draft' ? validateTransition('draft', 'assign', chitId) : 'queued';
+
+  const now = new Date().toISOString();
+  const partial: Partial<TaskFields> = {
+    assignee: roleId,
+    workflowStatus: finalWs,
+    handedBy: handerId,
+    handedAt: now,
+  };
+  writeTaskUpdate(corpRoot, hit, partial);
+
+  return { finalWorkflowStatus: finalWs };
 }
 
 // Re-export the transition error so callers can branch on it without
