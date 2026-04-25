@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -209,6 +209,38 @@ describe('whoami', () => {
     expect(out).toContain('kind:        Partner');
     expect(out).toContain('Ship feature X');
     expect(out).not.toContain('<not yet chosen');
+  });
+
+  // ─── Codex P2 regression: malformed casket-target chit ──────────
+
+  it('degrades gracefully when casket points at a malformed task chit', () => {
+    const member = makeMember({
+      id: 'broken',
+      displayName: 'broken',
+      role: 'backend-engineer',
+      kind: 'employee',
+    });
+    createCasketIfMissing(corpRoot, 'broken', 'broken');
+
+    // Plant a malformed task chit at the predicted path. findChitById
+    // resolves chit-t-<hex> by checking corp-level chits/task/<id>.md;
+    // a parseable file with broken frontmatter throws ChitMalformedError
+    // when the loader tries to read it.
+    const fakeChitId = 'chit-t-deadbeef';
+    const malformedDir = join(corpRoot, 'chits', 'task');
+    mkdirSync(malformedDir, { recursive: true });
+    writeFileSync(
+      join(malformedDir, `${fakeChitId}.md`),
+      '---\nthis is: { not [valid yaml ::: \n---\nbody\n',
+      'utf-8',
+    );
+    advanceCurrentStep(corpRoot, 'broken', fakeChitId, 'broken');
+
+    // Must not throw — the diagnostic command exists for moments
+    // exactly like this.
+    const r = buildWhoamiResult(corpRoot, member);
+    expect(r.casket?.currentStep).toBe(fakeChitId);
+    expect(r.casket?.title).toBeNull();
   });
 
   it('formatHuman: User shape is minimal (no casket / kind / role lines)', () => {

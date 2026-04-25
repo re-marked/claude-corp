@@ -94,16 +94,24 @@ export function buildWhoamiResult(corpRoot: string, member: Member): WhoamiResul
   const isAgent = member.type === 'agent';
 
   // Casket lookup is agent-only. Resolve currentStep + title if it's
-  // a task chit. Errors degrade to null (corrupted casket shouldn't
-  // block whoami).
+  // a task chit. Errors degrade to null — corrupted casket OR a
+  // currentStep pointing at a malformed chit (findChitById throws
+  // ChitMalformedError) shouldn't block whoami. A diagnostic command
+  // failing exactly when the corp is in a corrupted state is worse
+  // than null title.
   let casket: WhoamiResult['casket'] = null;
   if (isAgent) {
     const currentStep = readCurrentStepSafe(corpRoot, member.id);
     let title: string | null = null;
     if (currentStep) {
-      const hit = findChitById(corpRoot, currentStep);
-      if (hit && hit.chit.type === 'task') {
-        title = (hit.chit.fields.task as TaskFields).title ?? null;
+      try {
+        const hit = findChitById(corpRoot, currentStep);
+        if (hit && hit.chit.type === 'task') {
+          title = (hit.chit.fields.task as TaskFields).title ?? null;
+        }
+      } catch {
+        // Malformed task chit. queryChits / chit-hygiene sweeper will
+        // log + surface separately; here we just degrade gracefully.
       }
     }
     casket = { currentStep: currentStep ?? null, title };
