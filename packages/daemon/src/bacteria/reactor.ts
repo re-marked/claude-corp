@@ -33,7 +33,7 @@ import {
   BACTERIA_BURST_WINDOW_MS,
   BACTERIA_BURST_THRESHOLD,
 } from './types.js';
-import { readBacteriaEvents, writeOrBumpKink } from '@claudecorp/shared';
+import { readBacteriaEvents, writeOrBumpKink, resolveKink, queryChits } from '@claudecorp/shared';
 import { log, logError } from '../logger.js';
 
 export class BacteriaReactor {
@@ -118,8 +118,9 @@ export class BacteriaReactor {
 
   /**
    * Per-role count of mitose events in the burst window. Emits a
-   * `bacteria-burst:<role>` kink when count ≥ THRESHOLD. Pure read +
-   * one chit-write per bursting role; cheap.
+   * `bacteria-burst:<role>` kink when count ≥ THRESHOLD. Resolves the
+   * kink when the burst subsides so stale kinks don't persist for 7
+   * days in Sexton's queue after a one-time burst.
    */
   private detectBursts(now: Date): void {
     const since = new Date(now.getTime() - BACTERIA_BURST_WINDOW_MS).toISOString();
@@ -131,6 +132,8 @@ export class BacteriaReactor {
     for (const e of recentMitoses) {
       countByRole.set(e.role, (countByRole.get(e.role) ?? 0) + 1);
     }
+
+    // Write or bump burst kinks for roles above threshold.
     for (const [role, count] of countByRole) {
       if (count < BACTERIA_BURST_THRESHOLD) continue;
       try {
@@ -154,6 +157,37 @@ export class BacteriaReactor {
           `[bacteria] burst kink write failed for ${role}: ${(err as Error).message}`,
         );
       }
+    }
+
+    // Auto-resolve stale burst kinks for roles that are no longer bursting.
+    // Without this, a one-time burst kink stays active for 7 days — unlike
+    // sweeper kinks, bacteria kinks are written directly and have no runner
+    // pipeline to auto-resolve them when conditions clear.
+    try {
+      const activeKinks = queryChits<'kink'>(this.ctx.corpRoot, {
+        types: ['kink'],
+        scopes: ['corp'],
+        statuses: ['active'],
+      });
+      const bursting = new Set(countByRole.keys());
+      for (const c of activeKinks.chits) {
+        const k = c.chit.fields.kink;
+        if (k.source !== 'bacteria-burst') continue;
+        if (bursting.has(k.subject)) continue;
+        try {
+          resolveKink({
+            corpRoot: this.ctx.corpRoot,
+            source: 'bacteria-burst',
+            subject: k.subject,
+            resolution: 'auto-resolved',
+            updatedBy: 'bacteria-reactor',
+          });
+        } catch (err) {
+          logError(`[bacteria] burst kink resolve failed for ${k.subject}: ${(err as Error).message}`);
+        }
+      }
+    } catch (err) {
+      logError(`[bacteria] burst kink auto-resolve scan failed: ${(err as Error).message}`);
     }
   }
 
