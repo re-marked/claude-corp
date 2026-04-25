@@ -1712,6 +1712,10 @@ The breaker detector runs as a hook inside the silentexit sweeper's run, NOT as 
 
 Pull-based means the daemon-restart edge case is automatic — kink chits persist on disk, on next sweeper run the detector recomputes the count, trips appropriately. No in-memory counter to lose.
 
+**Scope: silentexit kinks ONLY.** The detector reads `--type kink --created-by sweeper:silentexit` exclusively. It does NOT consume agentstuck kinks (live agent stuck mid-task), chit-hygiene kinks (data integrity), orphantask kinks (queue oddities), or any other sweeper output. Reasoning: those are different failure modes with different remediation. A stuck agent escalates via 1.4.1 blocker chits; a chit-hygiene anomaly gets human investigation. Crash-looping is its own category (session dies before clean exit, sweeper respawns, repeat) and the breaker is its specialized response. Future versions could add a "stuck-loop" breaker with its own logic, but conflating the two would mean refusing spawns for problems spawning doesn't fix.
+
+**No migration needed.** Existing corps see the new chit type registered on first daemon boot post-upgrade. Their chit store has zero `breaker-trip` instances; queries return empty; spawn checks pass through to existing behavior. Pre-1.11 silent-exits accumulated in old kink chits don't false-positive trip — the window filter (last 5min default) only matches recent ones.
+
 #### Refusal — layered at every spawn site
 
 Three call sites need the check:
