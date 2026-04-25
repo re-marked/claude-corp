@@ -1652,32 +1652,166 @@ Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (ei
 **Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.9 (Sexton for wake)
 **PRs:** 3
 
-### 1.11 — Budget governor + circuit breaker **[pending]**
+### 1.11 — Crash-loop circuit breaker **[pending]**
 
-**Problem.** Runaway agents burn tokens. An agent stuck in a loop — same tool-call pattern every turn, no state change — can spend hours of API credit before Mark notices. And silent-exit loops (agent spawns, dies, spawns, dies) are worse: the failure mode is invisible in the TUI but shows up in the billing dashboard next month. Moved up from Project 3.3 because it's prerequisite for the "walk away overnight" dream — without it, one bad agent can blow the corp's budget while Mark sleeps.
+> **Design turn (2026-04-25):** The original 1.11 spec had two governors: per-hour dispatch budget + crash-loop circuit breaker. The dispatch-budget half got cut. Reasoning: claude-code's underlying constraint is a **5-hour rolling % window** of account budget (not per-hour token quotas), and the platform already enforces it. Reimplementing a parallel meter at the daemon layer would create two sources of truth that drift, and would be solving a problem the platform already handles. Token-cost observability also got cut for the same reason — `cc-cli costs` can come back as a follow-up if the founder wants visibility, but it doesn't gate dispatches. What remained worth shipping: the **crash-loop circuit breaker** — qualitatively different because it's not a usage cap, it's "this slot has silent-exited N times in M min, stop respawning it." Claude-code's 5h window catches the burn eventually, but in the meantime silentexit sweeper keeps respawning the broken slot every patrol tick, each spawn paying context-load tokens for nothing. The breaker stops that loop early. (Memory: `reference_claude_code_budget_window.md`.)
 
-**Two governors, both mandatory:**
+**Problem.** Silent-exit loops (agent spawns, dies, spawns, dies — sweeper keeps respawning every patrol tick) waste context-load tokens indefinitely. The failure mode is invisible in the TUI; it shows up later in claude-code's 5h window throttling. The breaker stops the loop before that.
 
-**1. Per-agent, per-hour dispatch budget.** Role-level quota: Backend Engineer Employees get N dispatches per hour; CEO Partner gets M; configurable per role in the registry. When an agent hits the cap, Sexton pauses dispatches to that slot for the rest of the hour, posts a Tier 3 inbox-item to the founder ("agent X hit their hour budget, paused until :00"), and releases on the hour boundary. No loss of work — the agent's Casket pointer is preserved; they resume on next tick.
+#### Substrate — `breaker-trip` chit type
 
-**2. Crash-loop circuit breaker.** If an agent's session silent-exits N times within M minutes (default: 3 in 5), Sexton pauses spawns to that slot, posts Tier 3 to the founder ("agent X has crash-looped 3× in 5 min, paused"), and does NOT auto-retry. Breaking out of the loop requires founder intervention — either `cc-cli fire --remove` if the slot is broken, or `cc-cli agent set-harness` / other recovery to restart the slot. Circuit breaker stays tripped across daemon restarts (persists as a chit — `breaker-trip-<slug>` at corp scope with `tripped_at`, `reason`, `spawn_history`).
+A new chit type registered in `packages/shared/src/chit-types.ts`:
 
-**Token cost tracking (optional v1 extension).** Per-agent per-day token spend, persisted as a chit or daemon-internal metric. Founder can `cc-cli costs` to see "who's spending what." Not governor-level — just observability — but falls naturally out of the dispatch budget work. Gas Town has this as `internal/quota`; we can mirror the design.
+```ts
+export interface BreakerTripFields {
+  /** The slot's Member.id this trip is for. Combined with chit.status='active' is the lookup key. */
+  slug: string;
+  /** ISO timestamp the trip fired. */
+  trippedAt: string;
+  /** Number of silent-exits that triggered this trip. Records the actual count, not the threshold. */
+  triggerCount: number;
+  /** Window the trigger was counted in, in ms. Records the role's effective window at trip time. */
+  triggerWindowMs: number;
+  /** Configured threshold at trip time (so audit reads cleanly even if the role's threshold changes later). */
+  triggerThreshold: number;
+  /** Chit ids of the silent-exit kinks that triggered the trip. `cc-cli chit list --depends-on <trip-id>` returns the failure history in one query. */
+  recentSilentexitKinks: string[];
+  /** Last N spawn timestamps before the trip. Forensic context — was this a cold loop, or a slot that worked then started failing? */
+  spawnHistory: string[];
+  /** Free-form prose. The detector writes a default summary; founder reset adds context. */
+  reason: string;
+  /** Set when chit.status flips to 'cleared' — who reset, when, why. */
+  clearedAt?: string;
+  clearedBy?: string;
+  clearReason?: string;
+}
+```
 
-**File paths:**
-- `packages/daemon/src/watchdog/budget.ts` (new — per-role rate limiter + tracker)
-- `packages/daemon/src/watchdog/circuit-breaker.ts` (new — crash-loop detection + breaker chit)
-- `packages/shared/src/roles.ts` (extend RoleEntry with optional `dispatchBudgetPerHour?`)
-- `packages/cli/src/commands/costs.ts` (new — observability view, optional)
+Lifecycle: `active` (just tripped, refusing spawns) → `cleared` (founder reset) → terminal. Non-ephemeral; never ages out — a stale trip surviving for weeks is a feature (the founder needs to see it), not a bug. Stored at corp scope (`<corpRoot>/chits/breaker-trip/breaker-t-<hex>.md`). One active trip per slug at a time; `tripBreaker` is idempotent and bumps `triggerCount` + appends to `recentSilentexitKinks` on re-trigger.
 
-**Test strategy:**
-- Unit: budget tracker accepts N dispatches, rejects N+1, resets on hour boundary.
-- Unit: circuit breaker trips after 3 silent-exits in 5 min, stays tripped across simulated daemon restart.
-- Integration: simulate a crash-loop in a test corp; verify Sexton pauses the slot within 2 cycles and posts Tier 3 to founder.
-- Regression: non-crashing agents don't trip the breaker.
+#### Detection — pull-based on silentexit sweeper
 
-**Depends on:** 1.1 (Employee kind for role scoping), 1.9 (Sexton dispatches the pause + escalation from her patrol)
-**PRs:** 2-3
+The breaker detector runs as a hook inside the silentexit sweeper's run, NOT as a separate sweeper. Reasoning: the silentexit sweeper is the canonical source of "this slot just died" findings; running detection inline keeps the trigger and the data source coupled. Detection logic:
+
+1. After silentexit sweeper finishes its pass, for each slug it observed dying this round:
+   - Query `cc-cli chit list --type kink --status active --created-by sweeper:silentexit --subject <slug>` filtered to the last `triggerWindowMs`.
+   - If count ≥ threshold: call `tripBreaker(corpRoot, { slug, kinks, ... })`.
+2. Threshold + window resolved per-role:
+   - `RoleEntry.crashLoopThreshold?: number` — default 3.
+   - `RoleEntry.crashLoopWindowMs?: number` — default 5 * 60 * 1000.
+   - Worker-tier roles can tune; partners-by-decree typically inherit defaults but can also override.
+
+Pull-based means the daemon-restart edge case is automatic — kink chits persist on disk, on next sweeper run the detector recomputes the count, trips appropriately. No in-memory counter to lose.
+
+#### Refusal — layered at every spawn site
+
+Three call sites need the check:
+
+1. **`ProcessManager.spawnAgent(memberId)`** — pre-spawn check. Reads `findActiveBreaker(corpRoot, memberId)`; if present, throws a typed `BreakerTrippedError` with the trip chit id in the message. Caller (silentexit sweeper / bacteria executor) catches and skips cleanly without crashing the patrol cycle.
+2. **silentexit sweeper's respawn path** — pre-respawn check inside the sweeper. If breaker is tripped, log `[silentexit] breaker tripped for <slug>, skipping respawn` and don't increment retry. The slot stays in members.json (the sweeper doesn't fire it), but no spawn is attempted.
+3. **Bacteria's `pickFreshSlug`** — when generating a fresh 2-letter suffix for a new mitose, the candidate must NOT collide with any active breaker's slug. Add tripped slugs to the avoid-set alongside the existing taken-slug set. Rare collision case (recycled name happens to land on a tripped slug) but real.
+
+Bacteria's apoptose path doesn't need the check — apoptose is removing a slot, not spawning one. The breaker-trip chit gets auto-cleaned (see "Auto-cleanup" below) when the slot is fully removed.
+
+#### Surfacing — three layers
+
+1. **Tier-3 inbox-item** to founder on every fresh trip:
+   ```
+   Subject: Crash-loop breaker tripped: <slug>
+   Body: Agent <slug> silent-exited <count>× in <window> min — paused.
+         Reset with `cc-cli breaker reset --slug <slug>`
+         or fire the slot with `cc-cli fire --remove --slug <slug>`.
+         Forensic context: cc-cli chit read <trip-id>
+   ```
+
+2. **Sexton wake prompts** (start + wake, not nudge) gain a "Active breaker trips" section that lists currently-active trips with their `triggerCount` and `trippedAt`. Sexton compounds these into prose for the founder during her patrol — *"backend-engineer-toast and qa-engineer-shadow are tripped. Toast started looping after task chit-t-abc; shadow's loop pattern looks like a flaky harness."* Bacteria stays mute; Sexton gives the trips a voice.
+
+3. **TUI sidebar** — tripped slots get a distinct `broken` status icon (lookup added to `STATUS` in theme.ts). Per-role rollup includes a tripped count: *"Backend Engineer: 3 active, 1 tripped, gens 0-4."*
+
+#### Founder controls — `cc-cli breaker`
+
+New CLI command group at `packages/cli/src/commands/breaker.ts` mirroring the bacteria/sweeper subcommand pattern:
+
+- **`cc-cli breaker list [--role <id>] [--include-cleared] [--json]`**
+  Lists active trips by default; `--include-cleared` includes historical ones for audit. Shows: slug, role, trippedAt, triggerCount, recent kink refs.
+
+- **`cc-cli breaker reset --slug <slug> [--reason "..."] [--json]`**
+  Closes the active trip chit. Subsequent `processManager.spawnAgent` calls go through normally. Bacteria's slug-collision avoidance stops blocking the slug. Records `clearedBy=founder`, `clearedAt=now`, `clearReason=opts.reason`.
+
+- **`cc-cli breaker show <slug-or-trip-id> [--json]`**
+  Detailed view of one trip — full forensic context, all referenced silent-exit kinks, spawn history.
+
+#### Auto-cleanup — orphan trip on slot removal
+
+When a slot is removed via `cc-cli fire --remove` or `cc-cli bacteria evict`, any active breaker-trip for that slug should also close. Otherwise an orphaned trip blocks the slug from being reused by bacteria's recycle pool, and clutters `cc-cli breaker list`. The fire and evict paths both need a one-line `closeBreakerForSlug(corpRoot, slug, 'slot removed')` call after the Member is removed.
+
+#### Robustness — the over-engineering pass
+
+Beyond the spec basics, the v1 robustness fence:
+
+- **Cross-restart trip persistence.** Trips are chits on disk; daemon restart re-reads them on next spawn-time check. No in-memory state to lose.
+- **Corrupted breaker chit fails open.** If the trip chit is malformed (parser fail), the spawn-time check returns "no active trip" rather than throwing. Rationale: a bad chit shouldn't permanently brick a slot — chit-hygiene sweeper will surface the corruption separately. Better to risk a missed trip than a silent permanent block.
+- **Concurrency.** Reactor mutex serializes bacteria's spawn path; CLI fire/evict and bacteria don't run concurrently because the daemon is single-process. Cross-process (e.g., founder runs `cc-cli breaker reset` while daemon is mid-tick) is fine — the reset commits to disk, the next spawn-time check reads the cleared state.
+- **Idempotency of trip writes.** `tripBreaker` looks up active trip for slug; if found, bumps `triggerCount` and appends to `recentSilentexitKinks` instead of creating a duplicate. No race even if multiple sweeper runs converge.
+- **Per-role threshold respects override at trip time, not check time.** The trip chit records the threshold + window AT TIME OF TRIP, so audit reads stay coherent even if the role's config changes mid-life.
+- **Sexton's wake summary mentions cleared-today trips, not just active.** Audit trail across the day; the founder sees both the active queue and what got resolved.
+- **Bacteria slug avoidance.** `pickFreshSlug` adds active-breaker slugs to its taken-set. The retry budget (100 attempts, then 4-letter fallback) absorbs the case where a recycled suffix collides; in practice, impact is invisible (one extra random retry).
+
+#### File paths
+
+- `packages/shared/src/types/chit.ts` — `BreakerTripFields` interface.
+- `packages/shared/src/chit-types.ts` — registry entry: type id `breaker-trip`, idPrefix `bt`, scope `corp`, ephemeral=false, lifecycle `active → cleared → terminal`.
+- `packages/shared/src/bacteria-breaker.ts` — read/write helpers: `tripBreaker`, `findActiveBreaker`, `closeBreakerForSlug`, `listActiveBreakers`. Pure file-first; no daemon dependency.
+- `packages/daemon/src/continuity/sweepers/silentexit.ts` — detection hook (compute count, trip on threshold) + respawn refusal (skip when breaker active).
+- `packages/daemon/src/process-manager.ts` — `BreakerTrippedError` class + pre-spawn check in `spawnAgent`.
+- `packages/daemon/src/bacteria/executor.ts` — `pickFreshSlug` adds tripped slugs to the avoid-set.
+- `packages/daemon/src/api.ts` — fire endpoint calls `closeBreakerForSlug` post-removal (auto-cleanup).
+- `packages/cli/src/commands/bacteria/evict.ts` — also calls `closeBreakerForSlug` post-removal.
+- `packages/cli/src/commands/breaker.ts` — top-level CLI group: list / reset / show.
+- `packages/cli/src/commands/breaker/list.ts`, `reset.ts`, `show.ts` — subcommand handlers.
+- `packages/cli/src/index.ts` — dispatch + help text entry.
+- `packages/daemon/src/continuity/sexton-wake-prompts.ts` — "Active breaker trips" section in `composePoolActivitySection` (or a parallel composer).
+- `packages/tui/src/components/member-sidebar.tsx` — tripped status icon + per-role rollup includes tripped count.
+- `packages/shared/src/themes.ts` — add `broken` STATUS entry if not already present.
+- `packages/shared/src/roles.ts` — `RoleEntry.crashLoopThreshold?` + `crashLoopWindowMs?` optional fields.
+
+#### Test strategy
+
+- Unit (`bacteria-breaker.ts`): trip writes a chit with the right shape; second trip on same slug bumps existing instead of creating duplicate; close flips status to cleared with timestamps; list returns only active by default.
+- Unit (silentexit detector): 3 silent-exit kinks in 5min trip; 3 in 6min don't; per-role threshold override honored.
+- Integration (process-manager): spawn refuses with `BreakerTrippedError` when active trip exists for the slug.
+- Integration (silentexit respawn): when breaker active, sweeper logs + skips, doesn't call spawnAgent.
+- Integration (bacteria slug avoidance): `pickFreshSlug` retries past tripped slug.
+- Integration (cross-restart): write a trip chit, simulate restart by re-reading from fresh process — spawn still refused.
+- Integration (auto-cleanup): fire-remove + evict both close orphan trips.
+- Edge: corrupted breaker chit at the trip path → fail-open, slot can spawn (chit-hygiene flags the corruption separately).
+- Regression: non-crashing agents don't trip; agents whose silent-exits are spread > 5min apart don't trip.
+- CLI: `breaker list` filters by --role; `breaker reset` requires --slug; `breaker show` returns full forensic context.
+
+#### Commit plan (~12 commits, ~700-900 LOC incl. tests)
+
+Substrate first, consumers second, tests at end:
+
+1. `feat(1.11): breaker-trip chit type + BreakerTripFields` (shared)
+2. `feat(1.11): bacteria-breaker helpers — trip / find / close / list` (shared)
+3. `feat(1.11): RoleEntry crashLoopThreshold + crashLoopWindowMs` (shared, schema-only)
+4. `feat(1.11): silentexit sweeper hooks the detector` (daemon)
+5. `feat(1.11): processManager.spawnAgent refuses on active breaker` (daemon)
+6. `feat(1.11): silentexit sweeper skips respawn when breaker active` (daemon)
+7. `feat(1.11): bacteria pickFreshSlug avoids tripped slugs` (daemon)
+8. `feat(1.11): Tier-3 inbox emission on trip` (daemon)
+9. `feat(1.11): cc-cli breaker list / reset / show` (cli)
+10. `feat(1.11): Sexton wake prompt — active breaker trips section` (daemon)
+11. `feat(1.11): TUI sidebar tripped-status icon + per-role rollup` (tui)
+12. `feat(1.11): auto-cleanup on fire/evict` (daemon api + cli evict)
+13. `test(1.11): substrate + helpers` (shared tests)
+14. `test(1.11): detection + refusal + cross-restart` (daemon tests)
+15. `test(1.11): CLI breaker commands` (cli tests)
+
+Codex round expected. Pattern same as PRs #182-186.
+
+**Depends on:** 1.1 (Employee kind for role scoping), 1.9 (silentexit sweeper as the detector source), 1.10 (bacteria slug-avoidance integration).
+**PRs:** 1 (single beefy PR matching 1.10's shape).
 
 ### 1.12 — Shipping: the merge lane + janitor Employees **[pending]**
 
