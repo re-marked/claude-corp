@@ -283,49 +283,62 @@ export function renderNamingBody(input: RenameNamingBodyInput): string {
   ].join('\n');
 }
 
-function handleRename(
-  corpRoot: string,
+/**
+ * Pure eligibility + uniqueness check for a rename request. Split out
+ * of handleRename so unit tests can hit every rejection path without
+ * mocking process.exit. Returns a discriminated result; callers run
+ * `fail()` on `!ok` and proceed otherwise.
+ */
+export type RenameEligibilityResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+export function checkRenameEligibility(
   member: Member,
   newName: string,
-  asJson: boolean,
-): void {
-  // Eligibility — only bacteria-spawned Employees with displayName
-  // still equal to their id can self-name. Once renamed, the path
-  // locks: a second rename would be amending an established identity,
-  // which isn't what this command is for.
+  allMembers: readonly Member[],
+): RenameEligibilityResult {
   if (member.type !== 'agent') {
-    fail(`whoami rename: only agents can rename — "${member.id}" is type=${member.type}`);
+    return {
+      ok: false,
+      error: `only agents can rename — "${member.id}" is type=${member.type}`,
+    };
   }
   const kind = member.kind ?? 'partner';
   if (kind !== 'employee') {
-    fail(
-      `whoami rename: only Employees can self-name — "${member.id}" is kind=partner. ` +
+    return {
+      ok: false,
+      error:
+        `only Employees can self-name — "${member.id}" is kind=partner. ` +
         `Partners are founder-named; renaming an established Partner is out of scope here.`,
-    );
+    };
   }
   if (member.status !== 'active') {
-    fail(`whoami rename: member "${member.id}" is status=${member.status}, not active`);
+    return {
+      ok: false,
+      error: `member "${member.id}" is status=${member.status}, not active`,
+    };
   }
   if (member.displayName !== member.id) {
-    fail(
-      `whoami rename: "${member.id}" already has displayName "${member.displayName}". ` +
+    return {
+      ok: false,
+      error:
+        `"${member.id}" already has displayName "${member.displayName}". ` +
         `Self-naming is one-shot — only bacteria-spawned slots with displayName === id qualify.`,
-    );
+    };
   }
-
-  // Shape.
   const shapeErr = validateRenameName(newName);
-  if (shapeErr) fail(`whoami rename: ${shapeErr}`);
-
-  if (!member.role) {
-    fail(
-      `whoami rename: "${member.id}" has no role registered — uniqueness check can't run. ` +
-        `This is unexpected for a bacteria-spawned slot; check the Member record.`,
-    );
+  if (shapeErr) {
+    return { ok: false, error: shapeErr };
   }
-
-  // Role-scoped uniqueness across active siblings.
-  const allMembers = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  if (!member.role) {
+    return {
+      ok: false,
+      error:
+        `"${member.id}" has no role registered — uniqueness check can't run. ` +
+        `This is unexpected for a bacteria-spawned slot; check the Member record.`,
+    };
+  }
   const conflict = allMembers.find(
     (m) =>
       m.id !== member.id &&
@@ -335,10 +348,26 @@ function handleRename(
       m.displayName === newName,
   );
   if (conflict) {
-    fail(
-      `whoami rename: another active ${member.role} already holds displayName "${newName}" ` +
+    return {
+      ok: false,
+      error:
+        `another active ${member.role} already holds displayName "${newName}" ` +
         `(slot ${conflict.id}). Pick something else — names within a role are unique.`,
-    );
+    };
+  }
+  return { ok: true };
+}
+
+function handleRename(
+  corpRoot: string,
+  member: Member,
+  newName: string,
+  asJson: boolean,
+): void {
+  const allMembers = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  const eligibility = checkRenameEligibility(member, newName, allMembers);
+  if (!eligibility.ok) {
+    fail(`whoami rename: ${eligibility.error}`);
   }
 
   // Write the new displayName.

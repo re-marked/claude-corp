@@ -7,6 +7,7 @@ import {
   formatHuman,
   validateRenameName,
   renderNamingBody,
+  checkRenameEligibility,
 } from '../packages/cli/src/commands/whoami.js';
 import {
   createChit,
@@ -271,6 +272,110 @@ describe('whoami', () => {
     ['x'.repeat(31), 'too long (31 chars)'],
   ])('validateRenameName rejects %s (%s)', (name) => {
     expect(validateRenameName(name)).not.toBeNull();
+  });
+
+  // ─── Rename: eligibility check (every rejection path) ────────────
+
+  function makeFreshSlot(overrides: Partial<Member> = {}): Member {
+    return makeMember({
+      id: 'backend-engineer-ab',
+      displayName: 'backend-engineer-ab', // self-naming pending
+      kind: 'employee',
+      role: 'backend-engineer',
+      status: 'active',
+      type: 'agent',
+      ...overrides,
+    });
+  }
+
+  it('checkRenameEligibility accepts a fresh Employee with valid name', () => {
+    const member = makeFreshSlot();
+    expect(checkRenameEligibility(member, 'Toast', [member])).toEqual({ ok: true });
+  });
+
+  it('rejects User type members', () => {
+    const member = makeFreshSlot({ type: 'user', kind: undefined });
+    const r = checkRenameEligibility(member, 'Toast', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/type=user/);
+  });
+
+  it('rejects Partners (kind=partner)', () => {
+    const member = makeFreshSlot({ kind: 'partner' });
+    const r = checkRenameEligibility(member, 'Toast', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/only Employees/);
+  });
+
+  it('rejects archived / non-active members', () => {
+    const member = makeFreshSlot({ status: 'archived' });
+    const r = checkRenameEligibility(member, 'Toast', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/status=archived/);
+  });
+
+  it('rejects already-named slots (displayName !== id)', () => {
+    const member = makeFreshSlot({ displayName: 'Toast' });
+    const r = checkRenameEligibility(member, 'Shadow', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/already has displayName/);
+  });
+
+  it('rejects bad-shape names', () => {
+    const member = makeFreshSlot();
+    const r = checkRenameEligibility(member, 'Toast Pancakes', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/doesn't match the name shape/);
+  });
+
+  it('rejects when slot has no role registered', () => {
+    const member = makeFreshSlot({ role: undefined });
+    const r = checkRenameEligibility(member, 'Toast', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/no role registered/);
+  });
+
+  it('rejects when an active sibling already holds the chosen name', () => {
+    const me = makeFreshSlot({ id: 'backend-engineer-ab' });
+    const sibling = makeMember({
+      id: 'backend-engineer-cd',
+      displayName: 'Toast', // already taken
+      kind: 'employee',
+      role: 'backend-engineer',
+      status: 'active',
+    });
+    const r = checkRenameEligibility(me, 'Toast', [me, sibling]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/already holds displayName "Toast"/);
+      expect(r.error).toMatch(/backend-engineer-cd/);
+    }
+  });
+
+  it('allows the same name held by an archived sibling (only active siblings reserve)', () => {
+    const me = makeFreshSlot({ id: 'backend-engineer-ab' });
+    const archivedSibling = makeMember({
+      id: 'backend-engineer-cd',
+      displayName: 'Toast',
+      kind: 'employee',
+      role: 'backend-engineer',
+      status: 'archived',
+    });
+    const r = checkRenameEligibility(me, 'Toast', [me, archivedSibling]);
+    expect(r).toEqual({ ok: true });
+  });
+
+  it('allows the same name held in a different role pool', () => {
+    const me = makeFreshSlot({ id: 'backend-engineer-ab' });
+    const otherRoleSibling = makeMember({
+      id: 'qa-engineer-cd',
+      displayName: 'Toast',
+      kind: 'employee',
+      role: 'qa-engineer',
+      status: 'active',
+    });
+    const r = checkRenameEligibility(me, 'Toast', [me, otherRoleSibling]);
+    expect(r).toEqual({ ok: true });
   });
 
   // ─── Rename: naming observation body ──────────────────────────────
