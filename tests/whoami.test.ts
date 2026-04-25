@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import {
   buildWhoamiResult,
   formatHuman,
+  validateRenameName,
+  renderNamingBody,
+  checkRenameEligibility,
 } from '../packages/cli/src/commands/whoami.js';
 import {
   createChit,
@@ -241,6 +244,178 @@ describe('whoami', () => {
     const r = buildWhoamiResult(corpRoot, member);
     expect(r.casket?.currentStep).toBe(fakeChitId);
     expect(r.casket?.title).toBeNull();
+  });
+
+  // ─── Rename: name-shape validator ─────────────────────────────────
+
+  it.each([
+    'Toast',
+    'Shadow',
+    'Copper',
+    'Soot',
+    'Aluminum-67',
+    'snake_case',
+    'A1',
+    'Whetstone',
+  ])('validateRenameName accepts %s', (name) => {
+    expect(validateRenameName(name)).toBeNull();
+  });
+
+  it.each([
+    ['', 'empty string'],
+    ['T', 'too short'],
+    ['Toast Pancakes', 'multi-word'],
+    ['1Toast', 'starts with digit'],
+    ['-Toast', 'starts with hyphen'],
+    ['Toast!', 'special char'],
+    ['Toast Toast', 'whitespace'],
+    ['x'.repeat(31), 'too long (31 chars)'],
+  ])('validateRenameName rejects %s (%s)', (name) => {
+    expect(validateRenameName(name)).not.toBeNull();
+  });
+
+  // ─── Rename: eligibility check (every rejection path) ────────────
+
+  function makeFreshSlot(overrides: Partial<Member> = {}): Member {
+    return makeMember({
+      id: 'backend-engineer-ab',
+      displayName: 'backend-engineer-ab', // self-naming pending
+      kind: 'employee',
+      role: 'backend-engineer',
+      status: 'active',
+      type: 'agent',
+      ...overrides,
+    });
+  }
+
+  it('checkRenameEligibility accepts a fresh Employee with valid name', () => {
+    const member = makeFreshSlot();
+    expect(checkRenameEligibility(member, 'Toast', [member])).toEqual({ ok: true });
+  });
+
+  it('rejects User type members', () => {
+    const member = makeFreshSlot({ type: 'user', kind: undefined });
+    const r = checkRenameEligibility(member, 'Toast', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/type=user/);
+  });
+
+  it('rejects Partners (kind=partner)', () => {
+    const member = makeFreshSlot({ kind: 'partner' });
+    const r = checkRenameEligibility(member, 'Toast', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/only Employees/);
+  });
+
+  it('rejects archived / non-active members', () => {
+    const member = makeFreshSlot({ status: 'archived' });
+    const r = checkRenameEligibility(member, 'Toast', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/status=archived/);
+  });
+
+  it('rejects already-named slots (displayName !== id)', () => {
+    const member = makeFreshSlot({ displayName: 'Toast' });
+    const r = checkRenameEligibility(member, 'Shadow', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/already has displayName/);
+  });
+
+  it('rejects bad-shape names', () => {
+    const member = makeFreshSlot();
+    const r = checkRenameEligibility(member, 'Toast Pancakes', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/doesn't match the name shape/);
+  });
+
+  it('rejects when slot has no role registered', () => {
+    const member = makeFreshSlot({ role: undefined });
+    const r = checkRenameEligibility(member, 'Toast', [member]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/no role registered/);
+  });
+
+  it('rejects when an active sibling already holds the chosen name', () => {
+    const me = makeFreshSlot({ id: 'backend-engineer-ab' });
+    const sibling = makeMember({
+      id: 'backend-engineer-cd',
+      displayName: 'Toast', // already taken
+      kind: 'employee',
+      role: 'backend-engineer',
+      status: 'active',
+    });
+    const r = checkRenameEligibility(me, 'Toast', [me, sibling]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/already holds displayName "Toast"/);
+      expect(r.error).toMatch(/backend-engineer-cd/);
+    }
+  });
+
+  it('allows the same name held by an archived sibling (only active siblings reserve)', () => {
+    const me = makeFreshSlot({ id: 'backend-engineer-ab' });
+    const archivedSibling = makeMember({
+      id: 'backend-engineer-cd',
+      displayName: 'Toast',
+      kind: 'employee',
+      role: 'backend-engineer',
+      status: 'archived',
+    });
+    const r = checkRenameEligibility(me, 'Toast', [me, archivedSibling]);
+    expect(r).toEqual({ ok: true });
+  });
+
+  it('rejects renaming to the slug itself (Codex P2 — would break self-cancel)', () => {
+    const me = makeFreshSlot({ id: 'backend-engineer-ab' });
+    const r = checkRenameEligibility(me, 'backend-engineer-ab', [me]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/your slug/);
+  });
+
+  it('allows the same name held in a different role pool', () => {
+    const me = makeFreshSlot({ id: 'backend-engineer-ab' });
+    const otherRoleSibling = makeMember({
+      id: 'qa-engineer-cd',
+      displayName: 'Toast',
+      kind: 'employee',
+      role: 'qa-engineer',
+      status: 'active',
+    });
+    const r = checkRenameEligibility(me, 'Toast', [me, otherRoleSibling]);
+    expect(r).toEqual({ ok: true });
+  });
+
+  // ─── Rename: naming observation body ──────────────────────────────
+
+  it('renderNamingBody includes the welcome line + lifecycle metadata', () => {
+    const body = renderNamingBody({
+      slug: 'backend-engineer-ab',
+      chosenName: 'Toast',
+      role: 'backend-engineer',
+      parentSlot: 'backend-engineer-bd',
+      generation: 3,
+      bornAt: '2026-04-25T15:30:00.000Z',
+    });
+    expect(body).toContain('[backend-engineer-ab] is now Toast.');
+    expect(body).toContain('born:        2026-04-25T15:30:00.000Z');
+    expect(body).toContain('parent:      backend-engineer-bd');
+    expect(body).toContain('generation:  3');
+    expect(body).toContain('role:        backend-engineer');
+    expect(body).toContain('Welcome, Toast.');
+  });
+
+  it('renderNamingBody handles gen-0 first-of-lineage slot', () => {
+    const body = renderNamingBody({
+      slug: 'backend-engineer-aa',
+      chosenName: 'Whetstone',
+      role: 'backend-engineer',
+      parentSlot: null,
+      generation: 0,
+      bornAt: '2026-04-25T10:00:00.000Z',
+    });
+    expect(body).toContain('parent:      none (first of lineage)');
+    expect(body).toContain('generation:  0');
+    expect(body).toContain('Welcome, Whetstone.');
   });
 
   it('formatHuman: User shape is minimal (no casket / kind / role lines)', () => {

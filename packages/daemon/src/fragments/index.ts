@@ -12,6 +12,7 @@ import { inboxFragment } from './inbox.js';
 import { autoemonFragment } from './autoemon.js';
 import { cultureFragment } from './culture.js';
 import { preCompactSignalFragment } from './pre-compact-signal.js';
+import { selfNamingFragment } from './self-naming.js';
 
 const FRAGMENTS: Fragment[] = [
   autoemonFragment,
@@ -21,6 +22,7 @@ const FRAGMENTS: Fragment[] = [
   contextFragment,
   historyFragment,
   preCompactSignalFragment,
+  selfNamingFragment,
 ].sort((a, b) => a.order - b.order);
 
 /**
