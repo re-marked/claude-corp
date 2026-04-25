@@ -140,6 +140,104 @@ describe('bacteria lineage', () => {
     expect(out).toContain('1 apoptosed');
   });
 
+  // ─── Codex P3 regression: recycled slugs preserve distinct lifecycles ─
+
+  it('recycled slug produces TWO nodes — does not collapse history', () => {
+    // Slot is born, dies, slot reborn with same slug (bacteria recycles
+    // 2-letter suffixes). Both lifecycles must render as distinct nodes.
+    const events: BacteriaEvent[] = [
+      mitose('backend-engineer-aa', null, 0),
+      apoptose('backend-engineer-aa', null, 1_800_000),
+      // Same slug, born again later (event ts overrides earlier mitose).
+      {
+        ...mitose('backend-engineer-aa', null, 0),
+        ts: '2026-04-25T15:00:00.000Z',
+      },
+    ];
+    const members: Member[] = [
+      // The second lifecycle is alive in members.json.
+      member({ id: 'backend-engineer-aa' }),
+    ];
+    const nodes = buildLineageNodes('backend-engineer', members, events);
+    expect(nodes).toHaveLength(2);
+
+    // First lifecycle: born early, apoptosed.
+    const dead = nodes.find((n) => n.bornAt === '2026-04-25T10:00:00.000Z');
+    expect(dead).toBeDefined();
+    expect(dead?.alive).toBe(false);
+    expect(dead?.apoptosedAt).toBe('2026-04-25T11:00:00.000Z');
+    expect(dead?.displayName).toBe('Toast');
+
+    // Second lifecycle: born later, alive.
+    const alive = nodes.find((n) => n.bornAt === '2026-04-25T15:00:00.000Z');
+    expect(alive).toBeDefined();
+    expect(alive?.alive).toBe(true);
+    expect(alive?.apoptosedAt).toBeNull();
+
+    // lifecycleId differs between the two — that's how the renderer
+    // links children to the correct ancestor.
+    expect(dead?.lifecycleId).not.toBe(alive?.lifecycleId);
+  });
+
+  it('children of recycled-slug parent link to the correct lifecycle by birth time', () => {
+    // Parent born → child A born under it → parent apoptoses → parent
+    // reborn with same slug → child B born under the new lifecycle.
+    // Each child must point to the lifecycle alive at its birth.
+    const events: BacteriaEvent[] = [
+      // First parent lifecycle
+      {
+        ...mitose('backend-engineer-aa', null, 0),
+        ts: '2026-04-25T08:00:00.000Z',
+      },
+      // Child A born under first parent
+      {
+        ...mitose('backend-engineer-bb', 'backend-engineer-aa', 1),
+        ts: '2026-04-25T09:00:00.000Z',
+      },
+      // First parent apoptoses
+      {
+        ...apoptose('backend-engineer-aa', null, 3_600_000),
+        ts: '2026-04-25T11:00:00.000Z',
+      },
+      // Same slug, second lifecycle starts
+      {
+        ...mitose('backend-engineer-aa', null, 0),
+        ts: '2026-04-25T13:00:00.000Z',
+      },
+      // Child C born under second parent
+      {
+        ...mitose('backend-engineer-cc', 'backend-engineer-aa', 1),
+        ts: '2026-04-25T14:00:00.000Z',
+      },
+    ];
+    const nodes = buildLineageNodes('backend-engineer', [], events);
+    const out = formatLineageTree('Backend Engineer', 'backend-engineer', nodes);
+
+    // Tree should have TWO roots (the two `aa` lifecycles), each with
+    // its own child. Without the P3 fix both children would lump
+    // under whichever `aa` won the slug-keyed map.
+    expect(out).toContain('backend-engineer-bb');
+    expect(out).toContain('backend-engineer-cc');
+
+    // Both lifecycles render. First (apoptosed) shows by its chosen
+    // name 'Toast'; second (unnamed) shows by raw slug. Two distinct
+    // identities present means both ancestors survived the per-lifecycle
+    // build pass.
+    expect(out).toContain('Toast (');
+    expect(out).toMatch(/^backend-engineer-aa /m);
+
+    // Each child is linked to a DIFFERENT parent lifecycle. Verify by
+    // counting that bb and cc both appear under their respective
+    // roots — each child appears exactly once and follows ONE root.
+    const bbIdx = out.indexOf('backend-engineer-bb');
+    const ccIdx = out.indexOf('backend-engineer-cc');
+    const toastIdx = out.indexOf('Toast (');
+    const aaUnnamedIdx = out.search(/^backend-engineer-aa /m);
+    // bb sits under Toast (first root); cc sits under the unnamed aa.
+    expect(toastIdx).toBeLessThan(bbIdx);
+    expect(aaUnnamedIdx).toBeLessThan(ccIdx);
+  });
+
   it('renders parent → child structure with branch glyphs', () => {
     const events: BacteriaEvent[] = [
       mitose('backend-engineer-aa', null, 0),

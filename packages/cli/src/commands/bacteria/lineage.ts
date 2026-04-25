@@ -34,6 +34,15 @@ interface LineageOpts {
 }
 
 interface LineageNode {
+  /**
+   * Per-lifecycle identity — bacteria recycles 2-letter slugs after
+   * apoptosis, so a long-running pool can have multiple distinct
+   * lifecycles sharing a slug. lifecycleId disambiguates them in
+   * the tree (parent edges resolve to specific lifecycles, not just
+   * slugs). Format: `${slug}@${bornAt}` for event-borne nodes,
+   * `${slug}#hire` for direct-hire nodes (no mitose event).
+   */
+  lifecycleId: string;
   slug: string;
   displayName: string | null;
   generation: number;
@@ -47,6 +56,11 @@ interface LineageNode {
   directHire: boolean;
   /** Currently exists in members.json. */
   alive: boolean;
+}
+
+function makeLifecycleId(slug: string, bornAt: string | null, suffix?: string): string {
+  if (suffix) return `${slug}#${suffix}`;
+  return bornAt ? `${slug}@${bornAt}` : `${slug}#unknown`;
 }
 
 export async function cmdBacteriaLineage(rawArgs: string[]): Promise<void> {
@@ -86,68 +100,112 @@ export function buildLineageNodes(
   members: readonly Member[],
   events: readonly BacteriaEvent[],
 ): LineageNode[] {
-  const aliveSet = new Set(
-    members
-      .filter(
-        (m) =>
-          m.type === 'agent' &&
-          m.status !== 'archived' &&
-          m.role === roleId &&
-          (m.kind ?? 'partner') === 'employee',
-      )
-      .map((m) => m.id),
-  );
-  const memberById = new Map(members.map((m) => [m.id, m]));
+  // Per-lifecycle node construction (Codex P3 fix). Bacteria recycles
+  // 2-letter slugs after apoptosis, so the SAME slug can have
+  // multiple distinct lifecycles in a long-running pool. We walk
+  // events sequentially: each mitose opens a new lifecycle node;
+  // the next apoptose for that slug closes it. After close, the
+  // slug is "free" and a subsequent mitose starts a NEW node — never
+  // overwrites the closed one.
+  const allNodes: LineageNode[] = [];
+  const openBySlug = new Map<string, LineageNode>();
 
-  const mitoseBySlug = new Map<string, MitoseEvent>();
-  const apoptoseBySlug = new Map<string, ApoptoseEvent>();
   for (const e of events) {
-    if (e.kind === 'mitose') mitoseBySlug.set(e.slug, e);
-    else apoptoseBySlug.set(e.slug, e);
+    if (e.kind === 'mitose') {
+      const node: LineageNode = {
+        lifecycleId: makeLifecycleId(e.slug, e.ts),
+        slug: e.slug,
+        displayName: null,
+        generation: e.generation,
+        parentSlug: e.parentSlug,
+        bornAt: e.ts,
+        apoptosedAt: null,
+        lifetimeMs: null,
+        tasksCompleted: null,
+        directHire: false,
+        alive: false,
+      };
+      // If a prior open lifecycle for this slug exists (mitose without
+      // a matching apoptose — log corruption / lost rotation), the new
+      // mitose displaces it; the old one stays in the array as
+      // "ancestral, no apoptose event seen."
+      openBySlug.set(e.slug, node);
+      allNodes.push(node);
+    } else {
+      const open = openBySlug.get(e.slug);
+      if (open && !open.apoptosedAt) {
+        // Close the matching open lifecycle.
+        open.apoptosedAt = e.ts;
+        open.lifetimeMs = e.lifetimeMs;
+        open.tasksCompleted = e.tasksCompleted;
+        open.displayName = e.chosenName;
+        openBySlug.delete(e.slug);
+      } else {
+        // Apoptose without a matching mitose in the log — the
+        // ancestral mitose was rotated/lost. Stub a node carrying
+        // the apoptose payload so the death isn't silently swallowed.
+        allNodes.push({
+          lifecycleId: makeLifecycleId(e.slug, e.ts, `apoptose-${e.ts}`),
+          slug: e.slug,
+          displayName: e.chosenName,
+          generation: e.generation,
+          parentSlug: e.parentSlug,
+          bornAt: null,
+          apoptosedAt: e.ts,
+          lifetimeMs: e.lifetimeMs,
+          tasksCompleted: e.tasksCompleted,
+          directHire: false,
+          alive: false,
+        });
+      }
+    }
   }
 
-  // Every slug that ever appeared in the role's events OR currently
-  // lives in members.json gets a node.
-  const slugs = new Set<string>([
-    ...mitoseBySlug.keys(),
-    ...apoptoseBySlug.keys(),
-    ...aliveSet,
-  ]);
-
-  const nodes: LineageNode[] = [];
-  for (const slug of slugs) {
-    const mitose = mitoseBySlug.get(slug);
-    const apoptose = apoptoseBySlug.get(slug);
-    const member = memberById.get(slug);
-    const directHire = !mitose; // born without a mitose event = founder hire
-    const alive = aliveSet.has(slug);
-
-    const generation = mitose?.generation
-      ?? member?.generation
-      ?? 0;
-    const parentSlug = mitose?.parentSlug
-      ?? member?.parentSlot
-      ?? null;
-    const bornAt = mitose?.ts ?? member?.createdAt ?? null;
-
-    nodes.push({
-      slug,
-      displayName: apoptose?.chosenName
-        ?? (member?.displayName !== member?.id ? member?.displayName ?? null : null),
-      generation,
-      parentSlug,
-      bornAt,
-      apoptosedAt: apoptose?.ts ?? null,
-      lifetimeMs: apoptose?.lifetimeMs ?? null,
-      tasksCompleted: apoptose?.tasksCompleted ?? null,
-      directHire,
-      alive,
-    });
+  // Live members of the role: mark `alive: true` on the matching open
+  // lifecycle (if any), or stub a direct-hire node when no event exists.
+  // Pre-1.10 founder-hired slots fall into the direct-hire path.
+  const aliveMembers = members.filter(
+    (m) =>
+      m.type === 'agent' &&
+      m.status !== 'archived' &&
+      m.role === roleId &&
+      (m.kind ?? 'partner') === 'employee',
+  );
+  for (const member of aliveMembers) {
+    const open = openBySlug.get(member.id);
+    if (open) {
+      open.alive = true;
+      // Slot may have self-named after birth (PR 3 — `cc-cli whoami
+      // rename`). Pull the chosen name onto the lifecycle node so the
+      // tree displays it for alive slots, not just apoptosed ones.
+      if (member.displayName !== member.id) {
+        open.displayName = member.displayName;
+      }
+    } else {
+      // Direct hire / pre-bacteria slot — no mitose event explains
+      // its existence. Render as a root with the founder-hire marker.
+      allNodes.push({
+        lifecycleId: makeLifecycleId(member.id, member.createdAt, 'hire'),
+        slug: member.id,
+        displayName:
+          member.displayName !== member.id ? member.displayName : null,
+        generation: member.generation ?? 0,
+        parentSlug: member.parentSlot ?? null,
+        bornAt: member.createdAt,
+        apoptosedAt: null,
+        lifetimeMs: null,
+        tasksCompleted: null,
+        directHire: true,
+        alive: true,
+      });
+    }
   }
 
   // Sort by birth time so older roots come first (more readable trees).
-  nodes.sort((a, b) => (a.bornAt ?? '').localeCompare(b.bornAt ?? ''));
-  return nodes;
+  // Nodes without a bornAt (orphan apoptose stubs) sort to the start;
+  // they typically appear with a "(gone — no apoptose event)" marker.
+  allNodes.sort((a, b) => (a.bornAt ?? '').localeCompare(b.bornAt ?? ''));
+  return allNodes;
 }
 
 export function formatLineageTree(
@@ -159,12 +217,21 @@ export function formatLineageTree(
     return `${roleDisplayName} (${roleId}) — no lineage yet (pool has never spawned).`;
   }
 
-  // Index children by parent.
-  const childrenByParent = new Map<string | null, LineageNode[]>();
-  for (const n of nodes) {
-    const list = childrenByParent.get(n.parentSlug) ?? [];
-    list.push(n);
-    childrenByParent.set(n.parentSlug, list);
+  // Codex P3: link by lifecycleId, not slug. Same slug recycled
+  // produces multiple nodes; each child must point at the SPECIFIC
+  // lifecycle that was alive at the child's birth time, not all
+  // ancestors that ever held the slug.
+  //
+  // Strategy: for each node, find its parent lifecycle by walking
+  // candidate nodes with the matching slug and picking the one whose
+  // [bornAt, apoptosedAt) bracketed the child's bornAt. Falls back
+  // to most-recent-by-birth-time if no overlap (stubs without bornAt).
+  const childrenByParentLifecycle = new Map<string | null, LineageNode[]>();
+  for (const child of nodes) {
+    const parentLifecycleId = resolveParentLifecycleId(child, nodes);
+    const list = childrenByParentLifecycle.get(parentLifecycleId) ?? [];
+    list.push(child);
+    childrenByParentLifecycle.set(parentLifecycleId, list);
   }
 
   const aliveCount = nodes.filter((n) => n.alive).length;
@@ -175,25 +242,70 @@ export function formatLineageTree(
     '',
   ];
 
-  // Walk roots (parentSlug = null) and render each subtree. Visited
-  // set defends against cycles in a corrupted log.
+  // Roots: nodes with no resolvable parent lifecycle (parentSlug
+  // null OR no candidate matched). They render flush-left.
+  const roots = childrenByParentLifecycle.get(null) ?? [];
+
+  // Visited set keyed by lifecycleId so a cycle in the log doesn't
+  // recurse forever, and so distinct lifecycles sharing a slug both
+  // get visited.
   const visited = new Set<string>();
-  const roots = childrenByParent.get(null) ?? [];
-  // Some slugs reference a parentSlug that doesn't exist as a node
-  // (parent's events were rotated/lost). Treat them as roots too.
-  const knownSlugs = new Set(nodes.map((n) => n.slug));
-  for (const n of nodes) {
-    if (n.parentSlug !== null && !knownSlugs.has(n.parentSlug)) {
-      roots.push(n);
-    }
-  }
 
   for (let i = 0; i < roots.length; i++) {
     const isLast = i === roots.length - 1;
-    renderSubtree(lines, roots[i]!, '', isLast, true, childrenByParent, visited);
+    renderSubtree(lines, roots[i]!, '', isLast, true, childrenByParentLifecycle, visited);
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Find the parent lifecycle node for a child. Bacteria recycles 2-letter
+ * slugs after apoptosis, so a parentSlug like 'backend-engineer-aa' can
+ * match multiple historical lifecycles. Pick the one whose lifetime
+ * contained the child's bornAt; fall back to most-recent if no overlap.
+ *
+ * Returns the parent's lifecycleId, or null when the parent isn't
+ * resolvable (parentSlug missing, no matching lifecycle in the log).
+ */
+function resolveParentLifecycleId(
+  child: LineageNode,
+  allNodes: readonly LineageNode[],
+): string | null {
+  if (!child.parentSlug) return null;
+  const candidates = allNodes.filter((n) => n.slug === child.parentSlug);
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0]!.lifecycleId;
+
+  // Multiple candidates — pick the one whose [bornAt, apoptosedAt)
+  // bracketed the child's bornAt. This is the "parent was alive when
+  // child was born" rule, which is the only way bacteria writes the
+  // edge in normal flow.
+  if (child.bornAt) {
+    for (const c of candidates) {
+      if (!c.bornAt) continue;
+      const start = c.bornAt;
+      // Open-ended (alive) lifecycles use a sentinel that no real
+      // ISO timestamp can exceed.
+      const end = c.apoptosedAt ?? '9999-12-31T23:59:59.999Z';
+      if (child.bornAt >= start && child.bornAt < end) {
+        return c.lifecycleId;
+      }
+    }
+  }
+
+  // Fallback: most-recent candidate by bornAt. Used when child has
+  // no bornAt (orphan apoptose stub) or when no lifetime overlap is
+  // exact (clock skew, edge cases).
+  const earlierCandidates = [...candidates]
+    .filter((c) => c.bornAt !== null)
+    .sort((a, b) => (b.bornAt ?? '').localeCompare(a.bornAt ?? ''));
+  if (earlierCandidates.length > 0) return earlierCandidates[0]!.lifecycleId;
+
+  // No candidate has a bornAt either — return the first one for
+  // determinism. This is deeply anomalous state and the tree will
+  // reflect it as such.
+  return candidates[0]!.lifecycleId;
 }
 
 function renderSubtree(
@@ -202,14 +314,17 @@ function renderSubtree(
   prefix: string,
   isLast: boolean,
   isRoot: boolean,
-  childrenByParent: Map<string | null, LineageNode[]>,
+  childrenByParentLifecycle: Map<string | null, LineageNode[]>,
   visited: Set<string>,
 ): void {
-  if (visited.has(node.slug)) {
+  // Codex P3: cycle detection keyed by lifecycleId so distinct
+  // lifecycles sharing a slug both render. Per-slug visited would
+  // wrongly skip the second lifecycle.
+  if (visited.has(node.lifecycleId)) {
     out.push(`${prefix}${isRoot ? '' : isLast ? '└── ' : '├── '}${node.slug} (cycle in log — skipping)`);
     return;
   }
-  visited.add(node.slug);
+  visited.add(node.lifecycleId);
 
   // Roots render flush-left without a branch glyph; non-roots get
   // ├── (mid) or └── (last) under their parent's prefix.
@@ -220,15 +335,16 @@ function renderSubtree(
     out.push(`${prefix}${branch}${formatNode(node)}`);
   }
 
-  const children = childrenByParent.get(node.slug) ?? [];
-  // Children's prefix: roots → '', non-roots → my prefix + '│   ' or
-  // '    ' depending on whether I was the last sibling.
+  // Children: lookup by THIS node's lifecycleId, not slug. The P3
+  // builder pass already linked each child to a specific parent
+  // lifecycle via resolveParentLifecycleId.
+  const children = childrenByParentLifecycle.get(node.lifecycleId) ?? [];
   const childPrefix = isRoot
     ? ''
     : prefix + (isLast ? '    ' : '│   ');
   for (let i = 0; i < children.length; i++) {
     const childIsLast = i === children.length - 1;
-    renderSubtree(out, children[i]!, childPrefix, childIsLast, false, childrenByParent, visited);
+    renderSubtree(out, children[i]!, childPrefix, childIsLast, false, childrenByParentLifecycle, visited);
   }
 }
 
