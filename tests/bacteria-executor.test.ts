@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -141,6 +141,94 @@ describe('executeBacteriaActions', () => {
     expect(stubPM.spawnCalls).toEqual([m.id]);
   });
 
+  // Regression guard: Codex P1 review caught that a bacteria-spawned
+  // slot without a founder DM channel was stuck busy-but-never-woken
+  // because dispatchTaskToDm bails when no direct channel contains
+  // the assignee. This test pins the channel registration so future
+  // refactors can't silently drop it.
+  it('mitose creates a founder DM channel + adds slot to pool channels', async () => {
+    // Pre-populate founder + general channel so the registration paths
+    // both have something to bind to.
+    const founder: Member = {
+      id: 'mark',
+      displayName: 'Mark',
+      rank: 'owner',
+      status: 'active',
+      type: 'user',
+      scope: 'corp',
+      scopeId: '',
+      agentDir: null,
+      port: null,
+      spawnedBy: null,
+      createdAt: '2026-04-01T00:00:00.000Z',
+    };
+    writeFileSync(join(corpRoot, 'members.json'), JSON.stringify([founder]), 'utf-8');
+    const generalChannelId = 'channel-general';
+    writeFileSync(
+      join(corpRoot, 'channels.json'),
+      JSON.stringify([
+        {
+          id: generalChannelId,
+          name: 'general',
+          kind: 'broadcast',
+          scope: 'corp',
+          scopeId: 'test-corp',
+          teamId: null,
+          memberIds: ['mark'],
+          createdBy: 'mark',
+          path: 'channels/general/',
+          createdAt: '2026-04-01T00:00:00.000Z',
+        },
+      ]),
+      'utf-8',
+    );
+
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      createdBy: 'founder',
+      status: 'active',
+      fields: {
+        task: {
+          title: 'do the thing',
+          priority: 'normal',
+          assignee: 'backend-engineer',
+          workflowStatus: 'queued',
+          complexity: 'medium',
+        },
+      },
+    });
+
+    await executeBacteriaActions(ctx, [
+      {
+        kind: 'mitose',
+        role: 'backend-engineer',
+        parentSlug: null,
+        generation: 0,
+        assignedChit: task.id,
+      },
+    ]);
+
+    const members = JSON.parse(readFileSync(join(corpRoot, 'members.json'), 'utf-8')) as Member[];
+    const slug = members.find((m) => m.role === 'backend-engineer')?.id;
+    expect(slug).toBeTruthy();
+
+    const channels = JSON.parse(readFileSync(join(corpRoot, 'channels.json'), 'utf-8')) as Array<{
+      kind: string;
+      memberIds: string[];
+      id: string;
+    }>;
+    // Founder DM should now exist with both founder and the new slot.
+    const founderDm = channels.find(
+      (c) => c.kind === 'direct' && c.memberIds.includes('mark') && c.memberIds.includes(slug!),
+    );
+    expect(founderDm).toBeDefined();
+
+    // The slot should be added to the pre-existing general channel.
+    const general = channels.find((c) => c.id === generalChannelId);
+    expect(general?.memberIds).toContain(slug);
+  });
+
   it('mitose claims the assigned chit (assignee + workflowStatus rewrite)', async () => {
     const task = createChit(corpRoot, {
       type: 'task',
@@ -234,6 +322,52 @@ describe('executeBacteriaActions', () => {
 
     // stopAgent called.
     expect(stubPM.stopCalls).toEqual([slug]);
+  });
+
+  // Regression guard: Codex P2 review caught that the archive
+  // directory was named `.archived-<slug>-<YYYY-MM-DD>`, so a recycled
+  // slug re-apoptosing on the same date would collide on rename, and
+  // the catch block would silently rmSync the live workspace. The
+  // archive name now includes the full ISO timestamp (ms-precision)
+  // for guaranteed per-apoptosis uniqueness.
+  it('apoptose archive directory name carries a per-apoptosis timestamp', async () => {
+    const slug = 'backend-engineer-aa';
+    const member: Member = {
+      id: slug,
+      displayName: slug,
+      rank: 'worker',
+      status: 'active',
+      type: 'agent',
+      scope: 'corp',
+      scopeId: '',
+      agentDir: `agents/${slug}/`,
+      port: null,
+      spawnedBy: null,
+      createdAt: '2026-04-25T08:00:00.000Z',
+      kind: 'employee',
+      role: 'backend-engineer',
+    };
+    writeFileSync(join(corpRoot, 'members.json'), JSON.stringify([member]), 'utf-8');
+    mkdirSync(join(corpRoot, 'agents', slug), { recursive: true });
+
+    await executeBacteriaActions(ctx, [
+      {
+        kind: 'apoptose',
+        slug,
+        idleSince: '2026-04-25T09:30:00.000Z',
+        reason: 'queue drained, hysteresis elapsed',
+      },
+    ]);
+
+    const agentsDir = readdirSync(join(corpRoot, 'agents'));
+    const archived = agentsDir.find((d) => d.startsWith(`.archived-${slug}-`));
+    expect(archived).toBeDefined();
+    // Format pin: must NOT be just the date (`.archived-<slug>-YYYY-MM-DD`,
+    // 10 chars after the slug). The full ISO with replaced separators
+    // is `2026-04-25T09-30-00-000Z` shape — matches the regex below.
+    expect(archived!).toMatch(
+      /^\.archived-backend-engineer-aa-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/,
+    );
   });
 
   it('apoptose against a missing slug is idempotent (no throw, no failure)', async () => {
