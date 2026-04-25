@@ -272,6 +272,10 @@ export type {
   ReadBacteriaEventsOpts,
 } from './bacteria-events.js';
 
+// Project 1.10.4: founder-controlled bacteria pause registry. Decision
+// module skips paused roles. Tiny JSON at <corpRoot>/bacteria-paused.json.
+export { readPausedRoles, pauseRole, resumeRole } from './bacteria-paused.js';
+
 // Project 1.9.6: seed bundled built-in blueprint markdown files
 // into a fresh corp's chit store at init. Mirrors installDefaultSkills —
 // the bundled `blueprints/` dir ships with the package, seeded once
