@@ -299,18 +299,28 @@ function claimAssignedChit(
 }
 
 function stripFromChannels(corpRoot: string, slug: string): void {
-  const path = join(corpRoot, CHANNELS_JSON);
-  if (!existsSync(path)) return;
-  const channels = readConfig<Channel[]>(path);
-  let touched = false;
-  for (const ch of channels) {
-    const idx = ch.memberIds.indexOf(slug);
-    if (idx >= 0) {
-      ch.memberIds.splice(idx, 1);
-      touched = true;
+  // Wrapped: a corrupted channels.json or transient fs error here
+  // shouldn't abort apoptose AFTER the obituary was written. The
+  // worst case from a swallow is a stale memberId entry — a future
+  // chit-hygiene sweeper pass cleans it up.
+  try {
+    const path = join(corpRoot, CHANNELS_JSON);
+    if (!existsSync(path)) return;
+    const channels = readConfig<Channel[]>(path);
+    let touched = false;
+    for (const ch of channels) {
+      const idx = ch.memberIds.indexOf(slug);
+      if (idx >= 0) {
+        ch.memberIds.splice(idx, 1);
+        touched = true;
+      }
     }
+    if (touched) writeConfig(path, channels);
+  } catch (err) {
+    logError(
+      `[bacteria] stripFromChannels failed for ${slug} (apoptose continuing): ${(err as Error).message}`,
+    );
   }
-  if (touched) writeConfig(path, channels);
 }
 
 function archiveSandbox(corpRoot: string, member: Member): void {
