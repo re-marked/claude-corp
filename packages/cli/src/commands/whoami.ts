@@ -191,7 +191,7 @@ function parseOpts(rawArgs: string[]): WhoamiOpts {
       json: { type: 'boolean' },
     },
     allowPositionals: true,
-    strict: false,
+    strict: true,
   });
   return {
     agent: parsed.values.agent as string | undefined,
