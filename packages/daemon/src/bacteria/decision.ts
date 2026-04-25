@@ -63,6 +63,7 @@ import {
   queryChits,
   getCurrentStep,
   employeeRoles,
+  readPausedRoles,
   MEMBERS_JSON,
   type Member,
   type ChitWithBody,
@@ -110,9 +111,13 @@ export function decideBacteriaActions(opts: DecideOpts): DecideResult {
 
   const members = loadMembers(corpRoot);
   const allActiveTasks = loadActiveTaskChits(corpRoot);
+  // Project 1.10.4: founder-paused roles skip both mitose AND apoptose.
+  // Read once per tick — the file is tiny and the read is cheap.
+  const pausedRoles = readPausedRoles(corpRoot);
 
   for (const role of employeeRoles()) {
     if (role.tier !== 'worker') continue;
+    if (pausedRoles.has(role.id)) continue;
 
     // Per-role tuning (Project 1.10.4): RoleEntry can override the
     // global TARGET_WEIGHTED_PER_SLOT + APOPTOSIS_HYSTERESIS_MS
