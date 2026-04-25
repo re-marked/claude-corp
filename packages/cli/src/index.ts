@@ -127,6 +127,7 @@ Commands:
   migrate    Corp data migrations (migrate tasks: pre-chits Tasks → Chits)
   daemon     Daemon-level ops (daemon install-service: OS supervisor setup)
   sweeper    Code sweepers — Sexton's workers (sweeper run <name>)
+  bacteria   Auto-scaling Employee pool: status / lineage / pause / resume / evict
 
 Feedback pipeline:
   feedback                              Corp overview — pending, BRAIN, CULTURE candidates
@@ -248,6 +249,13 @@ async function run() {
       // chit/inbox — each subcommand owns its flags.
       const { cmdSweeper } = await import('./commands/sweeper.js');
       await cmdSweeper(process.argv.slice(3));
+      break;
+    }
+    case 'bacteria': {
+      // Project 1.10.4: auto-scaling Employee pool observability +
+      // control. Pass-through pattern same as sweeper/chit/inbox.
+      const { cmdBacteria } = await import('./commands/bacteria.js');
+      await cmdBacteria(process.argv.slice(3));
       break;
     }
     case 'tame': {
