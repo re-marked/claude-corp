@@ -1,11 +1,33 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   seedBuiltinBlueprints,
   queryChits,
+  parseFrontmatter,
 } from '../packages/shared/src/index.js';
+
+const BUNDLED_BLUEPRINTS_DIR = join(
+  __dirname,
+  '..',
+  'packages',
+  'shared',
+  'blueprints',
+);
+
+function findMarkdownFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      out.push(...findMarkdownFiles(full));
+    } else if (entry.endsWith('.md')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
 
 /**
  * seedBuiltinBlueprints is the load-bearing mechanism for 1.9.6 —
@@ -21,6 +43,29 @@ import {
  * path — if the test passes here, the same resolution works for
  * a user running `cc-cli init` against a real install.
  */
+
+/**
+ * Per-file frontmatter parse check. The seedBuiltinBlueprints catch-and-skip
+ * loop is fail-safe at runtime (one bad file shouldn't abort corp init), but
+ * that means a corrupted bundled file fails SILENTLY in production — fresh
+ * corps just have one fewer patrol than they should. The "exactly 3 land"
+ * assertion below catches the count, but doesn't tell you WHICH file broke
+ * or why. This per-file loop names the failing file at exactly the layer
+ * the bug lives. Codex caught the tab-indentation regression in chit-hygiene.md
+ * on PR #180; this test prevents the next one from sneaking through.
+ */
+describe('bundled blueprint markdown files parse cleanly', () => {
+  const files = findMarkdownFiles(BUNDLED_BLUEPRINTS_DIR);
+
+  it.each(files)('%s parses with valid frontmatter', (filePath) => {
+    const raw = readFileSync(filePath, 'utf-8');
+    const { meta } = parseFrontmatter<{ name: string; steps: unknown[] }>(raw);
+    expect(meta, `frontmatter missing in ${filePath}`).toBeTruthy();
+    expect(typeof meta!.name, `name not a string in ${filePath}`).toBe('string');
+    expect(Array.isArray(meta!.steps), `steps not an array in ${filePath}`).toBe(true);
+    expect(meta!.steps.length, `steps empty in ${filePath}`).toBeGreaterThan(0);
+  });
+});
 
 describe('seedBuiltinBlueprints', () => {
   let corpRoot: string;
