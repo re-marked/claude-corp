@@ -26,6 +26,11 @@ export async function cmdBacteria(rawArgs: string[]): Promise<void> {
       await cmdBacteriaStatus(subArgs);
       break;
     }
+    case 'lineage': {
+      const { cmdBacteriaLineage } = await import('./bacteria/lineage.js');
+      await cmdBacteriaLineage(subArgs);
+      break;
+    }
     default: {
       console.error(`cc-cli bacteria: unknown subcommand "${subcommand}"`);
       console.error('');
@@ -44,6 +49,8 @@ Usage:
 Subcommands:
   status              Per-role colony view: active count, today's
                       mitoses/apoptoses, mean lifespan, peak count.
+  lineage <role>      Family tree of a worker-tier pool, rendered
+                      from the bacteria-events log.
 
 Flags are per-subcommand. Try \`cc-cli bacteria status --help\`.
 `);
