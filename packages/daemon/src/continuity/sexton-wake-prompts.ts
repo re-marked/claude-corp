@@ -35,6 +35,12 @@
  */
 
 import type { AlarumAction } from './alarum-prompt.js';
+import {
+  readBacteriaEvents,
+  readPausedRoles,
+  type ApoptoseEvent,
+  type BacteriaEvent,
+} from '@claudecorp/shared';
 
 // ─── Dispatch message templates ─────────────────────────────────────
 
@@ -178,12 +184,20 @@ If the nudge surfaced something the founder should know about (you noticed drift
  * — it's the "exit cheap" path and should be handled upstream. If
  * this throws, there's a bug in whoever called it.
  */
-export function dispatchMessageFor(action: AlarumAction): string {
+export function dispatchMessageFor(
+  action: AlarumAction,
+  corpRoot?: string,
+): string {
+  // Pool activity is appended for start/wake (the substantive
+  // dispatches). Nudge stays minimal — it's a pulse-check, not a
+  // working session.
+  const poolSection = action === 'nudge' ? '' : composePoolActivitySection(corpRoot);
+
   switch (action) {
     case 'start':
-      return START_MESSAGE;
+      return START_MESSAGE + poolSection;
     case 'wake':
-      return WAKE_MESSAGE;
+      return WAKE_MESSAGE + poolSection;
     case 'nudge':
       return NUDGE_MESSAGE;
     case 'nothing':
@@ -191,4 +205,94 @@ export function dispatchMessageFor(action: AlarumAction): string {
         `dispatchMessageFor called with action='nothing' — 'nothing' is the no-dispatch case; upstream routing should filter it before reaching here.`,
       );
   }
+}
+
+// ─── Pool activity section (Project 1.10.4) ─────────────────────────
+
+/**
+ * Reads bacteria-events.jsonl (today only) + pause registry, summarizes
+ * pool activity per role for Sexton's wake/start prompt. She compounds
+ * this into the prose she sends the founder.
+ *
+ * Returns an empty string when corpRoot is missing (test paths) or
+ * when there's nothing to report — no events today AND no pauses.
+ * Sexton stays focused on patrols when the pool is quiet rather than
+ * filling space with "no bacteria activity today" noise.
+ */
+function composePoolActivitySection(corpRoot: string | undefined): string {
+  if (!corpRoot) return '';
+
+  const startOfDay = startOfTodayIso();
+  let events: BacteriaEvent[];
+  let paused: Set<string>;
+  try {
+    events = readBacteriaEvents(corpRoot, { since: startOfDay });
+    paused = readPausedRoles(corpRoot);
+  } catch {
+    return '';
+  }
+
+  if (events.length === 0 && paused.size === 0) return '';
+
+  const byRole = new Map<string, { mitoses: number; apoptoses: number; lifetimes: number[] }>();
+  for (const e of events) {
+    const entry = byRole.get(e.role) ?? { mitoses: 0, apoptoses: 0, lifetimes: [] };
+    if (e.kind === 'mitose') entry.mitoses++;
+    else {
+      entry.apoptoses++;
+      entry.lifetimes.push((e as ApoptoseEvent).lifetimeMs);
+    }
+    byRole.set(e.role, entry);
+  }
+
+  const lines: string[] = [];
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  lines.push('## Pool activity today (bacteria)');
+  lines.push('');
+
+  if (byRole.size > 0) {
+    for (const [role, stats] of byRole) {
+      const meanLifespan =
+        stats.lifetimes.length > 0
+          ? formatDuration(
+              Math.round(stats.lifetimes.reduce((a, b) => a + b, 0) / stats.lifetimes.length),
+            )
+          : null;
+      const lifetimeFragment = meanLifespan ? `, mean lifespan ${meanLifespan}` : '';
+      lines.push(`- **${role}**: ${stats.mitoses} mitoses, ${stats.apoptoses} apoptoses${lifetimeFragment}`);
+    }
+  } else {
+    lines.push('- (no mitoses or apoptoses today)');
+  }
+
+  if (paused.size > 0) {
+    lines.push('');
+    lines.push(`Paused roles: ${[...paused].sort().join(', ')} — bacteria is skipping these until \`cc-cli bacteria resume --role <id>\`.`);
+  }
+
+  lines.push('');
+  lines.push(
+    'Surface noteworthy patterns to the founder if anything looks off (high churn, repeated bursts, a pool that\'s grown without bound). Otherwise carry on with patrols.',
+  );
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+function startOfTodayIso(): string {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  return remM === 0 ? `${h}h` : `${h}h${remM}m`;
 }
