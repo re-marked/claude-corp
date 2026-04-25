@@ -33,11 +33,15 @@ import {
   writeConfig,
   setupAgentWorkspace,
   addMemberToRegistry,
+  addChannelToRegistry,
+  addMemberToChannel,
+  createDmChannel,
   advanceCurrentStep,
   createChit,
   updateChit,
   findChitById,
   chitScopeFromPath,
+  getTheme,
   UNIVERSAL_SOUL,
   defaultRules,
   defaultHeartbeat,
@@ -48,6 +52,7 @@ import {
   type Channel,
   type GlobalConfig,
   type Corporation,
+  type ThemeId,
   type TaskFields,
 } from '@claudecorp/shared';
 import type { ProcessManager } from '../process-manager.js';
@@ -144,6 +149,15 @@ async function executeMitose(
     generation: action.generation,
   };
   addMemberToRegistry(corpRoot, member);
+
+  // Channel registration. Without this, dispatchTaskToDm has no DM
+  // channel to deliver the wakeup message into and the new slot
+  // sits busy-but-never-woken. Mirror hire.ts's flow: founder DM +
+  // pool channels (#general, #tasks, #logs themed). The founder DM
+  // is the dispatch path's hard requirement; the pool channels are
+  // for visibility (Sexton + founder can see the new slot in
+  // membership lists).
+  registerSlotChannels(corpRoot, member);
 
   // Casket already exists (setupAgentWorkspace created it idle).
   // Claim the assigned chit: advance casket pointer + rewrite the
@@ -258,6 +272,62 @@ function readCorpHarness(corpRoot: string): string | undefined {
     return readConfig<Corporation>(join(corpRoot, CORP_JSON)).harness;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Register the new slot in the founder DM (required — `dispatchTaskToDm`
+ * looks up a direct channel containing the assignee and bails when none
+ * exists; without this the spawned slot is busy-but-never-woken) plus
+ * the corp-themed pool channels (#general / #tasks / #logs).
+ *
+ * Mirrors hire.ts's channel flow. Founder is required for the DM —
+ * Employees never get founder-direct interaction in normal corp
+ * operation (Model A: founder DMs Partners, Partners DM Employees),
+ * but the channel needs to EXIST for the dispatch wakeup path. Quiet
+ * channel; founder doesn't have to use it.
+ */
+function registerSlotChannels(corpRoot: string, member: Member): void {
+  let members: Member[];
+  try {
+    members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  } catch {
+    return;
+  }
+  const founder = members.find((m) => m.rank === 'owner');
+  if (founder) {
+    try {
+      const dm = createDmChannel(
+        corpRoot,
+        founder.id,
+        member.id,
+        founder.displayName.toLowerCase(),
+        member.id,
+      );
+      addChannelToRegistry(corpRoot, dm);
+    } catch (err) {
+      logError(
+        `[bacteria] failed to create founder DM for ${member.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Pool channels — best-effort. Missing #general/#tasks/#logs would
+  // be unusual but isn't worth aborting the spawn over.
+  try {
+    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
+    const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
+    const theme = getTheme((corp.theme || 'corporate') as ThemeId);
+    const general = channels.find((c) => c.name === theme.channels.general);
+    if (general) addMemberToChannel(corpRoot, general.id, member.id);
+    const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
+    if (tasksChannel) addMemberToChannel(corpRoot, tasksChannel.id, member.id);
+    const logsChannel = channels.find((c) => c.name === theme.channels.logs);
+    if (logsChannel) addMemberToChannel(corpRoot, logsChannel.id, member.id);
+  } catch (err) {
+    logError(
+      `[bacteria] failed to register pool channels for ${member.id}: ${(err as Error).message}`,
+    );
   }
 }
 
