@@ -255,6 +255,13 @@ export type {
   KinkResolution,
 } from './kinks.js';
 
+// Project 1.9.6: seed bundled built-in blueprint markdown files
+// into a fresh corp's chit store at init. Mirrors installDefaultSkills —
+// the bundled `blueprints/` dir ships with the package, seeded once
+// at scaffoldCorp time. User-authored blueprints (via cc-cli blueprint
+// new) stay distinct via origin='authored'; seeded ones are 'builtin'.
+export { seedBuiltinBlueprints } from './blueprint-seed.js';
+
 // Blueprint var merge + coerce — Project 1.8 PR 2. Bridges CLI-shaped
 // string inputs to the typed Handlebars context the parser needs.
 // Pure; no Handlebars dependency (that lives in blueprint-parser.ts).

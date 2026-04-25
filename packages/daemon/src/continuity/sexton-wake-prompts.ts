@@ -66,18 +66,19 @@ Your immediate task this session:
    \`cc-cli chit list --type observation --limit 20\`
    \`cc-cli chit list --type kink --status active --limit 20\` — open operational findings. This is your main patrol signal: what's currently wrong that hasn't resolved yet.
 
-3. Decide what's worth doing this session. You don't have a patrol blueprint library yet (those land in a later sub-project), but you do have six sweepers on tap. Each emits kink chits you'll read on subsequent patrols (dedup + auto-resolve handled by the runner):
+3. Walk your patrol this wake:
 
-   \`cc-cli sweeper run silentexit\`       — respawn dead slots with pending Casket work
-   \`cc-cli sweeper run agentstuck\`       — flag live agents whose current task hasn't moved in 30+ min
-   \`cc-cli sweeper run orphantask\`       — find queued tasks with no assignee or archived assignee
-   \`cc-cli sweeper run phantom-cleanup\`  — reconcile members.json vs on-disk workspaces
-   \`cc-cli sweeper run chit-hygiene\`     — find malformed chits + orphan refs/dependsOn
-   \`cc-cli sweeper run log-rotation\`     — rotate daemon log if it's past 10MB
+   \`cc-cli blueprint show patrol/health-check\`
 
-   Usage pattern: run the sweepers you think are relevant given the kinks + observations you read. silentexit + agentstuck every tick is reasonable; the others only when something hints their domain is in play. Each is cheap and no-ops when clean — running one that finds nothing doesn't cost much.
+   That command prints the patrol blueprint — a list of steps (run silentexit, run agentstuck, review kinks, optionally summarize). Read each step's description in order and execute the instruction in your session. This blueprint is NOT cast to a Contract — patrols are read + walked, not materialized as task chains.
 
-   Beyond sweepers: integrate what you see in the corp state and name the most important signal.
+   Other patrols available when the situation warrants:
+     - \`cc-cli blueprint show patrol/corp-health\` — cross-agent coordination (orphantask + role-pool scan + contract-stall scan). Less frequent cadence than health-check.
+     - \`cc-cli blueprint show patrol/chit-hygiene\` — data-integrity scan (wraps the chit-hygiene sweeper). On-demand or slow cadence.
+
+   Individual sweepers are available under \`cc-cli sweeper run <name>\` too (silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation). The patrol blueprints orchestrate these in sensible order; running sweepers outside a patrol is for ad-hoc investigation.
+
+   Beyond patrols: integrate what you see in the corp state and name the most important signal.
 
 4. Write an observation summarizing your read + what you're choosing to do about it:
    \`cc-cli observe "<one-sentence summary>" --from sexton --category NOTICE --subject sexton-wake --importance 2\`
@@ -110,15 +111,16 @@ Check what's changed:
 2. \`cc-cli chit list --type observation --limit 20\` — recent observations, newest first
 3. \`cc-cli status\` — agent statuses (any broken? any stuck?)
 
-Decide whether this new signal warrants an action (nudging an agent via \`cc-cli say\`, running a sweeper, speaking up to the founder directly, writing an observation that compounds over time) or is noise to note-and-move-on.
+Decide whether this new signal warrants an action (walking your health-check patrol, nudging an agent via \`cc-cli say\`, speaking up to the founder directly, writing an observation that compounds over time) or is noise to note-and-move-on.
 
-Sweepers on tap (each no-ops when everything's healthy):
-  \`cc-cli sweeper run silentexit\`       — respawn dead slots with pending work
-  \`cc-cli sweeper run agentstuck\`       — flag live-but-not-progressing agents (30+ min stale)
-  \`cc-cli sweeper run orphantask\`       — find queued tasks with no assignee
-  \`cc-cli sweeper run phantom-cleanup\`  — reconcile members.json vs workspace dirs
-  \`cc-cli sweeper run chit-hygiene\`     — find malformed chits + orphan refs
-  \`cc-cli sweeper run log-rotation\`     — rotate daemon log past 10MB
+**Your main patrol on wakes:** \`cc-cli blueprint show patrol/health-check\` — read it, walk the steps in-session (run silentexit, run agentstuck, review kinks, surface anything). Not cast to a Contract; patrols are read + walked.
+
+Other patrols for when the situation warrants:
+  \`cc-cli blueprint show patrol/corp-health\`   — cross-agent coordination + role-pool scan
+  \`cc-cli blueprint show patrol/chit-hygiene\`  — data-integrity scan
+
+Individual sweepers (for ad-hoc investigation outside a patrol):
+  \`cc-cli sweeper run silentexit | agentstuck | orphantask | phantom-cleanup | chit-hygiene | log-rotation\`
 
 Kinks dedup per (source, subject) — re-running a sweeper on a persistent issue bumps occurrenceCount rather than piling duplicates. And when a sweeper stops reporting a subject, the runner auto-closes the prior kink as 'auto-resolved'. Your kink queue stays honest.
 
