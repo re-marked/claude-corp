@@ -334,6 +334,16 @@ export function checkRenameEligibility(
   if (shapeErr) {
     return { ok: false, error: shapeErr };
   }
+  // Codex P2: renaming to the slug itself passes shape (the slug is
+  // a valid name shape) and uniqueness (no other slot holds it), but
+  // displayName stays equal to id, so the self-naming fragment never
+  // self-cancels and "one-shot naming" silently breaks. Reject.
+  if (newName === member.id) {
+    return {
+      ok: false,
+      error: `"${newName}" is your slug — pick a different name. Renaming to the slug leaves displayName === id, which keeps the self-naming preamble firing on every dispatch.`,
+    };
+  }
   if (!member.role) {
     return {
       ok: false,

@@ -365,6 +365,13 @@ describe('whoami', () => {
     expect(r).toEqual({ ok: true });
   });
 
+  it('rejects renaming to the slug itself (Codex P2 — would break self-cancel)', () => {
+    const me = makeFreshSlot({ id: 'backend-engineer-ab' });
+    const r = checkRenameEligibility(me, 'backend-engineer-ab', [me]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/your slug/);
+  });
+
   it('allows the same name held in a different role pool', () => {
     const me = makeFreshSlot({ id: 'backend-engineer-ab' });
     const otherRoleSibling = makeMember({
