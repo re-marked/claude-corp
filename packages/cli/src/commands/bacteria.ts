@@ -41,6 +41,11 @@ export async function cmdBacteria(rawArgs: string[]): Promise<void> {
       await cmdBacteriaResume(subArgs);
       break;
     }
+    case 'evict': {
+      const { cmdBacteriaEvict } = await import('./bacteria/evict.js');
+      await cmdBacteriaEvict(subArgs);
+      break;
+    }
     default: {
       console.error(`cc-cli bacteria: unknown subcommand "${subcommand}"`);
       console.error('');
@@ -66,6 +71,10 @@ Subcommands:
                       decommissions. Idempotent.
   resume <role>       Resume bacteria for a paused role. Decision
                       module reassesses on next tick (~5s).
+  evict <slug>        Manually apoptose an idle slot. Writes obituary,
+                      strips channels, archives sandbox, removes the
+                      Member, logs the apoptose event. Idle slots only.
+                      --reason "..." flows into the obituary.
 
 Flags are per-subcommand. Try \`cc-cli bacteria status --help\`.
 `);
