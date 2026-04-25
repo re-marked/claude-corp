@@ -35,10 +35,22 @@
  *     separate primitive.
  */
 
-import { readConfig, type Member, MEMBERS_JSON } from '@claudecorp/shared';
+import {
+  readConfig,
+  type Member,
+  MEMBERS_JSON,
+  getCurrentStep,
+  getRole,
+  queryChits,
+  evaluateBreakerTrigger,
+  tripBreaker,
+  findActiveBreaker,
+  CRASH_LOOP_THRESHOLD_DEFAULT,
+  CRASH_LOOP_WINDOW_MS_DEFAULT,
+} from '@claudecorp/shared';
 import { join } from 'node:path';
-import { log } from '../../logger.js';
-import { getCurrentStep } from '@claudecorp/shared';
+import { log, logError } from '../../logger.js';
+import type { Daemon } from '../../daemon.js';
 import type { SweeperContext, SweeperResult, SweeperFinding } from './types.js';
 
 export async function runSilentexit(ctx: SweeperContext): Promise<SweeperResult> {
@@ -131,4 +143,123 @@ export async function runSilentexit(ctx: SweeperContext): Promise<SweeperResult>
     findings,
     summary: `silentexit: respawned ${respawned} slot(s), ${failed} respawn failure(s). Scanned ${procs.length} process entries.`,
   };
+}
+
+/**
+ * Crash-loop detection hook (Project 1.11). Called by the sweeper
+ * runner AFTER kink writes complete so it sees fresh occurrenceCount
+ * values. For each subject the silent-exit sweeper just emitted a
+ * finding for, look up the active silentexit kink, evaluate the
+ * trigger against the role's threshold/window (or defaults), and
+ * trip the breaker if crossed.
+ *
+ * Why here, not in runSilentexit's body: writeOrBumpKink runs in the
+ * runner pipeline, so the kink's count for THIS pass isn't visible
+ * yet inside runSilentexit. Running detection here keeps the trigger
+ * coupled to the silent-exit data source per spec while sequencing
+ * after the kink bump that produces the count.
+ *
+ * Idempotency: tripBreaker dedups on slug — repeat calls during a
+ * persistent loop bump triggerCount + recentSilentexitKinks rather
+ * than creating duplicates. Skips slugs that already have an active
+ * trip (no point evaluating a slot that's already paused).
+ *
+ * Failure containment: any error per-slug logs + continues; one
+ * malformed kink or unreadable role registry must not stop other
+ * detections in the same round.
+ */
+export function detectAndTripCrashLoops(
+  daemon: Daemon,
+  findings: ReadonlyArray<SweeperFinding>,
+): void {
+  if (findings.length === 0) return;
+
+  const now = new Date();
+  let members: Member[];
+  try {
+    members = readConfig<Member[]>(join(daemon.corpRoot, MEMBERS_JSON));
+  } catch (err) {
+    logError(
+      `[sweeper:silentexit] breaker detection skipped — members.json read failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+
+  // Read all active silentexit kinks once; filter per-finding in
+  // memory. Cheaper than per-slug query in the common case where
+  // multiple slots loop in the same round.
+  let activeKinks: ReturnType<typeof queryChits<'kink'>>['chits'];
+  try {
+    const result = queryChits<'kink'>(daemon.corpRoot, {
+      types: ['kink'],
+      scopes: ['corp'],
+      statuses: ['active'],
+    });
+    activeKinks = result.chits.filter(
+      (c) => c.chit.fields.kink.source === 'sweeper:silentexit',
+    );
+  } catch (err) {
+    logError(
+      `[sweeper:silentexit] breaker detection skipped — kink query failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+
+  for (const finding of findings) {
+    const slug = finding.subject;
+
+    try {
+      // Skip if already tripped — avoids redundant evaluation and
+      // keeps tripBreaker's idempotency contract from churning.
+      if (findActiveBreaker(daemon.corpRoot, slug)) continue;
+
+      const kinkContainer = activeKinks.find(
+        (c) => c.chit.fields.kink.subject === slug,
+      );
+      if (!kinkContainer) continue;
+      const kink = kinkContainer.chit;
+
+      // Per-role config snapshot. Member missing (slot was removed
+      // mid-round) or role not in registry → fall through to defaults.
+      const member = members.find((m) => m.id === slug);
+      const role = member?.role ? getRole(member.role) : undefined;
+      const threshold = role?.crashLoopThreshold ?? CRASH_LOOP_THRESHOLD_DEFAULT;
+      const windowMs = role?.crashLoopWindowMs ?? CRASH_LOOP_WINDOW_MS_DEFAULT;
+
+      const decision = evaluateBreakerTrigger(
+        {
+          id: kink.id,
+          createdAt: kink.createdAt,
+          occurrenceCount: kink.fields.kink.occurrenceCount,
+        },
+        threshold,
+        windowMs,
+        now,
+      );
+      if (!decision.shouldTrip) continue;
+
+      const reason =
+        `Crash-loop breaker tripped: ${decision.count} silent-exits within ` +
+        `${Math.round(decision.ageMs / 1000)}s (threshold ${threshold} / window ${Math.round(windowMs / 1000)}s).`;
+
+      const result = tripBreaker({
+        corpRoot: daemon.corpRoot,
+        slug,
+        triggerThreshold: threshold,
+        triggerWindowMs: windowMs,
+        triggerKinkId: kink.id,
+        loopStartedAt: kink.createdAt,
+        reason,
+      });
+
+      log(
+        `[sweeper:silentexit] breaker ${result.action} for ${slug} (count=${result.triggerCount}, threshold=${threshold})`,
+      );
+    } catch (err) {
+      logError(
+        `[sweeper:silentexit] breaker detection failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      // Continue — one slug's failure doesn't poison the round.
+    }
+  }
 }

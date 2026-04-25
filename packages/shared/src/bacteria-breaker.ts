@@ -56,6 +56,25 @@ import { queryChits, createChit, updateChit } from './chits.js';
 import { ChitValidationError } from './chit-types.js';
 import type { Chit } from './types/chit.js';
 
+// ─── Defaults ────────────────────────────────────────────────────────
+
+/**
+ * Default crash-loop threshold — N consecutive silent-exits within
+ * the window before tripping. RoleEntry.crashLoopThreshold overrides.
+ *
+ * Three is small enough to catch real loops fast (one bad spawn isn't
+ * a loop; three is) and large enough to absorb a single transient
+ * harness flake without paging the founder.
+ */
+export const CRASH_LOOP_THRESHOLD_DEFAULT = 3;
+
+/**
+ * Default crash-loop window in ms — 5 minutes. RoleEntry.crashLoopWindowMs
+ * overrides. Three crashes spread across hours don't trip; three in
+ * five minutes do.
+ */
+export const CRASH_LOOP_WINDOW_MS_DEFAULT = 5 * 60 * 1000;
+
 // ─── Pure detection helper ───────────────────────────────────────────
 
 /**

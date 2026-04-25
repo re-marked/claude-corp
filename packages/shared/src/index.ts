@@ -286,6 +286,8 @@ export {
   closeBreakerForSlug,
   findActiveBreaker,
   listActiveBreakers,
+  CRASH_LOOP_THRESHOLD_DEFAULT,
+  CRASH_LOOP_WINDOW_MS_DEFAULT,
 } from './bacteria-breaker.js';
 export type {
   BreakerTriggerKink,
