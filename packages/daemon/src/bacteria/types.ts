@@ -215,6 +215,24 @@ export const APOPTOSIS_HYSTERESIS_MS = 3 * 60 * 1000;
 export const BACTERIA_TICK_INTERVAL_MS = 5_000;
 
 /**
+ * Burst-detector window: how far back to look for mitose events when
+ * deciding whether to emit a `bacteria-burst:<role>` kink. Combined
+ * with BACTERIA_BURST_THRESHOLD (5 mitoses), 10 minutes captures the
+ * "founder is stress-testing OR the queue is getting decomposed
+ * badly" anomaly without false-positives on legitimate scaling.
+ */
+export const BACTERIA_BURST_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Burst threshold — N mitose events for the same role inside the
+ * window triggers a kink. Sexton reads kinks during her patrol and
+ * surfaces noteworthy ones to the founder. Dedup is per-(source,
+ * subject) via writeOrBumpKink, so the kink bumps occurrenceCount
+ * instead of duplicating while the burst persists.
+ */
+export const BACTERIA_BURST_THRESHOLD = 5;
+
+/**
  * Per-complexity weight lookup. Null/undefined complexity defaults
  * to medium so pre-0.5.1 tasks (or tasks an agent forgot to assess)
  * still trigger sensible scaling instead of silently weighting zero.
