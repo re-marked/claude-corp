@@ -399,9 +399,14 @@ function archiveSandbox(corpRoot: string, member: Member): void {
     ? member.agentDir
     : join(corpRoot, member.agentDir);
   if (!existsSync(abs)) return;
-  const dateStr = new Date().toISOString().slice(0, 10);
+  // Full ISO timestamp (with `:` and `.` replaced — invalid on Windows
+  // paths) so a recycled-then-re-apoptosed slug on the same day doesn't
+  // collide with its prior archive. Without uniqueness the rename
+  // fails, and the catch-block falls through to rmSync of the LIVE
+  // workspace — silently dropping the new lifecycle's artifacts.
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const parent = abs.replace(/[\\/][^\\/]+[\\/]?$/, '');
-  const archiveName = `.archived-${member.id}-${dateStr}`;
+  const archiveName = `.archived-${member.id}-${stamp}`;
   try {
     renameSync(abs, join(parent, archiveName));
   } catch (err) {
