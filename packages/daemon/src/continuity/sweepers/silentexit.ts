@@ -45,6 +45,7 @@ import {
   evaluateBreakerTrigger,
   tripBreaker,
   findActiveBreaker,
+  createInboxItem,
   CRASH_LOOP_THRESHOLD_DEFAULT,
   CRASH_LOOP_WINDOW_MS_DEFAULT,
 } from '@claudecorp/shared';
@@ -271,6 +272,34 @@ export function detectAndTripCrashLoops(
       log(
         `[sweeper:silentexit] breaker ${result.action} for ${slug} (count=${result.triggerCount}, threshold=${threshold})`,
       );
+
+      // Project 1.11: Tier-3 inbox notification fires ONLY on first
+      // creation. Re-trips bump triggerCount in place; spamming the
+      // founder with one inbox-item per consecutive crash defeats
+      // the whole point of dedup. Best-effort — inbox failure must
+      // not roll back the trip itself.
+      if (result.action === 'created') {
+        try {
+          const founder = members.find((m) => m.rank === 'owner');
+          if (founder) {
+            const displayName = member?.displayName ?? slug;
+            createInboxItem({
+              corpRoot: daemon.corpRoot,
+              recipient: founder.id,
+              tier: 3,
+              from: 'system',
+              subject: `Crash-loop breaker tripped: ${displayName} (${slug})`,
+              source: 'system',
+              sourceRef: result.chit.id,
+              references: [result.chit.id, kink.id],
+            });
+          }
+        } catch (err) {
+          logError(
+            `[sweeper:silentexit] inbox notification failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     } catch (err) {
       logError(
         `[sweeper:silentexit] breaker detection failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`,
