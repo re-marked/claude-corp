@@ -147,4 +147,45 @@ describe('handChitToRoleQueue', () => {
       }),
     ).toThrow(HandNotAllowedError);
   });
+
+  // ─── role-eligibility guard ──────────────────────────────────────
+
+  it('rejects unknown roles (no silent stall)', () => {
+    const taskId = makeTask();
+    expect(() =>
+      handChitToRoleQueue({
+        corpRoot,
+        roleId: 'zorblax-specialist',
+        chitId: taskId,
+        handerId: 'mark',
+      }),
+    ).toThrow(HandNotAllowedError);
+  });
+
+  it('rejects non-worker-tier roles — Partners aren\'t bacteria-eligible', () => {
+    const taskId = makeTask();
+    // 'ceo' is tier=decree (Partner). Queueing for it would silently
+    // stall since bacteria only mitoses worker-tier pools.
+    expect(() =>
+      handChitToRoleQueue({
+        corpRoot,
+        roleId: 'ceo',
+        chitId: taskId,
+        handerId: 'mark',
+      }),
+    ).toThrow(HandNotAllowedError);
+  });
+
+  it('rejects role-lead tier roles', () => {
+    const taskId = makeTask();
+    // 'engineering-lead' is tier=role-lead. Same silent-stall risk.
+    expect(() =>
+      handChitToRoleQueue({
+        corpRoot,
+        roleId: 'engineering-lead',
+        chitId: taskId,
+        handerId: 'mark',
+      }),
+    ).toThrow(HandNotAllowedError);
+  });
 });

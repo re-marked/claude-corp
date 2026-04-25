@@ -26,6 +26,7 @@ import {
   type TaskTransitionTrigger,
 } from './task-state-machine.js';
 import { createInboxItem } from './inbox.js';
+import { getRole } from './roles.js';
 import type { Chit, TaskFields, TaskWorkflowStatus, InboxItemTier } from './types/chit.js';
 
 export interface HandChitToSlotOpts {
@@ -251,6 +252,27 @@ export interface HandChitToRoleQueueResult {
  */
 export function handChitToRoleQueue(opts: HandChitToRoleQueueOpts): HandChitToRoleQueueResult {
   const { corpRoot, roleId, chitId, handerId } = opts;
+
+  // Bacteria-eligibility guard. Bacteria's decision module filters to
+  // worker-tier roles only — queueing a chit for a decree / role-lead
+  // role would leave it sitting forever (silent stall), since neither
+  // bacteria nor a hand-time slot pickup would ever claim it. Reject
+  // at the helper boundary so future callers (cron paths, automated
+  // pipelines) can't silently misuse this.
+  const role = getRole(roleId);
+  if (!role) {
+    throw new HandNotAllowedError(
+      chitId,
+      `unknown role "${roleId}" — see \`cc-cli help\` for the role registry`,
+    );
+  }
+  if (role.tier !== 'worker') {
+    throw new HandNotAllowedError(
+      chitId,
+      `role "${roleId}" is tier=${role.tier}, not worker — only worker-tier roles ` +
+        `are bacteria-eligible. Address Partners by name with \`cc-cli hand --to <slug>\`.`,
+    );
+  }
 
   const hit = findChitById(corpRoot, chitId);
   if (!hit) {
