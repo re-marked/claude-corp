@@ -85,6 +85,27 @@ export interface RoleEntry {
    * Worker-tier only.
    */
   bacteriaHysteresisMs?: number;
+  /**
+   * Crash-loop breaker threshold override (Project 1.11). When set,
+   * the silent-exit detector trips a slot's breaker after this many
+   * consecutive crashes; absent uses the global default (3).
+   *
+   * Tune up for noisy roles where transient failures are expected;
+   * tune down for roles where any loop is suspicious. Applies to
+   * any role silentexit can observe — partners-by-decree included.
+   */
+  crashLoopThreshold?: number;
+  /**
+   * Crash-loop breaker window override in ms (Project 1.11). The
+   * detector trips only when the kink's age (now - createdAt) is
+   * within this window; absent uses the global default (5 min).
+   *
+   * Together with crashLoopThreshold defines "fast loop" vs
+   * "spread-out crashes." A role that legitimately exits and
+   * re-spawns occasionally over hours should never trip; one that
+   * dies 3× in 5min has a real loop.
+   */
+  crashLoopWindowMs?: number;
 }
 
 export const ROLES: readonly RoleEntry[] = [

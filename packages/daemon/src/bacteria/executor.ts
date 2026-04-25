@@ -47,6 +47,7 @@ import {
   UNIVERSAL_SOUL,
   defaultRules,
   defaultHeartbeat,
+  listActiveBreakers,
   MEMBERS_JSON,
   CHANNELS_JSON,
   CORP_JSON,
@@ -307,6 +308,15 @@ async function executeApoptose(
 function pickFreshSlug(corpRoot: string, role: string): string {
   const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
   const taken = new Set(members.map((m) => m.id));
+  // Project 1.11: tripped slugs are reserved — even if their Member
+  // was removed (rare race), bacteria must not recycle the slug
+  // while the breaker is active or a fresh mitose would immediately
+  // get refused by spawnAgent. listActiveBreakers fails open ([])
+  // on corruption — better to risk a rare collision than to brick
+  // bacteria via a malformed trip chit.
+  for (const trip of listActiveBreakers(corpRoot)) {
+    taken.add(trip.fields['breaker-trip'].slug);
+  }
   for (let attempt = 0; attempt < 100; attempt++) {
     const suffix = randomTwoLetters();
     const slug = `${role}-${suffix}`;

@@ -20,6 +20,7 @@ import {
   writeGlobalConfig,
   readGlobalConfig,
   agentSessionKey,
+  closeBreakerForSlug,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -32,6 +33,7 @@ import { hireAgent } from './hire.js';
 import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm } from './task-events.js';
 import { log, logError } from './logger.js';
 import { runSweeper, UnknownSweeperError, SWEEPER_NAMES } from './continuity/sweepers/index.js';
+import { BreakerTrippedError } from './process-manager.js';
 
 /** Format tool call into a human-readable description for chat history. */
 import { formatToolMessage as formatToolMsg } from './format-tool.js';
@@ -301,6 +303,22 @@ export function createApi(daemon: Daemon): Server {
               // Remove: permanent deletion
               try { rmSync(agentAbs, { recursive: true, force: true }); } catch {}
             }
+          }
+
+          // 6. Project 1.11: close any active crash-loop breaker for this
+          // slug. Without this, an orphan trip would block the slug from
+          // being reused by bacteria (pickFreshSlug avoid-set) and clutter
+          // `cc-cli breaker list`. Best-effort — fire's success doesn't
+          // hinge on the breaker close.
+          try {
+            closeBreakerForSlug({
+              corpRoot: daemon.corpRoot,
+              slug: agent.id,
+              reason: `slot ${action === 'fire' ? 'archived' : 'removed'} via cc-cli agent ${action}`,
+              clearedBy: `cli:${action}`,
+            });
+          } catch {
+            // swallow — chit-hygiene will surface any anomaly
           }
 
           firedIds.push(agent.id);
@@ -1617,6 +1635,24 @@ export function createApi(daemon: Daemon): Server {
 
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
+      // Project 1.11: BreakerTrippedError is a client-actionable
+      // refusal, not a server fault. Return 409 Conflict with a
+      // structured payload so CLI surfaces (cc-cli agent start /
+      // restart, etc.) can show the founder the path forward
+      // instead of a generic 500.
+      if (err instanceof BreakerTrippedError) {
+        json(
+          res,
+          {
+            error: err.message,
+            breakerTripped: true,
+            slug: err.slug,
+            tripChitId: err.tripChitId,
+          },
+          409,
+        );
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       logError(`[daemon] API error: ${message}`);
       json(res, { error: message }, 500);

@@ -258,6 +258,12 @@ async function run() {
       await cmdBacteria(process.argv.slice(3));
       break;
     }
+    case 'breaker': {
+      // Project 1.11: crash-loop circuit breaker founder controls.
+      const { cmdBreaker } = await import('./commands/breaker.js');
+      await cmdBreaker(process.argv.slice(3));
+      break;
+    }
     case 'tame': {
       const { cmdTame } = await import('./commands/tame.js');
       await cmdTame({

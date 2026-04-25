@@ -24,6 +24,7 @@ import type { Daemon } from '../../daemon.js';
 import { log, logError } from '../../logger.js';
 import { SWEEPER_REGISTRY, parseSweeperName, SWEEPER_NAMES } from './registry.js';
 import type { SweeperResult, SweeperName, SweeperFinding } from './types.js';
+import { detectAndTripCrashLoops } from './silentexit.js';
 
 export type { SweeperContext, SweeperResult, SweeperModule, SweeperName, SweeperFinding, SweeperStatus } from './types.js';
 export { SWEEPER_REGISTRY, SWEEPER_NAMES, parseSweeperName } from './registry.js';
@@ -147,6 +148,20 @@ export async function runSweeper(
         `[sweeper] run ${validated} — kink-write failed: ${err instanceof Error ? err.message : String(err)} (title=${JSON.stringify(finding.title)})`,
       );
       // Intentionally swallowed — other findings still get a chance.
+    }
+  }
+
+  // Project 1.11: silent-exit findings feed the crash-loop breaker.
+  // Detection runs AFTER kink writes so it sees fresh occurrenceCount
+  // values. Internal failures are logged + swallowed; the sweeper
+  // result returned to the caller is unaffected.
+  if (validated === 'silentexit' && result.status !== 'failed') {
+    try {
+      detectAndTripCrashLoops(daemon, result.findings);
+    } catch (err) {
+      logError(
+        `[sweeper] run ${validated} — breaker detection threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

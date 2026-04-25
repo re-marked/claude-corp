@@ -21,6 +21,7 @@ import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   appendBacteriaEvent,
+  closeBreakerForSlug,
   createChit,
   getCurrentStep,
   queryChits,
@@ -158,6 +159,21 @@ export async function cmdBacteriaEvict(rawArgs: string[]): Promise<void> {
   // Remove the Member record.
   const updated = members.filter((m) => m.id !== member.id);
   writeConfig(join(corpRoot, MEMBERS_JSON), updated);
+
+  // Project 1.11: close any active crash-loop breaker. Otherwise an
+  // orphan trip blocks the slug from being reused by bacteria's
+  // pickFreshSlug avoid-set and clutters `cc-cli breaker list`.
+  // Best-effort — eviction's success doesn't hinge on this.
+  try {
+    closeBreakerForSlug({
+      corpRoot,
+      slug: member.id,
+      reason: `slot evicted via cc-cli bacteria evict: ${reason}`,
+      clearedBy: 'cli:evict',
+    });
+  } catch {
+    // swallow — chit-hygiene will surface any anomaly
+  }
 
   // Apoptose event with manual-eviction reason.
   try {

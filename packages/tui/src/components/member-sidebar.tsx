@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from '@claude-code-kit/ink-renderer';
-import { getRole, type Member } from '@claudecorp/shared';
+import { getRole, listActiveBreakers, type Member } from '@claudecorp/shared';
 import { COLORS, STATUS, BORDER_STYLE } from '../theme.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
 
@@ -9,15 +9,18 @@ interface Props {
   channelMemberIds: string[];
   visible: boolean;
   daemonClient: DaemonClient;
+  /** Project 1.11: corp root for reading active breaker chits. Optional — sidebar degrades to no tripped indicators when absent. */
+  corpRoot?: string;
 }
 
-export function MemberSidebar({ members, channelMemberIds, visible, daemonClient }: Props) {
+export function MemberSidebar({ members, channelMemberIds, visible, daemonClient, corpRoot }: Props) {
   const [agentStatuses, setAgentStatuses] = useState<Record<string, string>>({});
+  const [trippedSlugs, setTrippedSlugs] = useState<Set<string>>(new Set());
 
   // Fetch real-time agent statuses from daemon
   useEffect(() => {
     if (!visible) return;
-    
+
     const fetchStatuses = async () => {
       try {
         const agentList = await daemonClient.listAgents();
@@ -34,9 +37,24 @@ export function MemberSidebar({ members, channelMemberIds, visible, daemonClient
     fetchStatuses();
     // Refresh every 10 seconds while sidebar is visible
     const interval = setInterval(fetchStatuses, 10000);
-    
+
     return () => clearInterval(interval);
   }, [visible, daemonClient]);
+
+  // Project 1.11: read active breaker trips from disk on the same
+  // 10s cadence as agent statuses. listActiveBreakers fails open
+  // (returns []) on corruption, so this never throws to the
+  // render path.
+  useEffect(() => {
+    if (!visible || !corpRoot) return;
+    const fetchBreakers = () => {
+      const trips = listActiveBreakers(corpRoot);
+      setTrippedSlugs(new Set(trips.map((t) => t.fields['breaker-trip'].slug)));
+    };
+    fetchBreakers();
+    const interval = setInterval(fetchBreakers, 10000);
+    return () => clearInterval(interval);
+  }, [visible, corpRoot]);
 
   if (!visible) return null;
 
@@ -134,16 +152,29 @@ export function MemberSidebar({ members, channelMemberIds, visible, daemonClient
           const maxGen = Math.max(...generations);
           const genFragment =
             minGen === maxGen ? `gen ${minGen}` : `gens ${minGen}-${maxGen}`;
+          // Project 1.11: tripped count for the role rollup. Counted
+          // from active breaker chits intersected with this role's
+          // current slots — a trip whose Member was already removed
+          // doesn't inflate the role's tripped count.
+          const trippedCount = slots.filter((s) => trippedSlugs.has(s.id)).length;
+          const activeCount = slots.length - trippedCount;
+          // Use the broken status icon when ANY slot in the role is
+          // tripped; otherwise the neutral muted bullet.
+          const bulletColor = trippedCount > 0 ? STATUS.broken.color : COLORS.muted;
+          const bulletIcon = trippedCount > 0 ? STATUS.broken.icon : '•';
+          const summaryText = trippedCount > 0
+            ? `${activeCount} active, ${trippedCount} tripped (${genFragment})`
+            : `${slots.length} (${genFragment})`;
           return (
             <Box key={`role-${roleId}`} gap={0} marginBottom={0}>
-              <Text color={COLORS.muted}>•</Text>
+              <Text color={bulletColor}>{bulletIcon}</Text>
               <Text> </Text>
               <Text color={COLORS.text} wrap="end">
                 {label}
               </Text>
               <Text> </Text>
               <Text color={COLORS.muted} wrap="end">
-                {slots.length} ({genFragment})
+                {summaryText}
               </Text>
             </Box>
           );

@@ -38,9 +38,14 @@ import type { AlarumAction } from './alarum-prompt.js';
 import {
   readBacteriaEvents,
   readPausedRoles,
+  listActiveBreakers,
   type ApoptoseEvent,
   type BacteriaEvent,
+  type Member,
+  readConfig,
+  MEMBERS_JSON,
 } from '@claudecorp/shared';
+import { join } from 'node:path';
 
 // ─── Dispatch message templates ─────────────────────────────────────
 
@@ -192,12 +197,13 @@ export function dispatchMessageFor(
   // dispatches). Nudge stays minimal — it's a pulse-check, not a
   // working session.
   const poolSection = action === 'nudge' ? '' : composePoolActivitySection(corpRoot);
+  const breakerSection = action === 'nudge' ? '' : composeActiveBreakersSection(corpRoot);
 
   switch (action) {
     case 'start':
-      return START_MESSAGE + poolSection;
+      return START_MESSAGE + poolSection + breakerSection;
     case 'wake':
-      return WAKE_MESSAGE + poolSection;
+      return WAKE_MESSAGE + poolSection + breakerSection;
     case 'nudge':
       return NUDGE_MESSAGE;
     case 'nothing':
@@ -275,6 +281,109 @@ function composePoolActivitySection(corpRoot: string | undefined): string {
   lines.push('');
   lines.push(
     'Surface noteworthy patterns to the founder if anything looks off (high churn, repeated bursts, a pool that\'s grown without bound). Otherwise carry on with patrols.',
+  );
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+// ─── Active breaker trips section (Project 1.11) ─────────────────────
+
+/**
+ * Reads active breaker trips + today's cleared trips, summarizes for
+ * Sexton's wake/start prompt. Sexton compounds this into prose for
+ * the founder during her patrol — bacteria stays mute on trips;
+ * Sexton gives them a voice.
+ *
+ * Robustness edge from REFACTOR.md 1.11: when ≥3 active trips for
+ * the same role exist, the section is loud — prompts the founder
+ * to look at the underlying cause (harness regression, bad task
+ * chit) rather than reset trips one-by-one.
+ *
+ * Returns empty string when corpRoot is missing or there's nothing
+ * to report. Sexton stays focused on patrols when the breaker queue
+ * is quiet.
+ */
+function composeActiveBreakersSection(corpRoot: string | undefined): string {
+  if (!corpRoot) return '';
+
+  let allTrips: ReturnType<typeof listActiveBreakers>;
+  let members: Member[];
+  try {
+    allTrips = listActiveBreakers(corpRoot, { includeCleared: true });
+    members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  } catch {
+    return '';
+  }
+
+  const startOfDay = startOfTodayIso();
+  const startOfDayMs = Date.parse(startOfDay);
+  const active = allTrips.filter((t) => t.status === 'active');
+  const clearedToday = allTrips.filter(
+    (t) =>
+      t.status !== 'active' &&
+      t.fields['breaker-trip'].clearedAt !== undefined &&
+      Date.parse(t.fields['breaker-trip'].clearedAt!) >= startOfDayMs,
+  );
+
+  if (active.length === 0 && clearedToday.length === 0) return '';
+
+  const slugToRole = new Map<string, string | undefined>();
+  const slugToDisplay = new Map<string, string>();
+  for (const m of members) {
+    slugToRole.set(m.id, m.role);
+    slugToDisplay.set(m.id, m.displayName);
+  }
+
+  // Per-role active counts for the loud-on-3+ check.
+  const activeByRole = new Map<string, number>();
+  for (const t of active) {
+    const role = slugToRole.get(t.fields['breaker-trip'].slug) ?? '?';
+    activeByRole.set(role, (activeByRole.get(role) ?? 0) + 1);
+  }
+
+  const lines: string[] = [];
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  lines.push('## Active breaker trips (crash-loop)');
+  lines.push('');
+
+  if (active.length === 0) {
+    lines.push('- (no active trips)');
+  } else {
+    for (const t of active) {
+      const f = t.fields['breaker-trip'];
+      const role = slugToRole.get(f.slug) ?? '?';
+      const display = slugToDisplay.get(f.slug) ?? f.slug;
+      lines.push(
+        `- **${display}** (${f.slug}, role ${role}): ${f.triggerCount} silent-exits, tripped ${f.trippedAt}`,
+      );
+    }
+  }
+
+  // Loud-on-3+ check. If any role has ≥3 active trips, this is a
+  // pattern worth surfacing to the founder rather than letting
+  // them reset trips one-by-one.
+  const heavyRoles = [...activeByRole.entries()].filter(([, n]) => n >= 3);
+  if (heavyRoles.length > 0) {
+    lines.push('');
+    const phrase = heavyRoles
+      .map(([role, n]) => `**${n} trips on role ${role}**`)
+      .join(', ');
+    lines.push(
+      `⚠ ${phrase} — likely an underlying cause (harness regression, recent bad task chit). Surface this to the founder before resetting one-by-one.`,
+    );
+  }
+
+  if (clearedToday.length > 0) {
+    lines.push('');
+    lines.push(`Cleared today: ${clearedToday.length} trip(s) — audit trail in \`cc-cli breaker list --include-cleared\`.`);
+  }
+
+  lines.push('');
+  lines.push(
+    'Reset path: `cc-cli breaker reset --slug <slug>` (after fixing the cause). Forensic detail: `cc-cli breaker show <slug>`.',
   );
   lines.push('');
 

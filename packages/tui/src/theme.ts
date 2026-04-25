@@ -191,6 +191,10 @@ function buildStatus() {
     suspended: { icon: '\u25CB', color: COLORS.muted },
     archived: { icon: '\u2013', color: COLORS.muted },
     offline: { icon: '\u25CB', color: COLORS.muted },
+    // Project 1.11: slot has an active crash-loop breaker. Filled
+    // square in danger color — visually distinct from healthy and
+    // idle so tripped slots catch the eye in role rollups.
+    broken: { icon: '■', color: COLORS.danger },
   };
 }
 
