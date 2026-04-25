@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import {
   buildWhoamiResult,
   formatHuman,
+  validateRenameName,
+  renderNamingBody,
 } from '../packages/cli/src/commands/whoami.js';
 import {
   createChit,
@@ -241,6 +243,67 @@ describe('whoami', () => {
     const r = buildWhoamiResult(corpRoot, member);
     expect(r.casket?.currentStep).toBe(fakeChitId);
     expect(r.casket?.title).toBeNull();
+  });
+
+  // ─── Rename: name-shape validator ─────────────────────────────────
+
+  it.each([
+    'Toast',
+    'Shadow',
+    'Copper',
+    'Soot',
+    'Aluminum-67',
+    'snake_case',
+    'A1',
+    'Whetstone',
+  ])('validateRenameName accepts %s', (name) => {
+    expect(validateRenameName(name)).toBeNull();
+  });
+
+  it.each([
+    ['', 'empty string'],
+    ['T', 'too short'],
+    ['Toast Pancakes', 'multi-word'],
+    ['1Toast', 'starts with digit'],
+    ['-Toast', 'starts with hyphen'],
+    ['Toast!', 'special char'],
+    ['Toast Toast', 'whitespace'],
+    ['x'.repeat(31), 'too long (31 chars)'],
+  ])('validateRenameName rejects %s (%s)', (name) => {
+    expect(validateRenameName(name)).not.toBeNull();
+  });
+
+  // ─── Rename: naming observation body ──────────────────────────────
+
+  it('renderNamingBody includes the welcome line + lifecycle metadata', () => {
+    const body = renderNamingBody({
+      slug: 'backend-engineer-ab',
+      chosenName: 'Toast',
+      role: 'backend-engineer',
+      parentSlot: 'backend-engineer-bd',
+      generation: 3,
+      bornAt: '2026-04-25T15:30:00.000Z',
+    });
+    expect(body).toContain('[backend-engineer-ab] is now Toast.');
+    expect(body).toContain('born:        2026-04-25T15:30:00.000Z');
+    expect(body).toContain('parent:      backend-engineer-bd');
+    expect(body).toContain('generation:  3');
+    expect(body).toContain('role:        backend-engineer');
+    expect(body).toContain('Welcome, Toast.');
+  });
+
+  it('renderNamingBody handles gen-0 first-of-lineage slot', () => {
+    const body = renderNamingBody({
+      slug: 'backend-engineer-aa',
+      chosenName: 'Whetstone',
+      role: 'backend-engineer',
+      parentSlot: null,
+      generation: 0,
+      bornAt: '2026-04-25T10:00:00.000Z',
+    });
+    expect(body).toContain('parent:      none (first of lineage)');
+    expect(body).toContain('generation:  0');
+    expect(body).toContain('Welcome, Whetstone.');
   });
 
   it('formatHuman: User shape is minimal (no casket / kind / role lines)', () => {
