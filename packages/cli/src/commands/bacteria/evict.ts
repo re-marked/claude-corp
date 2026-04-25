@@ -76,11 +76,31 @@ export async function cmdBacteriaEvict(rawArgs: string[]): Promise<void> {
   // v1 restriction: idle slots only. Busy-slot eviction needs Casket
   // unwinding (re-route the chit, transition workflowStatus back to
   // queued) which is out of scope for the bacteria CLI.
-  let currentStep: string | null | undefined;
+  //
+  // Fail CLOSED when the casket is unreadable or missing (Codex P2):
+  // assuming "idle" on a corrupted-casket slot would orphan
+  // assignment state if the slot actually had work pinned to a
+  // currentStep we couldn't read. The founder should investigate
+  // the substrate gap before evicting.
+  let currentStep: string | null;
   try {
-    currentStep = getCurrentStep(corpRoot, opts.slug);
-  } catch {
-    currentStep = null;
+    const step = getCurrentStep(corpRoot, opts.slug);
+    if (step === undefined) {
+      console.error(
+        `cc-cli bacteria evict: "${opts.slug}" has no casket chit on disk. ` +
+          `That's a substrate gap — investigate via \`cc-cli wtf --agent ${opts.slug}\` ` +
+          `before evicting. Refusing to evict; the missing casket might be hiding ` +
+          `unresolved work.`,
+      );
+      process.exit(1);
+    }
+    currentStep = step;
+  } catch (err) {
+    console.error(
+      `cc-cli bacteria evict: cannot read casket for "${opts.slug}" — ${(err as Error).message}. ` +
+        `Refusing to evict; assuming idle on a corrupted casket could orphan assignment state.`,
+    );
+    process.exit(1);
   }
   if (currentStep) {
     console.error(
