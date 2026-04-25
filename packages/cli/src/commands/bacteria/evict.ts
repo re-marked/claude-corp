@@ -32,6 +32,7 @@ import {
   type Member,
   type TaskFields,
 } from '@claudecorp/shared';
+import { isDaemonRunning } from '@claudecorp/daemon';
 import { getCorpRoot } from '../../client.js';
 
 interface EvictOpts {
@@ -48,6 +49,32 @@ export async function cmdBacteriaEvict(rawArgs: string[]): Promise<void> {
     process.exit(1);
   }
   const reason = opts.reason ?? 'manual eviction';
+
+  // Codex P1: refuse to evict while the daemon is running. The
+  // disk-only mutation path doesn't update the daemon's in-memory
+  // processManager.agents Map; the evicted slug stays registered
+  // there and a future bacteria mitose that recycles the same
+  // 2-letter suffix would short-circuit on the stale entry instead
+  // of registering the new slot cleanly. Routing eviction through
+  // a daemon endpoint is the right long-term fix; for v1 the
+  // pragmatic stance is "stop the daemon first."
+  const { running } = isDaemonRunning();
+  if (running) {
+    console.error(
+      `cc-cli bacteria evict: daemon is running. The disk-only eviction path can't ` +
+        `clear processManager state for ${opts.slug}, which would leave the slug ` +
+        `registered in memory and break a future mitose that recycles the suffix. ` +
+        `Stop the daemon first:\n` +
+        `\n` +
+        `  cc-cli stop\n` +
+        `  cc-cli bacteria evict ${opts.slug}\n` +
+        `  cc-cli start\n` +
+        `\n` +
+        `(Future versions will route eviction through a daemon endpoint so this ` +
+        `restriction goes away.)`,
+    );
+    process.exit(1);
+  }
 
   const corpRoot = await getCorpRoot(opts.corp);
   const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
