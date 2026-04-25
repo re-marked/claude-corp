@@ -1,25 +1,39 @@
 /**
- * cc-cli whoami — "who am I" introspection.
+ * cc-cli whoami — "who am I" introspection + self-naming.
  *
- * Read-only, no mutations. Resolves a member by id, reads their
- * casket if they're an agent, formats the result. Useful for fresh
- * sessions post-Dredge handoff, post-compaction recovery, post-spawn
- * bacteria slots that haven't named themselves yet, or any moment
- * when an agent's identity feels uncertain.
+ * Two modes:
+ *
+ *   Read (default):  `cc-cli whoami --agent <slug>`
+ *     Resolves a member by id, reads their casket, formats the result.
+ *     Useful for fresh sessions post-Dredge handoff, post-compaction
+ *     recovery, post-spawn bacteria slots that haven't named themselves
+ *     yet, or any moment when an agent's identity feels uncertain.
+ *
+ *   Rename:          `cc-cli whoami rename <name> --agent <slug>`
+ *     One-shot self-naming for bacteria-spawned Employees. Validates
+ *     the slot is bacteria-eligible (kind=employee, displayName === id),
+ *     name shape, role-scoped uniqueness; writes new displayName to
+ *     members.json; emits a "naming" observation chit (NOTICE category,
+ *     subject=slug) that pairs with apoptosis's obituary chit at the
+ *     other bracket of the slot's life.
  *
  * Slims `cc-cli wtf`. wtf was overloaded — handoff context + recent
  * activity + what to do next + identity. Pulling identity into its
  * own command leaves wtf as "what's happening, what should I do next."
  *
- * Project 1.10.2. PR 3 will add `cc-cli whoami rename <name>` as a
- * subcommand for bacteria-spawned slots to self-name.
+ * Projects 1.10.2 + 1.10.3.
  */
 
 import { parseArgs } from 'node:util';
+import { join } from 'node:path';
 import {
+  createChit,
   findChitById,
   getCurrentStep,
   getRole,
+  readConfig,
+  writeConfig,
+  MEMBERS_JSON,
   type Member,
   type TaskFields,
 } from '@claudecorp/shared';
@@ -29,6 +43,8 @@ export interface WhoamiOpts {
   agent?: string;
   corp?: string;
   json?: boolean;
+  /** When set, switch from read-mode to rename-mode and claim this name. */
+  rename?: string;
 }
 
 export interface WhoamiResult {
@@ -75,6 +91,13 @@ export async function cmdWhoami(input: string[] | WhoamiOpts): Promise<void> {
   if (!member) {
     process.stderr.write(`error: member "${opts.agent}" not found in this corp\n`);
     process.exit(1);
+  }
+
+  // Branch on rename vs read. handleRename does its own validation +
+  // output and never falls through to the read formatter.
+  if (opts.rename !== undefined) {
+    handleRename(corpRoot, member, opts.rename, !!opts.json);
+    return;
   }
 
   const result = buildWhoamiResult(corpRoot, member);
@@ -200,10 +223,188 @@ function parseOpts(rawArgs: string[]): WhoamiOpts {
     allowPositionals: true,
     strict: true,
   });
+  // Subcommand detection: `cc-cli whoami rename <name>` →
+  // positionals = ['rename', '<name>']. Other positionals are
+  // ignored (no other subcommands today; future extensions add
+  // explicit cases here).
+  let rename: string | undefined;
+  if (parsed.positionals[0] === 'rename') {
+    rename = parsed.positionals[1];
+  }
   return {
     agent: parsed.values.agent as string | undefined,
     corp: parsed.values.corp as string | undefined,
     json: !!parsed.values.json,
+    ...(rename !== undefined ? { rename } : {}),
   };
+}
+
+// ─── Rename mechanics (Project 1.10.3) ──────────────────────────────
+
+/** One-word, 2–30 chars, starts with a letter, alphanumerics + hyphen / underscore. */
+const RENAME_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{1,29}$/;
+
+export function validateRenameName(name: string): string | null {
+  if (!name) return 'name is required (e.g. `cc-cli whoami rename Toast --agent backend-engineer-ab`)';
+  if (!RENAME_NAME_PATTERN.test(name)) {
+    return `"${name}" doesn't match the name shape — one word, 2–30 chars, starts with a letter, alphanumerics + hyphen/underscore`;
+  }
+  return null;
+}
+
+export interface RenameNamingBodyInput {
+  slug: string;
+  chosenName: string;
+  role: string;
+  parentSlot: string | null;
+  generation: number;
+  bornAt: string;
+}
+
+/**
+ * Render the prose body that lands in both the naming observation
+ * chit AND the CLI output on successful rename. Single source of
+ * formatting so the agent sees exactly what gets archived.
+ */
+export function renderNamingBody(input: RenameNamingBodyInput): string {
+  const parentLine = input.parentSlot
+    ? `parent:      ${input.parentSlot}`
+    : 'parent:      none (first of lineage)';
+  return [
+    `[${input.slug}] is now ${input.chosenName}.`,
+    '',
+    `- born:        ${input.bornAt} (mitose, queue overflow)`,
+    `- ${parentLine}`,
+    `- generation:  ${input.generation}`,
+    `- role:        ${input.role}`,
+    `- chose name on first dispatch.`,
+    '',
+    `Welcome, ${input.chosenName}.`,
+  ].join('\n');
+}
+
+function handleRename(
+  corpRoot: string,
+  member: Member,
+  newName: string,
+  asJson: boolean,
+): void {
+  // Eligibility — only bacteria-spawned Employees with displayName
+  // still equal to their id can self-name. Once renamed, the path
+  // locks: a second rename would be amending an established identity,
+  // which isn't what this command is for.
+  if (member.type !== 'agent') {
+    fail(`whoami rename: only agents can rename — "${member.id}" is type=${member.type}`);
+  }
+  const kind = member.kind ?? 'partner';
+  if (kind !== 'employee') {
+    fail(
+      `whoami rename: only Employees can self-name — "${member.id}" is kind=partner. ` +
+        `Partners are founder-named; renaming an established Partner is out of scope here.`,
+    );
+  }
+  if (member.status !== 'active') {
+    fail(`whoami rename: member "${member.id}" is status=${member.status}, not active`);
+  }
+  if (member.displayName !== member.id) {
+    fail(
+      `whoami rename: "${member.id}" already has displayName "${member.displayName}". ` +
+        `Self-naming is one-shot — only bacteria-spawned slots with displayName === id qualify.`,
+    );
+  }
+
+  // Shape.
+  const shapeErr = validateRenameName(newName);
+  if (shapeErr) fail(`whoami rename: ${shapeErr}`);
+
+  if (!member.role) {
+    fail(
+      `whoami rename: "${member.id}" has no role registered — uniqueness check can't run. ` +
+        `This is unexpected for a bacteria-spawned slot; check the Member record.`,
+    );
+  }
+
+  // Role-scoped uniqueness across active siblings.
+  const allMembers = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  const conflict = allMembers.find(
+    (m) =>
+      m.id !== member.id &&
+      m.type === 'agent' &&
+      m.status === 'active' &&
+      m.role === member.role &&
+      m.displayName === newName,
+  );
+  if (conflict) {
+    fail(
+      `whoami rename: another active ${member.role} already holds displayName "${newName}" ` +
+        `(slot ${conflict.id}). Pick something else — names within a role are unique.`,
+    );
+  }
+
+  // Write the new displayName.
+  const updated = allMembers.map((m) =>
+    m.id === member.id ? { ...m, displayName: newName } : m,
+  );
+  writeConfig(join(corpRoot, MEMBERS_JSON), updated);
+
+  // Naming observation chit — birth bracket of the slot's lifetime.
+  // Pairs with apoptosis's obituary observation (also subject=slug,
+  // category=NOTICE) so dreams (Project 4) can compound the pair.
+  // Best-effort: a chit-write failure doesn't roll back the rename
+  // (the displayName is already committed); we surface the failure
+  // on stderr.
+  const body = renderNamingBody({
+    slug: member.id,
+    chosenName: newName,
+    role: member.role!,
+    parentSlot: member.parentSlot ?? null,
+    generation: member.generation ?? 0,
+    bornAt: member.createdAt,
+  });
+  try {
+    createChit(corpRoot, {
+      type: 'observation',
+      scope: 'corp',
+      createdBy: member.id,
+      fields: {
+        observation: {
+          category: 'NOTICE',
+          subject: member.id,
+          importance: 1,
+          title: `${member.id} chose name: ${newName}`,
+        },
+      },
+      body,
+    });
+  } catch (err) {
+    process.stderr.write(
+      `[whoami rename] naming observation write failed (rename committed): ${(err as Error).message}\n`,
+    );
+  }
+
+  if (asJson) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          slug: member.id,
+          previousDisplayName: member.id,
+          displayName: newName,
+          role: member.role,
+          parentSlot: member.parentSlot ?? null,
+          generation: member.generation ?? 0,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+  console.log(body);
+}
+
+function fail(msg: string): never {
+  process.stderr.write(`error: ${msg}\n`);
+  process.exit(1);
 }
 
