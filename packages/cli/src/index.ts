@@ -128,6 +128,7 @@ Commands:
   daemon     Daemon-level ops (daemon install-service: OS supervisor setup)
   sweeper    Code sweepers — Sexton's workers (sweeper run <name>)
   bacteria   Auto-scaling Employee pool: status / lineage / pause / resume / evict
+  breaker    Crash-loop circuit breaker controls: list / reset / show
 
 Feedback pipeline:
   feedback                              Corp overview — pending, BRAIN, CULTURE candidates
