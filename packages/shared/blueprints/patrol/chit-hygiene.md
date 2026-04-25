@@ -38,7 +38,7 @@ steps:
       different fix; note which and surface in summary.
   - id: summary
     title: Surface data-integrity concerns
-    description: |
+    description: 
       Same voice rule. Your response posts to the founder's DM.
 
       Data integrity matters more than usual patrol findings — a
