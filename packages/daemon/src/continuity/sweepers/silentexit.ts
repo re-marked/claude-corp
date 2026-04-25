@@ -89,6 +89,22 @@ export async function runSilentexit(ctx: SweeperContext): Promise<SweeperResult>
     if (!member) continue;
     if (member.status === 'archived') continue;
 
+    // Project 1.11: skip respawn when this slot's crash-loop breaker
+    // is active. The slot stays in members.json (we don't fire it),
+    // but no spawn is attempted. spawnAgent itself would refuse with
+    // BreakerTrippedError — checking here keeps the log message
+    // intentional ("breaker active, skipping") instead of catching
+    // a thrown error from the spawn path. No respawn → no finding
+    // emitted for this slug → the existing silentexit kink for the
+    // slug is NOT bumped this round (it'll auto-resolve once the
+    // founder resets and the slot starts behaving).
+    if (findActiveBreaker(daemon.corpRoot, proc.memberId)) {
+      log(
+        `[sweeper:silentexit] breaker active for ${proc.memberId}, skipping respawn`,
+      );
+      continue;
+    }
+
     // Does this slot have work to resume? If its Casket is empty,
     // respawning achieves nothing — leave it alone.
     let currentStep: string | null | undefined;
