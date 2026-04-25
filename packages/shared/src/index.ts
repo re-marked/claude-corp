@@ -56,6 +56,7 @@ export type {
   BlueprintVar,
   SweeperRunFields,
   KinkFields,
+  BreakerTripFields,
 } from './types/index.js';
 
 // Parsers
@@ -275,6 +276,25 @@ export type {
 // Project 1.10.4: founder-controlled bacteria pause registry. Decision
 // module skips paused roles. Tiny JSON at <corpRoot>/bacteria-paused.json.
 export { readPausedRoles, pauseRole, resumeRole } from './bacteria-paused.js';
+
+// Project 1.11: crash-loop circuit breaker. Pure detection helper +
+// idempotent trip/close lifecycle + read surface for the spawn-refusal
+// path, founder controls, Sexton wake summary, TUI sidebar.
+export {
+  evaluateBreakerTrigger,
+  tripBreaker,
+  closeBreakerForSlug,
+  findActiveBreaker,
+  listActiveBreakers,
+} from './bacteria-breaker.js';
+export type {
+  BreakerTriggerKink,
+  BreakerTriggerDecision,
+  TripBreakerOpts,
+  TripBreakerResult,
+  CloseBreakerOpts,
+  ListActiveBreakersOpts,
+} from './bacteria-breaker.js';
 
 // Project 1.9.6: seed bundled built-in blueprint markdown files
 // into a fresh corp's chit store at init. Mirrors installDefaultSkills —
