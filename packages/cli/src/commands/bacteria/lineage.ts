@@ -190,7 +190,7 @@ export function formatLineageTree(
 
   for (let i = 0; i < roots.length; i++) {
     const isLast = i === roots.length - 1;
-    renderSubtree(lines, roots[i]!, '', isLast, childrenByParent, visited);
+    renderSubtree(lines, roots[i]!, '', isLast, true, childrenByParent, visited);
   }
 
   return lines.join('\n');
@@ -201,23 +201,34 @@ function renderSubtree(
   node: LineageNode,
   prefix: string,
   isLast: boolean,
+  isRoot: boolean,
   childrenByParent: Map<string | null, LineageNode[]>,
   visited: Set<string>,
 ): void {
   if (visited.has(node.slug)) {
-    out.push(`${prefix}${isLast ? '└── ' : '├── '}${node.slug} (cycle in log — skipping)`);
+    out.push(`${prefix}${isRoot ? '' : isLast ? '└── ' : '├── '}${node.slug} (cycle in log — skipping)`);
     return;
   }
   visited.add(node.slug);
 
-  const branch = prefix === '' ? '' : isLast ? '└── ' : '├── ';
-  out.push(`${prefix}${branch}${formatNode(node)}`);
+  // Roots render flush-left without a branch glyph; non-roots get
+  // ├── (mid) or └── (last) under their parent's prefix.
+  if (isRoot) {
+    out.push(formatNode(node));
+  } else {
+    const branch = isLast ? '└── ' : '├── ';
+    out.push(`${prefix}${branch}${formatNode(node)}`);
+  }
 
   const children = childrenByParent.get(node.slug) ?? [];
-  const childPrefix = prefix + (prefix === '' ? '' : isLast ? '    ' : '│   ');
+  // Children's prefix: roots → '', non-roots → my prefix + '│   ' or
+  // '    ' depending on whether I was the last sibling.
+  const childPrefix = isRoot
+    ? ''
+    : prefix + (isLast ? '    ' : '│   ');
   for (let i = 0; i < children.length; i++) {
     const childIsLast = i === children.length - 1;
-    renderSubtree(out, children[i]!, childPrefix, childIsLast, childrenByParent, visited);
+    renderSubtree(out, children[i]!, childPrefix, childIsLast, false, childrenByParent, visited);
   }
 }
 
