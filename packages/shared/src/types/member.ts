@@ -70,4 +70,31 @@ export interface Member {
    * engineer'); they always differ in id and displayName.
    */
   role?: string;
+  /**
+   * Bacteria lineage — id of the parent slot that this Employee
+   * mitosed from (Project 1.10). Set when bacteria spawns a slot in
+   * response to queue overflow on the parent; null/absent when the
+   * slot was the first member of its role's pool, or when the slot
+   * was hired directly via `cc-cli hire` (no genealogy edge to
+   * record). Used by obituary observations + generational telemetry
+   * to trace "who descended from whom" across the colony's lifetime.
+   *
+   * Founder-hired agents and pre-1.10 Members have no parent and
+   * read as generation 0.
+   */
+  parentSlot?: string | null;
+  /**
+   * Bacteria generation depth — Project 1.10. Founder-hired Employees
+   * and Partners are generation 0 (or undefined, which reads as 0).
+   * Each bacteria mitosis sets the new slot's generation to
+   * parent.generation + 1. A pool that has been splitting + collapsing
+   * for hours accumulates higher-generation slots; gen-0 are the
+   * "founders" of the colony in the literal sense.
+   *
+   * Cosmetic + diagnostic, not load-bearing for any bacteria decision.
+   * Useful in obituaries ("backend-engineer-toast: gen 4, parent ke")
+   * and for spotting cumulative-context-drift bugs ("gen 7+ slots
+   * crash twice as often as gen 0-2").
+   */
+  generation?: number;
 }
