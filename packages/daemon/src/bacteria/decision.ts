@@ -63,6 +63,7 @@ import {
   queryChits,
   getCurrentStep,
   employeeRoles,
+  readPausedRoles,
   MEMBERS_JSON,
   type Member,
   type ChitWithBody,
@@ -110,9 +111,19 @@ export function decideBacteriaActions(opts: DecideOpts): DecideResult {
 
   const members = loadMembers(corpRoot);
   const allActiveTasks = loadActiveTaskChits(corpRoot);
+  // Project 1.10.4: founder-paused roles skip both mitose AND apoptose.
+  // Read once per tick — the file is tiny and the read is cheap.
+  const pausedRoles = readPausedRoles(corpRoot);
 
   for (const role of employeeRoles()) {
     if (role.tier !== 'worker') continue;
+    if (pausedRoles.has(role.id)) continue;
+
+    // Per-role tuning (Project 1.10.4): RoleEntry can override the
+    // global TARGET_WEIGHTED_PER_SLOT + APOPTOSIS_HYSTERESIS_MS
+    // constants. Unset roles inherit the defaults.
+    const targetPerSlot = role.bacteriaTarget ?? TARGET_WEIGHTED_PER_SLOT;
+    const hysteresisMs = role.bacteriaHysteresisMs ?? APOPTOSIS_HYSTERESIS_MS;
 
     // Pool members: active Employees of this role.
     const pool = members
@@ -170,7 +181,7 @@ export function decideBacteriaActions(opts: DecideOpts): DecideResult {
       0,
     );
 
-    const targetExtraSlots = Math.ceil(weightedQueue / TARGET_WEIGHTED_PER_SLOT);
+    const targetExtraSlots = Math.ceil(weightedQueue / targetPerSlot);
     const delta = targetExtraSlots - idle.length;
 
     if (delta > 0) {
@@ -208,7 +219,7 @@ export function decideBacteriaActions(opts: DecideOpts): DecideResult {
       for (const { slot, idleSince } of idleByAge) {
         if (apoptosed >= surplus) break;
         const idleSinceMs = new Date(idleSince).getTime();
-        if (nowMs - idleSinceMs < APOPTOSIS_HYSTERESIS_MS) continue;
+        if (nowMs - idleSinceMs < hysteresisMs) continue;
         const action: ApoptoseAction = {
           kind: 'apoptose',
           slug: slot.id,

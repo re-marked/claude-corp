@@ -37,11 +37,13 @@ import {
   addMemberToChannel,
   createDmChannel,
   advanceCurrentStep,
+  appendBacteriaEvent,
   createChit,
   updateChit,
   findChitById,
   chitScopeFromPath,
   getTheme,
+  queryChits,
   UNIVERSAL_SOUL,
   defaultRules,
   defaultHeartbeat,
@@ -176,6 +178,27 @@ async function executeMitose(
   // committed Member record. Errors propagate so executor's outer
   // try/catch can log them.
   await processManager.spawnAgent(slug);
+
+  // Witness the birth in the bacteria-events log. Best-effort — if
+  // the append fails, the slot is alive but unwitnessed; downstream
+  // status / lineage views won't see it. Member record + obituary-
+  // pair (when it eventually apoptoses) is the load-bearing record;
+  // this is the cheap-query stream on top.
+  try {
+    appendBacteriaEvent(corpRoot, {
+      kind: 'mitose',
+      ts: new Date().toISOString(),
+      role: action.role,
+      slug,
+      generation: action.generation,
+      parentSlug: action.parentSlug,
+      assignedChit: action.assignedChit,
+    });
+  } catch (err) {
+    logError(
+      `[bacteria] mitose event log failed for ${slug} (slot alive): ${(err as Error).message}`,
+    );
+  }
 }
 
 // ─── Apoptose ───────────────────────────────────────────────────────
@@ -221,13 +244,53 @@ async function executeApoptose(
   // Archive matches `cc-cli fire`'s "fire" mode, not "remove".
   archiveSandbox(corpRoot, member);
 
+  // Compute lifetime metrics BEFORE removing the Member — the event
+  // record snapshots the slot's complete lived state. tasksCompleted
+  // is one chit-store scan; rare enough cost (apoptoses fire every
+  // few minutes per slot at most) to be acceptable.
+  const apoptoseTs = new Date();
+  const lifetimeMs = Math.max(
+    0,
+    apoptoseTs.getTime() - new Date(member.createdAt).getTime(),
+  );
+  const tasksCompleted = countCompletedTasksFor(corpRoot, member.id);
+  // chosenName: displayName at apoptose time. When equal to slug,
+  // the slot apoptosed before naming itself (rare; record null so
+  // dreams can distinguish "lived but never named" from "lived as X").
+  const chosenName = member.displayName !== member.id ? member.displayName : null;
+
   // Finally remove the Member record. Name returns to the pool by
   // virtue of no-longer-existing in members.json.
   const updated = members.filter((m) => m.id !== action.slug);
   writeConfig(join(corpRoot, MEMBERS_JSON), updated);
 
+  // Witness the death in the bacteria-events log. Order: AFTER the
+  // members.json write so the event reflects committed state. If the
+  // append fails, the slot is still correctly removed; we lose a
+  // witness but the obituary observation chit (written above) carries
+  // the same lifecycle fact.
+  try {
+    appendBacteriaEvent(corpRoot, {
+      kind: 'apoptose',
+      ts: apoptoseTs.toISOString(),
+      role: member.role ?? 'unknown',
+      slug: member.id,
+      generation: member.generation ?? 0,
+      parentSlug: member.parentSlot ?? null,
+      chosenName,
+      reason: action.reason,
+      idleSince: action.idleSince,
+      lifetimeMs,
+      tasksCompleted,
+    });
+  } catch (err) {
+    logError(
+      `[bacteria] apoptose event log failed for ${action.slug} (slot already removed): ${(err as Error).message}`,
+    );
+  }
+
   log(
-    `[bacteria] apoptose: ${action.slug} (${action.reason}, idle since ${action.idleSince}, gen ${member.generation ?? 0})`,
+    `[bacteria] apoptose: ${action.slug} (${action.reason}, idle since ${action.idleSince}, gen ${member.generation ?? 0}, lifetime ${lifetimeMs}ms, tasks ${tasksCompleted})`,
   );
 }
 
@@ -272,6 +335,35 @@ function readCorpHarness(corpRoot: string): string | undefined {
     return readConfig<Corporation>(join(corpRoot, CORP_JSON)).harness;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Count task chits the slot completed during its lifetime — used in
+ * the apoptose event for lifetime metrics ("backend pool: mean 3.2
+ * tasks per slot"). One chit-store scan per apoptose; rare enough
+ * that the cost doesn't matter at v1 corp scale.
+ *
+ * Filters: type=task AND assignee=slug AND workflowStatus=completed.
+ * Defensive against malformed chits (queryChits already routes those
+ * to the malformed audit log) — we ignore parse failures.
+ */
+function countCompletedTasksFor(corpRoot: string, slug: string): number {
+  try {
+    const result = queryChits<'task'>(corpRoot, {
+      types: ['task'],
+      limit: 0,
+    });
+    let count = 0;
+    for (const cwb of result.chits) {
+      const fields = cwb.chit.fields.task as TaskFields;
+      if (fields.assignee !== slug) continue;
+      if (fields.workflowStatus !== 'completed') continue;
+      count++;
+    }
+    return count;
+  } catch {
+    return 0;
   }
 }
 

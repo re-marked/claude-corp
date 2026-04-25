@@ -58,6 +58,33 @@ export interface RoleEntry {
   purpose: string;
   /** How this role typically communicates — tone, channels, frequency. Feeds CORP.md. */
   communication: string;
+  /**
+   * Bacteria target_weighted_per_slot override (Project 1.10.4). When
+   * set, the bacteria decision module uses this value instead of the
+   * global TARGET_WEIGHTED_PER_SLOT constant when computing this
+   * role's slot-count target. Lower = more aggressive parallelism +
+   * higher token spend on context-loads; higher = lazier splitting.
+   *
+   * Use case: roles with different task profiles want different
+   * cost / wall-clock trade-offs. Backend engineers churning small
+   * tickets might prefer 2.5 (less churn); QA engineers wanting
+   * fast feedback on every PR might prefer 1.0 (more parallelism).
+   *
+   * Worker-tier only — non-worker roles never reach the decision
+   * module's bacteria math; setting this on a Partner role is a no-op.
+   */
+  bacteriaTarget?: number;
+  /**
+   * Bacteria apoptosis hysteresis ms override (Project 1.10.4).
+   * When set, the bacteria decision module uses this value instead
+   * of the global APOPTOSIS_HYSTERESIS_MS constant for this role.
+   * Higher = slots persist longer through quiet periods (slower
+   * decommission, more identity continuity); lower = aggressive
+   * cleanup of idle slots.
+   *
+   * Worker-tier only.
+   */
+  bacteriaHysteresisMs?: number;
 }
 
 export const ROLES: readonly RoleEntry[] = [

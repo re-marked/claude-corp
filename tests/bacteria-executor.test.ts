@@ -6,8 +6,10 @@ import {
   createChit,
   createCasketIfMissing,
   queryChits,
+  readBacteriaEvents,
   type Member,
   type GlobalConfig,
+  type TaskFields,
 } from '../packages/shared/src/index.js';
 import {
   executeBacteriaActions,
@@ -385,6 +387,147 @@ describe('executeBacteriaActions', () => {
   });
 
   // ─── failure isolation ────────────────────────────────────────────
+
+  // ─── bacteria-events log emission (Project 1.10.4) ───────────────
+
+  it('mitose appends a MitoseEvent to bacteria-events.jsonl', async () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      createdBy: 'founder',
+      status: 'active',
+      fields: {
+        task: {
+          title: 'work',
+          priority: 'normal',
+          assignee: 'backend-engineer',
+          workflowStatus: 'queued',
+          complexity: 'medium',
+        },
+      },
+    });
+
+    await executeBacteriaActions(ctx, [
+      {
+        kind: 'mitose',
+        role: 'backend-engineer',
+        parentSlug: 'backend-engineer-bd',
+        generation: 3,
+        assignedChit: task.id,
+      },
+    ]);
+
+    const events = readBacteriaEvents(corpRoot, { kind: 'mitose' });
+    expect(events).toHaveLength(1);
+    const e = events[0]!;
+    if (e.kind !== 'mitose') throw new Error('narrowing');
+    expect(e.role).toBe('backend-engineer');
+    expect(e.parentSlug).toBe('backend-engineer-bd');
+    expect(e.generation).toBe(3);
+    expect(e.assignedChit).toBe(task.id);
+    expect(e.slug).toMatch(/^backend-engineer-[a-z]{2}$/);
+  });
+
+  it('apoptose appends an ApoptoseEvent with chosenName + lifetime + tasksCompleted', async () => {
+    const slug = 'backend-engineer-aa';
+    // Pre-create Member with chosenName + a couple of completed task chits.
+    const member: Member = {
+      id: slug,
+      displayName: 'Toast', // self-named
+      rank: 'worker',
+      status: 'active',
+      type: 'agent',
+      scope: 'corp',
+      scopeId: '',
+      agentDir: `agents/${slug}/`,
+      port: null,
+      spawnedBy: null,
+      // Born one hour before the test "now" — lifetime should be ~3.6M ms.
+      createdAt: new Date(Date.now() - 3_600_000).toISOString(),
+      kind: 'employee',
+      role: 'backend-engineer',
+      generation: 2,
+      parentSlot: 'backend-engineer-bd',
+    };
+    writeFileSync(join(corpRoot, 'members.json'), JSON.stringify([member]), 'utf-8');
+    mkdirSync(join(corpRoot, 'agents', slug), { recursive: true });
+
+    // Two completed tasks attributed to this slot.
+    for (let i = 0; i < 2; i++) {
+      createChit(corpRoot, {
+        type: 'task',
+        scope: 'corp',
+        createdBy: 'founder',
+        status: 'active',
+        fields: {
+          task: {
+            title: `task ${i}`,
+            priority: 'normal',
+            assignee: slug,
+            workflowStatus: 'completed',
+          } as TaskFields,
+        } as never,
+      });
+    }
+
+    await executeBacteriaActions(ctx, [
+      {
+        kind: 'apoptose',
+        slug,
+        idleSince: new Date(Date.now() - 4 * 60_000).toISOString(),
+        reason: 'queue drained, hysteresis elapsed',
+      },
+    ]);
+
+    const events = readBacteriaEvents(corpRoot, { kind: 'apoptose' });
+    expect(events).toHaveLength(1);
+    const e = events[0]!;
+    if (e.kind !== 'apoptose') throw new Error('narrowing');
+    expect(e.role).toBe('backend-engineer');
+    expect(e.slug).toBe(slug);
+    expect(e.generation).toBe(2);
+    expect(e.parentSlug).toBe('backend-engineer-bd');
+    expect(e.chosenName).toBe('Toast');
+    expect(e.tasksCompleted).toBe(2);
+    expect(e.lifetimeMs).toBeGreaterThan(3_500_000);
+    expect(e.lifetimeMs).toBeLessThan(3_700_000);
+  });
+
+  it('apoptose chosenName is null when slot apoptosed before naming', async () => {
+    const slug = 'backend-engineer-aa';
+    // displayName === id → "not yet chosen" signal
+    const member: Member = {
+      id: slug,
+      displayName: slug,
+      rank: 'worker',
+      status: 'active',
+      type: 'agent',
+      scope: 'corp',
+      scopeId: '',
+      agentDir: `agents/${slug}/`,
+      port: null,
+      spawnedBy: null,
+      createdAt: '2026-04-25T08:00:00.000Z',
+      kind: 'employee',
+      role: 'backend-engineer',
+    };
+    writeFileSync(join(corpRoot, 'members.json'), JSON.stringify([member]), 'utf-8');
+    mkdirSync(join(corpRoot, 'agents', slug), { recursive: true });
+
+    await executeBacteriaActions(ctx, [
+      {
+        kind: 'apoptose',
+        slug,
+        idleSince: '2026-04-25T09:30:00.000Z',
+        reason: 'test',
+      },
+    ]);
+
+    const events = readBacteriaEvents(corpRoot, { kind: 'apoptose' });
+    expect(events).toHaveLength(1);
+    if (events[0]!.kind !== 'apoptose') throw new Error('narrowing');
+    expect(events[0]!.chosenName).toBeNull();
+  });
 
   it('a failed action does not abort the rest of the batch', async () => {
     const task = createChit(corpRoot, {

@@ -28,6 +28,22 @@ export const MEMBERS_JSON = 'members.json';
 export const CHANNELS_JSON = 'channels.json';
 export const MESSAGES_JSONL = 'messages.jsonl';
 
+/**
+ * Bacteria-events log (Project 1.10.4) — append-only stream at the
+ * corp root. One JSON object per line, written by the daemon's
+ * bacteria executor on every mitose/apoptose. Read by status command,
+ * lineage view, Sexton's wake summaries, TUI sidebar aggregation.
+ */
+export const BACTERIA_EVENTS_JSONL = 'bacteria-events.jsonl';
+
+/**
+ * Bacteria pause registry — corp-scope set of role ids the bacteria
+ * decision module skips entirely (no mitose, no apoptose). Founder-
+ * controlled via `cc-cli bacteria pause/resume`. Shape:
+ * `{ paused: string[] }`.
+ */
+export const BACTERIA_PAUSED_JSON = 'bacteria-paused.json';
+
 export const SYSTEM_CHANNELS = ['general', 'tasks', 'logs'] as const;
 
 export const GITIGNORE_CONTENT = `# Agent secrets (injected by daemon, never committed)

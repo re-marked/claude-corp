@@ -30,7 +30,10 @@ import {
   emptyBacteriaState,
   type BacteriaState,
   BACTERIA_TICK_INTERVAL_MS,
+  BACTERIA_BURST_WINDOW_MS,
+  BACTERIA_BURST_THRESHOLD,
 } from './types.js';
+import { readBacteriaEvents, writeOrBumpKink } from '@claudecorp/shared';
 import { log, logError } from '../logger.js';
 
 export class BacteriaReactor {
@@ -81,10 +84,11 @@ export class BacteriaReactor {
     if (this.inFlight) return;
     this.inFlight = true;
     try {
+      const now = new Date();
       const result = decideBacteriaActions({
         corpRoot: this.ctx.corpRoot,
         previousState: this.state,
-        now: new Date(),
+        now,
       });
       if (result.actions.length > 0) {
         const summary = await executeBacteriaActions(this.ctx, result.actions);
@@ -93,10 +97,63 @@ export class BacteriaReactor {
         );
       }
       this.state = result.nextState;
+
+      // Burst detection (Project 1.10.4). Read events for the last
+      // BURST_WINDOW_MS; per-role count of mitoses ≥ THRESHOLD →
+      // emit a kink via writeOrBumpKink (per-(source, subject) dedup
+      // bumps occurrenceCount instead of duplicating while the burst
+      // persists). Sexton's existing kink-reading patrol surfaces.
+      // Best-effort: detection failure shouldn't poison the tick.
+      try {
+        this.detectBursts(now);
+      } catch (err) {
+        logError(`[bacteria] burst detection threw: ${(err as Error).message}`);
+      }
     } catch (err) {
       logError(`[bacteria] tick threw: ${(err as Error).message}`);
     } finally {
       this.inFlight = false;
+    }
+  }
+
+  /**
+   * Per-role count of mitose events in the burst window. Emits a
+   * `bacteria-burst:<role>` kink when count ≥ THRESHOLD. Pure read +
+   * one chit-write per bursting role; cheap.
+   */
+  private detectBursts(now: Date): void {
+    const since = new Date(now.getTime() - BACTERIA_BURST_WINDOW_MS).toISOString();
+    const recentMitoses = readBacteriaEvents(this.ctx.corpRoot, {
+      since,
+      kind: 'mitose',
+    });
+    const countByRole = new Map<string, number>();
+    for (const e of recentMitoses) {
+      countByRole.set(e.role, (countByRole.get(e.role) ?? 0) + 1);
+    }
+    for (const [role, count] of countByRole) {
+      if (count < BACTERIA_BURST_THRESHOLD) continue;
+      try {
+        writeOrBumpKink({
+          corpRoot: this.ctx.corpRoot,
+          source: 'bacteria-burst',
+          subject: role,
+          severity: 'warn',
+          title: `${role} pool burst — ${count} mitoses in ${BACTERIA_BURST_WINDOW_MS / 60000} min`,
+          body:
+            `Bacteria mitosed the ${role} pool ${count} times in the last ` +
+            `${BACTERIA_BURST_WINDOW_MS / 60000} minutes — above the ${BACTERIA_BURST_THRESHOLD} ` +
+            `threshold. Worth a look: stress test? Lead decomposing badly ` +
+            `(filing trivial tasks that should be one chit)? Mid-explosion ` +
+            `Contract? Reduce false-positives by tuning bacteriaTarget on ` +
+            `the role's RoleEntry.\n`,
+          createdBy: 'bacteria-reactor',
+        });
+      } catch (err) {
+        logError(
+          `[bacteria] burst kink write failed for ${role}: ${(err as Error).message}`,
+        );
+      }
     }
   }
 

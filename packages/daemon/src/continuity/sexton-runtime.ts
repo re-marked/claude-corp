@@ -117,7 +117,7 @@ export async function dispatchSexton(
     }
   }
 
-  const message = dispatchMessageFor(decision.action);
+  const message = dispatchMessageFor(decision.action, daemon.corpRoot);
   const sessionKey = agentSessionKey(sexton.displayName);
 
   // Resolve Sexton's DM channel with the founder so her response +
