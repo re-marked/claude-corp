@@ -89,7 +89,7 @@ describe('bacteria-breaker substrate', () => {
       expect(decision.shouldTrip).toBe(false);
     });
 
-    it('unparseable createdAt → ageMs=0, no trip on stale-window check', () => {
+    it('unparseable createdAt → ageMs=0, still trips if count meets threshold (treated as within window)', () => {
       const decision = evaluateBreakerTrigger(
         { id: 'k1', createdAt: 'not a timestamp', occurrenceCount: 5 },
         3,
