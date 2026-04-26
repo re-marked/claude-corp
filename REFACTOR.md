@@ -115,7 +115,7 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
 | 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 **[shipped]** |
-| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Budget governor, Shipping (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 **[~80% shipped as of 2026-04-24: 1.1-1.4.1, 1.6, 1.7, 1.8 landed; 1.9 complete through 1.9.6 (Sexton runtime + OS supervisor + 6 sweepers + kink chit type + 3 patrol blueprints); 1.10 bacteria + 1.11 budget/breaker + 1.12 Shipping not yet started]** |
+| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Crash-loop breaker, Clearinghouse (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 **[~92% shipped as of 2026-04-26: 1.1-1.4.1, 1.6-1.11 all landed; 1.12 Clearinghouse not yet started]** |
 | 2 | Workflow Substrate | Built-in blueprint library (domain workflows: ship-feature, fix-bug, etc.), self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 6-8 (slimmer — Blueprint substrate + patrol blueprints moved to Project 1 since the watchdog chain needs them on day one) |
 | 3 | Autonomous Operations | Advanced Witness patrols (corp-wide anomaly detection), stall/escalation routing, daemon-level auto-recovery | What's left of corp healing after Project 1's mechanical watchdogs ship — cross-agent coordination + daemon-restart survival. | 6-8 (slimmer — Refinery + circuit-breaker moved to Project 1) |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
@@ -1475,7 +1475,7 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 **Deferred to 1.9 follow-ups (non-blocking for 1.10/1.11/1.12):**
 - `cc-cli sweeper new --prompt` (AI sweeper authoring) — ship when someone wants a custom sweeper.
 - `cc-cli sweeper cast <blueprint>` — blueprint-based sweeper invocation. Current shape is direct-invoke via `cc-cli sweeper run <name>`; cast matters iff AI sweepers exist.
-- The two dep-gated patrols: `patrol/cleanup-stale-sandboxes` (needs sandbox-ttl, itself deferred pending project metadata with TTLs) and `patrol/merge-queue-status` (needs Shipping / 1.12). Land with their deps.
+- The two dep-gated patrols: `patrol/cleanup-stale-sandboxes` (needs sandbox-ttl, itself deferred pending project metadata with TTLs) and `patrol/merge-queue-status` (needs Clearinghouse / 1.12). Land with their deps.
 - The three dep-gated sweepers: `conflict-triage` (AI, needs sweeper-new flow), `breaker-reset` + `budget-watch` (pend 1.11).
 - The three design-deferred sweepers: `session-gc` (nothing to GC in our substrate), `sandbox-ttl` (missing data dep), `shutdown-dances` (not sweeper-shaped).
 
@@ -1534,7 +1534,7 @@ Authoring per-role operating manuals is 2.3 territory — the `hire-employee` bl
 - `patrol/health-check` — per-agent status sweep (silent-exit, stall, loop, GUPP violation).
 - `patrol/corp-health` — cross-agent coordination checks (chain walker idle agents, orphan tasks).
 - `patrol/cleanup-stale-sandboxes` — sandbox TTL enforcement.
-- `patrol/merge-queue-status` — Shipping (1.12) queue depth check.
+- `patrol/merge-queue-status` — Clearinghouse (1.12) queue depth check.
 - `patrol/chit-hygiene` — review of the lifecycle scanner's cooling/destroying decisions.
 
 Each blueprint tested by cooking into a Contract and walking it end-to-end.
@@ -1838,46 +1838,55 @@ Codex round expected. Pattern same as PRs #182-186.
 **Depends on:** 1.1 (Employee kind for role scoping), 1.9 (silentexit sweeper as the detector source), 1.10 (bacteria slug-avoidance integration).
 **PRs:** 1 (single beefy PR matching 1.10's shape).
 
-### 1.12 — Shipping: the merge lane + janitor Employees **[pending]**
+### 1.12 — Clearinghouse: the merge lane + clearinghouse Employees **[pending]**
+
+> **Naming locked (2026-04-26):** Mark renamed the primitive from the placeholder "Shipping" to **Clearinghouse** — the place, the phase, AND the team name. The status field that contracts/tasks/sandboxes carry while inside the clearinghouse phase is **`clearance`**. Secondary names (CLI verb, chit type id, role id, lock chit name, daemon module path) below are this doc's best guesses pending Mark's confirmation before code lands; revisit them at the start of implementation. (Memory: `project_clearinghouse_naming.md`.)
 
 **Problem.** Agents write to git freely today. At 3 agents, this is fine. At 20+ it's chaos — concurrent PRs collide on rebase, step on each other's changes, leave main in a broken state. The "walk away overnight" dream breaks when agents fight over main. Moved up from Project 3.2 (was "Refinery") because it's prerequisite for parallel work — without serialized merges, multi-Employee Contracts can't actually land.
 
-**The architecture Mark named:** there's a merge-lane system called **Shipping** (placeholder name — rename when it feels right), staffed by a pool of **janitor Employees** (bacteria-scaled). No Partner-by-decree needed — merging worktrees is mechanical, no identity, no relationship. The existing Janitor Partner gets removed from the role registry; `janitor` becomes an Employee role (`defaultKind: employee`, `tier: worker`).
+**The architecture:** a merge-lane system called **Clearinghouse**, staffed by a pool of **clearinghouse Employees** (bacteria-scaled). No Partner-by-decree needed — clearing worktrees (rebase, test, merge or conflict-route) is mechanical, no identity, no relationship. The existing Janitor Partner gets removed from the role registry; the new role is an Employee (`defaultKind: employee`, `tier: worker`). Best-guess role id: `clearinghouse` (single-word, matching `sexton`/`herald`/`hr`); confirm with Mark.
+
+**The `clearance` workflow status.** New value in the task and contract state machines:
+
+- `TaskWorkflowStatus`: `under_review → clearance → completed | rejected | failed | cancelled`. A task that passed audit but hasn't landed on main yet is in `clearance` — its clearance submission is queued or processing.
+- `ContractStatus`: `review → clearance → completed | rejected | failed | closed`. Contract enters `clearance` when its last task does; transitions to `completed` when all clearance submissions for its tasks merge.
+- Sandbox: open question. Sandboxes are filesystem dirs today with no state field; introducing one is non-trivial. Likely a no-op for v1 — sandbox just exists or doesn't, and the work it represents has its own clearance state via the task chit. Confirm with Mark.
 
 **Mechanism:**
-- Agents open PRs via their normal git push; then run `cc-cli ship --branch <name> --contract <chit-id>`, which creates a `merge-submission` chit (new chit type — non-ephemeral, audit trail).
-- merge-submission frontmatter: `branch`, `contract` reference, `submitter`, `priority`, `retry_count`, `status: queued | processing | merged | conflict | rejected | failed`.
-- Priority scoring (Gas Town's formula, adapted): `1000 + convoy_age×10/hr + (4-priority)×100 - min(retries×50, 300) + mr_age×1/hr`. Anti-thrashing via the retry-penalty cap.
-- Shipping lock: a corp-scope `shipping-lock` chit with `held_by: <janitor-slug> | null`. Only the lock-holder processes the queue at any moment. Release happens on merge complete or on janitor session exit.
-- Janitor Employees pull from the lane (pull-based, unlike Hand's push): each janitor's Casket is the shipping-lock. When they have the lock, they take the highest-scored queued submission, rebase, run tests, merge or conflict-route, close the submission, release the lock, next janitor picks up.
-- Real conflict → janitor files a blocker chit via 1.4.1 scoped to the PR author's ROLE (e.g. `backend-engineer`), not the specific slot. Role-resolver picks an active Employee via normal precedence (idle-first, least-priority otherwise): if the original author is still alive and idle, they're first-pick; if they've decommissioned, another Employee of the role handles it; if the role is empty, `no-candidates` triggers bacteria to spawn one (1.10). No PR can become permanently stranded by its author's death. Submission goes to `conflict` state; janitor releases lock + takes next. The blocker chit carries `originatingAuthor: <slug>` so the assignee sees "this was Toast's PR" as context even when Toast is gone.
-- Clean merge → submission `merged`, contract referenced by the submission gets its workflow-state advanced (typically `under_review → completed`).
+- Agents open PRs via their normal git push; then run `cc-cli clear --branch <name> --contract <chit-id>` (best-guess verb, was `cc-cli ship`), which creates a `clearance-submission` chit (best-guess type id, was `merge-submission`) — non-ephemeral, audit trail. Task moves to `clearance` workflow status at the same time.
+- clearance-submission frontmatter: `branch`, `contract` reference, `submitter`, `priority`, `retryCount`, `status: queued | processing | merged | conflict | rejected | failed`.
+- Priority scoring (Gas Town's formula, adapted): `1000 + queue_age×10/hr + (4-priority)×100 - min(retries×50, 300) + pr_age×1/hr`. Anti-thrashing via the retry-penalty cap.
+- Clearinghouse lock: a corp-scope `clearinghouse-lock` chit with `held_by: <worker-slug> | null`. Only the lock-holder processes the queue at any moment. Release happens on merge complete or on worker session exit.
+- Clearinghouse workers pull from the lane (pull-based, unlike Hand's push): each worker's Casket is the clearinghouse-lock. When they have the lock, they take the highest-scored queued submission, rebase, run tests, merge or conflict-route, close the submission, release the lock, next worker picks up.
+- Real conflict → worker files a blocker chit via 1.4.1 scoped to the PR author's ROLE (e.g. `backend-engineer`), not the specific slot. Role-resolver picks an active Employee via normal precedence (idle-first, least-priority otherwise): if the original author is still alive and idle, they're first-pick; if they've decommissioned, another Employee of the role handles it; if the role is empty, `no-candidates` triggers bacteria to spawn one (1.10). No PR can become permanently stranded by its author's death. Submission goes to `conflict` state; worker releases lock + takes next. The blocker chit carries `originatingAuthor: <slug>` so the assignee sees "this was Toast's PR" as context even when Toast is gone.
+- Clean merge → submission `merged`, the referenced task and contract advance from `clearance → completed`.
 
-**Bacteria scaling (from 1.10):** when `merge-submission` queue depth exceeds 1 and only 1 idle janitor exists, bacteria spawns another. Collapses to 1 idle when queue drains.
+**Bacteria scaling (from 1.10):** when `clearance-submission` queue depth exceeds 1 and only 1 idle clearinghouse worker exists, bacteria spawns another. Collapses to 1 idle when queue drains.
 
 **Role registry changes:**
 - Remove `janitor` Partner-by-decree entry.
-- Add `janitor` Employee role (worker tier, defaultKind: employee). Purpose: "Process the Shipping queue — rebase, test, merge or conflict-route."
+- Add `clearinghouse` Employee role (worker tier, defaultKind: employee). Purpose: "Process the Clearinghouse queue — rebase, test, merge or conflict-route."
 - Corp-sacred Partners drop from 6 to 5 (CEO, Herald, HR, Adviser, Sexton). (The prior `failsafe` slot is renamed to `sexton` in 1.9; this bullet reflects the post-1.9 registry.)
 
-**File paths:**
-- `packages/shared/src/chit-types.ts` (register `merge-submission` type with validator)
-- `packages/shared/src/types/chit.ts` (MergeSubmissionFields shape)
-- `packages/shared/src/roles.ts` (remove janitor Partner, add janitor Employee)
-- `packages/daemon/src/shipping.ts` (new — queue processor, lock management, bacteria trigger)
-- `packages/cli/src/commands/ship.ts` (new — `cc-cli ship --branch <name> --contract <chit-id>`)
+**File paths (best-guess):**
+- `packages/shared/src/chit-types.ts` (register `clearance-submission` type with validator)
+- `packages/shared/src/types/chit.ts` (`ClearanceSubmissionFields` shape; extend `TaskWorkflowStatus` + `ContractStatus` with `clearance`)
+- `packages/shared/src/roles.ts` (remove janitor Partner, add clearinghouse Employee)
+- `packages/daemon/src/clearinghouse.ts` (new — queue processor, lock management, bacteria trigger)
+- `packages/cli/src/commands/clear.ts` (new — `cc-cli clear --branch <name> --contract <chit-id>`)
 
 **Test strategy:**
 - Unit: priority scoring formula produces expected orderings.
+- Unit: workflow-status transitions accept `clearance` only from `under_review` (task) / `review` (contract); reject illegal entries.
 - Integration: two concurrent submissions with different files → both merge serially, main is clean.
-- Integration: two submissions with real conflict → first merges, second flips to `conflict`, blocker chit filed at second's submitter, retry-on-submitter-fix flow works.
-- Integration: queue depth > idle-janitor count → bacteria spawns a second janitor.
-- Regression: solo-corp (one janitor) processes submissions serially without deadlock.
+- Integration: two submissions with real conflict → first merges, second flips to `conflict`, blocker chit filed at second's submitter's role, retry-on-submitter-fix flow works.
+- Integration: queue depth > idle-worker count → bacteria spawns a second clearinghouse worker.
+- Regression: solo-corp (one worker) processes submissions serially without deadlock.
 
 **Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing conflicts), 1.4.1 (blocker injection), 1.10 (bacteria for pool scaling)
 **PRs:** 3-4
 
-**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; another Employee picks up the blocker; original Employee resumes on blocker-close. When any Employee silent-exits or stalls, Sexton's patrol (1.9) detects + respawns via process-manager — and if the daemon itself dies, the OS supervisor restarts it, Pulse ticks, Alarum spawns, Sexton resumes from her handoff chit, and the corp keeps going. When any agent tries to push to main, they route through `cc-cli ship` → Shipping queue (1.12) → janitor Employee merges. Mark walks away; when he comes back, 4 out of 5 Tasks have landed on main via serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop needed between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path. Corp is unkillable short of token exhaustion or OS process-kill without a supervisor.
+**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; another Employee picks up the blocker; original Employee resumes on blocker-close. When any Employee silent-exits or stalls, Sexton's patrol (1.9) detects + respawns via process-manager — and if the daemon itself dies, the OS supervisor restarts it, Pulse ticks, Alarum spawns, Sexton resumes from her handoff chit, and the corp keeps going. When any agent finishes a Task, they route through `cc-cli clear` → Clearinghouse queue (1.12) → clearinghouse worker merges. Mark walks away; when he comes back, 4 out of 5 Tasks have landed on main via serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop needed between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path. Corp is unkillable short of token exhaustion or OS process-kill without a supervisor.
 
 ---
 
@@ -1961,7 +1970,7 @@ Employees inherit their role's `CLAUDE.md` template when spawned (the CEO wrote 
 **Problem.** 1.9's patrols catch per-agent failures. They don't catch cross-agent patterns: "Backend Engineer pool keeps producing PRs the QA Engineer pool rejects — there's a skill gap" or "Engineering Lead has been handing impossible Tasks to Employees for 3 days." These aren't per-agent bugs; they're coordination bugs that only surface when you aggregate across roles.
 
 **Scope.**
-- Cross-agent pattern detectors that consume chit store + observation stream: reject-rate per role-pair, task-escalation frequency, blocker-file-rate per role, merge-submission retry-rate.
+- Cross-agent pattern detectors that consume chit store + observation stream: reject-rate per role-pair, task-escalation frequency, blocker-file-rate per role, clearance-submission retry-rate.
 - Threshold-based alerting (not ML — explicit rules): `backend→qa reject rate > 0.5 sustained for 24h → observation + Tier 2 inbox to CEO`.
 - Orphan-task reaper: Chits that should have dispatched but didn't — route via Sexton's redistribute action to an idle Employee.
 - Intervention audit trail: every anomaly + intervention writes an observation so dreams can compound patterns across time.
@@ -1970,11 +1979,11 @@ Employees inherit their role's `CLAUDE.md` template when spawned (the CEO wrote 
 **Depends on:** 1.9 (Sexton + patrol blueprint library), 1.10 (bacteria), 4.1 (observations), 4.2 (dreams)
 **PRs:** 2-3
 
-### 3.2 — [ABSORBED INTO 1.12 — Shipping]
+### 3.2 — [ABSORBED INTO 1.12 — Clearinghouse]
 
-The Refinery merge-coordinator work moved up into Project 1 (now 1.12 — Shipping). Rationale: merge discipline is prerequisite for multi-agent work, not a polish layer on top. Without serialized merges, parallel Employees stomp on each other from day one of Project 1's autonomous-loop test. Also: the whole thing is Employee-shape work (mechanical merging, no identity), which fits Project 1's "foundation + scaffolding" better than Project 3's "self-heal meta-layer."
+The Refinery merge-coordinator work moved up into Project 1 (now 1.12 — Clearinghouse). Rationale: merge discipline is prerequisite for multi-agent work, not a polish layer on top. Without serialized merges, parallel Employees stomp on each other from day one of Project 1's autonomous-loop test. Also: the whole thing is Employee-shape work (mechanical merging, no identity), which fits Project 1's "foundation + scaffolding" better than Project 3's "self-heal meta-layer."
 
-If you're looking for the merge-queue + janitor-pool design, go to 1.12.
+If you're looking for the merge-queue + clearinghouse-worker-pool design, go to 1.12.
 
 ### 3.3 — [ABSORBED INTO 1.9 + 1.11]
 
@@ -1988,9 +1997,9 @@ The auto-recovery machinery split across two earlier sub-projects:
 **Problem.** When the daemon process itself dies + restarts, in-flight Contracts shouldn't lose their place. Chit state is file-first so the substrate survives, but the watchdog + bacteria + shipping queue processors all need to pick up mid-cycle cleanly. 1.9 covers the watchdog-chain-level unkillability (OS supervisor → daemon → Pulse → Alarum → Sexton resuming from handoff chit); this sub-project covers the corp-wide state-rehydration on daemon boot.
 
 **Scope.**
-- Daemon boot walks members.json + Casket chits + merge-submission queue + pending breaker-trip chits, reconstructs in-memory state from disk.
+- Daemon boot walks members.json + Casket chits + clearance-submission queue + pending breaker-trip chits, reconstructs in-memory state from disk.
 - Pulse starts ticking immediately post-boot; Alarum's first tick sees Sexton's existing handoff chit and continues her patrols.
-- Shipping queue picks up where it left off — checks `shipping-lock` chit's `held_by`; if that janitor's session is gone, release the lock and let the next queued janitor take over.
+- Clearinghouse queue picks up where it left off — checks `clearinghouse-lock` chit's `held_by`; if that worker's session is gone, release the lock and let the next queued clearinghouse worker take over.
 - Circuit-breaker chits respected across restart (breaker trips persist).
 
 **Acceptance criteria.**
@@ -2000,7 +2009,7 @@ The auto-recovery machinery split across two earlier sub-projects:
 **Depends on:** 1.9, 1.11, 1.12
 **PRs:** 1-2
 
-**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Sexton's patrol from 1.9 respawns them). A merge conflict happens (Shipping janitor from 1.12 routes it to the author via a blocker chit). A role's Employee keeps crashing (circuit breaker from 1.11 trips). The daemon process restarts at 3am from a memory leak (3.3' resumes state cleanly; OS supervisor + 1.9's watchdog chain carry the corp across the restart). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
+**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Sexton's patrol from 1.9 respawns them). A merge conflict happens (Clearinghouse worker from 1.12 routes it to the author's role via a blocker chit). A role's Employee keeps crashing (circuit breaker from 1.11 trips). The daemon process restarts at 3am from a memory leak (3.3' resumes state cleanly; OS supervisor + 1.9's watchdog chain carry the corp across the restart). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
 
 ---
 
@@ -2282,7 +2291,7 @@ Still being discussed: the two remaining open questions (Partner demotion, voice
 1. Remaining 1.9 follow-ups: `cc-cli sweeper new --prompt` generator, patrol blueprint library (the contract-shaped blueprints Sexton cooks + walks), + `conflict-triage` AI sweeper.
 2. **Project 1.10** — Bacteria (auto-scaling Employee pool via weighted queue depth from TaskFields.complexity, role-resolver spawn integration, self-naming flow). Prerequisite for 1.12. Spec pinned earlier today: silentexit reinitializes existing slots; bacteria only creates new ones; disjoint domains.
 3. **Project 1.11** — Budget governor + crash-loop circuit breaker. Pinned integration point: silentexit retry-budget goes through 1.11's breaker, not a per-sweeper counter. Enables the `breaker-reset` + `budget-watch` sweepers.
-4. **Project 1.12** — Shipping (merge lane + janitor Employees). Pinned spec update earlier today: conflict blockers are role-scoped, not slot-scoped, so no PR gets stranded when its author decommissions.
+4. **Project 1.12** — Clearinghouse (merge lane + clearinghouse Employees). Renamed 2026-04-26 from placeholder "Shipping"; status value `clearance`. Pinned spec update earlier: conflict blockers are role-scoped, not slot-scoped, so no PR gets stranded when its author decommissions.
 
 Claude (not the corp) drives the build — the corp hasn't earned that trust yet. Eventually, once the corp works well on this new substrate, future refactors can be corp-driven. But not this one.
 
