@@ -186,7 +186,10 @@ export async function cmdBacteriaEvict(rawArgs: string[]): Promise<void> {
       parentSlug: member.parentSlot ?? null,
       chosenName,
       reason: `manual eviction: ${reason}`,
-      idleSince: apoptoseTs.toISOString(),
+      // True idleSince is unavailable without casket history from the CLI
+      // path. member.createdAt is the earliest possible idle start and
+      // serves as a conservative lower bound for lineage/stats displays.
+      idleSince: member.createdAt,
       lifetimeMs,
       tasksCompleted,
     });
