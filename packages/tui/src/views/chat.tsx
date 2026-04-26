@@ -2287,7 +2287,7 @@ Always consider what happens when things go wrong.`,
               : jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
             agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
           />
-          <Text color={slumberActive ? '#a5b4fc' : jackMode?.active ? COLORS.warning : COLORS.muted}> {slumberActive ? 'SLUMBER active · /wake /brief  ' : ''}{jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  {(sending || thinking) && jackMode?.active ? 'Esc:interrupt' : 'Esc:back'}</Text>
+          <Text color={slumberActive ? '#a5b4fc' : jackMode?.active ? COLORS.warning : COLORS.muted}> {slumberActive ? 'SLUMBER active · /wake /brief  ' : ''}{jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  m:members{(sending || thinking) && jackMode?.active ? 'Esc:interrupt' : 'Esc:back'}</Text>
         </>
       )}
     </Box>
