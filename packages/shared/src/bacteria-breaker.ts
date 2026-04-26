@@ -290,8 +290,15 @@ export function closeBreakerForSlug(opts: CloseBreakerOpts): ReadonlyArray<Chit<
       });
       closed.push(updated);
     } catch (err) {
+      // Validation errors are caller bugs — rethrow immediately.
+      // Other errors (fs glitch, stale chit) skip this trip so the
+      // rest of the loop still closes. chit-hygiene will surface the
+      // anomaly on the next scan.
       if (err instanceof ChitValidationError) throw err;
-      throw err;
+      console.error(
+        `[bacteria-breaker] closeBreakerForSlug: failed to close chit ${target.chit.id}:`,
+        (err as Error).message,
+      );
     }
   }
   return closed;
