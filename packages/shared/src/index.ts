@@ -298,6 +298,9 @@ export type {
   ListActiveBreakersOpts,
 } from './bacteria-breaker.js';
 
+// Shared formatting utilities (janitor fix: centralizes duplicated formatDuration).
+export { formatDuration } from './format.js';
+
 // Project 1.9.6: seed bundled built-in blueprint markdown files
 // into a fresh corp's chit store at init. Mirrors installDefaultSkills —
 // the bundled `blueprints/` dir ships with the package, seeded once
