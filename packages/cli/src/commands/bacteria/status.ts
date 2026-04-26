@@ -14,6 +14,7 @@
 import { parseArgs } from 'node:util';
 import {
   employeeRoles,
+  formatDuration,
   readBacteriaEvents,
   readPausedRoles,
   type ApoptoseEvent,
@@ -185,16 +186,6 @@ function formatOneRole(s: RoleStats): string {
   return lines.join('\n');
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const remM = m % 60;
-  return remM === 0 ? `${h}h` : `${h}h${remM}m`;
-}
 
 function startOfTodayIso(): string {
   const now = new Date();
