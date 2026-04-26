@@ -12,6 +12,10 @@
  *   2. Add an entry in FieldsForType (types/chit.ts)
  *   3. Write a validator function in this file
  *   4. Add an entry to CHIT_TYPES below
+ *   5. Add the type id (with a 1-2 line "why this exists" comment) to
+ *      `expectedTypeIds` in `tests/chit-types.test.ts` — the invariant
+ *      test compares the hand-list against CHIT_TYPES so the "why"
+ *      gets a documentation gate.
  * The registry invariant tests catch drift between FieldsForType and
  * CHIT_TYPES so missed steps fail the build.
  */
