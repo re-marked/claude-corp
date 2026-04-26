@@ -17,12 +17,13 @@ import {
   renameSync,
   existsSync,
 } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   appendBacteriaEvent,
   closeBreakerForSlug,
   createChit,
+  formatDuration,
   getCurrentStep,
   queryChits,
   readConfig,
@@ -309,7 +310,7 @@ function archiveSandbox(corpRoot: string, member: Member): void {
   const abs = isAbsolute(member.agentDir) ? member.agentDir : join(corpRoot, member.agentDir);
   if (!existsSync(abs)) return;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const parent = abs.replace(/[\\/][^\\/]+[\\/]?$/, '');
+  const parent = dirname(abs);
   const archiveName = `.archived-${member.id}-${stamp}`;
   try {
     renameSync(abs, join(parent, archiveName));
@@ -322,17 +323,6 @@ function archiveSandbox(corpRoot: string, member: Member): void {
       );
     }
   }
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const remM = m % 60;
-  return remM === 0 ? `${h}h` : `${h}h${remM}m`;
 }
 
 function parseEvictOpts(rawArgs: string[]): EvictOpts {
