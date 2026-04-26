@@ -177,5 +177,15 @@ function isBacteriaEvent(x: unknown): x is BacteriaEvent {
   if (typeof e.role !== 'string') return false;
   if (typeof e.slug !== 'string') return false;
   if (typeof e.generation !== 'number') return false;
+  // Kind-specific required fields — prevents NaN in downstream numeric
+  // aggregations when a truncated-write or external mutation omits them.
+  if (e.kind === 'mitose') {
+    if (typeof e.assignedChit !== 'string') return false;
+  }
+  if (e.kind === 'apoptose') {
+    if (typeof e.lifetimeMs !== 'number') return false;
+    if (typeof e.tasksCompleted !== 'number') return false;
+    if (typeof e.idleSince !== 'string') return false;
+  }
   return true;
 }
