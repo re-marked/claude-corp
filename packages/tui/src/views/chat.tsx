@@ -2148,7 +2148,8 @@ Always consider what happens when things go wrong.`,
   };
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="row" flexGrow={1}>
+      <Box flexDirection="column" flexGrow={1}>
       {/* Messages — ScrollBox with sticky scroll replaces Ink's broken Static */}
       <ScrollBox stickyScroll flexGrow={1} flexDirection="column">
         {messages.slice(-100).map((msg, idx, arr) => renderMsg(msg, idx > 0 ? arr[idx - 1] ?? null : null))}
@@ -2276,5 +2277,13 @@ Always consider what happens when things go wrong.`,
         </>
       )}
     </Box>
+    </Box>
+    <MemberSidebar
+      members={members}
+      channelMemberIds={channel.memberIds}
+      visible={showMemberSidebar}
+      daemonClient={daemonClient}
+      corpRoot={corpRoot}
+    />
   );
 }
