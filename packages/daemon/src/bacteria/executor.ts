@@ -162,6 +162,16 @@ async function executeMitose(
   // membership lists).
   registerSlotChannels(corpRoot, member);
 
+  // Spawn BEFORE claiming the chit. If spawnAgent throws, the member
+  // exists but the casket stays idle and the chit's assignee remains
+  // the role-id, so the decision loop treats the task as unprocessed
+  // on the next tick and retries. Claiming first would deadlock the
+  // chit: assigned to a slug that never ran, invisible to silentexit
+  // (no process entry) and invisible to the decision loop (assignee !=
+  // role-id). processManager.spawnAgent reads the committed Member
+  // record written above. Errors propagate to the outer try/catch.
+  await processManager.spawnAgent(slug);
+
   // Casket already exists (setupAgentWorkspace created it idle).
   // Claim the assigned chit: advance casket pointer + rewrite the
   // chit's assignee from role-id to slot-id + bump workflowStatus
@@ -174,11 +184,6 @@ async function executeMitose(
   log(
     `[bacteria] mitose: ${slug} (role=${action.role}, gen=${action.generation}, parent=${action.parentSlug ?? 'none'}, chit=${action.assignedChit})`,
   );
-
-  // Spawn the session. processManager.spawnAgent reads the now-
-  // committed Member record. Errors propagate so executor's outer
-  // try/catch can log them.
-  await processManager.spawnAgent(slug);
 
   // Witness the birth in the bacteria-events log. Best-effort — if
   // the append fails, the slot is alive but unwitnessed; downstream
