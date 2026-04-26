@@ -2149,10 +2149,15 @@ Always consider what happens when things go wrong.`,
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Messages — ScrollBox with sticky scroll replaces Ink's broken Static */}
-      <ScrollBox stickyScroll flexGrow={1} flexDirection="column">
-        {messages.slice(-100).map((msg, idx, arr) => renderMsg(msg, idx > 0 ? arr[idx - 1] ?? null : null))}
-      </ScrollBox>
+      {/* Messages-area + member sidebar live in a row so the sidebar
+          sits to the right of the chat. Input/status stay below this
+          row at full width. */}
+      <Box flexDirection="row" flexGrow={1}>
+        <Box flexDirection="column" flexGrow={1}>
+          {/* Messages — ScrollBox with sticky scroll replaces Ink's broken Static */}
+          <ScrollBox stickyScroll flexGrow={1} flexDirection="column">
+            {messages.slice(-100).map((msg, idx, arr) => renderMsg(msg, idx > 0 ? arr[idx - 1] ?? null : null))}
+          </ScrollBox>
       {/* Streaming messages — each renders inline like a real message in the chat */}
       {channelStreams.filter(s => s.content).map(stream => {
         const streamAgent = members.find(m => m.displayName === stream.agentName);
@@ -2203,6 +2208,16 @@ Always consider what happens when things go wrong.`,
           </Text>
         </Box>
       )}
+        </Box>
+        {/* Member sidebar — toggled with 'm'. Project 1.10.4 + 1.11. */}
+        <MemberSidebar
+          members={members}
+          channelMemberIds={channel.memberIds}
+          visible={showMemberSidebar}
+          daemonClient={daemonClient}
+          corpRoot={corpRoot}
+        />
+      </Box>
       {/* Plan review mode — replaces input with approve/edit/dismiss choice */}
       {planReview ? (
         <Box flexDirection="column">
