@@ -115,7 +115,7 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
 | 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 **[shipped]** |
-| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Budget governor, Shipping (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 **[~80% shipped as of 2026-04-24: 1.1-1.4.1, 1.6, 1.7, 1.8 landed; 1.9 complete through 1.9.6 (Sexton runtime + OS supervisor + 6 sweepers + kink chit type + 3 patrol blueprints); 1.10 bacteria + 1.11 budget/breaker + 1.12 Shipping not yet started]** |
+| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Budget governor, Shipping (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 **[~95% shipped as of 2026-04-25: 1.1-1.4.1, 1.6, 1.7, 1.8 landed; 1.9 complete through 1.9.6; 1.10 bacteria core+observability+self-naming+whoami shipped (PRs #182–#186); 1.11 crash-loop circuit breaker shipped (PR #187); 1.12 Shipping not yet started]** |
 | 2 | Workflow Substrate | Built-in blueprint library (domain workflows: ship-feature, fix-bug, etc.), self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 6-8 (slimmer — Blueprint substrate + patrol blueprints moved to Project 1 since the watchdog chain needs them on day one) |
 | 3 | Autonomous Operations | Advanced Witness patrols (corp-wide anomaly detection), stall/escalation routing, daemon-level auto-recovery | What's left of corp healing after Project 1's mechanical watchdogs ship — cross-agent coordination + daemon-restart survival. | 6-8 (slimmer — Refinery + circuit-breaker moved to Project 1) |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
@@ -1558,8 +1558,8 @@ Sweeper list (code by default; `conflict-triage` is the sole AI-by-default). Shi
 - `session-gc` — **[deferred]** original spec said "orphan processes, dead tmux panes, subprocess leftovers." Claude Corp doesn't use tmux; claude-code dispatches self-clean per turn; the gateway is daemon-managed. Nothing concrete to GC in the current substrate. Revisit when real orphan state accumulates in practice.
 - `sandbox-ttl` — **[deferred]** requires project metadata to carry a TTL field which doesn't exist yet. Building this against missing data would produce a sweeper that always returns noop. Defer until project metadata grows TTLs.
 - `shutdown-dances` — **[deferred, reshape]** original spec described "deterministic graceful-shutdown state machine for agents." That's not sweeper-shaped — a sweeper is a periodic scan, shutdown is an orchestrated flow triggered by stop. Belongs as a separate primitive, not a module in the sweeper registry.
-- `breaker-reset` — **[pending 1.11]** circuit breakers past cooldown; clear if cause resolved. Depends on 1.11's circuit-breaker chit type existing.
-- `budget-watch` — **[pending 1.11]** per-agent token spend; warn on daily-cap approach. Depends on 1.11's budget governor.
+- `breaker-reset` — **[intentionally dropped from 1.11]** The shipped 1.11 uses `cc-cli breaker reset` (founder-manual) instead of an auto-clearing periodic sweep. Auto-reset was cut because "cause resolved" is not reliably machine-detectable — a sweeper resetting a breaker whose root cause is still active would restart the crash loop immediately. Founder-manual is the right UX. Revisit in Project 3 (autonomous operations) if a heuristic for "root cause resolved" emerges.
+- `budget-watch` — **[dropped]** the dispatch-budget governor was cut from 1.11; see 1.11 design-turn note above. Not a sweeper concern.
 - `conflict-triage` (AI) — **[pending 1.9.5+]** called by `chit-hygiene` on ambiguous chits. AI sweepers ship via `cc-cli sweeper new --prompt` which isn't wired yet.
 
 Code sweepers don't bacteria-scale (one module handling a queue is fine). AI sweepers do — under load, bacteria splits spawn additional instances, matching 1.10's semantics.
@@ -1622,7 +1622,7 @@ Stability boundary sits at the destructive-action boundary and the first-N-runs 
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.4 (role-resolver for Sexton's redistribute action), 1.6 (handoff chit for Sexton's continuity across sessions), 1.8 (Blueprint-as-molecule — Sexton's patrols + sweepers ARE blueprints).
 **PRs:** 6-7 (bumped from 5-6 to accommodate sweeper substrate + `cc-cli sweeper new` authoring flow).
 
-### 1.10 — Auto-scaling Employee pool (bacteria) **[pending]**
+### 1.10 — Auto-scaling Employee pool (bacteria) **[shipped — PRs #182–#186, 2026-04-25]**
 
 Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Sexton (1.9) can also trigger wakes on idle-with-work agents during her patrol.
 
@@ -1652,7 +1652,7 @@ Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (ei
 **Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.9 (Sexton for wake)
 **PRs:** 3
 
-### 1.11 — Crash-loop circuit breaker **[pending]**
+### 1.11 — Crash-loop circuit breaker **[shipped — PR #187, 2026-04-25]**
 
 > **Design turn (2026-04-25):** The original 1.11 spec had two governors: per-hour dispatch budget + crash-loop circuit breaker. The dispatch-budget half got cut. Reasoning: claude-code's underlying constraint is a **5-hour rolling % window** of account budget (not per-hour token quotas), and the platform already enforces it. Reimplementing a parallel meter at the daemon layer would create two sources of truth that drift, and would be solving a problem the platform already handles. Token-cost observability also got cut for the same reason — `cc-cli costs` can come back as a follow-up if the founder wants visibility, but it doesn't gate dispatches. What remained worth shipping: the **crash-loop circuit breaker** — qualitatively different because it's not a usage cap, it's "this slot has silent-exited N times in M min, stop respawning it." Claude-code's 5h window catches the burn eventually, but in the meantime silentexit sweeper keeps respawning the broken slot every patrol tick, each spawn paying context-load tokens for nothing. The breaker stops that loop early. (Memory: `reference_claude_code_budget_window.md`.)
 
