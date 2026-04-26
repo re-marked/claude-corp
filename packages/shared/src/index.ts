@@ -277,6 +277,11 @@ export type {
 // module skips paused roles. Tiny JSON at <corpRoot>/bacteria-paused.json.
 export { readPausedRoles, pauseRole, resumeRole } from './bacteria-paused.js';
 
+// Shared formatting helpers — single source for human-facing strings
+// (durations etc) so behavior stays consistent across CLI surfaces +
+// Sexton's wake prose.
+export { formatDuration } from './format.js';
+
 // Project 1.11: crash-loop circuit breaker. Pure detection helper +
 // idempotent trip/close lifecycle + read surface for the spawn-refusal
 // path, founder controls, Sexton wake summary, TUI sidebar.
