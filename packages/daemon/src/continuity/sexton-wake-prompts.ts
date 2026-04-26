@@ -391,8 +391,10 @@ function composeActiveBreakersSection(corpRoot: string | undefined): string {
 }
 
 function startOfTodayIso(): string {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  // Use UTC day boundary so the cutoff aligns with event timestamps,
+  // which are always UTC ISO strings. Local-time midnight would drop
+  // events from 00:00–offset:00 UTC in negative-offset timezones.
+  return new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z';
 }
 
 function formatDuration(ms: number): string {
