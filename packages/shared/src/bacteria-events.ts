@@ -177,5 +177,12 @@ function isBacteriaEvent(x: unknown): x is BacteriaEvent {
   if (typeof e.role !== 'string') return false;
   if (typeof e.slug !== 'string') return false;
   if (typeof e.generation !== 'number') return false;
+  if (e.kind === 'mitose') {
+    if (typeof e.assignedChit !== 'string') return false;
+  }
+  if (e.kind === 'apoptose') {
+    if (typeof e.lifetimeMs !== 'number') return false;
+    if (typeof e.tasksCompleted !== 'number') return false;
+  }
   return true;
 }
