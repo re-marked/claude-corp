@@ -78,6 +78,11 @@ describe('CHIT_TYPES registry invariants', () => {
     // observations so soul material stays soul material. Ephemeral
     // 7d TTL, destroy-if-not-promoted; dedup per (source, subject).
     'kink',
+    // Project 1.11: breaker-trip — crash-loop circuit breaker chit.
+    // Non-ephemeral, corp-scope, active → closed lifecycle. Refuses
+    // spawnAgent for the slug while active; founder resets via
+    // `cc-cli breaker reset`.
+    'breaker-trip',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {
