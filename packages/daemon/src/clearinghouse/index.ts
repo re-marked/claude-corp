@@ -215,3 +215,17 @@ export type {
   MarkFailedAndReleaseResult,
   ReleaseAllOpts,
 } from './workflow.js';
+
+// ─── pressman ────────────────────────────────────────────────────────
+// Convenience hire for the Pressman Employee. NOT auto-called from
+// daemon boot — Pressman is founder opt-in via `cc-cli hire --role
+// pressman` (which auto-loads the operational manual). This export
+// is for tests + the future bacteria-scaling integration.
+export {
+  hirePressman,
+  buildPressmanRules,
+} from './pressman.js';
+export type {
+  HirePressmanOpts,
+  HirePressmanResult,
+} from './pressman.js';

@@ -3,168 +3,263 @@ name: patrol/clearing
 origin: builtin
 title: Clearinghouse Clearing Patrol
 summary: |
-  Pressman's canonical loop — claim lock, rebase, test, merge. Read by
-  Sexton during her wake summary to know what the merge lane is doing,
-  and by future LLM-Pressman (v2) as their walked patrol blueprint. v1
-  Pressman is daemon-driven; this file documents the flow.
+  Pressman's canonical walk — pick a queued clearance-submission,
+  rebase against main, run tests, push, and either finalize the
+  cascade or file a blocker. Walked once per Pressman wake; one
+  submission per walk; exit cleanly when done.
 steps:
-  - id: scan-queue
-    title: Scan the clearance-submission queue
+  - id: pick
+    title: Pick the next submission
     description: |
-      `cc-cli chit list --type clearance-submission --status active`
-      (filtered to submissionStatus=queued in the body) returns ranked
-      submissions. The Gas Town-adapted priority formula:
+      Run `cc-cli clearinghouse pick --from <your-slug> --json`.
 
-        score = 1000
-              + (queue_age_hours × 10)
-              + ((4 - priorityLevel) × 100)   [critical=300, low=0]
-              - min(retryCount × 50, 300)     [anti-thrashing cap]
-              + (pr_age_hours × 1)
+      Three outcomes:
 
-      Skip if queue empty. The scheduler returns to its idle interval
-      until the next tick.
-  - id: claim-lock
-    title: Claim the clearinghouse-lock for the top submission
-    description: |
-      The lock is a singleton corp-scope JSON at
-      `<corpRoot>/clearinghouse-lock.json`. Atomic claim via
-      `claimClearinghouseLock` — refuses when someone else holds it
-      OR when this slug already holds for a DIFFERENT submission
-      (forces explicit release first; otherwise prior submission
-      strands in submissionStatus=processing with no recovery path).
+      - `picked: null` — queue empty OR lock held by another
+        Pressman OR claim race went elsewhere. Exit cleanly; the
+        next wake brings the next chance.
 
-      On successful claim: lock state stored on disk, scheduler
-      proceeds. On failure: skip this tick; resumeClearinghouse will
-      catch stale-holder cases on the next sweep.
+      - `picked: {..., resumed: true}` — your prior session held
+        the lock when it died. The submission is mid-flight; the
+        worktree may be in a partial-rebase state. Re-walk from
+        acquire-worktree (it force-removes and re-adds, starting
+        from a clean checkout).
+
+      - `picked: {..., resumed: false}` — fresh claim. Lock is
+        yours; submission is now in `processing`. Hold onto
+        `submissionId`, `branch`, `taskId`, `contractId`, and
+        `submitter` for the rest of the walk.
+
+      Read each subcommand's JSON output. Prose output is for
+      humans; you read structured data.
   - id: acquire-worktree
     title: Acquire an isolated worktree
     description: |
-      WorktreePool hands back a clean worktree at
-      `<corpRoot>/.clearinghouse/wt-N/` with the PR's branch checked
-      out. Pool-managed: idle entries get reset (resetHard +
-      cleanWorkdir) before reuse — no inheritance of dirty state from
-      prior submissions. Up to DEFAULT_POOL_CAP (4) entries; if all
-      held, returns retryable failure.
-  - id: fetch-and-rebase
-    title: Fetch origin, rebase against base
-    description: |
-      `git fetch origin <baseBranch>` + `attemptRebase`. The flow
-      classifies into five outcomes:
+      Run `cc-cli clearinghouse acquire-worktree --from <slug>
+      --submission <id> --branch <branch> --json`.
 
-      - clean → proceed to tests.
-      - auto-resolved → trivial conflicts (whitespace / comment-only /
-        identical) auto-resolved by the conflict classifier; proceed.
-      - needs-author → substantive conflicts; abort the rebase, file
-        a blocker chit (severity=blocker, scoped to author's role
-        via 1.4.1), mark submissionStatus=failed with reason. Lock
-        released; next tick takes a different submission.
-      - sanity-failed → post-rebase diff blew up beyond the file-count
-        ceiling (max(pre × 5, 20)). Catches stale base, accidental
-        cherry-pick, generated-file explosion. Mark failed; surface
-        to engineering-lead via the failure record's route field.
-      - fatal → runtime error from gitOps (network, disk, tool); mark
-        failed; pedagogicalSummary surfaces the cause.
-  - id: run-tests
+      Returns `worktree.path` — a deterministic location keyed off
+      the submission id. Use it as the `--worktree` argument for
+      every step below.
+
+      The acquire is idempotent on the path. If a prior session
+      crashed mid-rebase and left the worktree dirty, this call
+      force-removes it and re-adds a clean checkout. You don't have
+      to clean up manually.
+  - id: rebase
+    title: Fetch base + rebase + classify outcome
+    description: |
+      Run `cc-cli clearinghouse rebase --from <slug> --submission
+      <id> --worktree <path> --branch <branch> --json`.
+
+      Five outcomes — branch on `rebase.outcome`:
+
+      - `clean` / `auto-resolved` — the rebase landed (auto-resolved
+        means trivial whitespace / comment / identical conflicts
+        were fixed in-place; this is normal). Proceed to the test
+        step.
+
+      - `needs-author` — substantive conflicts in
+        `rebase.conflictedFiles`. Default response: file a blocker
+        (kind=`rebase-conflict`) with the file list and a
+        pedagogical note. Exception: if the conflict is tiny and
+        obvious (e.g. both branches added a similar import line and
+        the resolution is to keep both), you may resolve inline —
+        but be honest about your confidence. The cost of a wrong
+        resolution is shipping broken code.
+
+      - `sanity-failed` — post-rebase diff blew up beyond the file-
+        count ceiling (max(pre × 5, 20)). Catches stale base,
+        accidental cherry-pick, generated-file explosion. Use
+        `mark-failed` (no requeue) with the reason from
+        `rebase.failureRecord.pedagogicalSummary`.
+
+      - `fatal` — runtime git error (network, disk, tool-missing).
+        Use `mark-failed` (no requeue). The `failureRecord.route`
+        names where the surface goes — typically `founder` for
+        infra failures, occasionally `author` for branch issues.
+  - id: test
     title: Run tests with flake retry
     description: |
-      `runWithFlakeRetry` runs the corp's test command (default
-      `pnpm test`, configurable via CLEARINGHOUSE_TEST_COMMAND).
-      First run + one retry on initial failure (1s delay between).
+      Run `cc-cli clearinghouse test --from <slug> --submission <id>
+      --worktree <path> --json`.
 
-      Outcomes:
-      - passed-first → proceed to merge.
-      - flake → re-run passed; treat as success, log the flake.
-      - consistent-fail → both runs failed with overlapping failures;
-        file blocker (severity=blocker, scoped to author's role)
-        with the per-test failure summary; mark failed.
-      - inconclusive → timeout / crash / tool-missing; mark failed
-        and surface to founder (the corp's test environment is
-        misbehaving in a way re-running won't fix).
+      Branch on `test.classifiedAs`:
 
-      v2 enhancement: `attributeFailure` runs the same tests on main
-      and classifies pr-introduced vs main-regression vs mixed — the
-      lead-the-field piece. Out-of-scope for v1 because gitOps doesn't
-      expose checkoutRef yet.
-  - id: attempt-merge
+      - `passed-first` / `flake` — proceed to merge. Flakes are
+        environmental noise; the re-run passed. Don't surface to
+        the author.
+
+      - `consistent-fail` — both runs failed on the same tests.
+        File a blocker (kind=`test-fail`) with the failure names
+        from `test.finalRun.failures` in the detail body. The
+        author needs to see exactly which tests failed.
+
+      - `inconclusive` — timeout, crash, or tool-missing. The corp's
+        test environment is misbehaving in a way re-running won't
+        fix. Use `mark-failed` (no requeue). If you see this twice
+        in a row across different submissions, DM the founder —
+        the corp infrastructure may be sick.
+  - id: merge
     title: Push the rebased branch
     description: |
-      `attemptMerge` does `git push --force-with-lease origin <branch>`
-      and captures HEAD sha. Outcomes:
+      Run `cc-cli clearinghouse merge --from <slug> --submission
+      <id> --worktree <path> --branch <branch> --json`.
 
-      - merged → markSubmissionMerged cascades through task workflow
-        (clearance → completed) and contract chit.status (clearance →
-        completed when all sibling tasks complete). Lock released.
-      - race → origin moved between our rebase and our push;
-        retryCount++, submissionStatus flips back to queued for next
-        tick. Capped at PRESSMAN_RETRY_CAP (3); beyond that, mark
-        failed.
-      - hook-rejected → origin's pre-receive hook refused; the hook's
-        stderr captured into the blocker chit. Author addresses, runs
-        cc-cli done on a fix, audit re-fires enterClearance.
-      - branch-deleted → unrecoverable; mark failed; surface to
-        author's role.
-      - fatal → runtime error; mark failed.
-  - id: release
-    title: Release the lock
-    description: |
-      releaseClearinghouseLock with the holder slug. Mismatch returns
-      false (stale-handle protection); the periodic resumeClearinghouse
-      sweep catches dead-holder cases.
+      Branch on `merge.outcome`:
 
-      Worktree returned to pool (reset + clean) for the next
-      acquire. Pool stays warm — saves create/destroy churn.
-  - id: log-outcome
-    title: Log the tick outcome for retrospective
+      - `merged` — proceed to finalize. `merge.mergeCommitSha` is
+        your audit trail; pass it to finalize.
+
+      - `race` — origin moved between your rebase and your push.
+        Use `mark-failed --requeue`. The retry cap (3) prevents
+        infinite loops on chronically-racing branches. The next
+        pick re-rebases from the new origin tip.
+
+      - `hook-rejected` — origin's pre-receive hook refused. The
+        hook output is in `merge.hookOutput`. File a blocker
+        (kind=`hook-reject`) with the hookOutput in the detail
+        body. The author needs to see exactly what the hook
+        complained about.
+
+      - `branch-deleted` — branch gone from origin. Use
+        `mark-failed` (no requeue); unrecoverable without author
+        action.
+
+      - `fatal` — runtime git error. Use `mark-failed` (no requeue).
+  - id: finalize
+    title: Cascade success + cleanup
     description: |
-      Daemon log entry summarizes: submission id, branch, outcome,
-      time, any cascade deltas. Sexton's wake digest reads the
-      observation/escalation/kink chit stream — the blocker chit
-      from a needs-author outcome surfaces naturally there without
-      a separate notification path.
+      Run `cc-cli clearinghouse finalize --from <slug> --submission
+      <id> --merge-sha <sha> --worktree <path> --json`.
+
+      Cascades the chit graph: submission → merged, task workflow
+      `clearance → completed`, contract → completed if all sibling
+      tasks landed. Releases the lock. Removes the worktree.
+
+      After finalize succeeds, post a one-liner in `#general`:
+
+        cc-cli send --channel general
+          --message "Merged <submitter>'s PR for task <taskId>
+                     (sha <short-sha>)."
+
+      Then exit cleanly. Your session is done.
+  - id: file-blocker-or-mark-failed
+    title: Branch-point: when the walk doesn't end in finalize
+    description: |
+      The walk exits via `finalize` on the happy path. The other
+      exits are:
+
+      - `file-blocker` for needs-author cases (substantive
+        rebase conflict, consistent test fail, hook reject).
+        Creates an escalation chit routed to the author's role
+        via Hand. Marks submission failed; releases lock + worktree.
+        After filing, DM the author so they know:
+
+          cc-cli say --agent <submitter>
+            --message "Blocker on your PR for task <taskId>
+                       — see escalation <id>."
+
+      - `mark-failed` (no requeue) for terminal failures that
+        aren't author-actionable (sanity-failed, inconclusive
+        tests, branch-deleted, fatal). Records a reason; cascades
+        task to failed; releases lock + worktree.
+
+      - `mark-failed --requeue` for push-race only. Bumps
+        retryCount; under the cap (3) flips back to queued for
+        the next pick; at cap terminal-fails. Don't use --requeue
+        for any other outcome.
+
+      - `release` for graceful early exits where the submission
+        state has already been written elsewhere — bare lock +
+        worktree cleanup, no chit changes. Sparingly used.
 ---
 
 # Clearinghouse Clearing Patrol
 
-The Pressman's canonical loop. Documentation-shape for v1 (daemon
-runs the loop directly) and walked-by-LLM-Pressman shape for v2
-when judgment moments need an agent's session.
+You are the Pressman. This patrol is your canonical walk: you read
+the queue, take one submission, run it through the merge lane, and
+finish in a terminal state (merged / blocker filed / mark-failed).
+One submission per wake. Exit cleanly when done.
 
 ## When to walk this
 
-Continuously, while a Pressman is hired and the queue is non-empty.
-Each tick is one submission's full journey from queued to merged
-(or failed-with-blocker). Tick interval is 30s by default —
-configured via PRESSMAN_TICK_INTERVAL_MS.
+On every wake. Wakes come from two sources:
+
+- **Reactive** — the daemon's `clearance-submission` watcher
+  detects a freshly-queued submission and dispatches you.
+- **Pulse fallback** — every Pulse tick (5 min default), if the
+  queue is non-empty and no Pressman is currently processing,
+  you get woken. Catches stale queues where the watcher missed
+  an event.
+
+You don't loop inside a session. The session walks one submission
+to a terminal state, then exits. The next wake handles the next
+submission. This keeps the lane round-robin-friendly when bacteria
+spawns multiple Pressmen (1.12.3).
 
 ## What this is NOT
 
-- Not pre-push review. That's `patrol/code-review` (Editor's job
-  in PR 4). By the time a submission reaches Pressman's queue,
-  Editor has already approved or cap-bypassed.
-- Not author-side conflict resolution. That's `patrol/conflict-
-  resolution` — the substitute-author flow when a blocker routes
-  back via 1.4.1.
-- Not a GitHub Actions surrogate. We do CI-style work locally
-  before merging; CI on origin runs after as a safety net.
+- Not pre-push code review. That's `patrol/code-review` (Editor's
+  walk, lands in 1.12.2). By the time a submission reaches your
+  queue, Editor has approved or capped-out — `reviewBypassed` on
+  the submission tells you which.
+- Not author-side conflict resolution. When you file a
+  rebase-conflict blocker, a substitute Employee picks it up via
+  `patrol/conflict-resolution`. Your job ends at the blocker.
+- Not a CI surrogate. You run tests locally before merge as a
+  mechanical correctness check. The corp's CI on origin may run
+  after merge as defense-in-depth; that's not your concern.
 
 ## Failure routing rules
 
-The `route` field on every FailureRecord drives blocker scoping:
+The `route` field on every `failureRecord` (and the `kind` field
+on every blocker) drives where the surface goes:
 
-- `author` — patch is broken; route to PR author's role via 1.4.1.
-- `engineering-lead` — main branch is broken (regression); the PR
-  is innocent. Route up.
-- `founder` — corp infra broken (disk full, tool missing, network
-  down). Tier-3 inbox via existing audit channel.
+- `author` (kind=rebase-conflict, test-fail, hook-reject) —
+  patch is broken; route blocker to the PR author's role via
+  Hand. Substitute Employee resumes if original is gone.
+- `engineering-lead` (route=engineering-lead in
+  failureRecord) — main branch is broken (regression). The PR
+  is innocent; escalate up.
+- `founder` (route=founder; tool-missing, disk-full, network) —
+  corp infrastructure is broken. Tier-3 inbox via the existing
+  audit channel. DM the founder if you see repeated infra
+  failures.
 
-## Why daemon-driven for v1
+## Why you exist
 
-Every judgment moment the spec described — flake-vs-real,
-trivial-vs-substantive conflict, sanity check — is already encoded
-in the PR 2 primitives (flake detector, conflict classifier,
-post-rebase sanity check). There's no LLM-shaped decision left.
+Two failures break "walk away overnight" without you:
 
-v2 transition target: contract-aware merge ordering (avoid merging
-tasks of the same contract simultaneously to reduce conflict
-surface), founder-DM-on-stuck (Pressman pings founder when judgment
-runs out beyond the encoded rules).
+1. Agents push to main freely. At twenty agents, concurrent PRs
+   collide on rebase, step on each other, leave main broken.
+
+2. Test failures and merge conflicts surface as undifferentiated
+   alarms. Real failures and flakes look identical; everything
+   pages someone.
+
+You serialize the actual landing on main, you separate flake from
+real failure, you triage substantive vs trivial conflicts, you
+route blockers with author-context. The corp ships overnight
+because you're patient and decisive at the right moments.
+
+## Your judgment moments
+
+Code classifies outcomes precisely. You decide what they mean for
+THIS submission:
+
+- A trivial fix to a near-passing test (snapshot update, lint
+  rule) might be in scope to amend rather than block. Read the
+  failure first; default position: file-blocker.
+- A rebase conflict that's mechanically substantive but whose
+  resolution is obvious (both sides added an import; resolution
+  is to keep both) might be in scope. Default position: file-
+  blocker. The cost of a wrong inline call is corrupted main.
+- Repeated infrastructure failures — DM the founder. The lane
+  is fine; the corp infra isn't.
+- A submission marked `resumed: true` — your prior session
+  crashed. Re-walk from acquire-worktree.
+
+When in genuine doubt: file the blocker. Pedagogical blockers
+route to humans who can read context; over-cautious blockers
+cost a small delay. Confident wrong calls cost a corrupted main.
