@@ -230,10 +230,10 @@ export async function attemptRebase(opts: AttemptRebaseOpts): Promise<Result<Reb
 
 interface InnerRebaseResult {
   state: 'clean' | 'auto-resolved' | 'needs-author' | 'fatal';
-  autoResolvedFiles?: string[];
+  autoResolvedFiles?: readonly string[];
   autoResolutionRounds?: number;
-  conflictedFiles?: string[];
-  conflictSummaries?: ConflictSummary[];
+  conflictedFiles?: readonly string[];
+  conflictSummaries?: readonly ConflictSummary[];
   failureRecord?: FailureRecord;
 }
 
