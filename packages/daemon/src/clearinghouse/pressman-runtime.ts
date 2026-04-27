@@ -205,11 +205,30 @@ export class PressmanScheduler {
     }
     if (!pressman) return; // No Pressman hired; corp opted out
 
-    // 2. Is the lock free?
+    // 2. Self-heal stale state per-tick. Catches dead-holder locks
+    // that accumulated between boots: a Pressman crashed mid-tick,
+    // lock stays held, no progress without intervention. Every tick
+    // the scheduler re-runs resumeClearinghouse with the live
+    // aliveness predicate; stale locks get released, orphaned
+    // submissions re-queued. Boot-time resume handles restart-time;
+    // this tick-level resume handles between-restart silent exits.
+    try {
+      const recovered = resumeClearinghouse(this.corpRoot, (slug) => this.isAgentAlive(slug));
+      if (recovered.lockReleased) {
+        log(`[clearinghouse:pressman] tick recovered stale lock`);
+      }
+      if (recovered.submissionsReset > 0) {
+        log(`[clearinghouse:pressman] tick re-queued ${recovered.submissionsReset} orphan submission(s)`);
+      }
+    } catch (err) {
+      logError(`[clearinghouse:pressman] tick resumeClearinghouse failed: ${stringify(err)}`);
+    }
+
+    // 3. Is the lock free now (post-recovery)?
     const lock = readClearinghouseLock(this.corpRoot);
     if (lock.heldBy) {
-      // Held — either active processing OR stale. resumeClearinghouse
-      // (boot + periodic sweep) handles the stale case; we just skip.
+      // Held by an alive holder — another tick is processing.
+      // Skip; we'll catch up on the next tick when they release.
       return;
     }
 
