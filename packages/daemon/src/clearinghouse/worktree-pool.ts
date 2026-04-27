@@ -190,9 +190,13 @@ export class WorktreePool {
     // Reset + clean. Best-effort: a reset failure is logged but we
     // still release the slot — better to free it than to permanently
     // leak the entry on a transient git error.
+    //
+    // Note: we DO NOT clear entry.branch — a same-branch reacquire
+    // skips the worktree-remove + worktree-add pair via
+    // resetEntryToBranch's early-return, saving git ops on the
+    // common Pressman-iterates-on-same-branch path.
     const reset = await this.resetEntryToCleanState(entry);
     entry.holder = null;
-    entry.branch = null;
     if (!reset.ok) {
       // Surface to caller; the entry IS released but the next
       // acquire might fail to check out its branch.

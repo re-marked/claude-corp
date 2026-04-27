@@ -93,8 +93,20 @@ export interface TestFailureSummary {
 export interface RunTestsOpts {
   /** Working directory the test command runs in. Typically a worktree path. */
   cwd: string;
-  /** Override the test command. Falls back to env then DEFAULT_TEST_COMMAND. */
+  /**
+   * Override the test command in shell-style string form. Falls back
+   * to env then DEFAULT_TEST_COMMAND. Tokenized by whitespace —
+   * does NOT respect quoting. Use the structured `program` + `args`
+   * shape when you need quoted arguments.
+   */
   command?: string;
+  /**
+   * Structured override (overrides `command` when both supplied).
+   * Lets callers pass exact program + args without worrying about
+   * shell tokenization.
+   */
+  program?: string;
+  args?: readonly string[];
   /** Override the per-run timeout. */
   timeoutMs?: number;
   /** Extra env vars merged into process.env. */
@@ -112,18 +124,27 @@ export interface RunTestsOpts {
  * shouldn't have to wrap — tool missing, etc.
  */
 export async function runTests(opts: RunTestsOpts): Promise<Result<TestRunResult>> {
-  const command = opts.command ?? process.env.CLEARINGHOUSE_TEST_COMMAND ?? DEFAULT_TEST_COMMAND;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TEST_TIMEOUT_MS;
   const startedAt = Date.now();
 
-  // Split command into program + args. We don't use a shell because
-  // shell-injection risk + portability concerns. Caller passes the
-  // command in space-separated form; we tokenize.
-  const tokens = command.split(/\s+/).filter((t) => t.length > 0);
-  if (tokens.length === 0) {
-    return err(failure('tool-missing', `Empty test command`, `command='${command}'`));
+  // Resolve program + args. Structured override wins over the
+  // shell-style string. The string path tokenizes by whitespace
+  // (good enough for the canonical `pnpm test` shape; not for
+  // commands with quoted arguments — use the structured shape there).
+  let program: string;
+  let args: readonly string[];
+  if (opts.program) {
+    program = opts.program;
+    args = opts.args ?? [];
+  } else {
+    const command = opts.command ?? process.env.CLEARINGHOUSE_TEST_COMMAND ?? DEFAULT_TEST_COMMAND;
+    const tokens = command.split(/\s+/).filter((t) => t.length > 0);
+    if (tokens.length === 0) {
+      return err(failure('tool-missing', `Empty test command`, `command='${command}'`));
+    }
+    program = tokens[0]!;
+    args = tokens.slice(1);
   }
-  const [program, ...args] = tokens;
 
   let result: Awaited<ReturnType<typeof execa>>;
   try {
