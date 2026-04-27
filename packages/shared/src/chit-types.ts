@@ -39,6 +39,8 @@ import type {
   SweeperRunFields,
   KinkFields,
   BreakerTripFields,
+  ClearanceSubmissionFields,
+  ReviewCommentFields,
 } from './types/chit.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -211,6 +213,10 @@ function validateTask(fields: unknown): void {
       'in_progress',
       'blocked',
       'under_review',
+      // Project 1.12: passed audit + Editor review (or cap-bypassed)
+      // and the clearance-submission is queued/processing in the
+      // Pressman lane.
+      'clearance',
       'completed',
       'rejected',
       'failed',
@@ -681,6 +687,117 @@ function validateSweeperRun(fields: unknown): void {
   }
 }
 
+function validateClearanceSubmission(fields: unknown): void {
+  const f = requireObject(fields, 'clearance-submission') as Partial<ClearanceSubmissionFields>;
+
+  // Identity / linkage — all required + non-empty.
+  requireNonEmptyString(f.branch, 'clearance-submission.branch');
+  requireNonEmptyString(f.contractId, 'clearance-submission.contractId');
+  requireNonEmptyString(f.taskId, 'clearance-submission.taskId');
+  requireNonEmptyString(f.submitter, 'clearance-submission.submitter');
+
+  // Priority is snapshotted from the task at submit time so the
+  // queue order is stable. Strict enum.
+  requireEnum(f.priority, 'clearance-submission.priority', [
+    'critical',
+    'high',
+    'normal',
+    'low',
+  ] as const);
+
+  // Submitted timestamp is mandatory — anchor for queue-age scoring.
+  if (f.submittedAt === undefined || f.submittedAt === null) {
+    throw new ChitValidationError(
+      'clearance-submission.submittedAt is required (ISO 8601 timestamp)',
+      'clearance-submission.submittedAt',
+    );
+  }
+  optionalIsoTimestamp(f.submittedAt, 'clearance-submission.submittedAt');
+
+  // The rich state machine. chit.status is coarser; this is the
+  // source of truth for "where is this submission in the lane."
+  requireEnum(f.submissionStatus, 'clearance-submission.submissionStatus', [
+    'queued',
+    'processing',
+    'merged',
+    'conflict',
+    'rejected',
+    'failed',
+  ] as const);
+
+  // Counters — integers, generous ceiling. retryCount and
+  // reviewRound are tracked separately because they're penalized
+  // differently in the priority formula (retry penalized, review
+  // not).
+  requireInteger(f.retryCount, 'clearance-submission.retryCount', 0, 1_000_000);
+  requireInteger(f.reviewRound, 'clearance-submission.reviewRound', 0, 1_000_000);
+
+  // reviewBypassed is optional. When present, MUST be boolean.
+  if (f.reviewBypassed !== undefined && f.reviewBypassed !== null && typeof f.reviewBypassed !== 'boolean') {
+    throw new ChitValidationError(
+      'clearance-submission.reviewBypassed must be a boolean or null/absent',
+      'clearance-submission.reviewBypassed',
+    );
+  }
+
+  // Processing-state fields. Optional — present when claimed by a
+  // Pressman, absent or null while queued.
+  optionalIsoTimestamp(f.processingStartedAt, 'clearance-submission.processingStartedAt');
+  if (f.processingBy !== undefined) requireStringOrNull(f.processingBy, 'clearance-submission.processingBy');
+
+  // Merged-state fields. Optional; populated on `submissionStatus = 'merged'`.
+  optionalIsoTimestamp(f.mergedAt, 'clearance-submission.mergedAt');
+  if (f.mergeCommitSha !== undefined) requireStringOrNull(f.mergeCommitSha, 'clearance-submission.mergeCommitSha');
+
+  // Latest-failure prose. Free form. Refreshed per attempt; per-attempt
+  // detail lives in step-log chits, not here.
+  if (f.lastFailureReason !== undefined) requireStringOrNull(f.lastFailureReason, 'clearance-submission.lastFailureReason');
+}
+
+function validateReviewComment(fields: unknown): void {
+  const f = requireObject(fields, 'review-comment') as Partial<ReviewCommentFields>;
+
+  // Linkage — submissionId + taskId both required so queries can
+  // filter either way without walking the chain.
+  requireNonEmptyString(f.submissionId, 'review-comment.submissionId');
+  requireNonEmptyString(f.taskId, 'review-comment.taskId');
+  requireNonEmptyString(f.reviewerSlug, 'review-comment.reviewerSlug');
+
+  // Location.
+  requireNonEmptyString(f.filePath, 'review-comment.filePath');
+  requireInteger(f.lineStart, 'review-comment.lineStart', 1, 10_000_000);
+  requireInteger(f.lineEnd, 'review-comment.lineEnd', 1, 10_000_000);
+  // Cross-field invariant: lineEnd >= lineStart. A reversed range
+  // is almost certainly an authoring mistake; reject loudly so the
+  // Editor's writer surfaces it instead of producing an unrenderable
+  // comment.
+  if (typeof f.lineStart === 'number' && typeof f.lineEnd === 'number' && f.lineEnd < f.lineStart) {
+    throw new ChitValidationError(
+      `review-comment.lineEnd (${f.lineEnd}) must be >= lineStart (${f.lineStart})`,
+      'review-comment.lineEnd',
+    );
+  }
+
+  // Severity — only blocker rejects the round; others advisory.
+  requireEnum(f.severity, 'review-comment.severity', ['blocker', 'suggestion', 'nit'] as const);
+
+  // Comment content. issue + why both required + non-empty —
+  // Editor must articulate both for the comment to compound into
+  // CULTURE.md substrate later.
+  requireNonEmptyString(f.issue, 'review-comment.issue');
+  requireNonEmptyString(f.why, 'review-comment.why');
+
+  // Suggested patch is optional but recommended. String or null;
+  // empty string would imply "patch field exists but is blank,"
+  // which is meaningless — reject by treating empty differently
+  // from absent. Use requireStringOrNull's existing semantics
+  // (string or null only); absent is also fine.
+  if (f.suggestedPatch !== undefined) requireStringOrNull(f.suggestedPatch, 'review-comment.suggestedPatch');
+
+  // Round counter — integer >= 1 (round 1 is the first review pass).
+  requireInteger(f.reviewRound, 'review-comment.reviewRound', 1, 1_000_000);
+}
+
 function validateBreakerTrip(fields: unknown): void {
   const f = requireObject(fields, 'breaker-trip') as Partial<BreakerTripFields>;
 
@@ -797,7 +914,10 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     defaultEphemeral: false,
     defaultTTL: null,
     defaultStatus: 'draft',
-    validStatuses: ['draft', 'active', 'review', 'completed', 'rejected', 'failed', 'closed'],
+    // Project 1.12: 'clearance' added — contract sits here while
+    // its tasks' clearance-submissions are queued/processing in the
+    // Pressman lane, transitions to 'completed' when all merge.
+    validStatuses: ['draft', 'active', 'review', 'clearance', 'completed', 'rejected', 'failed', 'closed'],
     terminalStatuses: ['completed', 'rejected', 'failed', 'closed'],
     destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
     validate: validateContract,
@@ -990,6 +1110,44 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     // promotion. Absent that, it burns clean.
     destructionPolicy: 'destroy-if-not-promoted',
     validate: validateKink,
+  },
+  {
+    id: 'clearance-submission',
+    idPrefix: 'cs',
+    // Non-ephemeral. The merge audit trail is durable corp history
+    // — every PR's journey through Clearinghouse stays on disk for
+    // retrospectives + future CULTURE.md compounding.
+    defaultEphemeral: false,
+    defaultTTL: null,
+    // chit.status is coarser than submissionStatus. Mapping:
+    //   queued / processing / conflict → active
+    //   merged                          → completed
+    //   rejected                        → rejected (founder cancellation)
+    //   failed                          → failed (mechanical exhaustion)
+    //   (founder-cancel cascade)        → closed
+    // The submissionStatus field carries the rich state; chit.status
+    // exists for the generic terminal-vs-active gate.
+    defaultStatus: 'active',
+    validStatuses: ['active', 'completed', 'rejected', 'failed', 'closed', 'burning'],
+    terminalStatuses: ['completed', 'rejected', 'failed', 'closed', 'burning'],
+    destructionPolicy: 'keep-forever', // non-ephemeral — scanner never visits, field is a no-op
+    validate: validateClearanceSubmission,
+  },
+  {
+    id: 'review-comment',
+    idPrefix: 'rc',
+    // Non-ephemeral. Review feedback compounds into CULTURE.md
+    // material over time; "we keep getting flagged for X" is a
+    // pattern only durable comments can surface.
+    defaultEphemeral: false,
+    defaultTTL: null,
+    defaultStatus: 'active',
+    // active = open comment, closed = addressed or made moot by
+    // re-review. burning is the shared abort-mid-write terminal.
+    validStatuses: ['active', 'closed', 'burning'],
+    terminalStatuses: ['closed', 'burning'],
+    destructionPolicy: 'keep-forever',
+    validate: validateReviewComment,
   },
   {
     id: 'breaker-trip',

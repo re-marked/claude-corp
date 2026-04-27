@@ -44,6 +44,18 @@ export const BACTERIA_EVENTS_JSONL = 'bacteria-events.jsonl';
  */
 export const BACTERIA_PAUSED_JSON = 'bacteria-paused.json';
 
+/**
+ * Project 1.12: Clearinghouse lock state. Singleton corp-scope JSON
+ * tracking which Pressman currently holds the merge lane. Tiny JSON
+ * (single object) instead of a chit type — same reasoning as bacteria-
+ * paused: it's runtime daemon state, not a work record. Audit trail
+ * comes from logs + step-log chits referencing the lock.
+ *
+ * Shape: `{ heldBy: string | null, claimedAt: string | null,
+ * submissionId: string | null }`.
+ */
+export const CLEARINGHOUSE_LOCK_JSON = 'clearinghouse-lock.json';
+
 export const SYSTEM_CHANNELS = ['general', 'tasks', 'logs'] as const;
 
 export const GITIGNORE_CONTENT = `# Agent secrets (injected by daemon, never committed)

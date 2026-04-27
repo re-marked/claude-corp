@@ -106,6 +106,18 @@ export interface RoleEntry {
    * dies 3× in 5min has a real loop.
    */
   crashLoopWindowMs?: number;
+  /**
+   * Editor review-round cap override (Project 1.12). When the role
+   * is `editor`, this is the maximum number of review rounds before
+   * the system bypasses review and proceeds to the Pressman lane.
+   * Absent uses `EDITOR_REVIEW_ROUND_CAP_DEFAULT` (3).
+   *
+   * Tune down (e.g. 1) for security-critical roles where one bounce
+   * is enough; tune up (e.g. 5) for docs-heavy roles where iteration
+   * is normal. The cap is a failsafe to prevent deadlock — most PRs
+   * pass on round 1; the cap doesn't force iterations to happen.
+   */
+  editorReviewRoundCap?: number;
 }
 
 export const ROLES: readonly RoleEntry[] = [
@@ -158,18 +170,12 @@ export const ROLES: readonly RoleEntry[] = [
     communication:
       'Slow-take by design — responds in hours, not seconds. Written pushback + explicit recommended alternatives.',
   },
-  {
-    id: 'janitor',
-    displayName: 'Janitor',
-    defaultKind: 'partner',
-    tier: 'decree',
-    description:
-      "Git steward. Resolves merge conflicts, manages the merge queue, keeps main clean.",
-    purpose:
-      "Coordinate concurrent PRs so main stays in a shippable state at all times.",
-    communication:
-      'Short status pings in #general. DMs to PR authors on conflicts. Always proposes a resolution, never just reports a problem.',
-  },
+  // Janitor (Partner-by-decree) retired in 1.12. Replaced by the
+  // Pressman + Editor Employee roles below (post-push merge mechanics
+  // + pre-push code review respectively). Both are bacteria-scaled
+  // worker roles — clearing PRs is mechanical work that doesn't need
+  // identity or relationship, the founder can spawn as many as the
+  // queue demands.
   {
     // Project 1.9 — caretaker of continuity. Orchestrates unkillability
     // via patrol blueprints; dispatches sweepers that do the mechanical
@@ -266,6 +272,36 @@ export const ROLES: readonly RoleEntry[] = [
       'Find the break the engineering agent missed. Write reproduction steps; cite the specific test or file where it fails.',
     communication:
       'Bug reports follow Tried/Failed/Need shape per CORP.md Common Patterns. Blunt about severity.',
+  },
+
+  // ─── Clearinghouse Employees (Project 1.12) ───────────────────────
+  // Pre-push code review (Editor) + post-push git mechanics
+  // (Pressman). Both bacteria-scaled. The publication metaphor —
+  // Editor reviews the manuscript, Pressman runs it through the
+  // press to the public-facing main branch.
+  {
+    id: 'editor',
+    displayName: 'Editor',
+    defaultKind: 'employee',
+    tier: 'worker',
+    description:
+      "Pre-push code reviewer. Reads the local diff before the branch leaves the author's sandbox; writes pedagogical Codex-shape comments (issue + why + suggested patch) so any role-substitute can act on them cold.",
+    purpose:
+      'Catch contract-goal mismatch, missing tests, banned patterns, regressions, acceptance-criteria gaps before the public PR exists. Never fixes — comments route via 1.4.1 to the author\'s role for the actual patch.',
+    communication:
+      "Comment chits attached to the in-flight clearance-submission. Severity 'blocker' rejects the round; 'suggestion'/'nit' advisory only. Iteration capped via editorReviewRoundCap (default 3) — cap-hit bypasses review and proceeds to Pressman.",
+  },
+  {
+    id: 'pressman',
+    displayName: 'Pressman',
+    defaultKind: 'employee',
+    tier: 'worker',
+    description:
+      'Post-push merge mechanic. Holds the clearinghouse-lock, claims the top clearance-submission, rebases against main, runs tests, merges cleanly or files a conflict-blocker. Real judgment moments — flake-vs-real test failure, trivial-vs-substantial conflict.',
+    purpose:
+      'Serialize the actual landing on main so concurrent PRs from a 20-agent corp never collide. Code primitives (git mechanics, conflict classifier, flake re-detection) facilitate; the Pressman session orchestrates and decides.',
+    communication:
+      'Brief status updates in #general on merge events. Conflict-blockers via 1.4.1 to author\'s role with `originatingAuthor` context for substitute pickups. DMs founder when judgment runs out (rare — most flows are decisive).',
   },
 ];
 
