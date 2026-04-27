@@ -416,6 +416,162 @@ function cascadeTaskWorkflowStatus(
   });
 }
 
+// ─── Stale-lock detection + restart resumption ───────────────────────
+
+/**
+ * Result of a stale-lock check. `state` is the current lock; `isStale`
+ * is true iff the lock is held by a slug that the supplied predicate
+ * reports as not-alive. Free locks are never stale.
+ */
+export interface StaleLockInfo {
+  readonly state: ClearinghouseLockState;
+  readonly isStale: boolean;
+}
+
+/**
+ * Pure: classify a lock as stale-or-not given an aliveness predicate.
+ * Caller (daemon) supplies the predicate, typically by composing
+ * processManager.getAgent into a slug→boolean function. Pure shape
+ * keeps this testable without process-manager.
+ */
+export function detectStaleLock(
+  state: ClearinghouseLockState,
+  isAlive: (slug: string) => boolean,
+): StaleLockInfo {
+  if (!state.heldBy) return { state, isStale: false };
+  return { state, isStale: !isAlive(state.heldBy) };
+}
+
+/**
+ * A clearance-submission whose `processingBy` slot is no longer
+ * alive — orphaned mid-process by a Pressman crash or restart.
+ * Caller resets these to `queued` so the next Pressman tick picks
+ * them up.
+ */
+export interface OrphanedSubmission {
+  readonly chit: Chit<'clearance-submission'>;
+  /** The slug that was processing — now dead. */
+  readonly orphanedFrom: string;
+}
+
+/**
+ * Walk active clearance-submissions, return any whose
+ * `submissionStatus === 'processing'` AND whose `processingBy` slot
+ * is not alive. Pure-ish: the only I/O is the chit query; the
+ * aliveness predicate is supplied.
+ */
+export function findOrphanedProcessingSubmissions(
+  corpRoot: string,
+  isAlive: (slug: string) => boolean,
+): ReadonlyArray<OrphanedSubmission> {
+  let result: ReturnType<typeof queryChits<'clearance-submission'>>;
+  try {
+    result = queryChits<'clearance-submission'>(corpRoot, {
+      types: ['clearance-submission'],
+      scopes: ['corp'],
+      statuses: ['active'],
+    });
+  } catch {
+    return [];
+  }
+  const orphans: OrphanedSubmission[] = [];
+  for (const c of result.chits) {
+    const f = c.chit.fields['clearance-submission'];
+    if (f.submissionStatus !== 'processing') continue;
+    if (!f.processingBy) continue; // defensive — shouldn't happen
+    if (isAlive(f.processingBy)) continue;
+    orphans.push({ chit: c.chit, orphanedFrom: f.processingBy });
+  }
+  return orphans;
+}
+
+/**
+ * Reset one orphaned submission back to `queued` so the next
+ * Pressman tick can re-claim it. Idempotent: no-op if the
+ * submission has already moved off `processing`.
+ *
+ * Records `lastFailureReason` for retrospective audit so the
+ * resumption shows up in `cc-cli clearinghouse status` listings.
+ * Does NOT increment retryCount — restart-induced re-queue isn't
+ * the submission's fault and shouldn't penalize its priority.
+ */
+export function resetOrphanedSubmission(
+  corpRoot: string,
+  submissionId: string,
+  reason: string,
+): void {
+  const result = findChitById(corpRoot, submissionId);
+  if (!result || result.chit.type !== 'clearance-submission') return;
+  const subChit = result.chit as Chit<'clearance-submission'>;
+  const subFields = subChit.fields['clearance-submission'];
+  if (subFields.submissionStatus !== 'processing') return;
+
+  updateChit<'clearance-submission'>(corpRoot, 'corp', 'clearance-submission', subChit.id, {
+    updatedBy: 'system:clearinghouse-resume',
+    fields: {
+      'clearance-submission': {
+        ...subFields,
+        submissionStatus: 'queued',
+        processingBy: null,
+        // processingStartedAt cleared by setting to null (chit
+        // serializer treats null and absent equivalently for
+        // optional ISO timestamps).
+        processingStartedAt: undefined,
+        lastFailureReason: reason,
+      },
+    },
+  });
+}
+
+/**
+ * Summary of what `resumeClearinghouse` cleaned up. Caller logs
+ * this so the founder/Sexton can see post-restart what was
+ * recovered.
+ */
+export interface ResumeClearinghouseResult {
+  readonly lockReleased: boolean;
+  readonly submissionsReset: number;
+}
+
+/**
+ * Boot-time + periodic-sweeper composer. Releases the lock if its
+ * holder is dead; resets every orphaned-processing submission back
+ * to `queued`. Best-effort per orphan — one bad reset doesn't
+ * poison the rest.
+ *
+ * Daemon calls this at startup (after processManager initializes
+ * so `isAlive` returns meaningful values) and from a sweeper at
+ * regular cadence (catches Pressman silent-exits between restarts).
+ */
+export function resumeClearinghouse(
+  corpRoot: string,
+  isAlive: (slug: string) => boolean,
+): ResumeClearinghouseResult {
+  let lockReleased = false;
+  const lockInfo = detectStaleLock(readClearinghouseLock(corpRoot), isAlive);
+  if (lockInfo.isStale) {
+    forceReleaseClearinghouseLock(corpRoot);
+    lockReleased = true;
+  }
+
+  const orphans = findOrphanedProcessingSubmissions(corpRoot, isAlive);
+  let resetCount = 0;
+  for (const o of orphans) {
+    try {
+      resetOrphanedSubmission(
+        corpRoot,
+        o.chit.id,
+        `Pressman '${o.orphanedFrom}' no longer alive at resume time — re-queued.`,
+      );
+      resetCount++;
+    } catch {
+      // Best-effort — one failure shouldn't poison the rest.
+    }
+  }
+
+  return { lockReleased, submissionsReset: resetCount };
+}
+
 function cascadeContractStatusIfReady(
   corpRoot: string,
   contractId: string,

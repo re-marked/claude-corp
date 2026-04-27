@@ -310,6 +310,10 @@ export {
   forceReleaseClearinghouseLock,
   markSubmissionMerged,
   markSubmissionFailed,
+  detectStaleLock,
+  findOrphanedProcessingSubmissions,
+  resetOrphanedSubmission,
+  resumeClearinghouse,
 } from './clearinghouse.js';
 export type {
   ScorableSubmission,
@@ -319,6 +323,9 @@ export type {
   ReleaseLockOpts,
   MarkSubmissionMergedOpts,
   MarkSubmissionFailedOpts,
+  StaleLockInfo,
+  OrphanedSubmission,
+  ResumeClearinghouseResult,
 } from './clearinghouse.js';
 export type {
   BreakerTriggerKink,
