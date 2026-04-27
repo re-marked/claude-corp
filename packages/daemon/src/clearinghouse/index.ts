@@ -167,3 +167,17 @@ export type {
   ValidateCommentPositionOpts,
   CommentValidationResult,
 } from './editor-diff.js';
+
+// ─── enter-clearance ─────────────────────────────────────────────────
+// Bridge from audit-approve to merge-lane (Project 1.12 PR 3). Called
+// by `cc-cli audit`'s approve path on 1.12-aware corps; pushes the
+// branch, creates the clearance-submission chit, advances the task
+// workflow status. Replaces the user-typed `cc-cli clear` ceremony.
+export {
+  enterClearance,
+  isClearinghouseAwareCorp,
+} from './enter-clearance.js';
+export type {
+  EnterClearanceOpts,
+  EnterClearanceResult,
+} from './enter-clearance.js';
