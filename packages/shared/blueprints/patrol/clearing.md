@@ -145,7 +145,7 @@ steps:
 
       Then exit cleanly. Your session is done.
   - id: file-blocker-or-mark-failed
-    title: Branch-point: when the walk doesn't end in finalize
+    title: "Branch-point: when the walk doesn't end in finalize"
     description: |
       The walk exits via `finalize` on the happy path. The other
       exits are:
