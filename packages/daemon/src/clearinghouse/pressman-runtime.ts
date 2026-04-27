@@ -99,6 +99,15 @@ export interface PressmanSchedulerOpts {
   baseBranch?: string;
   /** Override worktree pool (for tests). */
   pool?: WorktreePoolType;
+  /**
+   * Override the test command. Lets tests pass a deterministic
+   * pass-through (e.g. `node -e process.exit(0)`) instead of
+   * spawning the full corp test suite. Same shape as
+   * runWithFlakeRetry's runOpts.
+   */
+  testCommand?: string;
+  testProgram?: string;
+  testArgs?: readonly string[];
 }
 
 export class PressmanScheduler {
@@ -108,6 +117,9 @@ export class PressmanScheduler {
   private readonly tickIntervalMs: number;
   private readonly baseBranch: string;
   private readonly pool: WorktreePoolType;
+  private readonly testCommand?: string;
+  private readonly testProgram?: string;
+  private readonly testArgs?: readonly string[];
   private interval: NodeJS.Timeout | null = null;
   private inFlight = false;
   private stopped = false;
@@ -119,6 +131,9 @@ export class PressmanScheduler {
     this.tickIntervalMs = opts.tickIntervalMs ?? PRESSMAN_TICK_INTERVAL_MS;
     this.baseBranch = opts.baseBranch ?? DEFAULT_BASE_BRANCH;
     this.pool = opts.pool ?? new WorktreePool({ corpRoot: this.corpRoot, gitOps: this.gitOps });
+    this.testCommand = opts.testCommand;
+    this.testProgram = opts.testProgram;
+    this.testArgs = opts.testArgs;
   }
 
   /**
@@ -335,9 +350,16 @@ export class PressmanScheduler {
           return;
       }
 
-      // Tests with flake retry.
+      // Tests with flake retry. Test command overrides come from
+      // scheduler config (defaults: env or DEFAULT_TEST_COMMAND inside
+      // runTests).
       const tests = await runWithFlakeRetry({
-        runOpts: { cwd: handle.path },
+        runOpts: {
+          cwd: handle.path,
+          ...(this.testCommand ? { command: this.testCommand } : {}),
+          ...(this.testProgram ? { program: this.testProgram } : {}),
+          ...(this.testArgs ? { args: this.testArgs } : {}),
+        },
         maxRetries: 1,
       });
       if (!tests.ok) {
