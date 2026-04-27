@@ -92,6 +92,20 @@ export interface HandoffPromotionResult {
   errors: string[];
 }
 
+export interface PromotePendingHandoffOpts {
+  /**
+   * When true, skip the task-close and chain-walk steps. Used by
+   * 1.12-aware corps where the task transitions `under_review →
+   * clearance` (handled by enterClearance after promotion) and the
+   * chain walks happen at merge time (handled by markSubmissionMerged).
+   *
+   * Casket advance + handoff chit creation still happen — those are
+   * the agent's session-end ceremonies and don't depend on the
+   * task being closed.
+   */
+  deferTaskClose?: boolean;
+}
+
 /**
  * Try to promote a pending handoff for the given agent. No-op when
  * there's no pending file — safe to call unconditionally on audit
@@ -101,6 +115,7 @@ export function promotePendingHandoff(
   corpRoot: string,
   agentSlug: string,
   workspacePath: string,
+  opts: PromotePendingHandoffOpts = {},
 ): HandoffPromotionResult {
   const result: HandoffPromotionResult = {
     promoted: false,
@@ -190,12 +205,24 @@ export function promotePendingHandoff(
   // TaskFields.output so downstream chain steps can read what this
   // step produced without grepping the body. All three happen in one
   // updateChit so the terminal write is atomic relative to queries.
+  //
+  // 1.12-aware corps DEFER this step: the task transitions
+  // under_review → clearance via enterClearance after promotion
+  // returns, and clearance → completed via markSubmissionMerged
+  // when Pressman lands the merge. closedTaskId is still set to
+  // currentStepId so the caller can hand it off to enterClearance.
   if (currentStepId) {
-    try {
-      closeTaskAsCompleted(corpRoot, currentStepId, payload);
+    if (opts.deferTaskClose) {
+      // Surface the task id without mutating state — caller fires
+      // enterClearance with this id.
       result.closedTaskId = currentStepId;
-    } catch (err) {
-      result.errors.push(`close-task: ${stringify(err)}`);
+    } else {
+      try {
+        closeTaskAsCompleted(corpRoot, currentStepId, payload);
+        result.closedTaskId = currentStepId;
+      } catch (err) {
+        result.errors.push(`close-task: ${stringify(err)}`);
+      }
     }
   }
 
@@ -208,7 +235,12 @@ export function promotePendingHandoff(
   // Caskets). Future commit wires the delta application into
   // task-events.ts; for now this gives us real audit observability
   // of the cascade, bridging 1.3's pure primitive to the real flow.
-  if (currentStepId) {
+  //
+  // 1.12-aware corps DEFER this step: the task isn't closed yet
+  // (it's at under_review, transitioning to clearance), so chain
+  // dependents shouldn't fire. They fire when the submission
+  // actually merges (markSubmissionMerged → cascade).
+  if (currentStepId && !opts.deferTaskClose) {
     try {
       const advance = advanceChain(corpRoot, currentStepId);
       result.chainDeltas = advance.dependentDeltas;
