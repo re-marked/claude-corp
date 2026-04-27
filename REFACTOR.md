@@ -1896,7 +1896,9 @@ Style nits explicitly out of scope at v1 (too noisy). When `CULTURE.md` lands la
 
 #### Phase 2 — Pressman: post-push merge mechanics
 
-Triggered after Editor approves (or cap hits). The author runs `cc-cli clear --branch <name> --contract <chit-id>` (best-guess CLI verb), which: pushes the branch to GitHub, creates a `clearance-submission` chit, advances the task workflow to `clearance`. From the outside world, the public PR that appears on GitHub has *already* been internally reviewed.
+Triggered automatically after Editor approves (or cap hits) — the author never types `cc-cli clear`. Audit's approve path (the same Stop-hook path that promotes pending handoffs today) gains a "is this a 1.12-aware corp?" check; when yes, it fires `enterClearance` via a daemon HTTP endpoint that pushes the branch to origin, creates the `clearance-submission` chit, and advances the task workflow `under_review → clearance` atomically. From the outside world, the public PR that appears on GitHub has *already* been internally reviewed AND the merge queue has already accepted it.
+
+Author's mental model stays simple: *I run `cc-cli done`. The system handles the rest.* That collapses two manual ceremonies (done + clear) into one. The audit gate's existing approve path is the natural trigger because it's already where "this work is publishable" gets decided process-wise; layering "this work is queueable" on top is a small extension, not a new chain link.
 
 **clearance-submission frontmatter:** `branch`, `contract` reference, `submitter`, `priority`, `retryCount`, `reviewRound`, `reviewBypassed`, `status: queued | processing | merged | conflict | rejected | failed`.
 
@@ -1912,7 +1914,7 @@ Triggered after Editor approves (or cap hits). The author runs `cc-cli clear --b
 5. On clean merge: submission → `merged`; task and contract advance from `clearance → completed`; release lock.
 6. Next Pressman picks up.
 
-**Conflict routing.** When Pressman files a blocker, it's role-scoped (e.g. `backend-engineer`), not slot-scoped. Role-resolver finds an active Employee via normal precedence (idle-first, else any Employee of the role, else `no-candidates` triggers bacteria via 1.10). The blocker chit carries `originatingAuthor: <slug>` so the assignee sees "this was Toast's PR" as context even when Toast is gone. After resolution, the author re-submits via `cc-cli clear` (back through Phase 1 if the fix was non-trivial — Editor decides; trivial conflict-fix may skip).
+**Conflict routing.** When Pressman files a blocker, it's role-scoped (e.g. `backend-engineer`), not slot-scoped. Role-resolver finds an active Employee via normal precedence (idle-first, else any Employee of the role, else `no-candidates` triggers bacteria via 1.10). The blocker chit carries `originatingAuthor: <slug>` so the assignee sees "this was Toast's PR" as context even when Toast is gone. After resolution, the substitute Employee runs `cc-cli done` on the same chain step — audit's approve path re-fires `enterClearance` automatically. Back through Phase 1 if the fix was non-trivial (Editor decides on re-review); trivial conflict-fixes can skip review via the cap-bypass mechanism if the diff is small.
 
 **Bacteria scaling (from 1.10).** Both pools scale independently:
 - Editor pool: when in-flight review tasks exceed Editor capacity, bacteria spawns another. Editor work is bursty (a contract's worth of PRs all hit review around the same time), so the pool needs to grow fast and shrink slow.
@@ -1928,10 +1930,13 @@ Triggered after Editor approves (or cap hits). The author runs `cc-cli clear --b
 - `packages/shared/src/chit-types.ts` — register `clearance-submission` and `review-comment` types with validators.
 - `packages/shared/src/types/chit.ts` — `ClearanceSubmissionFields` and `ReviewCommentFields` shapes; extend `TaskWorkflowStatus` + `ContractStatus` with `clearance`.
 - `packages/shared/src/roles.ts` — remove janitor Partner; add `editor` and `pressman` Employee roles. Add `RoleEntry.editorReviewRoundCap?: number` for per-role override; constant `EDITOR_REVIEW_ROUND_CAP_DEFAULT = 3` in shared.
-- `packages/daemon/src/clearinghouse.ts` — Pressman primitives (lock management, queue ordering, rebase/test/merge helpers exposed to the Pressman session). Pattern same as `sexton-runtime.ts`: infrastructure, not the active loop.
-- `packages/daemon/src/editor.ts` — Editor primitives (diff readers, comment-chit writers, review-round counter management).
-- `packages/cli/src/commands/clear.ts` — `cc-cli clear --branch <name> --contract <chit-id>` (push + create submission).
-- `packages/cli/src/commands/review-request.ts` — `cc-cli review-request --task <chit-id>` (dispatch Editor against local diff).
+- `packages/daemon/src/clearinghouse/` (PR 2 + PR 3 territory) — code primitives: `git-ops.ts`, `worktree-pool.ts`, `rebase-flow.ts`, `merge-flow.ts`, `tests-runner.ts`, `test-attribution.ts`, `conflict-classifier.ts`, `editor-diff.ts`, `failure-taxonomy.ts`. Pattern same as `sexton-runtime.ts`: infrastructure, not the active loop.
+- `packages/daemon/src/clearinghouse/pressman-runtime.ts` — Pressman session orchestration: dispatcher that picks top of queue, claims lock, walks rebase → test → merge → cascade. The active loop, mirrors `sexton-runtime.ts`.
+- `packages/daemon/src/clearinghouse/editor-runtime.ts` — Editor session orchestration (PR 4).
+- `packages/daemon/src/clearinghouse/enter-clearance.ts` — `enterClearance(corpRoot, taskId, ...)`: pushes branch, creates clearance-submission, advances task state. Called by audit's approve path via daemon HTTP endpoint.
+- `packages/daemon/src/api.ts` — new `/clearinghouse/submit` endpoint (calls `enterClearance`). New endpoint to dispatch Editor against a local diff (PR 4).
+- `packages/cli/src/commands/audit.ts` — extend approve path to fire `enterClearance` via the daemon endpoint when the corp is 1.12-aware (presence of pressman/editor roles).
+- `packages/cli/src/commands/clearinghouse.ts` — admin/manual fallback: `cc-cli clearinghouse submit --task <id>` for the rare case a task needs to enter the lane outside the normal audit flow. NOT the canonical author path.
 
 **Test strategy:**
 - Unit: priority scoring formula produces expected orderings.
@@ -1949,7 +1954,7 @@ Triggered after Editor approves (or cap hits). The author runs `cc-cli clear --b
 **Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing), 1.4.1 (blocker injection), 1.10 (bacteria for pool scaling).
 **PRs:** 4-5 (substrate + Pressman + Editor + integration + tests).
 
-**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; another Employee picks up the blocker; original resumes on close. When any Employee silent-exits, Sexton's patrol (1.9) respawns them; daemon dies → OS supervisor restarts; corp keeps going. When an Employee finishes a Task, an Editor reads the local diff and either approves or sends pedagogical comments back via 1.4.1; once approved (or cap-bypassed), `cc-cli clear` pushes + queues the submission; a Pressman picks it up, rebases, tests, merges. Mark walks away; when he comes back, 4 of 5 Tasks have landed on main via internally-reviewed serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path. Corp is unkillable short of token exhaustion or OS process-kill without a supervisor.
+**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves. Audit's approve path: promotes the pending handoff to a chit, advances Casket, AND (for 1.12-aware corps) fires `enterClearance` — which dispatches an Editor against the local diff, on Editor approval pushes the branch + creates a clearance-submission, advances the task to `clearance`. A Pressman picks the submission up, rebases, tests, merges. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; another Employee picks up the blocker; original resumes on close. When any Employee silent-exits, Sexton's patrol (1.9) respawns them; daemon dies → OS supervisor restarts; corp keeps going. Mark walks away; when he comes back, 4 of 5 Tasks have landed on main via internally-reviewed serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. The agent's mental model: *I run `cc-cli done`. The system handles the rest.* No human-in-the-loop between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path. Corp is unkillable short of token exhaustion or OS process-kill without a supervisor.
 
 ---
 
