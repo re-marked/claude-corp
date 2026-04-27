@@ -2158,6 +2158,220 @@ Concrete branch points where the agent decides (not the code):
 
 ---
 
+### 1.12.2 — Editor session (PR 4 of 1.12)
+
+Adds the pre-push code review phase. By the time PR #193 + 1.12.1 land, the corp can already merge — every submission flows with `reviewBypassed: true` because Editor doesn't exist yet. 1.12.2 inserts Editor between audit-approve and `enterClearance`, so the public PR that appears on GitHub has actually been internally reviewed.
+
+**Same shape as Pressman.** Editor is an Employee with a session + CLAUDE.md (do NOT repeat the 1.12.1 mistake — `feedback_no_v1_v2_postponing.md` applies here too). Mirrors `hireSexton`/`hirePressman` pattern. Walks `patrol/code-review` blueprint. Calls `cc-cli editor <verb>` subcommands that wrap workflow primitives.
+
+#### What stays from 1.12.1 (DO NOT TOUCH)
+
+- All Pressman code (workflow.ts + cc-cli clearinghouse subcommands + role prompt + watcher).
+- All PR 1+2 substrate.
+- The `clearance-submission` chit type and `review-comment` chit type (both already shipped in PR 1).
+- The `editor` role registry entry (already there).
+
+#### What's new
+
+##### A. TaskFields gains `editorReviewRound` + `editorReviewCapHit`
+
+Counter lives on the task chit — survives across audit cycles even when no submission exists yet. Resets to 0 on task creation; increments each time Editor rejects; persists across audit re-fires. When the counter hits the role's `editorReviewRoundCap` (default 3 from 1.12 substrate), `editorReviewCapHit` flips true and the next audit-approve fires `enterClearance` with `reviewBypassed: true`.
+
+Schema-only change in `packages/shared/src/types/chit.ts` + the validator + the invariant test (per `chit-types.ts` step-5 rule). Follow the breaker-trip / clearance-submission addition pattern.
+
+##### B. Audit hook extension
+
+Modify `cc-cli audit`'s approve path (the post-1.12.1 version, after the Pressman surgery):
+
+```
+on approve + 1.12-aware corp:
+  if (taskChit.editorReviewCapHit OR no Editor hired):
+    fire enterClearance(reviewBypassed=true, reviewRound=task.editorReviewRound)
+  else:
+    dispatch Editor session against this task (event-driven wake)
+    Editor walks patrol/code-review
+    Editor returns: approve | reject(comments) | cap-bypass
+    if approve:
+      fire enterClearance(reviewBypassed=false, reviewRound=task.editorReviewRound)
+    if reject:
+      route comments via 1.4.1 to author's role
+      task.editorReviewRound++ (mark capHit if reaches cap)
+      audit emits decision='block' so the agent's session re-runs and produces a fix
+    if cap-bypass:
+      task.editorReviewCapHit=true
+      fire enterClearance(reviewBypassed=true, ...)
+```
+
+The "is editor hired" gate mirrors `isClearinghouseAwareCorp` — `isEditorAwareCorp(corpRoot)` checks `members.json` for `role==='editor'`. Without Editor hired, audit falls through to the 1.12.1 flow (reviewBypassed=true automatically).
+
+##### C. Editor workflow primitives
+
+**File:** `packages/daemon/src/clearinghouse/editor-workflow.ts`
+
+Stateless Result-returning functions for each Editor step:
+
+```ts
+// Pick the next pending review request. Returns task + diff metadata.
+export function pickNextReview(opts: { corpRoot, editorSlug }): Result<PendingReview | null>;
+
+// Compute reviewable diff metadata via PR 2's computeReviewableDiff.
+export async function loadReviewContext(opts: { corpRoot, taskId, gitOps? }): Result<ReviewContext>;
+// ReviewContext = { taskFields, contractFields, diff: ReviewableDiff, branch }
+
+// File a review-comment chit (severity-tagged).
+export function fileReviewComment(opts: {
+  corpRoot, taskId, reviewerSlug, filePath, lineStart, lineEnd,
+  severity: 'blocker'|'suggestion'|'nit', issue, why, suggestedPatch?, reviewRound
+}): Result<{ commentId }>;
+
+// Approve the task — caller fires enterClearance next.
+export function approveReview(opts: { corpRoot, taskId, editorSlug }): Result<void>;
+
+// Reject — increments task.editorReviewRound, returns whether cap was hit.
+export function rejectReview(opts: { corpRoot, taskId, editorSlug, reason }): Result<{ newRound, capHit }>;
+
+// Cap-bypass shortcut for callers that want to surface "Editor capped out, proceeding."
+export function bypassReview(opts: { corpRoot, taskId, editorSlug, reason }): Result<void>;
+```
+
+Reuses (do not reimplement): `computeReviewableDiff`, `validateCommentPosition`, `shouldFilterFile`, `EDITOR_REVIEW_ROUND_CAP_DEFAULT`, the `review-comment` chit type from PR 1.
+
+##### D. CLI subcommand surface
+
+**File:** `packages/cli/src/commands/editor.ts`
+
+```
+cc-cli editor pick --from <editor-slug>
+  → pickNextReview. Output: { ok, taskId, branch, contractId, submitter } or { ok, empty: true }
+
+cc-cli editor diff --from <slug> --task <id>
+  → loadReviewContext. Output: { ok, files: [{ path, status, additions, deletions }], filteredFiles, oversized, oversizedReason? }
+
+cc-cli editor file-comment --from <slug> --task <id> --file <path> --line-start <n> [--line-end <n>] --severity <blocker|suggestion|nit> --issue "..." --why "..." [--suggested-patch "..."]
+  → fileReviewComment. Output: { ok, commentId }
+
+cc-cli editor approve --from <slug> --task <id>
+  → approveReview. Output: { ok }
+
+cc-cli editor reject --from <slug> --task <id> --reason "..."
+  → rejectReview. Output: { ok, newRound, capHit }
+```
+
+Editor session walks `patrol/code-review` blueprint:
+1. `cc-cli editor pick` → next task to review.
+2. `cc-cli editor diff` → file list + filtered list + oversized check.
+3. For each reviewable file: agent uses native tools (Read, Grep, Bash with `git diff <file>`) to read the actual diff content. Code provides metadata; agent reads the substance.
+4. For each issue found: `cc-cli editor file-comment` with severity.
+5. End: `cc-cli editor approve` (no blockers) OR `cc-cli editor reject` (any blocker-severity comment exists).
+
+Blueprint guidance (what to look for): contract-goal mismatch, missing tests for new code paths, banned patterns (security holes, secrets), test regressions, file scope explosion, acceptance-criteria gaps. Style nits: out of scope until CULTURE.md exists (Project 5.2).
+
+##### E. Wake mechanism (event-driven, per-task)
+
+Editor wakes are NOT periodic. They fire when audit's approve path decides to dispatch a review. Pattern: audit calls `processManager.spawnAgent(editor.id)` + a wake message via existing `dispatch.ts` flow. Wake message carries the task id explicitly.
+
+Multiple Editors (when bacteria scales the pool in 1.12.3) round-robin via per-task claim — a `reviewerSlug` + `claimedAt` field on the task chit prevents two Editors from reviewing the same task. Claim before reading diff, release on approve/reject.
+
+##### F. Patrol blueprints
+
+- `packages/shared/blueprints/patrol/code-review.md` — canonical walk + judgment guidelines. Pedagogical comment shape required (issue + why + suggested patch).
+- `packages/shared/blueprints/patrol/audit.md` — formalize the existing audit gate as a blueprint (refactor; can defer to 1.12.3 if 1.12.2 is already heavy).
+
+##### G. PR commit plan (~7-9 commits)
+
+1. `feat(1.12.2): TaskFields editorReviewRound + editorReviewCapHit` (shared, schema-only)
+2. `feat(1.12.2): editor-workflow.ts — stateless review primitives`
+3. `feat(1.12.2): cc-cli editor subcommands — pick/diff/file-comment/approve/reject`
+4. `feat(1.12.2): Editor role prompt + hire bootstrap (mirrors Pressman 1.12.1)`
+5. `feat(1.12.2): audit approve-path dispatches Editor before enterClearance`
+6. `feat(1.12.2): enterClearance signature accepts reviewRound + reviewBypassed from caller`
+7. `feat(1.12.2): patrol/code-review blueprint + walked-flow docstring`
+8. `test(1.12.2): editor-workflow primitives + audit dispatch + reviewRound state machine`
+9. (Optional) `feat(1.12.2): patrol/audit blueprint — formalize existing gate`
+
+#### Non-goals for 1.12.2
+
+- Test-attribution main-vs-PR comparison (`runTestsOnRef`) — Editor doesn't run tests; it reads diffs. Pressman runs tests and could use attribution. Defer to 1.12.3 if helpful.
+- Style-nit auto-detection / auto-comment — Editor authors comments via judgment; no auto-linter integration. CULTURE.md compounding (Project 5.2) is what eventually drives style.
+- Multi-Editor concurrent review of the same task — one Editor per task; bacteria scaling for the pool comes in 1.12.3.
+
+---
+
+### 1.12.3 — Integration + ship-criterion demo (PR 5 of 1.12)
+
+The "walk away overnight" PR. By 1.12.3 end, the Project 1 ship criterion is real — hand 5 tasks, walk away, come back to 4 merged + 1 blocker in inbox.
+
+#### What's new
+
+##### A. Bacteria scaling for Pressman + Editor pools
+
+Both roles register with sensible `bacteriaTarget` values. Per 1.10's RoleEntry shape:
+- Pressman: target ~1 idle (queue work is steady; one Pressman keeps up).
+- Editor: target ~2 idle (review work is bursty; a contract's worth of approvals can hit at once).
+
+`packages/daemon/src/bacteria/decision.ts` already handles per-role targets. Config-only.
+
+##### B. Founder observability
+
+- `cc-cli clearinghouse status` — admin/debug. Lock holder, queue depth, in-flight, recent submissions (configurable window).
+- `cc-cli clearinghouse list [--status <state>] [--role <id>] [--include-merged]` — submission browser, mirrors `cc-cli breaker list`.
+- `cc-cli clearinghouse show <submission-id>` — full forensic view: branch, all review-comment chits, blocker chain, merge sha if landed.
+- TUI sidebar enrichment — clearance queue depth + recent merge count visible alongside the bacteria role rollups (built in 1.10.4).
+
+##### C. Channel/DM notification on terminal state
+
+Per the research-borrowed Atlantis pattern: when a submission flips to a terminal state (merged / failed / conflict-routed), Pressman posts a brief message in the relevant channel:
+- Merged → `#general`: "Merged Toast's PR for task chit-t-abc (sha def123)."
+- Conflict-routed → DM with author's role: "Your PR for task chit-t-abc hit a substantive conflict; see escalation chit-e-xyz."
+- Hook-rejected → DM with author: hook output included.
+
+Reuses existing `post()` primitive. Editor does the same on approval/rejection (less verbose).
+
+##### D. Sexton wake digest integration
+
+Sexton's wake prompt (existing `composePoolActivitySection` + `composeActiveBreakersSection` pattern) gains an "Active clearinghouse" section: queue depth, in-flight submission, recent merges in the last hour, currently-routed blockers.
+
+`packages/daemon/src/continuity/sexton-wake-prompts.ts` — add `composeClearinghouseSection(corpRoot)`. Skip on nudge (consistent with existing pattern).
+
+##### E. `runTestsOnRef` real impl
+
+Land the deferred attribution path: extend `GitOps` with `checkoutRef(worktreePath, ref): Promise<Result<void>>`. `runTestsOnRef` switches to the named ref, runs tests, restores. Pressman's runtime gains an "if test failed, run on main and call `attributeFailure`" flow before deciding blocker routing — pr-introduced fires blocker to author; main-regression fires to engineering-lead.
+
+##### F. End-to-end demo + ship-criterion test
+
+`tests/clearinghouse-end-to-end.test.ts` — fixture corp, hire 1 backend-engineer + 1 editor + 1 pressman, dispatch a contract with 5 tasks (3 trivial + 1 with a substantive conflict + 1 with a real test failure). Expected outcomes:
+- 3 trivial → merged via clean Pressman flow.
+- Conflict task → blocker filed to backend-engineer's role; substitute Employee resolves; re-merges.
+- Test-fail task → blocker filed to author; founder's tier-3 inbox surfaces it.
+
+This test IS the live executable form of the Project 1 ship criterion.
+
+##### G. Forward-compat schema markers (per research)
+
+Add fields without implementing yet:
+- `ClearanceSubmissionFields.scopeKeys?: string[]` — for parallel lane isolation when multi-Pressman lands.
+- Lock path templating: `getClearinghouseLockPath(corpRoot, laneId='default')` returns `clearinghouse-lock-{laneId}.json`. v1 always passes 'default'; future lane-aware Pressmen pass real lane ids. Schema change is non-breaking.
+- `flake-suspected` as a `submissionStatus` alternative — reserved value, no consumer yet.
+
+These are documentation-shape additions. No behavior change in 1.12.3, but the substrate is ready when queue depth justifies parallel lanes.
+
+#### PR commit plan (~6-8 commits)
+
+1. `feat(1.12.3): bacteria targets for pressman + editor + per-role config`
+2. `feat(1.12.3): cc-cli clearinghouse status / list / show`
+3. `feat(1.12.3): channel + DM notifications on submission terminal state`
+4. `feat(1.12.3): Sexton wake digest — clearinghouse section`
+5. `feat(1.12.3): runTestsOnRef impl + Pressman attribution flow`
+6. `feat(1.12.3): forward-compat schema markers (scopeKeys, lane-aware lock path)`
+7. `test(1.12.3): end-to-end fixture — Project 1 ship criterion executable`
+8. `feat(1.12.3): TUI sidebar — clearance queue + recent merges rollup`
+
+#### Project 1 closes when 1.12.3 lands
+
+After 1.12.3, Project 1's full ship criterion runs as an actual integration test. Project 1 is done. Move on to Project 2 (Workflow Substrate) per the existing roadmap.
+
+---
+
 ## Project 2: Workflow Substrate
 
 *Chains become real. Work propagates without the founder pushing it. Self-witnessing meta-layer arrives.*
