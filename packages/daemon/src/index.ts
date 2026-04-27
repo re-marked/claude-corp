@@ -19,6 +19,12 @@ export { InboxManager } from './inbox.js';
 export { Pulse } from './continuity/pulse.js';
 export { hireSexton } from './continuity/sexton.js';
 export { hireJanitor, buildJanitorRules } from './janitor.js';
+
+// Project 1.12: Clearinghouse code primitives. Surface re-exported
+// so cli + future Pressman/Editor agent code can import from a
+// single namespace. Implementation details live in the
+// `./clearinghouse/` subdirectory.
+export * from './clearinghouse/index.js';
 export { ContractWatcher } from './contract-watcher.js';
 export { hireWarden, buildWardenRules } from './warden.js';
 export { hireHerald, buildHeraldRules } from './herald.js';
