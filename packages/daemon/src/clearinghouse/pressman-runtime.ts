@@ -45,7 +45,7 @@
  *   without a Pressman.
  */
 
-import { watch, type FSWatcher, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { watch, type FSWatcher, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   readConfig,
@@ -55,8 +55,10 @@ import {
   readClearinghouseLock,
   resumeClearinghouse,
   agentSessionKey,
+  findChitById,
   type Member,
   type Channel,
+  type Chit,
 } from '@claudecorp/shared';
 import { log, logError } from '../logger.js';
 import type { Daemon } from '../daemon.js';
@@ -239,9 +241,34 @@ export class ClearanceSubmissionWatcher {
         setTimeout(() => this.subscribe(), 2000);
       });
       log(`[pressman-runtime] watching ${this.dir}`);
+
+      // One-shot scan: dispatch a wake if there's already queued work
+      // visible at subscribe time. Covers the case where the chits
+      // dir is created AFTER clearinghouseBootRecover ran — without
+      // this scan, the queued work would sit until the next sweep
+      // tick (up to 5 min). The dispatch itself is busy-skip-safe so
+      // a redundant call when the queue is being processed is a no-op.
+      void this.scanAndDispatchIfWork();
     } catch (err) {
       logError(`[pressman-runtime] watcher subscribe failed: ${err instanceof Error ? err.message : String(err)} — retrying in 5s`);
       setTimeout(() => this.subscribe(), 5000);
+    }
+  }
+
+  private async scanAndDispatchIfWork(): Promise<void> {
+    try {
+      const queueDepth = rankQueue(this.daemon.corpRoot).length;
+      if (queueDepth === 0) return;
+      const lock = readClearinghouseLock(this.daemon.corpRoot);
+      const isAlive = (slug: string): boolean => {
+        const proc = this.daemon.processManager.getAgent(slug);
+        return proc?.status === 'ready' || proc?.status === 'starting';
+      };
+      if (lock.heldBy && isAlive(lock.heldBy)) return;
+      log(`[pressman-runtime] watcher subscribe: queue depth ${queueDepth} — dispatching`);
+      await dispatchPressman(this.daemon);
+    } catch (err) {
+      logError(`[pressman-runtime] watcher initial scan failed — ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -262,17 +289,23 @@ export class ClearanceSubmissionWatcher {
   private async handle(filename: string): Promise<void> {
     const path = join(this.dir, filename);
     if (!existsSync(path)) return; // chit deleted between event and handler
-    let content: string;
+
+    // Parse the chit through the primitive rather than regex-matching
+    // raw frontmatter. Robust to formatting variation (quote style,
+    // field order, future schema changes). We extract the chit id
+    // from the filename — chit filenames are id-based.
+    const chitId = filename.replace(/\.md$/, '');
+    let chit: Chit<'clearance-submission'> | undefined;
     try {
-      content = readFileSync(path, 'utf-8');
+      const hit = findChitById(this.daemon.corpRoot, chitId);
+      if (!hit || hit.chit.type !== 'clearance-submission') return;
+      chit = hit.chit as Chit<'clearance-submission'>;
     } catch {
-      return;
+      return; // partial-write race; next tick re-evaluates
     }
-    // Lightweight check — look for the queued status in the
-    // frontmatter. We don't need the full chit parse here; the
-    // primitive (rankQueue) does that on the dispatch path.
-    if (!/submissionStatus:\s*['"]?queued['"]?/.test(content)) return;
-    log(`[pressman-runtime] watcher: queued submission detected (${filename}) — dispatching wake`);
+    if (chit.fields['clearance-submission'].submissionStatus !== 'queued') return;
+
+    log(`[pressman-runtime] watcher: queued submission detected (${chitId}) — dispatching wake`);
     await dispatchPressman(this.daemon);
   }
 }
