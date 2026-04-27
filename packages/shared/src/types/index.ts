@@ -73,4 +73,6 @@ export type {
   SweeperRunFields,
   KinkFields,
   BreakerTripFields,
+  ClearanceSubmissionFields,
+  ReviewCommentFields,
 } from './chit.js';

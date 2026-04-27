@@ -83,6 +83,18 @@ describe('CHIT_TYPES registry invariants', () => {
     // spawnAgent for the slug while active; founder resets via
     // `cc-cli breaker reset`.
     'breaker-trip',
+    // Project 1.12: clearance-submission — one PR's journey through
+    // the Clearinghouse phase (queue → Pressman → merge or conflict).
+    // Non-ephemeral; chit.status follows the rich submissionStatus
+    // field. Created by `cc-cli clear` after Editor approves or the
+    // review-round cap forces bypass.
+    'clearance-submission',
+    // Project 1.12: review-comment — one Editor-authored Codex-shape
+    // comment on a clearance-submission's diff. Non-ephemeral so
+    // recurring patterns can compound into CULTURE.md material.
+    // Severity 'blocker' rejects the round; 'suggestion'/'nit'
+    // advisory only.
+    'review-comment',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {

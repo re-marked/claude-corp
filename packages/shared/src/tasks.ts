@@ -155,6 +155,10 @@ function workflowToLegacyStatus(ws: TaskWorkflowStatus | 'pending' | 'assigned')
     case 'in_progress': return 'in_progress';
     case 'blocked': return 'blocked';
     case 'under_review': return 'in_progress';
+    // Project 1.12: clearance is "agent done working, clearance-
+    // submission queued/processing through the Pressman lane."
+    // Legacy callers see this as in_progress alongside under_review.
+    case 'clearance': return 'in_progress';
     case 'completed': return 'completed';
     case 'rejected': return 'failed';
     case 'failed': return 'failed';

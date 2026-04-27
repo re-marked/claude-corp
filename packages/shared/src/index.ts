@@ -57,6 +57,8 @@ export type {
   SweeperRunFields,
   KinkFields,
   BreakerTripFields,
+  ClearanceSubmissionFields,
+  ReviewCommentFields,
 } from './types/index.js';
 
 // Parsers

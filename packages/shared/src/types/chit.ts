@@ -34,6 +34,8 @@ export interface FieldsForType {
   'sweeper-run': SweeperRunFields;
   kink: KinkFields;
   'breaker-trip': BreakerTripFields;
+  'clearance-submission': ClearanceSubmissionFields;
+  'review-comment': ReviewCommentFields;
 }
 
 /**
@@ -54,6 +56,13 @@ export type ChitStatus =
   | 'draft'
   | 'active'
   | 'review'
+  /**
+   * Project 1.12: contract is past review and waiting for all its
+   * tasks' clearance-submissions to merge through the Clearinghouse
+   * phase. Per-type registry gates which chit types can use this
+   * status — adding it here doesn't make every chit type eligible.
+   */
+  | 'clearance'
   | 'completed'
   | 'rejected'
   | 'failed'
@@ -220,6 +229,14 @@ export type TaskWorkflowStatus =
   | 'in_progress'
   | 'blocked'
   | 'under_review'
+  /**
+   * Project 1.12: task passed audit AND Editor review (or hit the
+   * review-round cap and proceeded via reviewBypassed). Its
+   * clearance-submission is queued or processing in the Pressman
+   * lane. Transitions to `completed` when the submission merges, or
+   * `failed` if the Pressman flow exhausts retries.
+   */
+  | 'clearance'
   | 'completed'
   | 'rejected'
   | 'failed'
@@ -911,4 +928,160 @@ export interface BreakerTripFields {
   clearedAt?: string;
   clearedBy?: string;
   clearReason?: string;
+}
+
+/**
+ * Fields for a `clearance-submission` chit (Project 1.12).
+ *
+ * Records one PR's journey through the Clearinghouse phase: pushed
+ * branch → queue → Pressman processing → merge or conflict-route.
+ * Created by `cc-cli clear` after Editor approves (or after the
+ * review-round cap forces bypass). Closed when Pressman either
+ * merges cleanly or files a substantive blocker.
+ *
+ * ### Lifecycle
+ * - chit.status `active` while `submissionStatus` is `queued`,
+ *   `processing`, or `conflict`.
+ * - chit.status `completed` when `submissionStatus` becomes `merged`.
+ * - chit.status `failed` when `submissionStatus` becomes `failed`
+ *   (mechanical exhaustion — rebase keeps breaking, tests keep
+ *   failing past retry budget, branch gone from origin).
+ * - chit.status `closed` when founder cancels (or upstream
+ *   contract is cancelled).
+ *
+ * ### Per-task, not per-contract
+ * One submission per task chit, typically. A 5-task contract
+ * generates 5 submissions over time as tasks individually pass
+ * through review and reach the Pressman lane.
+ *
+ * ### Counters
+ * - `reviewRound` — Phase-1 review iterations (Editor sent it back
+ *   N times before approving or hitting the cap). Success path —
+ *   does NOT incur the priority-formula retry penalty.
+ * - `retryCount` — Phase-2 mechanical retries (rebase produced
+ *   nonsense, tests flaked into a re-run, transient origin push
+ *   rejection). Failure path — DOES incur the retry penalty in the
+ *   priority formula.
+ *
+ * ### Bypassed reviews
+ * `reviewBypassed: true` records that this submission reached
+ * Phase 2 via cap-hit rather than approval. The corp's existing
+ * audit-tier-3 surface catches anything genuinely alarming; this
+ * flag is for retrospective audit + CULTURE.md compounding ("we
+ * keep capping out review on backend-engineer work").
+ */
+export interface ClearanceSubmissionFields {
+  /** Git branch being submitted, as it lives on origin. */
+  branch: string;
+  /** Chit id of the contract this submission's task belongs to. */
+  contractId: string;
+  /** Chit id of the task this submission settles. One submission per task. */
+  taskId: string;
+  /** Member id of the agent who ran `cc-cli clear`. */
+  submitter: string;
+  /**
+   * Snapshotted from the task's priority at submit time so a
+   * priority change mid-queue doesn't reorder existing entries
+   * unexpectedly. Pressman's queue ordering reads this field.
+   */
+  priority: 'critical' | 'high' | 'normal' | 'low';
+  /** ISO timestamp the submission was created. */
+  submittedAt: string;
+  /**
+   * The rich state machine. chit.status follows but is coarser
+   * (active / completed / failed / closed). See lifecycle docstring.
+   */
+  submissionStatus: 'queued' | 'processing' | 'merged' | 'conflict' | 'rejected' | 'failed';
+  /** Phase-2 mechanical-retry counter. Penalized in priority formula. */
+  retryCount: number;
+  /** Phase-1 Editor-iteration counter. NOT penalized in priority formula. */
+  reviewRound: number;
+  /**
+   * True if this submission reached Phase 2 via cap-hit (Editor
+   * couldn't converge with author within the review-round cap) and
+   * NOT via Editor approval. For audit + future CULTURE.md
+   * compounding; does not change Pressman's behavior.
+   */
+  reviewBypassed?: boolean;
+  /** ISO timestamp the Pressman claimed it. Null/absent while queued. */
+  processingStartedAt?: string;
+  /** Pressman Member.id currently processing. Null/absent while queued or after release. */
+  processingBy?: string | null;
+  /** ISO timestamp the merge landed. Set on `submissionStatus = 'merged'`. */
+  mergedAt?: string;
+  /** Resulting commit sha on main, for audit. Optional — some merges may not surface a sha. */
+  mergeCommitSha?: string | null;
+  /**
+   * Free-form prose recording why the most recent attempt failed
+   * (rebase classification, test failure summary, conflict summary).
+   * Refreshed on each retry; the prior reason is overwritten because
+   * the per-attempt history lives in step-log chits, not here.
+   */
+  lastFailureReason?: string | null;
+}
+
+/**
+ * Fields for a `review-comment` chit (Project 1.12).
+ *
+ * One Editor-authored comment on a clearance-submission's diff.
+ * Pedagogical Codex-shape — every comment carries the issue, the
+ * *why*, and a suggested patch when one exists, so a substitute
+ * agent picking up the fix cold can act on it without context.
+ *
+ * ### Severity is a real lever
+ * Only `blocker` severity rejects the review round and bounces
+ * the submission back to the author's role. `suggestion` and
+ * `nit` are advisory — author MAY address them, doesn't HAVE to.
+ * This prevents Editor from being so sticky that simple PRs cycle
+ * forever on style preferences.
+ *
+ * Roughly:
+ *   - `blocker` — contract-goal mismatch, missing required test,
+ *     banned pattern (security hole, secret in diff), test
+ *     regression, acceptance-criteria gap.
+ *   - `suggestion` — naming improvement, refactor opportunity,
+ *     clearer error message, alternative approach worth weighing.
+ *   - `nit` — style preference, minor doc improvement, ordering.
+ *
+ * ### Lifecycle
+ * Non-ephemeral. Comments persist for audit + CULTURE.md
+ * compounding (recurring nit patterns become corp conventions over
+ * time). chit.status `active` while open, `closed` when addressed
+ * or made moot by re-review.
+ */
+export interface ReviewCommentFields {
+  /** Chit id of the clearance-submission this comment is on. */
+  submissionId: string;
+  /**
+   * Chit id of the task this submission settles. Denormalized from
+   * the submission for cheap filtering — `cc-cli chit list --type
+   * review-comment --task <id>` shouldn't have to walk submissions.
+   */
+  taskId: string;
+  /** Member id of the Editor who wrote it. */
+  reviewerSlug: string;
+  /** Path within the repo. */
+  filePath: string;
+  /** 1-indexed line range start. */
+  lineStart: number;
+  /** Inclusive 1-indexed line range end. Often equals lineStart for single-line comments. Cross-field invariant: lineEnd >= lineStart. */
+  lineEnd: number;
+  /**
+   * Severity. Only `blocker` rejects the round. See docstring.
+   */
+  severity: 'blocker' | 'suggestion' | 'nit';
+  /** One-line summary of the issue. Required + non-empty. */
+  issue: string;
+  /** Pedagogical explanation — why this matters, what it could break, the principle behind it. The CULTURE.md substrate. */
+  why: string;
+  /**
+   * Optional patch hint. When present, gives the substitute author
+   * something concrete to start from rather than re-thinking the
+   * fix cold. Accepts: a unified-diff snippet, a code block, or
+   * prose like "rename `foo` to `bar` and update both call sites
+   * in baz.ts."
+   */
+  suggestedPatch?: string | null;
+  /** Which Phase-1 round this comment came from. Lets the corp track "issues we caught in round 1 vs round 2." */
+  reviewRound: number;
 }
