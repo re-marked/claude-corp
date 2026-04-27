@@ -181,3 +181,37 @@ export type {
   EnterClearanceOpts,
   EnterClearanceResult,
 } from './enter-clearance.js';
+
+// ─── workflow ────────────────────────────────────────────────────────
+// Stateless step primitives the Pressman session calls via cc-cli
+// clearinghouse subcommands. Each primitive runs in a fresh CLI
+// process, returns Result<T>, and operates only on on-disk state.
+export {
+  pickNext,
+  acquireWorktree,
+  rebaseStep,
+  testStep,
+  mergeStep,
+  finalizeMerged,
+  fileBlocker,
+  markFailedAndRelease,
+  releaseAll,
+  DEFAULT_BASE_BRANCH,
+  PRESSMAN_RETRY_CAP,
+} from './workflow.js';
+export type {
+  PickedSubmission,
+  PickNextOpts,
+  AcquireWorktreeOpts,
+  AcquiredWorktree,
+  RebaseStepOpts,
+  TestStepOpts,
+  MergeStepOpts,
+  FinalizeMergedOpts,
+  FileBlockerOpts,
+  FileBlockerResult,
+  BlockerKind,
+  MarkFailedAndReleaseOpts,
+  MarkFailedAndReleaseResult,
+  ReleaseAllOpts,
+} from './workflow.js';
