@@ -40,6 +40,7 @@ import { CronManager } from './crons.js';
 import { DreamManager } from './dreams.js';
 import { AutoemonManager } from './autoemon.js';
 import { BacteriaReactor } from './bacteria/index.js';
+import { PressmanScheduler } from './clearinghouse/pressman-runtime.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { InflightRegistry } from './inflight-registry.js';
@@ -76,6 +77,8 @@ export class Daemon {
   autoemon: AutoemonManager;
   analytics: AnalyticsEngine;
   bacteria: BacteriaReactor;
+  /** Project 1.12: merge-lane scheduler. Daemon-driven for v1; transitions to LLM-Pressman in v2 when judgment moments need agent eyeballs. */
+  pressman: PressmanScheduler;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -169,6 +172,10 @@ export class Daemon {
     this.bacteria = new BacteriaReactor({
       corpRoot: this.corpRoot,
       globalConfig: this.globalConfig,
+      processManager: this.processManager,
+    });
+    this.pressman = new PressmanScheduler({
+      corpRoot: this.corpRoot,
       processManager: this.processManager,
     });
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
@@ -460,6 +467,12 @@ export class Daemon {
     this.hireWatcher.start();
     this.pulse.start();
     this.contractWatcher.start();
+    // Project 1.12: Pressman scheduler. Boots boot-time
+    // resumeClearinghouse + orphan-worktree cleanup before its first
+    // tick. Idle when no Pressman is hired (corp opts in via hire).
+    void this.pressman.start().catch((err) => {
+      logError(`[daemon] PressmanScheduler.start failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
 
     this.analytics.start();
 
@@ -792,6 +805,10 @@ export class Daemon {
 
   async stop(): Promise<void> {
     this.bacteria.stop(); // Stop reactor before processManager — pending mitose actions need spawn primitives alive
+    // Project 1.12: drain worktree pool + clear interval before
+    // process-manager teardown so any in-flight tick doesn't outlive
+    // the agent context it relies on.
+    await this.pressman.stop().catch(() => undefined);
     this.heartbeat.stop();
     this.taskWatcher.stop();
     this.hireWatcher.stop();

@@ -181,3 +181,18 @@ export type {
   EnterClearanceOpts,
   EnterClearanceResult,
 } from './enter-clearance.js';
+
+// ─── pressman-runtime ────────────────────────────────────────────────
+// Active loop that processes the merge queue (Project 1.12 PR 3).
+// Composes rebase-flow + tests-runner + merge-flow + cascade helpers
+// into a tick-driven scheduler. v1 is daemon-driven (no LLM session);
+// v2 transition when judgment moments need an agent's eyeballs.
+export {
+  PressmanScheduler,
+  PRESSMAN_TICK_INTERVAL_MS,
+  DEFAULT_BASE_BRANCH,
+  PRESSMAN_RETRY_CAP,
+} from './pressman-runtime.js';
+export type {
+  PressmanSchedulerOpts,
+} from './pressman-runtime.js';
