@@ -229,3 +229,15 @@ export type {
   HirePressmanOpts,
   HirePressmanResult,
 } from './pressman.js';
+
+// ─── pressman-runtime ────────────────────────────────────────────────
+// Wake dispatch + reactive watcher + Pulse-fallback sweep. Wired into
+// daemon.ts at start. Pressman session walks patrol/clearing on each
+// wake; the runtime decides only WHEN to wake.
+export {
+  dispatchPressman,
+  ClearanceSubmissionWatcher,
+  clearinghouseSweep,
+  clearinghouseBootRecover,
+  CLEARINGHOUSE_SWEEP_INTERVAL_MS,
+} from './pressman-runtime.js';

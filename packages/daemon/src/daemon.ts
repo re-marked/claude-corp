@@ -34,6 +34,12 @@ import { hireWarden } from './warden.js';
 import { hireHerald } from './herald.js';
 import { hirePlanner } from './planner.js';
 import { ContractWatcher } from './contract-watcher.js';
+import {
+  ClearanceSubmissionWatcher,
+  clearinghouseBootRecover,
+  clearinghouseSweep,
+  CLEARINGHOUSE_SWEEP_INTERVAL_MS,
+} from './clearinghouse/pressman-runtime.js';
 import { ClockManager } from './clock-manager.js';
 import { LoopManager } from './loops.js';
 import { CronManager } from './crons.js';
@@ -69,6 +75,7 @@ export class Daemon {
   hireWatcher: HireWatcher;
   pulse: Pulse;
   contractWatcher: ContractWatcher;
+  clearanceSubmissionWatcher: ClearanceSubmissionWatcher;
   clocks: ClockManager;
   loops: LoopManager;
   crons: CronManager;
@@ -160,6 +167,7 @@ export class Daemon {
     this.hireWatcher = new HireWatcher(this);
     this.pulse = new Pulse(this);
     this.contractWatcher = new ContractWatcher(this);
+    this.clearanceSubmissionWatcher = new ClearanceSubmissionWatcher(this);
     this.clocks = new ClockManager(this.events);
     this.loops = new LoopManager(this);
     this.crons = new CronManager(this);
@@ -460,6 +468,20 @@ export class Daemon {
     this.hireWatcher.start();
     this.pulse.start();
     this.contractWatcher.start();
+    // Project 1.12.1: Pressman runtime — boot recovery + reactive
+    // watcher + Pulse-fallback sweep. No-ops on corps without a
+    // hired Pressman.
+    clearinghouseBootRecover(this);
+    this.clearanceSubmissionWatcher.start();
+    this.clocks.register({
+      id: 'clearinghouse-sweep',
+      name: 'Clearinghouse Sweep',
+      type: 'heartbeat',
+      intervalMs: CLEARINGHOUSE_SWEEP_INTERVAL_MS,
+      target: 'pressman',
+      description: 'Recovers stale lock state + dispatches Pressman wake when queue is non-empty and no live holder.',
+      callback: () => clearinghouseSweep(this),
+    });
 
     this.analytics.start();
 
@@ -797,6 +819,7 @@ export class Daemon {
     this.hireWatcher.stop();
     this.pulse.stop();
     this.contractWatcher.stop();
+    this.clearanceSubmissionWatcher.stop();
     this.autoemon.stop(); // Persist autoemon state before shutdown
     this.crons.stopAll(); // Stop croner jobs before ClockManager
     this.loops.shutdown(); // Flush loop stats
