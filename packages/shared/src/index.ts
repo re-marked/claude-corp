@@ -296,6 +296,30 @@ export {
   CRASH_LOOP_THRESHOLD_DEFAULT,
   CRASH_LOOP_WINDOW_MS_DEFAULT,
 } from './bacteria-breaker.js';
+
+// Project 1.12: clearinghouse helpers — pure priority scoring, queue
+// ordering, lock lifecycle (singleton JSON), and submission state
+// cascade (submission → task → contract). The Pressman/Editor agents
+// and CLI commands compose against these.
+export {
+  scoreSubmission,
+  rankQueue,
+  readClearinghouseLock,
+  claimClearinghouseLock,
+  releaseClearinghouseLock,
+  forceReleaseClearinghouseLock,
+  markSubmissionMerged,
+  markSubmissionFailed,
+} from './clearinghouse.js';
+export type {
+  ScorableSubmission,
+  QueueEntry,
+  ClearinghouseLockState,
+  ClaimLockOpts,
+  ReleaseLockOpts,
+  MarkSubmissionMergedOpts,
+  MarkSubmissionFailedOpts,
+} from './clearinghouse.js';
 export type {
   BreakerTriggerKink,
   BreakerTriggerDecision,
