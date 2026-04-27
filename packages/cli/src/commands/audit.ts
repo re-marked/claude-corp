@@ -53,12 +53,14 @@ import {
   casketExists,
   resolveKind,
   promotePendingHandoff,
+  completeDeferredTaskClose,
   revertTaskFromUnderReview,
   buildPreCompactInstructions,
   buildCheckpointObservation,
   createChit,
   extractLatestUsageFromTranscript,
   type Chit,
+  type ContractFields,
   type HookInput,
   type AuditDecision,
   type AuditInput,
@@ -265,7 +267,7 @@ async function runHookPath(
   // marker so a one-shot override survives any intervening compactions.
   if (consumePendingOverride(corpRoot, slug)) {
     logAuditDecision(corpRoot, slug, { decision: 'approve' }, { reason: 'override-consumed' });
-    approveAndMaybePromote(corpRoot, slug);
+    await approveAndMaybePromote(corpRoot, slug);
     return;
   }
 
@@ -300,7 +302,7 @@ async function runHookPath(
       { decision: 'approve' },
       { event: 'transcript-unavailable-fail-open', taskId: currentTask.id },
     );
-    approveAndMaybePromote(corpRoot, slug);
+    await approveAndMaybePromote(corpRoot, slug);
     return;
   }
 
@@ -328,7 +330,7 @@ async function runHookPath(
   });
 
   if (decision.decision === 'approve') {
-    approveAndMaybePromote(corpRoot, slug);
+    await approveAndMaybePromote(corpRoot, slug);
   } else {
     // Block: revert the Casket-current task from under_review back to
     // in_progress via the 1.3 state machine so the agent sees the
@@ -367,11 +369,19 @@ async function runHookPath(
  * that didn't come from a `cc-cli done` (e.g. override, idle, tier-3-
  * clear) skip the promotion path harmlessly.
  */
-function approveAndMaybePromote(corpRoot: string, slug: string): void {
+async function approveAndMaybePromote(corpRoot: string, slug: string): Promise<void> {
   try {
     const workspace = findAgentWorkspace(corpRoot, slug);
     if (workspace) {
-      const promotion = promotePendingHandoff(corpRoot, slug, workspace);
+      // Project 1.12: 1.12-aware corps defer the task close + chain
+      // walk during promotion — those happen later (clearance-state
+      // transition via enterClearance, then completed-state via
+      // markSubmissionMerged when Pressman lands the merge).
+      const { isClearinghouseAwareCorp } = await import('@claudecorp/daemon');
+      const clearinghouseActive = isClearinghouseAwareCorp(corpRoot);
+      const promotion = promotePendingHandoff(corpRoot, slug, workspace, {
+        deferTaskClose: clearinghouseActive,
+      });
       if (promotion.promoted) {
         logAuditDecision(
           corpRoot,
@@ -382,6 +392,7 @@ function approveAndMaybePromote(corpRoot: string, slug: string): void {
             worklogPath: promotion.worklogPath,
             handoffChitId: promotion.handoffChitId,
             closedTaskId: promotion.closedTaskId,
+            clearinghouseActive,
             // Project 1.3: chain walker deltas surfaced for founder
             // visibility. dependentsNowReady + cascadedBlocked get
             // derived from the deltas the walker returned when the
@@ -400,12 +411,190 @@ function approveAndMaybePromote(corpRoot: string, slug: string): void {
             promotionErrors: promotion.errors,
           },
         );
+
+        // Project 1.12: fire enterClearance to push branch + create
+        // submission + advance task workflow. Best-effort: failures
+        // log to the audit trail but don't block the approve emit
+        // (the agent's session still ends; the founder can recover
+        // via cc-cli clearinghouse submit or by inspecting the log).
+        if (clearinghouseActive && promotion.closedTaskId) {
+          await fireEnterClearance(corpRoot, slug, promotion.closedTaskId, workspace);
+        }
       }
     }
   } catch (err) {
     logAuditError(corpRoot, slug, err);
   }
   emitDecision({ decision: 'approve' });
+}
+
+/**
+ * Project 1.12: enterClearance side trip on audit approve. Resolves
+ * the contract id from the task chit's parent contract, derives the
+ * branch from the worktree, fires enterClearance, logs the result.
+ *
+ * Best-effort everywhere — the agent's session ends regardless of
+ * outcome. Errors land in `.audit-log.jsonl` for retrospective.
+ */
+async function fireEnterClearance(
+  corpRoot: string,
+  slug: string,
+  taskId: string,
+  workspacePath: string,
+): Promise<void> {
+  try {
+    const { enterClearance } = await import('@claudecorp/daemon');
+
+    // Resolve contractId — task chits don't carry a parent ref;
+    // walk contracts and find the one whose taskIds includes us.
+    const contractId = findContractContainingTask(corpRoot, taskId);
+    if (!contractId) {
+      // Standalone task (no contract OR broken linkage). The
+      // clearinghouse flow needs a contract for cascade purposes,
+      // so this task can't enter the lane at all — fall back to
+      // the normal close path. This is the ONE branch where
+      // unconditional close is correct: the task isn't a
+      // clearinghouse candidate to begin with, so there's no
+      // unshipped work being hidden by closing it. (Codex P1 on
+      // PR #194 originally surfaced this strand.)
+      const fallback = runDeferredCloseFallback(corpRoot, slug, taskId, 'no contract contains this task');
+      logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
+        event: 'enter-clearance-skipped',
+        reason: 'no contract contains this task',
+        taskId,
+        fallbackClosed: fallback.closed,
+        fallbackErrors: fallback.errors,
+      });
+      return;
+    }
+
+    // Derive branch via git in the worktree. We do NOT fall back
+    // close on a branch read failure — the work hasn't reached
+    // origin yet, and a silent close would advance the contract
+    // chain as if it had. Leave the task at under_review; the
+    // agent's next session re-runs `cc-cli done` after fixing the
+    // sandbox state, audit re-fires this path, and the lane gets
+    // its second chance. (Codex P1 follow-up on PR #194.)
+    const branch = readCurrentBranch(workspacePath);
+    if (!branch || branch === 'HEAD' || branch === 'main') {
+      const reason = branch
+        ? `worktree on '${branch}' — refusing to merge into itself`
+        : 'could not read current branch';
+      logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
+        event: 'enter-clearance-blocked',
+        reason,
+        taskId,
+        contractId,
+        // No fallbackClosed — task stays at under_review by design.
+      });
+      return;
+    }
+
+    const result = await enterClearance({
+      corpRoot,
+      taskId,
+      contractId,
+      branch,
+      submitter: slug,
+      worktreePath: workspacePath,
+      // PR 3 default: Editor doesn't exist yet, every submission
+      // gets reviewBypassed: true. PR 4 will pass this from
+      // Editor's approve / cap-hit decision.
+      reviewBypassed: true,
+      reviewRound: 0,
+    });
+
+    if (result.ok) {
+      logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
+        event: 'enter-clearance-success',
+        taskId,
+        contractId,
+        branch,
+        submissionId: result.value.submissionId,
+        pushedSha: result.value.pushedSha ?? null,
+      });
+    } else {
+      // enterClearance failed (push race, hook rejection, chit-
+      // store error, etc). Do NOT fall back to close — nothing
+      // shipped to origin AND/OR no submission was queued, so
+      // closing would hide unmerged work and falsely advance the
+      // contract chain. Leave the task at under_review; the
+      // author addresses the cause and re-runs `cc-cli done`,
+      // which re-fires audit. The pedagogical summary in the
+      // log gives them the diagnosis. (Codex P1 follow-up.)
+      logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
+        event: 'enter-clearance-failed',
+        taskId,
+        contractId,
+        branch,
+        category: result.failure.category,
+        summary: result.failure.pedagogicalSummary,
+        retryable: result.failure.retryable,
+      });
+    }
+  } catch (err) {
+    // Uncaught path: same as a typed enterClearance failure —
+    // safer to leave the task at under_review than to close on
+    // an unknown error mode that might indicate partial state.
+    logAuditError(corpRoot, slug, err);
+  }
+}
+
+function runDeferredCloseFallback(
+  corpRoot: string,
+  slug: string,
+  taskId: string,
+  reason: string,
+): { closed: boolean; errors: readonly string[] } {
+  try {
+    const result = completeDeferredTaskClose(corpRoot, taskId, { closedBy: slug, reason });
+    return { closed: result.closed, errors: result.errors };
+  } catch (err) {
+    return {
+      closed: false,
+      errors: [`completeDeferredTaskClose threw: ${err instanceof Error ? err.message : String(err)}`],
+    };
+  }
+}
+
+/**
+ * Find the contract chit whose taskIds includes the given task id.
+ * Returns the contract's chit id or null when no contract claims it
+ * (standalone task — clearinghouse flow doesn't apply).
+ */
+function findContractContainingTask(corpRoot: string, taskId: string): string | null {
+  try {
+    const result = queryChits<'contract'>(corpRoot, { types: ['contract'] });
+    for (const cwb of result.chits) {
+      const fields = cwb.chit.fields.contract as ContractFields;
+      if (fields.taskIds?.includes(taskId)) return cwb.chit.id;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the worktree's current branch via git. Returns null on any
+ * failure (not a repo, detached HEAD, git missing, etc.) — caller
+ * surfaces a skip-with-reason rather than crashing.
+ */
+function readCurrentBranch(worktreePath: string): string | null {
+  try {
+    // Synchronous spawn via child_process.execFileSync. Bounded
+    // 5s timeout so a hung git can't lock the audit hook.
+    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    const output = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: worktreePath,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const branch = output.trim();
+    return branch.length > 0 ? branch : null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Stdin reader ───────────────────────────────────────────────────

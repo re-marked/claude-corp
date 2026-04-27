@@ -264,6 +264,15 @@ async function run() {
       await cmdBreaker(process.argv.slice(3));
       break;
     }
+    case 'clearinghouse': {
+      // Project 1.12.1: Pressman's primitives surface — pick / acquire-
+      // worktree / rebase / test / merge / finalize / file-blocker /
+      // mark-failed / release / status. Walked by the Pressman Employee
+      // session per the patrol/clearing blueprint.
+      const { cmdClearinghouse } = await import('./commands/clearinghouse.js');
+      await cmdClearinghouse(process.argv.slice(3));
+      break;
+    }
     case 'tame': {
       const { cmdTame } = await import('./commands/tame.js');
       await cmdTame({

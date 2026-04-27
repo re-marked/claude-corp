@@ -419,6 +419,7 @@ export {
   parseTranscript,
   parseTranscriptBeforeCompact,
   promotePendingHandoff,
+  completeDeferredTaskClose,
   revertTaskFromUnderReview,
   peekLatestHandoffChit,
   consumeHandoffChit,
@@ -439,6 +440,7 @@ export type {
   HandoffPromotionResult,
   PendingHandoffPayload,
   RevertUnderReviewResult,
+  CompleteDeferredCloseResult,
   PreCompactInstructionsInput,
   CheckpointBuilderInput,
   CheckpointCasketRef,
@@ -617,6 +619,8 @@ export { MEMORY_TEMPLATE } from './templates/memory.js';
 export { USER_TEMPLATE } from './templates/user.js';
 export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarness } from './templates/environment.js';
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
+export { pressmanRules, type PressmanRulesOpts } from './templates/pressman-bootstrap.js';
+export { roleSpecificAgentsContent, type RoleSpecificRulesOpts } from './templates/role-rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
 export {
   renderServiceForPlatform,

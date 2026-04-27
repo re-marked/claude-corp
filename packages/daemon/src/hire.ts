@@ -20,6 +20,7 @@ import {
   CORP_JSON,
   UNIVERSAL_SOUL,
   defaultRules,
+  roleSpecificAgentsContent,
   defaultHeartbeat,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
@@ -122,7 +123,19 @@ export async function hireAgent(
 
   // 2. Create workspace (remote: true — no .openclaw/ dir, gateway handles state)
   const soulContent = opts.soulContent ?? UNIVERSAL_SOUL;
-  const agentsContent = opts.agentsContent ?? defaultRules(opts.rank);
+  // Role-aware AGENTS.md dispatch: when --role names a role with a
+  // pre-written operational manual (Pressman; Editor in 1.12.2),
+  // those rules ship by default. Falls through to plain defaultRules
+  // when the caller supplies no role OR the role has no manual.
+  const templateHarness = harness === 'claude-code' ? 'claude-code' : 'openclaw';
+  const agentsContent =
+    opts.agentsContent
+    ?? roleSpecificAgentsContent({
+      ...(opts.role ? { role: opts.role } : {}),
+      rank: opts.rank,
+      harness: templateHarness,
+    })
+    ?? defaultRules({ rank: opts.rank, harness: templateHarness });
   const heartbeatContent = opts.heartbeatContent ?? defaultHeartbeat(opts.rank);
 
   const { member } = setupAgentWorkspace({

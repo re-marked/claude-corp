@@ -167,3 +167,80 @@ export type {
   ValidateCommentPositionOpts,
   CommentValidationResult,
 } from './editor-diff.js';
+
+// ─── enter-clearance ─────────────────────────────────────────────────
+// Bridge from audit-approve to merge-lane (Project 1.12 PR 3). Called
+// by `cc-cli audit`'s approve path on 1.12-aware corps; pushes the
+// branch, creates the clearance-submission chit, advances the task
+// workflow status. Replaces the user-typed `cc-cli clear` ceremony.
+export {
+  enterClearance,
+  isClearinghouseAwareCorp,
+} from './enter-clearance.js';
+export type {
+  EnterClearanceOpts,
+  EnterClearanceResult,
+} from './enter-clearance.js';
+
+// ─── workflow ────────────────────────────────────────────────────────
+// Stateless step primitives the Pressman session calls via cc-cli
+// clearinghouse subcommands. Each primitive runs in a fresh CLI
+// process, returns Result<T>, and operates only on on-disk state.
+export {
+  pickNext,
+  acquireWorktree,
+  rebaseStep,
+  testStep,
+  mergeStep,
+  finalizeMerged,
+  fileBlocker,
+  markFailedAndRelease,
+  releaseAll,
+  cleanupOrphanWorktrees,
+  DEFAULT_BASE_BRANCH,
+  PRESSMAN_RETRY_CAP,
+} from './workflow.js';
+export type {
+  PickedSubmission,
+  PickNextOpts,
+  AcquireWorktreeOpts,
+  AcquiredWorktree,
+  RebaseStepOpts,
+  TestStepOpts,
+  MergeStepOpts,
+  FinalizeMergedOpts,
+  FileBlockerOpts,
+  FileBlockerResult,
+  BlockerKind,
+  MarkFailedAndReleaseOpts,
+  MarkFailedAndReleaseResult,
+  ReleaseAllOpts,
+  CleanupOrphanWorktreesOpts,
+  CleanupOrphanWorktreesResult,
+} from './workflow.js';
+
+// ─── pressman ────────────────────────────────────────────────────────
+// Convenience hire for the Pressman Employee. NOT auto-called from
+// daemon boot — Pressman is founder opt-in via `cc-cli hire --role
+// pressman` (which auto-loads the operational manual). This export
+// is for tests + the future bacteria-scaling integration.
+export {
+  hirePressman,
+  buildPressmanRules,
+} from './pressman.js';
+export type {
+  HirePressmanOpts,
+  HirePressmanResult,
+} from './pressman.js';
+
+// ─── pressman-runtime ────────────────────────────────────────────────
+// Wake dispatch + reactive watcher + Pulse-fallback sweep. Wired into
+// daemon.ts at start. Pressman session walks patrol/clearing on each
+// wake; the runtime decides only WHEN to wake.
+export {
+  dispatchPressman,
+  ClearanceSubmissionWatcher,
+  clearinghouseSweep,
+  clearinghouseBootRecover,
+  CLEARINGHOUSE_SWEEP_INTERVAL_MS,
+} from './pressman-runtime.js';

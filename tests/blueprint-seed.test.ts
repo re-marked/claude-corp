@@ -82,7 +82,7 @@ describe('seedBuiltinBlueprints', () => {
     }
   });
 
-  it('seeds the 3 shipped patrol blueprints as chits with origin=builtin', () => {
+  it('seeds the 5 shipped patrol blueprints as chits with origin=builtin', () => {
     seedBuiltinBlueprints(corpRoot);
 
     const result = queryChits<'blueprint'>(corpRoot, {
@@ -93,6 +93,8 @@ describe('seedBuiltinBlueprints', () => {
     const names = result.chits.map((c) => c.chit.fields.blueprint.name).sort();
     expect(names).toEqual([
       'patrol/chit-hygiene',
+      'patrol/clearing',
+      'patrol/conflict-resolution',
       'patrol/corp-health',
       'patrol/health-check',
     ]);
@@ -139,10 +141,10 @@ describe('seedBuiltinBlueprints', () => {
       statuses: ['active'],
     });
 
-    // All 3 should come back under status=active filter — if the
+    // All 5 should come back under status=active filter — if the
     // seeder landed them as 'draft' (the default for authored
     // blueprints), cc-cli blueprint show wouldn't find them.
-    expect(result.chits.length).toBe(3);
+    expect(result.chits.length).toBe(5);
   });
 
   it('runs without throwing even when invoked twice (not idempotent, but non-fatal)', () => {

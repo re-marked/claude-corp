@@ -92,6 +92,20 @@ export interface HandoffPromotionResult {
   errors: string[];
 }
 
+export interface PromotePendingHandoffOpts {
+  /**
+   * When true, skip the task-close and chain-walk steps. Used by
+   * 1.12-aware corps where the task transitions `under_review →
+   * clearance` (handled by enterClearance after promotion) and the
+   * chain walks happen at merge time (handled by markSubmissionMerged).
+   *
+   * Casket advance + handoff chit creation still happen — those are
+   * the agent's session-end ceremonies and don't depend on the
+   * task being closed.
+   */
+  deferTaskClose?: boolean;
+}
+
 /**
  * Try to promote a pending handoff for the given agent. No-op when
  * there's no pending file — safe to call unconditionally on audit
@@ -101,6 +115,7 @@ export function promotePendingHandoff(
   corpRoot: string,
   agentSlug: string,
   workspacePath: string,
+  opts: PromotePendingHandoffOpts = {},
 ): HandoffPromotionResult {
   const result: HandoffPromotionResult = {
     promoted: false,
@@ -190,12 +205,24 @@ export function promotePendingHandoff(
   // TaskFields.output so downstream chain steps can read what this
   // step produced without grepping the body. All three happen in one
   // updateChit so the terminal write is atomic relative to queries.
+  //
+  // 1.12-aware corps DEFER this step: the task transitions
+  // under_review → clearance via enterClearance after promotion
+  // returns, and clearance → completed via markSubmissionMerged
+  // when Pressman lands the merge. closedTaskId is still set to
+  // currentStepId so the caller can hand it off to enterClearance.
   if (currentStepId) {
-    try {
-      closeTaskAsCompleted(corpRoot, currentStepId, payload);
+    if (opts.deferTaskClose) {
+      // Surface the task id without mutating state — caller fires
+      // enterClearance with this id.
       result.closedTaskId = currentStepId;
-    } catch (err) {
-      result.errors.push(`close-task: ${stringify(err)}`);
+    } else {
+      try {
+        closeTaskAsCompleted(corpRoot, currentStepId, payload);
+        result.closedTaskId = currentStepId;
+      } catch (err) {
+        result.errors.push(`close-task: ${stringify(err)}`);
+      }
     }
   }
 
@@ -208,7 +235,12 @@ export function promotePendingHandoff(
   // Caskets). Future commit wires the delta application into
   // task-events.ts; for now this gives us real audit observability
   // of the cascade, bridging 1.3's pure primitive to the real flow.
-  if (currentStepId) {
+  //
+  // 1.12-aware corps DEFER this step: the task isn't closed yet
+  // (it's at under_review, transitioning to clearance), so chain
+  // dependents shouldn't fire. They fire when the submission
+  // actually merges (markSubmissionMerged → cascade).
+  if (currentStepId && !opts.deferTaskClose) {
     try {
       const advance = advanceChain(corpRoot, currentStepId);
       result.chainDeltas = advance.dependentDeltas;
@@ -330,6 +362,89 @@ function closeTaskAsCompleted(
     fields: { task: fieldUpdate } as never,
     updatedBy: payload.createdBy,
   });
+}
+
+/**
+ * Project 1.12 fallback: when audit ran with `deferTaskClose: true`
+ * but the clearinghouse path can't proceed (no contract for this
+ * task, branch unreadable, enterClearance failed), the task would
+ * otherwise stay stuck at `under_review` forever — promotion
+ * already happened but the close was deferred to a path that never
+ * fires.
+ *
+ * This helper completes the deferred close: marks the task
+ * completed (mirror of the non-deferred path), runs the chain
+ * walker, returns deltas for the audit log. Idempotent — terminal
+ * tasks return without mutation.
+ *
+ * Callers should fire this from EVERY skip / failure branch in the
+ * clearinghouse-fire path so standalone tasks (no contract) and
+ * recovery paths (broken linkage, push failed) still terminate
+ * cleanly.
+ */
+export interface CompleteDeferredCloseResult {
+  /** True iff a state mutation actually happened. False when the task was already terminal. */
+  readonly closed: boolean;
+  readonly chainDeltas: readonly DependentDelta[];
+  readonly errors: string[];
+}
+
+export function completeDeferredTaskClose(
+  corpRoot: string,
+  taskId: string,
+  opts: { closedBy: string; reason?: string },
+): CompleteDeferredCloseResult {
+  const errors: string[] = [];
+  const result: CompleteDeferredCloseResult = {
+    closed: false,
+    chainDeltas: [],
+    errors,
+  };
+
+  const hit = findChitById(corpRoot, taskId);
+  if (!hit || hit.chit.type !== 'task') {
+    errors.push(`completeDeferredTaskClose: task ${taskId} not found`);
+    return result;
+  }
+  const terminal = new Set(['completed', 'rejected', 'failed', 'closed']);
+  if (terminal.has(hit.chit.status)) {
+    // Already done; idempotent no-op.
+    return result;
+  }
+
+  // Synthesize a minimal payload — we don't have access to the
+  // original handoff payload at this point in the flow (it's already
+  // been promoted to a chit), but the close path doesn't need
+  // anything beyond `createdBy` + a `completed[]` array. The
+  // `reason` lands in the task's output field via the completed[]
+  // join so a founder grepping later sees why this close happened.
+  const fallbackPayload: PendingHandoffPayload = {
+    predecessorSession: 'system:audit-clearinghouse-fallback',
+    completed: opts.reason ? [`(deferred close fallback) ${opts.reason}`] : [],
+    nextAction: 'task closed via clearinghouse-skip fallback',
+    openQuestion: null,
+    sandboxState: null,
+    notes: opts.reason ?? null,
+    createdAt: new Date().toISOString(),
+    createdBy: opts.closedBy,
+  };
+
+  try {
+    closeTaskAsCompleted(corpRoot, taskId, fallbackPayload);
+    (result as { closed: boolean }).closed = true;
+  } catch (err) {
+    errors.push(`close-task: ${stringify(err)}`);
+    return result;
+  }
+
+  try {
+    const advance = advanceChain(corpRoot, taskId);
+    (result as { chainDeltas: readonly DependentDelta[] }).chainDeltas = advance.dependentDeltas;
+  } catch (err) {
+    errors.push(`advance-chain: ${stringify(err)}`);
+  }
+
+  return result;
 }
 
 /**
