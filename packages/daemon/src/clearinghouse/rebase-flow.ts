@@ -166,8 +166,17 @@ export async function attemptRebase(opts: AttemptRebaseOpts): Promise<Result<Reb
   // 2-4. Rebase + resolution loop.
   const rebaseResult = await runRebaseWithResolution(opts, MAX_AUTO_RESOLUTION_ROUNDS);
   if (!rebaseResult.ok) {
-    // Programmer-error level; bubble.
-    return err(rebaseResult.failure);
+    // Inner runner failures include runtime git problems (timeout,
+    // tool-missing, disk-full from gitOps.rebase/rebaseContinue),
+    // NOT just programmer faults. Surface them as outcome='fatal'
+    // with a populated failureRecord so callers switching on
+    // RebaseAttemptResult.outcome receive the documented value
+    // and route through their fatal path. (Codex P1 catch on PR #192.)
+    return ok({
+      outcome: 'fatal',
+      failureRecord: rebaseResult.failure,
+      preStats,
+    });
   }
   const { state: rebaseState, autoResolvedFiles, autoResolutionRounds, conflictedFiles, conflictSummaries } = rebaseResult.value;
 

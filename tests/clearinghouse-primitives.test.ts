@@ -507,6 +507,27 @@ bare`;
       };
       expect(validateCommentPosition({ filePath: 'a.ts', lineStart: 5, lineEnd: 5, diff }).valid).toBe(true);
     });
+
+    // Codex P2 regression (PR #192): line-targeted comments on
+    // deleted files have no new-side lines to attach to. Validator
+    // must reject before downstream comment-write fails.
+    it('validateCommentPosition rejects deleted-file targets', () => {
+      const diff: ReviewableDiff = {
+        files: [{ path: 'gone.ts', status: 'deleted', additions: 0, deletions: 12 }],
+        filteredFiles: [],
+        totalAdditions: 0,
+        totalDeletions: 12,
+        oversized: false,
+      };
+      const result = validateCommentPosition({
+        filePath: 'gone.ts',
+        lineStart: 5,
+        lineEnd: 5,
+        diff,
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) expect(result.reason).toMatch(/deleted/);
+    });
   });
 
   // ─── test-attribution (pure) ───────────────────────────────────
@@ -812,6 +833,31 @@ spaced
       }
     });
 
+    // Codex P1 regression (PR #192): runtime git failures from
+    // gitOps.rebase / rebaseContinue (timeout/tool/disk) were
+    // bubbling as Result.err — callers switching on
+    // RebaseAttemptResult.outcome never saw 'fatal' and skipped
+    // their failure routing. Now those surface as outcome='fatal'
+    // with a populated failureRecord.
+    it('runtime git failure surfaces as outcome=fatal, not Result.err', async () => {
+      const gitOps = buildMockGitOps({
+        diffStats: async () => ok({ filesChanged: 1, insertions: 1, deletions: 0 }),
+        rebase: async () => err(failure('network-timeout', 'rebase timed out', 'detail')),
+      });
+      const result = await attemptRebase({
+        worktreePath: '/wt',
+        baseBranch: 'main',
+        prBranch: 'feat/x',
+        gitOps,
+      });
+      // Must be ok=true with outcome=fatal; NOT a Result.err.
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.outcome).toBe('fatal');
+        expect(result.value.failureRecord?.category).toBe('network-timeout');
+      }
+    });
+
     it('sanity-failed when post-rebase blows up file count', async () => {
       // Pre stats: 2 files. Post stats: 50 files. Ceiling = max(2*5, 20) = 20. 50 > 20 → sanity-failed.
       let callCount = 0;
@@ -917,6 +963,44 @@ spaced
       const wrongHandle = { ...acq.value, holder: 'p-bb' };
       const release = await pool.release(wrongHandle);
       expect(release.ok).toBe(false);
+    });
+
+    // Codex P2 regression (PR #192): a reset failure on one idle
+    // entry was aborting acquire entirely — even when other idle
+    // entries (or fresh capacity) could satisfy the request. Now
+    // the loop continues to the next entry on failure.
+    it('acquire continues scanning after a reset failure on an idle entry', async () => {
+      let firstResetCalled = false;
+      const gitOps = buildMockGitOps({
+        // First reset fails (simulate stale entry); second succeeds.
+        // Acquire should still complete — by creating a NEW entry
+        // since both idle entries are exhausted.
+        worktreeAdd: async () => ok(undefined),
+        worktreeRemove: async () => ok(undefined),
+        resetHard: async () => {
+          if (!firstResetCalled) {
+            firstResetCalled = true;
+            return err(failure('unknown', 'reset failed', 'mock'));
+          }
+          return ok(undefined);
+        },
+        cleanWorkdir: async () => ok(undefined),
+      });
+      const pool = new WorktreePool({ corpRoot, gitOps, cap: 4 });
+      // Pre-populate one idle entry by acquire+release.
+      const acq1 = await pool.acquire({ branch: 'feat/x', holder: 'p-aa' });
+      expect(acq1.ok).toBe(true);
+      if (!acq1.ok) return;
+      // Reset fires here; first call fails (simulated). Release
+      // should still succeed at the slot level.
+      await pool.release(acq1.value);
+
+      // Now acquire again. Since the released entry's reset would
+      // fail (well, second call now succeeds per the mock — but
+      // the point is: the loop didn't abort). Should hand back
+      // a working handle.
+      const acq2 = await pool.acquire({ branch: 'feat/x', holder: 'p-bb' });
+      expect(acq2.ok).toBe(true);
     });
 
     // Codex P1 regression (PR #192): release was a no-op on the

@@ -271,6 +271,15 @@ export function validateCommentPosition(opts: ValidateCommentPositionOpts): Comm
   if (!file) {
     return { valid: false, reason: `file '${opts.filePath}' is not in the reviewable diff (not changed by this PR)` };
   }
+  // lineStart/lineEnd are 1-indexed lines in the NEW (HEAD) file.
+  // A deleted file has no new-side content — commenting on a line
+  // number is structurally impossible. (Codex P2 catch on PR #192.)
+  if (file.status === 'deleted') {
+    return {
+      valid: false,
+      reason: `file '${opts.filePath}' is deleted by this PR — no new-side lines exist for line-targeted comments. Comment on the deletion at the file level via the chit body instead.`,
+    };
+  }
   return { valid: true };
 }
 

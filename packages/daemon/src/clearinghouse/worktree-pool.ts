@@ -121,12 +121,20 @@ export class WorktreePool {
   async acquire(opts: { branch: string; holder: string }): Promise<Result<WorktreeHandle>> {
     this.ensureParentDir();
 
-    // Try to reuse a free entry.
+    // Try to reuse a free entry. If reset fails on one entry, keep
+    // scanning — a stale/corrupt free entry shouldn't block allocation
+    // when other idle entries (or fresh capacity) are available.
+    // (Codex P2 catch on PR #192.) Track the last reset failure for
+    // the all-options-exhausted case where no entry could be reset
+    // AND we're at the cap.
+    let lastResetFailure: FailureRecord | null = null;
     for (const entry of this.entries.values()) {
       if (entry.holder !== null) continue;
-      // Reset + check out the requested branch.
       const reset = await this.resetEntryToBranch(entry, opts.branch);
-      if (!reset.ok) return err(reset.failure);
+      if (!reset.ok) {
+        lastResetFailure = reset.failure;
+        continue;
+      }
       entry.holder = opts.holder;
       entry.branch = opts.branch;
       return ok({
@@ -139,6 +147,13 @@ export class WorktreePool {
 
     // No free entry — create one if under cap.
     if (this.entries.size >= this.cap) {
+      // If we got here because all idle entries had reset failures,
+      // surface the last one — it's more diagnostic than a bare
+      // "pool full" message and tells the founder which underlying
+      // issue is blocking allocation.
+      if (lastResetFailure) {
+        return err(lastResetFailure);
+      }
       return err(failure(
         'unknown',
         `worktree pool full (${this.cap} entries, all held). Wait for a release or raise the cap.`,
