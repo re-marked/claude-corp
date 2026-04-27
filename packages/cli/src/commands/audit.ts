@@ -53,6 +53,7 @@ import {
   casketExists,
   resolveKind,
   promotePendingHandoff,
+  completeDeferredTaskClose,
   revertTaskFromUnderReview,
   buildPreCompactInstructions,
   buildCheckpointObservation,
@@ -548,9 +549,8 @@ function runDeferredCloseFallback(
   slug: string,
   taskId: string,
   reason: string,
-): { closed: boolean; errors: string[] } {
+): { closed: boolean; errors: readonly string[] } {
   try {
-    const { completeDeferredTaskClose } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
     const result = completeDeferredTaskClose(corpRoot, taskId, { closedBy: slug, reason });
     return { closed: result.closed, errors: result.errors };
   } catch (err) {

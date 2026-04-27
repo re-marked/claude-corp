@@ -250,8 +250,10 @@ export function isClearinghouseAwareCorp(corpRoot: string): boolean {
   try {
     const { readConfig, MEMBERS_JSON } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
     const { join } = require('node:path') as typeof import('node:path');
-    const members = readConfig<Array<{ role?: string; status?: string }>>(join(corpRoot, MEMBERS_JSON));
-    return members.some((m) => m.role === 'pressman' && m.status !== 'archived');
+    const members = readConfig<Array<{ role?: string; type?: string; status?: string }>>(join(corpRoot, MEMBERS_JSON));
+    return members.some(
+      (m) => m.role === 'pressman' && m.type === 'agent' && m.status !== 'archived',
+    );
   } catch {
     return false;
   }
