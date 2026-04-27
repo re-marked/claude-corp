@@ -1004,11 +1004,11 @@ export interface ClearanceSubmissionFields {
    */
   reviewBypassed?: boolean;
   /** ISO timestamp the Pressman claimed it. Null/absent while queued. */
-  processingStartedAt?: string;
+  processingStartedAt?: string | null;
   /** Pressman Member.id currently processing. Null/absent while queued or after release. */
   processingBy?: string | null;
   /** ISO timestamp the merge landed. Set on `submissionStatus = 'merged'`. */
-  mergedAt?: string;
+  mergedAt?: string | null;
   /** Resulting commit sha on main, for audit. Optional — some merges may not surface a sha. */
   mergeCommitSha?: string | null;
   /**

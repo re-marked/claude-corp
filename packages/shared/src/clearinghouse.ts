@@ -529,7 +529,7 @@ export function resetOrphanedSubmission(
         // processingStartedAt cleared by setting to null (chit
         // serializer treats null and absent equivalently for
         // optional ISO timestamps).
-        processingStartedAt: undefined,
+        processingStartedAt: null,
         lastFailureReason: reason,
       },
     },
@@ -577,8 +577,13 @@ export function resumeClearinghouse(
         `Pressman '${o.orphanedFrom}' no longer alive at resume time — re-queued.`,
       );
       resetCount++;
-    } catch {
+    } catch (err) {
       // Best-effort — one failure shouldn't poison the rest.
+      // Surface to stderr so the daemon log captures it; don't
+      // throw because partial-recovery is better than no-recovery.
+      process.stderr.write(
+        `[clearinghouse:resume] reset failed for ${o.chit.id}: ${err instanceof Error ? err.message : String(err)}\n`,
+      );
     }
   }
 
