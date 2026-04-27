@@ -196,6 +196,7 @@ export {
   fileBlocker,
   markFailedAndRelease,
   releaseAll,
+  cleanupOrphanWorktrees,
   DEFAULT_BASE_BRANCH,
   PRESSMAN_RETRY_CAP,
 } from './workflow.js';
@@ -214,6 +215,8 @@ export type {
   MarkFailedAndReleaseOpts,
   MarkFailedAndReleaseResult,
   ReleaseAllOpts,
+  CleanupOrphanWorktreesOpts,
+  CleanupOrphanWorktreesResult,
 } from './workflow.js';
 
 // ─── pressman ────────────────────────────────────────────────────────

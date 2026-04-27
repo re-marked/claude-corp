@@ -470,8 +470,10 @@ export class Daemon {
     this.contractWatcher.start();
     // Project 1.12.1: Pressman runtime — boot recovery + reactive
     // watcher + Pulse-fallback sweep. No-ops on corps without a
-    // hired Pressman.
-    clearinghouseBootRecover(this);
+    // hired Pressman. Boot recovery is fire-and-forget — its eager
+    // dispatch awaits a /cc/say roundtrip we don't want to block
+    // start() on.
+    void clearinghouseBootRecover(this);
     this.clearanceSubmissionWatcher.start();
     this.clocks.register({
       id: 'clearinghouse-sweep',

@@ -60,6 +60,7 @@ import {
 } from '@claudecorp/shared';
 import { log, logError } from '../logger.js';
 import type { Daemon } from '../daemon.js';
+import { cleanupOrphanWorktrees } from './workflow.js';
 
 // ─── Config ──────────────────────────────────────────────────────────
 
@@ -320,15 +321,29 @@ export async function clearinghouseSweep(daemon: Daemon): Promise<void> {
 // ─── Boot recovery ───────────────────────────────────────────────────
 
 /**
- * Run resumeClearinghouse once at daemon boot. Called from daemon.ts
- * AFTER processManager is initialized (so isAlive returns meaningful
- * values). Idempotent; safe to call before any Pressman is hired.
+ * Boot recovery — runs once at daemon start, AFTER processManager is
+ * initialized so `isAlive` returns meaningful values. Three things:
+ *
+ *   1. resumeClearinghouse — release stale lock, re-queue any
+ *      submissions whose processingBy slot is no longer alive.
+ *   2. cleanupOrphanWorktrees — remove `.clearinghouse/wt-*` dirs
+ *      that don't match any active submission. Recovers disk space
+ *      from prior sessions that died mid-walk.
+ *   3. Eager dispatch — if the queue is non-empty after recovery,
+ *      dispatch a Pressman wake immediately. Without this, a corp
+ *      that booted with pending work would wait up to one sweep
+ *      cadence (5min) before the first dispatch.
+ *
+ * Async because cleanup + dispatch are async; called via `void` from
+ * daemon.ts so boot doesn't block on it. Failures log; never throw.
  */
-export function clearinghouseBootRecover(daemon: Daemon): void {
+export async function clearinghouseBootRecover(daemon: Daemon): Promise<void> {
   const isAlive = (slug: string): boolean => {
     const proc = daemon.processManager.getAgent(slug);
     return proc?.status === 'ready' || proc?.status === 'starting';
   };
+
+  // 1. Recover stale lock + orphaned submissions.
   try {
     const result = resumeClearinghouse(daemon.corpRoot, isAlive);
     if (result.lockReleased || result.submissionsReset > 0) {
@@ -337,4 +352,34 @@ export function clearinghouseBootRecover(daemon: Daemon): void {
   } catch (err) {
     logError(`[pressman-runtime] boot: resumeClearinghouse threw — ${err instanceof Error ? err.message : String(err)}`);
   }
+
+  // 2. Reap orphan worktree directories.
+  try {
+    const cleanup = await cleanupOrphanWorktrees({ corpRoot: daemon.corpRoot });
+    if (cleanup.ok && (cleanup.value.removed > 0 || cleanup.value.failed > 0)) {
+      log(`[pressman-runtime] boot: orphan worktrees — removed=${cleanup.value.removed}, failed=${cleanup.value.failed}`);
+    } else if (!cleanup.ok) {
+      logError(`[pressman-runtime] boot: cleanupOrphanWorktrees failed — ${cleanup.failure.pedagogicalSummary}`);
+    }
+  } catch (err) {
+    logError(`[pressman-runtime] boot: cleanupOrphanWorktrees threw — ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // 3. Eager dispatch — if queue is non-empty + no live holder, wake
+  // Pressman now instead of waiting for the first sweep tick.
+  let lockHeld = false;
+  try {
+    const lock = readClearinghouseLock(daemon.corpRoot);
+    lockHeld = lock.heldBy !== null && isAlive(lock.heldBy);
+  } catch { /* fall through */ }
+  if (lockHeld) return;
+
+  let queueDepth = 0;
+  try {
+    queueDepth = rankQueue(daemon.corpRoot).length;
+  } catch { return; }
+  if (queueDepth === 0) return;
+
+  log(`[pressman-runtime] boot: queue depth ${queueDepth} — dispatching wake eagerly`);
+  await dispatchPressman(daemon);
 }

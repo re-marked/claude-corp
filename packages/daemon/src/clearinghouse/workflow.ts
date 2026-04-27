@@ -758,6 +758,87 @@ export async function markFailedAndRelease(
   return ok({ requeued, retryCount: finalRetryCount });
 }
 
+// ─── cleanupOrphanWorktrees ──────────────────────────────────────────
+
+export interface CleanupOrphanWorktreesOpts {
+  corpRoot: string;
+  gitOps?: GitOps;
+}
+
+export interface CleanupOrphanWorktreesResult {
+  /** Worktree directories removed. */
+  readonly removed: number;
+  /** Worktree directories that failed to remove (logged but not surfaced as error). */
+  readonly failed: number;
+}
+
+/**
+ * Walk `<corpRoot>/.clearinghouse/wt-*` directories; remove any
+ * whose submission-id prefix doesn't match an active clearance-
+ * submission chit. Used at daemon boot to clean up after a prior
+ * session that died mid-walk without finalizing.
+ *
+ * "Active" here means status='active' chit-lifecycle wise — completed
+ * and failed submissions have moved off active, so their worktrees
+ * are fair game. A queued/processing submission's worktree is
+ * preserved (it's mid-flight).
+ *
+ * Best-effort per dir: a single failure doesn't poison the rest.
+ * Returns counts so the caller can log a summary.
+ */
+export async function cleanupOrphanWorktrees(
+  opts: CleanupOrphanWorktreesOpts,
+): Promise<Result<CleanupOrphanWorktreesResult>> {
+  const gitOps = opts.gitOps ?? realGitOps;
+  const parent = join(opts.corpRoot, WORKTREE_PARENT_DIR);
+  if (!existsSync(parent)) return ok({ removed: 0, failed: 0 });
+
+  // Collect prefixes of submissions that should keep their worktrees.
+  const livePrefixes = new Set<string>();
+  try {
+    const subs = (await import('@claudecorp/shared')).queryChits<'clearance-submission'>(opts.corpRoot, {
+      types: ['clearance-submission'],
+      scopes: ['corp'],
+      statuses: ['active'],
+    });
+    for (const c of subs.chits) {
+      const id = c.chit.id;
+      const prefix = id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, WORKTREE_PREFIX_LEN);
+      livePrefixes.add(prefix);
+    }
+  } catch {
+    // Chit query failure: be conservative and don't remove anything.
+    // The next sweep / acquire path force-removes individually.
+    return ok({ removed: 0, failed: 0 });
+  }
+
+  let entries: string[];
+  try {
+    const fs = await import('node:fs');
+    entries = fs.readdirSync(parent);
+  } catch (cause) {
+    return err(failure(
+      'unknown',
+      `cleanupOrphanWorktrees: cannot read ${parent}`,
+      cause instanceof Error ? cause.message : String(cause),
+    ));
+  }
+
+  let removed = 0;
+  let failed = 0;
+  for (const name of entries) {
+    const match = name.match(/^wt-([a-zA-Z0-9_-]+)$/);
+    if (!match) continue;
+    const prefix = match[1]!;
+    if (livePrefixes.has(prefix)) continue;
+    const path = join(parent, name);
+    const result = await gitOps.worktreeRemove(path, { force: true, cwd: opts.corpRoot });
+    if (result.ok) removed++;
+    else failed++;
+  }
+  return ok({ removed, failed });
+}
+
 // ─── releaseAll ──────────────────────────────────────────────────────
 
 export interface ReleaseAllOpts {
