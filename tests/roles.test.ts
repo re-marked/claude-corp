@@ -60,11 +60,17 @@ describe('role registry', () => {
     }
   });
 
-  it('contains all the corp-sacred Partners by decree (CEO, Herald, HR, Adviser, Janitor, Sexton)', () => {
+  it('contains the corp-sacred Partners by decree (CEO, Herald, HR, Adviser, Sexton)', () => {
+    // Project 1.12: Janitor retired; Pressman + Editor took over the
+    // merge-lane work as worker-tier Employees. Decree count went
+    // from 6 to 5.
     const decrees = ROLES.filter((r) => r.tier === 'decree').map((r) => r.id);
-    for (const required of ['ceo', 'herald', 'hr', 'adviser', 'janitor', 'sexton']) {
+    for (const required of ['ceo', 'herald', 'hr', 'adviser', 'sexton']) {
       expect(decrees).toContain(required);
     }
+    // Affirmatively check janitor is gone — guards against
+    // accidental resurrection in the registry.
+    expect(decrees).not.toContain('janitor');
   });
 });
 

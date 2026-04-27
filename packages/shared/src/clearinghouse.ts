@@ -247,8 +247,19 @@ export interface ClaimLockOpts {
  */
 export function claimClearinghouseLock(opts: ClaimLockOpts): boolean {
   const current = readClearinghouseLock(opts.corpRoot);
+  // Held by another slug — refuse outright.
   if (current.heldBy && current.heldBy !== opts.slug) return false;
+  // Already held by us for the same submission — idempotent success.
   if (current.heldBy === opts.slug && current.submissionId === opts.submissionId) return true;
+  // Held by us for a DIFFERENT submission — refuse. If a Pressman
+  // re-enters claim while still holding the prior submission's lock,
+  // overwriting would strand the prior submission in
+  // submissionStatus='processing' with a live processingBy slug —
+  // findOrphanedProcessingSubmissions only catches dead-holder
+  // orphans, so the stranded chit would never be re-queued. Caller
+  // must release the prior claim first. (Codex catch on PR #191.)
+  if (current.heldBy === opts.slug && current.submissionId !== opts.submissionId) return false;
+  // Lock is free — claim it.
   writeLockState(opts.corpRoot, {
     heldBy: opts.slug,
     claimedAt: new Date().toISOString(),
@@ -328,7 +339,12 @@ export function markSubmissionMerged(opts: MarkSubmissionMergedOpts): void {
   const subFields = subChit.fields['clearance-submission'];
   const mergedAt = new Date().toISOString();
 
-  // 1. Update the submission chit.
+  // 1. Update the submission chit. Preserve any previously-stored
+  // mergeCommitSha when the retry caller doesn't supply one — the
+  // function's idempotency contract means a partial-cascade retry
+  // shouldn't erase the audit link to the landed commit. (Codex
+  // catch on PR #191.)
+  const preservedSha = opts.mergeCommitSha ?? subFields.mergeCommitSha ?? null;
   updateChit<'clearance-submission'>(opts.corpRoot, 'corp', 'clearance-submission', subChit.id, {
     status: 'completed',
     updatedBy: opts.updatedBy,
@@ -336,8 +352,8 @@ export function markSubmissionMerged(opts: MarkSubmissionMergedOpts): void {
       'clearance-submission': {
         ...subFields,
         submissionStatus: 'merged',
-        mergedAt,
-        mergeCommitSha: opts.mergeCommitSha ?? null,
+        mergedAt: subFields.mergedAt ?? mergedAt, // also preserve mergedAt across retries
+        mergeCommitSha: preservedSha,
         processingBy: null,
       },
     },

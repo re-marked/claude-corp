@@ -195,6 +195,24 @@ describe('clearinghouse substrate', () => {
       expect(readClearinghouseLock(corpRoot).heldBy).toBeNull();
     });
 
+    // Codex P1 regression (PR #191): re-claim by same slug for a
+    // DIFFERENT submission would silently overwrite the prior claim,
+    // stranding the prior submission in submissionStatus='processing'
+    // with a live processingBy. Caller must release first.
+    it('rejects same-slug re-claim for a different submission', () => {
+      claimClearinghouseLock({ corpRoot, slug: 'pressman-aa', submissionId: 'chit-cs-first' });
+      const ok = claimClearinghouseLock({
+        corpRoot,
+        slug: 'pressman-aa',
+        submissionId: 'chit-cs-second',
+      });
+      expect(ok).toBe(false);
+      // Lock state unchanged — still pointing at the original submission.
+      const lock = readClearinghouseLock(corpRoot);
+      expect(lock.heldBy).toBe('pressman-aa');
+      expect(lock.submissionId).toBe('chit-cs-first');
+    });
+
     it('readClearinghouseLock returns free state on corrupted JSON', () => {
       const path = join(corpRoot, CLEARINGHOUSE_LOCK_JSON);
       writeFileSync(path, '{ this is { not json }', 'utf-8');
@@ -347,6 +365,38 @@ const subAfter = findChitById(corpRoot, submissionId);
 const contractAfter = findChitById(corpRoot, contractId);
       // Contract stays at draft (its initial state) — sibling unfinished.
       expect(contractAfter.chit.status).toBe('draft');
+    });
+
+    // Codex P2 regression (PR #191): markSubmissionMerged would
+    // overwrite mergeCommitSha with null whenever a retry call
+    // omitted opts.mergeCommitSha — losing the audit link to the
+    // actual merged commit. Now preserves the existing stored value.
+    it('markSubmissionMerged preserves mergeCommitSha across retry without sha arg', () => {
+      const taskId = makeTask();
+      const contractId = makeContract([taskId]);
+      const submissionId = makeSubmission(taskId, contractId);
+
+      // First call with sha — records it.
+      markSubmissionMerged({
+        corpRoot,
+        submissionId,
+        mergeCommitSha: 'abc123def456',
+        updatedBy: 'pressman-aa',
+      });
+
+      const after1 = findChitById(corpRoot, submissionId);
+      expect(after1!.chit.fields['clearance-submission'].mergeCommitSha).toBe('abc123def456');
+
+      // Retry without sha (e.g. partial-cascade re-attempt). Must
+      // preserve the recorded sha, not null it out.
+      markSubmissionMerged({
+        corpRoot,
+        submissionId,
+        updatedBy: 'pressman-aa',
+      });
+
+      const after2 = findChitById(corpRoot, submissionId);
+      expect(after2!.chit.fields['clearance-submission'].mergeCommitSha).toBe('abc123def456');
     });
 
     it('markSubmissionFailed cascades task to failed but never the contract', () => {
