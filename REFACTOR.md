@@ -1838,55 +1838,118 @@ Codex round expected. Pattern same as PRs #182-186.
 **Depends on:** 1.1 (Employee kind for role scoping), 1.9 (silentexit sweeper as the detector source), 1.10 (bacteria slug-avoidance integration).
 **PRs:** 1 (single beefy PR matching 1.10's shape).
 
-### 1.12 — Clearinghouse: the merge lane + clearinghouse Employees **[pending]**
+### 1.12 — Clearinghouse: pre-push review + merge lane **[pending]**
 
-> **Naming locked (2026-04-26):** Mark renamed the primitive from the placeholder "Shipping" to **Clearinghouse** — the place, the phase, AND the team name. The status field that contracts/tasks/sandboxes carry while inside the clearinghouse phase is **`clearance`**. Secondary names (CLI verb, chit type id, role id, lock chit name, daemon module path) below are this doc's best guesses pending Mark's confirmation before code lands; revisit them at the start of implementation. (Memory: `project_clearinghouse_naming.md`.)
+> **Naming locked (2026-04-26):** Mark renamed the primitive from the placeholder "Shipping" to **Clearinghouse** — the place, the phase, AND the team name. The status field that contracts/tasks/sandboxes carry while inside the clearinghouse phase is **`clearance`**. Two Employee roles staff the phase: **Editor** (pre-push code review) and **Pressman** (post-push git mechanics + merge). Secondary names (CLI verb, chit type id, lock chit name, daemon module paths) below are best-guess; confirm with Mark at implementation start. (Memory: `project_clearinghouse_naming.md`.)
 
-**Problem.** Agents write to git freely today. At 3 agents, this is fine. At 20+ it's chaos — concurrent PRs collide on rebase, step on each other's changes, leave main in a broken state. The "walk away overnight" dream breaks when agents fight over main. Moved up from Project 3.2 (was "Refinery") because it's prerequisite for parallel work — without serialized merges, multi-Employee Contracts can't actually land.
+**Problem.** Two related failures break "walk away overnight":
+1. Agents push to main freely. At 20+ agents, concurrent PRs collide on rebase, step on each other's changes, leave main broken.
+2. No internal review. Bugs that an internal Codex-equivalent would catch reach external review (or worse, main) — wasting external-reviewer attention and growing main's debt.
 
-**The architecture:** a merge-lane system called **Clearinghouse**, staffed by a pool of **clearinghouse Employees** (bacteria-scaled). No Partner-by-decree needed — clearing worktrees (rebase, test, merge or conflict-route) is mechanical, no identity, no relationship. The existing Janitor Partner gets removed from the role registry; the new role is an Employee (`defaultKind: employee`, `tier: worker`). Best-guess role id: `clearinghouse` (single-word, matching `sexton`/`herald`/`hr`); confirm with Mark.
+The Clearinghouse phase fixes both. Internal review (Editor) catches issues *before* the branch is pushed; merge automation (Pressman) serializes the actual landing on main.
 
-**The `clearance` workflow status.** New value in the task and contract state machines:
+**The two-role architecture.** Both are Employee roles — bacteria-scaled, real sessions, real judgment. Code provides primitives; agents orchestrate. The split between them is independent-gate: an Editor that also did the merging would collapse two cognitive modes into one and lose what made the split useful.
 
-- `TaskWorkflowStatus`: `under_review → clearance → completed | rejected | failed | cancelled`. A task that passed audit but hasn't landed on main yet is in `clearance` — its clearance submission is queued or processing.
-- `ContractStatus`: `review → clearance → completed | rejected | failed | closed`. Contract enters `clearance` when its last task does; transitions to `completed` when all clearance submissions for its tasks merge.
-- Sandbox: open question. Sandboxes are filesystem dirs today with no state field; introducing one is non-trivial. Likely a no-op for v1 — sandbox just exists or doesn't, and the work it represents has its own clearance state via the task chit. Confirm with Mark.
+- **Editor** (role id `editor`, worker tier, defaultKind: employee). Pre-push code review. Reads the local diff before the branch ever leaves the author's sandbox. Writes pedagogical Codex-style comments — *issue + why + suggested patch* — so any role-substitute can act on them cold. Never fixes themselves; comments route back to the author's role via 1.4.1. Iterates with the author up to a configurable cap.
+- **Pressman** (role id `pressman`, worker tier, defaultKind: employee). Post-push git mechanics. Holds the clearinghouse-lock, claims the top submission, rebases against main, runs tests, merges cleanly or files a conflict-blocker. Real judgment moments — "is this test failure flaky or real?", "is this conflict trivial enough to resolve here or do I punt to the author?" — so not a sweeper, not a cron job; an Employee with a session and a CLAUDE.md. "Going to press" metaphor: they're the last hands on the work before main.
 
-**Mechanism:**
-- Agents open PRs via their normal git push; then run `cc-cli clear --branch <name> --contract <chit-id>` (best-guess verb, was `cc-cli ship`), which creates a `clearance-submission` chit (best-guess type id, was `merge-submission`) — non-ephemeral, audit trail. Task moves to `clearance` workflow status at the same time.
-- clearance-submission frontmatter: `branch`, `contract` reference, `submitter`, `priority`, `retryCount`, `status: queued | processing | merged | conflict | rejected | failed`.
-- Priority scoring (Gas Town's formula, adapted): `1000 + queue_age×10/hr + (4-priority)×100 - min(retries×50, 300) + pr_age×1/hr`. Anti-thrashing via the retry-penalty cap.
-- Clearinghouse lock: a corp-scope `clearinghouse-lock` chit with `held_by: <worker-slug> | null`. Only the lock-holder processes the queue at any moment. Release happens on merge complete or on worker session exit.
-- Clearinghouse workers pull from the lane (pull-based, unlike Hand's push): each worker's Casket is the clearinghouse-lock. When they have the lock, they take the highest-scored queued submission, rebase, run tests, merge or conflict-route, close the submission, release the lock, next worker picks up.
-- Real conflict → worker files a blocker chit via 1.4.1 scoped to the PR author's ROLE (e.g. `backend-engineer`), not the specific slot. Role-resolver picks an active Employee via normal precedence (idle-first, least-priority otherwise): if the original author is still alive and idle, they're first-pick; if they've decommissioned, another Employee of the role handles it; if the role is empty, `no-candidates` triggers bacteria to spawn one (1.10). No PR can become permanently stranded by its author's death. Submission goes to `conflict` state; worker releases lock + takes next. The blocker chit carries `originatingAuthor: <slug>` so the assignee sees "this was Toast's PR" as context even when Toast is gone.
-- Clean merge → submission `merged`, the referenced task and contract advance from `clearance → completed`.
+The existing Janitor Partner gets removed from the role registry; both Pressman and Editor land as Employee roles.
 
-**Bacteria scaling (from 1.10):** when `clearance-submission` queue depth exceeds 1 and only 1 idle clearinghouse worker exists, bacteria spawns another. Collapses to 1 idle when queue drains.
+**The `clearance` workflow status.** New value in the task and contract state machines, slotting between review and completion:
+
+- `TaskWorkflowStatus`: `under_review → clearance → completed | rejected | failed | cancelled`. A task that passed audit AND passed Editor review (or hit the review-round cap) but hasn't landed on main yet is in `clearance` — its clearance-submission is queued or processing in Pressman's lane.
+- `ContractStatus`: `review → clearance → completed | rejected | failed | closed`. Contract enters `clearance` when its last task does; transitions to `completed` when all clearance-submissions for its tasks merge.
+- Sandbox: open question, likely no-op for v1. Sandboxes are filesystem dirs without a state field today; introducing one is non-trivial and the task chit's clearance status carries the same information.
+
+#### Phase 1 — Editor: pre-push internal review
+
+Triggered by the author at task-completion time (after `cc-cli done` audit passes), before any `git push`. Best-guess CLI: author runs `cc-cli review-request --task <chit-id>` from inside their sandbox; system dispatches an Editor agent against the local diff.
+
+**What the Editor reads:**
+- The diff (staged commits in the author's sandbox).
+- The task chit's `acceptanceCriteria` (does the diff satisfy them?).
+- The contract chit (does the diff fit the contract's stated goal?).
+- `CLAUDE.md` and any visible feedback memories — until `CULTURE.md` exists (Project 5.2), this is the corp-conventions surface.
+
+**What the Editor judges (v1 scope):**
+- Contract-goal mismatch — diff doesn't actually do what was contracted.
+- Missing tests for new code paths.
+- Banned patterns — security holes, secrets in diffs, raw shell, etc.
+- Test regressions — the diff breaks something already-tested.
+- File scope explosion — PR claims to fix X, also rewrites unrelated Y.
+- Acceptance-criteria gaps — task said "must do A, B, C" and the diff only does A.
+
+Style nits explicitly out of scope at v1 (too noisy). When `CULTURE.md` lands later, the Editor reads from it.
+
+**Comment shape (Codex-style, pedagogical).** Every review-comment chit carries: file path + line range + issue summary + *why this matters* + *suggested patch or approach*. Pedagogical because the author who fixes the issue may not be the one who wrote the code (substitute via role-resolver). Bonus: pedagogical comments are the substrate that compounds into `CULTURE.md` later.
+
+**The review loop:**
+1. Editor reads diff + context, writes review-comment chits attached to the in-flight clearance-submission (or its predecessor — see "submission lifecycle" below).
+2. If no issues: Editor approves, submission proceeds to Phase 2.
+3. If issues: comments route via 1.4.1 to the author's role (e.g. `backend-engineer`). Role-resolver picks original-author-if-alive, else any Employee of the role, else bacteria spawns one. The substitute reads the comments cold and patches the code in the same sandbox (or a fresh one — TBD whether sandbox stays put or transfers).
+4. Author re-requests review. `reviewRound` counter on the submission increments.
+5. Loop until approval OR cap.
+
+**`reviewRound` cap (failsafe, not gate).** Default 3 rounds. Configurable per-role via `RoleEntry.editorReviewRoundCap?: number` — a security-sensitive role might cap at 1, a docs-heavy role at 5. *Most PRs pass round 1*; the cap is not a forced floor. When the cap is hit, the system *skips review and proceeds to Phase 2 directly*. This is deliberately not an escalation: blocking a merge forever because reviewer + author can't converge is worse than letting it through with the corp's existing ambient audit-tier-3 surface catching anything genuinely alarming.
+
+**`reviewBypassed` flag.** If a submission reaches Phase 2 via cap-hit rather than approval, the submission carries `reviewBypassed: true` (and `reviewRound === cap`). This is for retrospective audit and CULTURE.md compounding — "we keep capping out review on backend-engineer work" is a pattern worth investigating, even if no individual PR was blocked.
+
+#### Phase 2 — Pressman: post-push merge mechanics
+
+Triggered after Editor approves (or cap hits). The author runs `cc-cli clear --branch <name> --contract <chit-id>` (best-guess CLI verb), which: pushes the branch to GitHub, creates a `clearance-submission` chit, advances the task workflow to `clearance`. From the outside world, the public PR that appears on GitHub has *already* been internally reviewed.
+
+**clearance-submission frontmatter:** `branch`, `contract` reference, `submitter`, `priority`, `retryCount`, `reviewRound`, `reviewBypassed`, `status: queued | processing | merged | conflict | rejected | failed`.
+
+**Priority scoring** (Gas Town's formula, adapted): `1000 + queue_age×10/hr + (4-priority)×100 - min(retries×50, 300) + pr_age×1/hr`. Anti-thrashing via the retry-penalty cap. Note: `retryCount` is for *Phase-2 mechanical failures* (failed merges, flaky tests requiring a retry), not for `reviewRound`. Review iterations are a success path; mechanical retries are a failure path. Different counters, different penalty treatments.
+
+**Clearinghouse lock.** A corp-scope `clearinghouse-lock` chit with `held_by: <pressman-slug> | null`. Only the lock-holder processes the queue at any moment. Release happens on merge complete, conflict-routing, or pressman session exit. Each Pressman's Casket points at the lock when held.
+
+**The Pressman flow** (pull-based, unlike Hand's push):
+1. Idle Pressman with no Casket polls the queue. If non-empty AND lock is null, claim the lock (atomic chit update with `held_by` set) and take the top-priority submission.
+2. Rebase the branch against main. If rebase produces nonsense (200 files touched on a 2-line PR), re-pull main, retry once, then if still nonsense file a conflict-blocker — the rebase looks broken and a human-context judgment is needed.
+3. Run tests. If tests fail: re-run once to rule out flakiness (judgment call: did the same test fail in the same way? Then it's real). On real failure → file a blocker via 1.4.1 to the author's role.
+4. Attempt merge. Trivial conflicts (whitespace, comment-only) — Pressman attempts to resolve in-place. Substantive conflicts (semantic, function-body) — file a blocker via 1.4.1 to the author's role; submission flips to `conflict` state.
+5. On clean merge: submission → `merged`; task and contract advance from `clearance → completed`; release lock.
+6. Next Pressman picks up.
+
+**Conflict routing.** When Pressman files a blocker, it's role-scoped (e.g. `backend-engineer`), not slot-scoped. Role-resolver finds an active Employee via normal precedence (idle-first, else any Employee of the role, else `no-candidates` triggers bacteria via 1.10). The blocker chit carries `originatingAuthor: <slug>` so the assignee sees "this was Toast's PR" as context even when Toast is gone. After resolution, the author re-submits via `cc-cli clear` (back through Phase 1 if the fix was non-trivial — Editor decides; trivial conflict-fix may skip).
+
+**Bacteria scaling (from 1.10).** Both pools scale independently:
+- Editor pool: when in-flight review tasks exceed Editor capacity, bacteria spawns another. Editor work is bursty (a contract's worth of PRs all hit review around the same time), so the pool needs to grow fast and shrink slow.
+- Pressman pool: when `clearance-submission` queue depth exceeds 1 and only 1 idle Pressman exists, bacteria spawns another. Pressman work is steadier; pool typically holds at 1-2.
 
 **Role registry changes:**
 - Remove `janitor` Partner-by-decree entry.
-- Add `clearinghouse` Employee role (worker tier, defaultKind: employee). Purpose: "Process the Clearinghouse queue — rebase, test, merge or conflict-route."
+- Add `editor` Employee role (worker tier, defaultKind: employee). Purpose: *"Pre-push code review. Reads diffs, writes pedagogical comments, never fixes."*
+- Add `pressman` Employee role (worker tier, defaultKind: employee). Purpose: *"Post-push git mechanics. Rebase, test, merge or conflict-route."*
 - Corp-sacred Partners drop from 6 to 5 (CEO, Herald, HR, Adviser, Sexton). (The prior `failsafe` slot is renamed to `sexton` in 1.9; this bullet reflects the post-1.9 registry.)
 
 **File paths (best-guess):**
-- `packages/shared/src/chit-types.ts` (register `clearance-submission` type with validator)
-- `packages/shared/src/types/chit.ts` (`ClearanceSubmissionFields` shape; extend `TaskWorkflowStatus` + `ContractStatus` with `clearance`)
-- `packages/shared/src/roles.ts` (remove janitor Partner, add clearinghouse Employee)
-- `packages/daemon/src/clearinghouse.ts` (new — queue processor, lock management, bacteria trigger)
-- `packages/cli/src/commands/clear.ts` (new — `cc-cli clear --branch <name> --contract <chit-id>`)
+- `packages/shared/src/chit-types.ts` — register `clearance-submission` and `review-comment` types with validators.
+- `packages/shared/src/types/chit.ts` — `ClearanceSubmissionFields` and `ReviewCommentFields` shapes; extend `TaskWorkflowStatus` + `ContractStatus` with `clearance`.
+- `packages/shared/src/roles.ts` — remove janitor Partner; add `editor` and `pressman` Employee roles. Add `RoleEntry.editorReviewRoundCap?: number` for per-role override; constant `EDITOR_REVIEW_ROUND_CAP_DEFAULT = 3` in shared.
+- `packages/daemon/src/clearinghouse.ts` — Pressman primitives (lock management, queue ordering, rebase/test/merge helpers exposed to the Pressman session). Pattern same as `sexton-runtime.ts`: infrastructure, not the active loop.
+- `packages/daemon/src/editor.ts` — Editor primitives (diff readers, comment-chit writers, review-round counter management).
+- `packages/cli/src/commands/clear.ts` — `cc-cli clear --branch <name> --contract <chit-id>` (push + create submission).
+- `packages/cli/src/commands/review-request.ts` — `cc-cli review-request --task <chit-id>` (dispatch Editor against local diff).
 
 **Test strategy:**
 - Unit: priority scoring formula produces expected orderings.
 - Unit: workflow-status transitions accept `clearance` only from `under_review` (task) / `review` (contract); reject illegal entries.
-- Integration: two concurrent submissions with different files → both merge serially, main is clean.
-- Integration: two submissions with real conflict → first merges, second flips to `conflict`, blocker chit filed at second's submitter's role, retry-on-submitter-fix flow works.
-- Integration: queue depth > idle-worker count → bacteria spawns a second clearinghouse worker.
-- Regression: solo-corp (one worker) processes submissions serially without deadlock.
+- Unit: `reviewRound` cap defaults to 3; per-role override honored; cap-hit flips `reviewBypassed: true` and proceeds to Phase 2.
+- Integration: Editor approves → submission proceeds; Editor rejects → comments route to author's role via 1.4.1; loop until approval.
+- Integration: two concurrent Pressman submissions with different files → both merge serially, main is clean.
+- Integration: two Pressman submissions with real conflict → first merges, second flips to `conflict`, blocker filed at second's submitter's role, retry-on-fix flow works.
+- Integration: Pressman test re-run distinguishes flake from real failure (mock test that fails once then passes).
+- Integration: Pressman trivial-conflict resolution (whitespace-only conflict → resolved in-place; semantic conflict → routed).
+- Integration: Editor pool depth grows on bursty review load; Pressman pool grows on queue depth.
+- Regression: solo-corp (one Editor, one Pressman) processes a contract end-to-end without deadlock.
+- Regression: original-author-decommissioned mid-review → substitute Employee picks up review comments cold and patches.
 
-**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing conflicts), 1.4.1 (blocker injection), 1.10 (bacteria for pool scaling)
-**PRs:** 3-4
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing), 1.4.1 (blocker injection), 1.10 (bacteria for pool scaling).
+**PRs:** 4-5 (substrate + Pressman + Editor + integration + tests).
 
-**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; another Employee picks up the blocker; original Employee resumes on blocker-close. When any Employee silent-exits or stalls, Sexton's patrol (1.9) detects + respawns via process-manager — and if the daemon itself dies, the OS supervisor restarts it, Pulse ticks, Alarum spawns, Sexton resumes from her handoff chit, and the corp keeps going. When any agent finishes a Task, they route through `cc-cli clear` → Clearinghouse queue (1.12) → clearinghouse worker merges. Mark walks away; when he comes back, 4 out of 5 Tasks have landed on main via serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop needed between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path. Corp is unkillable short of token exhaustion or OS process-kill without a supervisor.
+**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; another Employee picks up the blocker; original resumes on close. When any Employee silent-exits, Sexton's patrol (1.9) respawns them; daemon dies → OS supervisor restarts; corp keeps going. When an Employee finishes a Task, an Editor reads the local diff and either approves or sends pedagogical comments back via 1.4.1; once approved (or cap-bypassed), `cc-cli clear` pushes + queues the submission; a Pressman picks it up, rebases, tests, merges. Mark walks away; when he comes back, 4 of 5 Tasks have landed on main via internally-reviewed serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path. Corp is unkillable short of token exhaustion or OS process-kill without a supervisor.
 
 ---
 
