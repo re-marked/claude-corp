@@ -1953,6 +1953,211 @@ Triggered after Editor approves (or cap hits). The author runs `cc-cli clear --b
 
 ---
 
+### 1.12.1 — Pressman session rebuild **[NEXT — start here on resume]**
+
+> **Compaction handoff (2026-04-26):** Previous Claude shipped PR 3 of 1.12 (#193) with a daemon-`setInterval` Pressman scheduler instead of a real Employee session. The spec (above, line 1854) says *"not a sweeper, not a cron job; an Employee with a session and a CLAUDE.md."* Mark caught the deviation; this section is the rebuild plan. Memory `feedback_no_v1_v2_postponing.md` captures the underlying failure mode (rationalizing scope reduction as "v1 ships X, v2 evolves to Y") so the next Claude doesn't recreate it. Read that memory + this section before touching any code.
+
+#### Why this exists as a separate sub-project
+
+PR 3 (#193) is mostly correct — `enterClearance`, the audit hook, `deferTaskClose`, the patrol blueprints, and all PR 1+2 substrate are right. The single load-bearing wrong piece is `pressman-runtime.ts`'s `PressmanScheduler` class — a `setInterval`-driven daemon loop that calls primitives directly. The spec's mental model is the inverse: agent-orchestrated, code-as-tools, judgment moments live in the agent. 1.12.1 is the surgery.
+
+#### What stays from PR #193 (DO NOT TOUCH)
+
+- `packages/daemon/src/clearinghouse/enter-clearance.ts` — bridge from audit-approve to lane.
+- `packages/cli/src/commands/audit.ts` — `fireEnterClearance` + `deferTaskClose` flow.
+- `packages/shared/src/audit/handoff-promotion.ts` — `deferTaskClose` option.
+- All PR 2 primitives (git-ops, rebase-flow, merge-flow, test-attribution, conflict-classifier, editor-diff, worktree-pool, failure-taxonomy, tests-runner).
+- `packages/shared/blueprints/patrol/clearing.md` — becomes the *actually walked* blueprint.
+- `packages/shared/blueprints/patrol/conflict-resolution.md` — substitute-author flow.
+- `tests/clearinghouse-primitives.test.ts` (PR 2 tests).
+- `tests/clearinghouse-substrate.test.ts` (PR 1 tests).
+- enterClearance + handoff-promotion + isClearinghouseAwareCorp tests in `tests/pressman-runtime.test.ts` — extract to `tests/enter-clearance.test.ts` so the file name matches what's tested.
+- The escalation-chit blocker shape, lock cascade semantics, role registry entries.
+
+#### What gets surgically removed
+
+- `packages/daemon/src/clearinghouse/pressman-runtime.ts` — the entire `PressmanScheduler` class, its `setInterval`, the in-flight guard, the start/stop/tick methods.
+- `daemon.ts` wiring — import, `pressman` field, instantiation, `start()`, `stop()`.
+- `clearinghouse/index.ts` — `PressmanScheduler` export and its types.
+- The PressmanScheduler-specific tests in `tests/pressman-runtime.test.ts` (drop the "happy path" + "needs-author" + "no-op" tick tests; the workflow logic they exercise lives in step-level tests in 1.12.1).
+
+#### What gets added (the rebuild)
+
+##### A. Workflow primitives module
+
+**File:** `packages/daemon/src/clearinghouse/workflow.ts` (NEW)
+
+Stateless functions extracted from the old `processSubmission` body. Each returns a `Result<T>` discriminated union. No class, no interval, no daemon state. Each function is a single coherent step the agent invokes via a CLI subcommand.
+
+```ts
+// Find queued submission + claim lock for the named pressman.
+// Returns null inside Result.value when queue empty (success-noop case).
+export function pickNext(opts: { corpRoot, pressmanSlug }): Result<PickedSubmission | null>;
+
+// Acquire isolated worktree for the branch.
+export async function acquireWorktree(opts: { corpRoot, branch, slug, gitOps? }): Result<{ path }>;
+
+// Fetch + rebase. Wraps attemptRebase + classifies outcome.
+export async function rebaseStep(opts: { corpRoot, submissionId, worktreePath, gitOps? }): Result<RebaseAttemptResult>;
+
+// runWithFlakeRetry against the worktree.
+export async function testStep(opts: { corpRoot, submissionId, worktreePath, testCommand?, testProgram?, testArgs? }): Result<RunWithFlakeRetryResult>;
+
+// attemptMerge.
+export async function mergeStep(opts: { corpRoot, submissionId, worktreePath, gitOps? }): Result<MergeAttemptResult>;
+
+// Cascade success: markSubmissionMerged + release lock + release worktree.
+export async function finalizeMerged(opts: { corpRoot, submissionId, mergeCommitSha?, slug, worktreePath?, gitOps? }): Result<void>;
+
+// File escalation chit (severity=blocker, scoped to author's role) +
+// markSubmissionFailed + release lock + release worktree.
+export async function fileBlocker(opts: { corpRoot, submissionId, kind: 'rebase-conflict' | 'test-fail' | 'hook-reject', summary, detail, slug, worktreePath?, gitOps? }): Result<{ escalationId }>;
+
+// Mark failed without filing a blocker (e.g., race retry, sanity-failed).
+// Caller decides whether to re-queue or terminal-fail via opts.
+export async function markFailedAndRelease(opts: { corpRoot, submissionId, reason, slug, requeue?: boolean, worktreePath?, gitOps? }): Result<void>;
+
+// Standalone release for cleanup paths.
+export async function releaseAll(opts: { corpRoot, slug, worktreePath?, gitOps? }): Result<void>;
+```
+
+Reuses (do not reimplement) PR 1 + PR 2 primitives: `claimClearinghouseLock`, `releaseClearinghouseLock`, `rankQueue`, `attemptRebase`, `attemptMerge`, `runWithFlakeRetry`, `markSubmissionMerged`, `markSubmissionFailed`, `WorktreePool`, the conflict classifier, etc.
+
+##### B. CLI subcommand surface
+
+**File:** `packages/cli/src/commands/clearinghouse.ts` (extend existing admin-fallback file)
+
+Each subcommand parses args, calls the matching workflow function, prints structured JSON the agent reads. Identity-checked via `--from <slug>` (matches existing CLI convention; lock claim verifies).
+
+```
+cc-cli clearinghouse pick --from <pressman-slug> [--json]
+  → pickNext. Output: { ok, submissionId, branch, taskId, contractId, submitter, priority, score } or { ok, empty: true }
+
+cc-cli clearinghouse acquire-worktree --from <slug> --branch <name> [--json]
+  → acquireWorktree. Output: { ok, path }
+
+cc-cli clearinghouse rebase --from <slug> --submission <id> --worktree <path> [--json]
+  → rebaseStep. Output: { ok, outcome, conflictedFiles?, conflictSummaries?, autoResolvedFiles?, preStats?, postStats?, failureRecord? }
+
+cc-cli clearinghouse test --from <slug> --submission <id> --worktree <path> [--command <str>] [--json]
+  → testStep. Output: { ok, classifiedAs, finalRun: { outcome, durationMs, failures }, allRunsCount }
+
+cc-cli clearinghouse merge --from <slug> --submission <id> --worktree <path> [--json]
+  → mergeStep. Output: { ok, outcome, mergeCommitSha?, hookOutput? }
+
+cc-cli clearinghouse finalize --from <slug> --submission <id> [--merge-sha <sha>] [--worktree <path>] [--json]
+  → finalizeMerged. Output: { ok }
+
+cc-cli clearinghouse file-blocker --from <slug> --submission <id> --kind <rebase-conflict|test-fail|hook-reject> --summary "..." --detail "..." [--worktree <path>] [--json]
+  → fileBlocker. Output: { ok, escalationId }
+
+cc-cli clearinghouse mark-failed --from <slug> --submission <id> --reason "..." [--requeue] [--worktree <path>] [--json]
+  → markFailedAndRelease. Output: { ok, requeued? }
+
+cc-cli clearinghouse release --from <slug> [--worktree <path>] [--json]
+  → releaseAll. Output: { ok }
+
+cc-cli clearinghouse status [--json]
+  → Admin/debug. Lock holder + queue depth + recent submissions.
+```
+
+The existing admin fallback `cc-cli clearinghouse submit --task <id>` stays as-is for the rare manual-dispatch case.
+
+##### C. Pressman role prompt + bootstrap
+
+**Files:**
+- `packages/shared/src/templates/pressman-bootstrap.ts` (NEW) — CLAUDE.md template, AGENTS.md template, role-specific instructions.
+- `packages/daemon/src/clearinghouse/pressman.ts` (NEW) — `hirePressman(daemon)` + `buildPressmanRules(harness)`. Mirrors `packages/daemon/src/continuity/sexton.ts` exactly.
+
+The CLAUDE.md tells Pressman:
+- Their job is git mechanics on already-Editor-approved code (until PR 4 lands Editor, every submission has `reviewBypassed: true`).
+- On wake: read `cc-cli blueprint show patrol/clearing`, walk the steps, call subcommands in order.
+- Branch points where judgment matters: substantive conflict (file blocker vs attempt small fix), test consistent-fail (file blocker vs check if it's a one-line snapshot fix), hook rejection (route to author vs address inline).
+- DM founder when judgment runs out — their session response auto-posts to founder DM (existing pattern).
+- Exit cleanly when: queue drained, OR one submission processed and the lane should round-robin to next Pressman, OR a blocker filed (the work belongs to the author's role now).
+
+NOT auto-hired on daemon boot. Founder runs `cc-cli hire --role pressman` once. PR 5 adds bacteria-spawn-on-queue-depth.
+
+##### D. Wake mechanism (reactive + Pulse fallback)
+
+**Files:** modify `packages/daemon/src/contract-watcher.ts` pattern OR add new `clearinghouse-watcher.ts`.
+
+Two complementary triggers:
+
+1. **Reactive watcher** — `ClearanceSubmissionWatcher` watches `<corpRoot>/chits/clearance-submission/` for new files. On new submission with `submissionStatus: 'queued'`, dispatches a Pressman wake. Mirrors `task-watcher.ts` shape.
+
+2. **Pulse fallback** — every Pulse tick (5min default), if there's a hired Pressman + non-empty queue + no agent currently processing, dispatch a wake. Catches stale-queue cases where the watcher missed an event.
+
+Wake dispatches go through `processManager.spawnAgent(pressman.id)` + a wake message via the existing `dispatch.ts` flow. Wake message body: a short prose pointer like *"Queue has work. Walk patrol/clearing. Process one submission then exit."*
+
+The Pressman session walks the blueprint, exits on completion, the next wake (reactive or Pulse) triggers them again for the next submission.
+
+##### E. Per-walk self-heal (replaces per-tick scheduler self-heal)
+
+The old scheduler called `resumeClearinghouse` per tick. In the rebuild, the agent calls `cc-cli clearinghouse pick` first thing — `pickNext` runs `resumeClearinghouse` internally before reading the lock and queue. That moves the self-heal into the workflow primitive, where it belongs (any pick attempt benefits from clean state).
+
+Boot-time `resumeClearinghouse` stays — daemon's startup path calls it once, before the watcher starts dispatching.
+
+#### Implementation strategy: force-push #193
+
+Recommend force-push #193 rather than a fresh branch. Reasoning:
+- 70% of PR 3 is correct (the 4 commits listed under "What stays" above are reviewed and worth keeping).
+- Only `pressman-runtime.ts` + its daemon wiring + its scheduler-specific tests need to go.
+- Force-push on a feature branch (not main) is acceptable per `feedback_no_squash_no_rebase.md` (the rule covers merge methods, not feature-branch force-pushes).
+- Re-reviewing the same enterClearance code in a fresh branch wastes Codex review budget.
+
+If Mark prefers a fresh branch (clean history): cut `feat/1.12.1-pressman-session` off project/1, cherry-pick the 4 keeper commits, build the rebuild on top.
+
+#### Commit plan for the rebuild (~7-8 commits)
+
+After the surgical removal commit, add:
+
+1. `revert+remove(1.12): drop PressmanScheduler class + daemon wiring` — surgical removal. Files: `pressman-runtime.ts` deleted, `daemon.ts` reverted, `clearinghouse/index.ts` exports trimmed, scheduler tests dropped.
+2. `feat(1.12.1): workflow primitives — stateless steps over PR 2` — new `workflow.ts` extracting and reshaping the old `processSubmission` body into typed step functions.
+3. `feat(1.12.1): cc-cli clearinghouse subcommands — pick/rebase/test/merge/finalize/file-blocker/mark-failed/release/status` — CLI handlers wrapping `workflow.ts`.
+4. `feat(1.12.1): Pressman role prompt + hire bootstrap` — `pressman-bootstrap.ts` template + `clearinghouse/pressman.ts` (`hirePressman` + `buildPressmanRules`). Mirrors Sexton.
+5. `feat(1.12.1): clearance-submission watcher + Pulse fallback wake` — reactive + periodic dispatch.
+6. `test(1.12.1): workflow primitives` — each step in isolation with mock GitOps.
+7. `test(1.12.1): cc-cli clearinghouse subcommands` — args parsing + JSON output shape.
+8. `test(1.12.1): Pressman hire + dispatch end-to-end` — fixture corp with hired Pressman + queued submission, dispatch wake, walk blueprint, verify merge cascade.
+
+Plus a Codex review round expected (1.10/1.11/1.12 pattern); regression tests bundled with fixes per established practice.
+
+#### Reading order for next-Claude on resume
+
+Before any code:
+1. `~\.claude\projects\C--Users-psyhik1769-agentcorp\memory\feedback_no_v1_v2_postponing.md` — the rule that was broken.
+2. `~\.claude\projects\C--Users-psyhik1769-agentcorp\memory\feedback_redirects_arent_corrections.md` — tone guidance; don't perform apology theater while rebuilding.
+3. This section (1.12.1).
+4. The 1.12 spec sections above (1.12 main, lines 1854 + 1907-1915 especially).
+5. `packages/daemon/src/continuity/sexton.ts` — the `hirePressman` template comes from this shape.
+6. `packages/daemon/src/continuity/sexton-runtime.ts` — wake dispatch pattern source.
+7. `packages/daemon/src/continuity/sexton-wake-prompts.ts` — prompt template pattern.
+8. `packages/daemon/src/clearinghouse/pressman-runtime.ts` (the wrong-shape file) — to understand which `processSubmission` body fragments map to which workflow step.
+9. `packages/shared/blueprints/patrol/clearing.md` — the blueprint the agent will walk.
+10. `packages/cli/src/commands/clearinghouse.ts` (existing admin file) — extend, don't rewrite.
+
+#### Key principle restated (so next-Claude doesn't drift)
+
+**Agent walks the blueprint, code provides the steps.** The judgment moments the spec named become real because the agent reads each subcommand's structured output and decides what to do next based on the patrol blueprint's instructions. Code's job is to make each step reliable and return structured data; the agent's job is to compose those steps and decide at branches.
+
+Concrete branch points where the agent decides (not the code):
+- After `rebase`: outcome=needs-author. File blocker now? Look at the conflicted files for a one-line fix? DM founder about a structural mess? Patrol gives guidance; agent makes the call.
+- After `test`: classifiedAs=consistent-fail. File blocker (default)? Or recognize a snapshot-update can fix it and do that? Agent's call.
+- After `merge`: outcome=hook-rejected. Read the hook output, decide if you understand it enough to address yourself, otherwise route to author with prose.
+- DM-founder triggers: encoded by the agent's judgment, not by code. Blueprint suggests "DM founder when X looks structurally wrong" — agent sees X, agent posts.
+
+#### Non-goals for 1.12.1 (do NOT expand scope)
+
+- LLM-driven Editor — that's PR 4 (1.12.2 in this doc's flow if Mark wants to rename).
+- Bacteria scaling for Pressman pool — PR 5 (1.12.5 in flow).
+- Contract-aware merge ordering — never specced; do NOT add.
+- Mergify-style speculative parallel batches — research-noted as defer-forever; do NOT add.
+- `runTestsOnRef` impl with `gitOps.checkoutRef` — defer until PR 4's attribution flow needs it.
+- Multi-Pressman concurrent processing — single Pressman is enough for ship criterion; multi is PR 5 territory.
+
+---
+
 ## Project 2: Workflow Substrate
 
 *Chains become real. Work propagates without the founder pushing it. Self-witnessing meta-layer arrives.*
