@@ -314,6 +314,7 @@ export {
   findOrphanedProcessingSubmissions,
   resetOrphanedSubmission,
   resumeClearinghouse,
+  EDITOR_REVIEW_ROUND_CAP_DEFAULT,
 } from './clearinghouse.js';
 export type {
   ScorableSubmission,

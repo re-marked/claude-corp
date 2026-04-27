@@ -36,6 +36,19 @@ import { queryChits, updateChit, findChitById, chitScopeFromPath } from './chits
 import { CLEARINGHOUSE_LOCK_JSON } from './constants.js';
 import type { Chit, TaskWorkflowStatus } from './types/chit.js';
 
+// ─── Defaults ────────────────────────────────────────────────────────
+
+/**
+ * Default Editor review-round cap — N rounds before the system
+ * bypasses review and proceeds to the Pressman lane. Per-role
+ * override via `RoleEntry.editorReviewRoundCap`.
+ *
+ * Three matches typical human PR review cadence (first push + 2 fix
+ * rounds). Cap is a failsafe against author-reviewer deadlock; most
+ * PRs pass round 1 and never approach the cap.
+ */
+export const EDITOR_REVIEW_ROUND_CAP_DEFAULT = 3;
+
 // ─── Priority scoring (pure) ─────────────────────────────────────────
 
 /**
