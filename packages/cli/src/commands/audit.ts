@@ -448,10 +448,19 @@ async function fireEnterClearance(
     // walk contracts and find the one whose taskIds includes us.
     const contractId = findContractContainingTask(corpRoot, taskId);
     if (!contractId) {
+      // Standalone task (no contract OR broken linkage). The
+      // clearinghouse flow needs a contract for cascade purposes,
+      // so we fall back to the normal close path that
+      // promotePendingHandoff would have taken with
+      // deferTaskClose=false. Without this fallback the task stays
+      // in under_review forever (Codex P1 catch on PR #194).
+      const fallback = runDeferredCloseFallback(corpRoot, slug, taskId, 'no contract contains this task');
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
         event: 'enter-clearance-skipped',
         reason: 'no contract contains this task',
         taskId,
+        fallbackClosed: fallback.closed,
+        fallbackErrors: fallback.errors,
       });
       return;
     }
@@ -462,13 +471,17 @@ async function fireEnterClearance(
     // cc-cli clearinghouse submit if needed.
     const branch = readCurrentBranch(workspacePath);
     if (!branch || branch === 'HEAD' || branch === 'main') {
+      const reason = branch
+        ? `worktree on '${branch}' — refusing to merge into itself`
+        : 'could not read current branch';
+      const fallback = runDeferredCloseFallback(corpRoot, slug, taskId, reason);
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
         event: 'enter-clearance-skipped',
-        reason: branch
-          ? `worktree on '${branch}' — refusing to merge into itself`
-          : 'could not read current branch',
+        reason,
         taskId,
         contractId,
+        fallbackClosed: fallback.closed,
+        fallbackErrors: fallback.errors,
       });
       return;
     }
@@ -497,6 +510,16 @@ async function fireEnterClearance(
         pushedSha: result.value.pushedSha ?? null,
       });
     } else {
+      // enterClearance failed mid-flight (push rejection, chit-store
+      // error, etc). The task is still at under_review with the
+      // close deferred — same stranded-task problem as the skip
+      // paths above. Fall back to closing so it doesn't sit forever.
+      const fallback = runDeferredCloseFallback(
+        corpRoot,
+        slug,
+        taskId,
+        `enterClearance failed: ${result.failure.pedagogicalSummary}`,
+      );
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
         event: 'enter-clearance-failed',
         taskId,
@@ -505,10 +528,36 @@ async function fireEnterClearance(
         category: result.failure.category,
         summary: result.failure.pedagogicalSummary,
         retryable: result.failure.retryable,
+        fallbackClosed: fallback.closed,
+        fallbackErrors: fallback.errors,
       });
     }
   } catch (err) {
+    // Any uncaught path also strands the task. Best-effort fallback
+    // close so the corp doesn't end up with a permanent under_review
+    // chit; logAuditError captures the original cause.
+    try {
+      runDeferredCloseFallback(corpRoot, slug, taskId, 'fireEnterClearance threw — see audit error log');
+    } catch { /* best-effort */ }
     logAuditError(corpRoot, slug, err);
+  }
+}
+
+function runDeferredCloseFallback(
+  corpRoot: string,
+  slug: string,
+  taskId: string,
+  reason: string,
+): { closed: boolean; errors: string[] } {
+  try {
+    const { completeDeferredTaskClose } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
+    const result = completeDeferredTaskClose(corpRoot, taskId, { closedBy: slug, reason });
+    return { closed: result.closed, errors: result.errors };
+  } catch (err) {
+    return {
+      closed: false,
+      errors: [`completeDeferredTaskClose threw: ${err instanceof Error ? err.message : String(err)}`],
+    };
   }
 }
 

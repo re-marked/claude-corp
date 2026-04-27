@@ -365,6 +365,89 @@ function closeTaskAsCompleted(
 }
 
 /**
+ * Project 1.12 fallback: when audit ran with `deferTaskClose: true`
+ * but the clearinghouse path can't proceed (no contract for this
+ * task, branch unreadable, enterClearance failed), the task would
+ * otherwise stay stuck at `under_review` forever — promotion
+ * already happened but the close was deferred to a path that never
+ * fires.
+ *
+ * This helper completes the deferred close: marks the task
+ * completed (mirror of the non-deferred path), runs the chain
+ * walker, returns deltas for the audit log. Idempotent — terminal
+ * tasks return without mutation.
+ *
+ * Callers should fire this from EVERY skip / failure branch in the
+ * clearinghouse-fire path so standalone tasks (no contract) and
+ * recovery paths (broken linkage, push failed) still terminate
+ * cleanly.
+ */
+export interface CompleteDeferredCloseResult {
+  /** True iff a state mutation actually happened. False when the task was already terminal. */
+  readonly closed: boolean;
+  readonly chainDeltas: readonly DependentDelta[];
+  readonly errors: string[];
+}
+
+export function completeDeferredTaskClose(
+  corpRoot: string,
+  taskId: string,
+  opts: { closedBy: string; reason?: string },
+): CompleteDeferredCloseResult {
+  const errors: string[] = [];
+  const result: CompleteDeferredCloseResult = {
+    closed: false,
+    chainDeltas: [],
+    errors,
+  };
+
+  const hit = findChitById(corpRoot, taskId);
+  if (!hit || hit.chit.type !== 'task') {
+    errors.push(`completeDeferredTaskClose: task ${taskId} not found`);
+    return result;
+  }
+  const terminal = new Set(['completed', 'rejected', 'failed', 'closed']);
+  if (terminal.has(hit.chit.status)) {
+    // Already done; idempotent no-op.
+    return result;
+  }
+
+  // Synthesize a minimal payload — we don't have access to the
+  // original handoff payload at this point in the flow (it's already
+  // been promoted to a chit), but the close path doesn't need
+  // anything beyond `createdBy` + a `completed[]` array. The
+  // `reason` lands in the task's output field via the completed[]
+  // join so a founder grepping later sees why this close happened.
+  const fallbackPayload: PendingHandoffPayload = {
+    predecessorSession: 'system:audit-clearinghouse-fallback',
+    completed: opts.reason ? [`(deferred close fallback) ${opts.reason}`] : [],
+    nextAction: 'task closed via clearinghouse-skip fallback',
+    openQuestion: null,
+    sandboxState: null,
+    notes: opts.reason ?? null,
+    createdAt: new Date().toISOString(),
+    createdBy: opts.closedBy,
+  };
+
+  try {
+    closeTaskAsCompleted(corpRoot, taskId, fallbackPayload);
+    (result as { closed: boolean }).closed = true;
+  } catch (err) {
+    errors.push(`close-task: ${stringify(err)}`);
+    return result;
+  }
+
+  try {
+    const advance = advanceChain(corpRoot, taskId);
+    (result as { chainDeltas: readonly DependentDelta[] }).chainDeltas = advance.dependentDeltas;
+  } catch (err) {
+    errors.push(`advance-chain: ${stringify(err)}`);
+  }
+
+  return result;
+}
+
+/**
  * Audit-block counterpart to the approve-path promotion. Called from
  * audit.ts when a handoff gets blocked; reverts the Casket-current
  * task's workflowStatus from under_review back to in_progress so the

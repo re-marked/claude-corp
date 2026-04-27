@@ -46,6 +46,7 @@ export type {
 } from './pre-compact-checkpoint.js';
 export {
   promotePendingHandoff,
+  completeDeferredTaskClose,
   revertTaskFromUnderReview,
   peekLatestHandoffChit,
   consumeHandoffChit,
@@ -54,4 +55,5 @@ export type {
   HandoffPromotionResult,
   PendingHandoffPayload,
   RevertUnderReviewResult,
+  CompleteDeferredCloseResult,
 } from './handoff-promotion.js';

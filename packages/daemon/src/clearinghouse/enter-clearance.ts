@@ -231,12 +231,16 @@ export async function enterClearance(opts: EnterClearanceOpts): Promise<Result<E
 /**
  * Pre-check: is this CORP using the clearinghouse flow? Audit calls
  * this to decide whether to fire enterClearance — corps that haven't
- * hired a Pressman shouldn't have their audit flow rerouted.
+ * hired a Pressman (or fired theirs) shouldn't have their audit flow
+ * rerouted, otherwise submissions accumulate with no worker to
+ * process them and tasks strand.
  *
- * Detection: presence of any Member with `role === 'pressman'` in
- * the corp's members.json. The Pressman is the queue processor —
- * without one, submissions go nowhere. So "Pressman is hired" is
- * the operationally meaningful gate.
+ * Detection: presence of any non-archived Member with
+ * `role === 'pressman'` in the corp's members.json. The archived
+ * filter mirrors `dispatchPressman`'s active-Pressman filter — both
+ * paths must agree on what "Pressman exists" means, otherwise audit
+ * defers task closes for a Pressman that dispatch silently skips.
+ * (Codex P2 catch on PR #194.)
  *
  * Returns false when members.json can't be read (defensive — a
  * corp with broken members.json shouldn't have audit divert into
@@ -246,8 +250,8 @@ export function isClearinghouseAwareCorp(corpRoot: string): boolean {
   try {
     const { readConfig, MEMBERS_JSON } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
     const { join } = require('node:path') as typeof import('node:path');
-    const members = readConfig<Array<{ role?: string }>>(join(corpRoot, MEMBERS_JSON));
-    return members.some((m) => m.role === 'pressman');
+    const members = readConfig<Array<{ role?: string; status?: string }>>(join(corpRoot, MEMBERS_JSON));
+    return members.some((m) => m.role === 'pressman' && m.status !== 'archived');
   } catch {
     return false;
   }
