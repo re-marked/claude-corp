@@ -154,6 +154,7 @@ export {
   validateCommentPosition,
   parseNumstatOutput,
   parseNameStatusOutput,
+  normalizeRenamePath,
   DEFAULT_MAX_FILES,
   DEFAULT_MAX_LINES,
 } from './editor-diff.js';

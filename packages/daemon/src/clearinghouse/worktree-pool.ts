@@ -317,12 +317,24 @@ export class WorktreePool {
   private async resetEntryToCleanState(entry: PoolEntry): Promise<Result<void>> {
     // Abort any rebase that might be in progress (idempotent).
     await this.gitOps.rebaseAbort(entry.path).catch(() => undefined);
-    // For a per-worktree clean state we'd ideally `git reset --hard
-    // HEAD && git clean -fdx`. We don't expose those in GitOps yet
-    // — rather than expanding the interface for a single use case,
-    // let resetEntryToBranch do worktree remove+add when we need to
-    // switch branches. For same-branch reset, leave as-is and trust
-    // the pre-rebase isClean check.
+    // Hard reset to discard tracked modifications. Then clean to
+    // remove untracked+ignored. Both are required for true isolation
+    // between holders — without them, the next acquire inherits
+    // dirty state (Codex P1 catch on PR #192). Best-effort per
+    // step: a reset failure is logged but we still attempt clean,
+    // and we still release the slot — leaking a partially-reset
+    // entry beats leaking the slot itself.
+    const resetResult = await this.gitOps.resetHard(entry.path);
+    if (!resetResult.ok) {
+      // Surface the reset failure but try clean anyway. The next
+      // acquire will detect leftover state via isClean and either
+      // recover or surface its own failure.
+      const cleanResult = await this.gitOps.cleanWorkdir(entry.path);
+      if (!cleanResult.ok) return err(cleanResult.failure);
+      return err(resetResult.failure);
+    }
+    const cleanResult = await this.gitOps.cleanWorkdir(entry.path);
+    if (!cleanResult.ok) return err(cleanResult.failure);
     return ok(undefined);
   }
 }

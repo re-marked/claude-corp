@@ -202,38 +202,55 @@ export function parseConflictMarkers(fileContents: string): Omit<ConflictBlock, 
 // ─── Comment detection ───────────────────────────────────────────────
 
 /**
- * Per-extension comment-line patterns. Heuristic (line-prefix match
- * after stripping leading whitespace) — not AST-aware. False positives
- * possible inside string literals, but those classify as substantive
- * (the safe direction).
+ * Per-extension comment-line patterns. Heuristic (whole-line match
+ * after stripping leading/trailing whitespace) — not AST-aware. The
+ * conservative direction is to UNDER-match: a non-comment line being
+ * passed through harmlessly differs into substantive classification
+ * (safe), whereas a non-comment line incorrectly flagged AS comment
+ * gets stripped and could mislabel a substantive conflict as
+ * comment-only — which would then auto-resolve to incoming and
+ * silently drop behavior changes (Codex P1 catch on PR #192).
+ *
+ * Each regex must match the WHOLE line (anchored ^…$). Lines with
+ * code mixed alongside comments (`x = 1; // note`) are NOT
+ * classified as comments — the comment fragment isn't enough to
+ * make the line as a whole pure comment.
  */
+const C_FAMILY_PATTERNS: RegExp[] = [
+  /^\/\/.*$/,                  // pure // comment (rest of line)
+  /^\/\*.*?\*\/$/,             // single-line /* … */ filling the whole line
+  /^\/\*[^*]*$/,               // start of multi-line block /* … (no */ on this line)
+  /^\*\/$/,                    // multi-line block end "*/"
+  /^\*\s.*$|^\*$/,             // multi-line continuation "* foo" or bare "*"
+];
+
 const COMMENT_PATTERNS: Record<string, RegExp[]> = {
-  // C-family: //, /* */, leading * inside block comments
-  '.ts': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.tsx': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.js': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.jsx': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.go': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.rs': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//, /^\/\/\//],
-  '.java': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.c': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.h': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.cpp': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.swift': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  '.kt': [/^\/\//, /^\/\*/, /^\*[/ ]?/, /\*\//],
-  // Hash-comment family
-  '.py': [/^#/],
-  '.sh': [/^#/],
-  '.rb': [/^#/],
-  '.pl': [/^#/],
-  '.yaml': [/^#/],
-  '.yml': [/^#/],
-  '.toml': [/^#/],
-  '.dockerfile': [/^#/],
-  // Markup
-  '.md': [/^<!--/, /-->$/],
-  '.html': [/^<!--/, /-->$/],
-  '.xml': [/^<!--/, /-->$/],
+  // C-family: anchored //, /* */, *, */ patterns.
+  '.ts': C_FAMILY_PATTERNS,
+  '.tsx': C_FAMILY_PATTERNS,
+  '.js': C_FAMILY_PATTERNS,
+  '.jsx': C_FAMILY_PATTERNS,
+  '.go': C_FAMILY_PATTERNS,
+  '.rs': [...C_FAMILY_PATTERNS, /^\/\/\/.*$/], // doc-comment ///
+  '.java': C_FAMILY_PATTERNS,
+  '.c': C_FAMILY_PATTERNS,
+  '.h': C_FAMILY_PATTERNS,
+  '.cpp': C_FAMILY_PATTERNS,
+  '.swift': C_FAMILY_PATTERNS,
+  '.kt': C_FAMILY_PATTERNS,
+  // Hash-comment family — anchored # at line start.
+  '.py': [/^#.*$/],
+  '.sh': [/^#.*$/],
+  '.rb': [/^#.*$/],
+  '.pl': [/^#.*$/],
+  '.yaml': [/^#.*$/],
+  '.yml': [/^#.*$/],
+  '.toml': [/^#.*$/],
+  '.dockerfile': [/^#.*$/],
+  // Markup — pure single-line comment OR start/end of multi-line.
+  '.md': [/^<!--.*-->$/, /^<!--[^>]*$/, /^.*-->$/],
+  '.html': [/^<!--.*-->$/, /^<!--[^>]*$/, /^.*-->$/],
+  '.xml': [/^<!--.*-->$/, /^<!--[^>]*$/, /^.*-->$/],
 };
 
 function getExtension(filePath: string): string {

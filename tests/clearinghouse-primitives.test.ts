@@ -40,6 +40,7 @@ import {
   validateCommentPosition,
   parseNumstatOutput,
   parseNameStatusOutput,
+  normalizeRenamePath,
   // types
   type GitOps,
   type RebaseOutcome,
@@ -192,6 +193,37 @@ just opens, never closes`;
         base: [],
       };
       expect(classifyBlock(block, 'foo.ts')).toBe('comment-only');
+    });
+
+    // Codex P1 regression (PR #192): unanchored `\*\/` matched
+    // anywhere in a line, so non-comment code containing `*/`
+    // (e.g. `array.length /* note */)`) got stripped as if it were
+    // a comment line — making substantive conflicts mislabel as
+    // comment-only and auto-resolve to incoming, silently dropping
+    // behavior changes. Anchored patterns require WHOLE-line matches.
+    it('classifyBlock — code lines containing */ are NOT classified as comments', () => {
+      const block = {
+        startLine: 1,
+        endLine: 4,
+        // Both sides have `*/` mid-line as part of code (block-comment
+        // close used inline). Sides differ in real code. Must classify
+        // as substantive, NOT comment-only.
+        current: ['array.length /* a */ + 1;'],
+        incoming: ['array.length /* a */ + 2;'],
+        base: [],
+      };
+      expect(classifyBlock(block, 'foo.ts')).toBe('substantive');
+    });
+
+    it('isCommentLine — pure // comment ✓; code-with-trailing-comment ✗', () => {
+      expect(isCommentLine('// pure', 'a.ts')).toBe(true);
+      expect(isCommentLine('const x = 1; // trailing', 'a.ts')).toBe(false);
+    });
+
+    it('isCommentLine — pure block comment ✓; code-with-block-comment ✗', () => {
+      expect(isCommentLine('/* whole */', 'a.ts')).toBe(true);
+      expect(isCommentLine('var x = 1; /* trailing */', 'a.ts')).toBe(false);
+      expect(isCommentLine('var x = 1 /* mid */ + 2;', 'a.ts')).toBe(false);
     });
 
     it('classifyBlock identifies substantive differences', () => {
@@ -370,6 +402,34 @@ bare`;
       expect(rows).toHaveLength(3);
       expect(rows[0]!).toEqual({ additions: 12, deletions: 3, path: 'file/a.ts' });
       expect(rows[2]!).toEqual({ additions: 0, deletions: 0, path: 'img.png' }); // binary
+    });
+
+    // Codex P2 regression (PR #192): `git diff --numstat` emits
+    // brace forms for renames; `git diff --name-status` emits the
+    // new path only. Without normalization, the merge-by-path
+    // misses renamed files → status='unknown' and downstream
+    // comment-position checks reject valid comments on them.
+    it('normalizeRenamePath handles all four rename forms', () => {
+      // Brace, shared prefix.
+      expect(normalizeRenamePath('src/{old.ts => new.ts}')).toBe('src/new.ts');
+      // Brace, shared suffix.
+      expect(normalizeRenamePath('{lib => src}/util.ts')).toBe('src/util.ts');
+      // Brace mid-path.
+      expect(normalizeRenamePath('src/{old => new}/sub/x.ts')).toBe('src/new/sub/x.ts');
+      // Top-level arrow form (no braces).
+      expect(normalizeRenamePath('old.ts => new.ts')).toBe('new.ts');
+      // Regular path passes through unchanged.
+      expect(normalizeRenamePath('src/foo.ts')).toBe('src/foo.ts');
+    });
+
+    it('parseNumstatOutput normalizes rename paths inline', () => {
+      const text = `5\t3\tsrc/{old.ts => new.ts}\n10\t10\t{lib => src}/util.ts\n2\t2\told.ts => new.ts`;
+      const rows = parseNumstatOutput(text);
+      expect(rows.map((r) => r.path)).toEqual([
+        'src/new.ts',
+        'src/util.ts',
+        'new.ts',
+      ]);
     });
 
     it('parseNameStatusOutput handles renames and adds', () => {
@@ -604,6 +664,8 @@ bare`;
       listConflictedFiles: scripts.listConflictedFiles ?? (async () => ok([])),
       branchExists: scripts.branchExists ?? (async () => ok(true)),
       isClean: scripts.isClean ?? (async () => ok(true)),
+      resetHard: scripts.resetHard ?? noop,
+      cleanWorkdir: scripts.cleanWorkdir ?? noop,
     };
   }
 
@@ -855,6 +917,32 @@ spaced
       const wrongHandle = { ...acq.value, holder: 'p-bb' };
       const release = await pool.release(wrongHandle);
       expect(release.ok).toBe(false);
+    });
+
+    // Codex P1 regression (PR #192): release was a no-op on the
+    // worktree state — same-branch reuse inherited tracked +
+    // untracked changes from the prior holder. Now release MUST
+    // call resetHard + cleanWorkdir before the slot can be re-used.
+    it('release calls resetHard + cleanWorkdir to clear leftover state', async () => {
+      const calls: string[] = [];
+      const gitOps = buildMockGitOps({
+        worktreeAdd: async () => { calls.push('add'); return ok(undefined); },
+        rebaseAbort: async () => { calls.push('rebase-abort'); return ok(undefined); },
+        resetHard: async () => { calls.push('reset-hard'); return ok(undefined); },
+        cleanWorkdir: async () => { calls.push('clean-fdx'); return ok(undefined); },
+      });
+      const pool = new WorktreePool({ corpRoot, gitOps });
+      const acq = await pool.acquire({ branch: 'feat/x', holder: 'p-aa' });
+      expect(acq.ok).toBe(true);
+      if (!acq.ok) return;
+      calls.length = 0;
+
+      await pool.release(acq.value);
+      // Must include both reset-hard AND clean-fdx (and rebase-abort
+      // for safety against an in-progress rebase).
+      expect(calls).toContain('reset-hard');
+      expect(calls).toContain('clean-fdx');
+      expect(calls).toContain('rebase-abort');
     });
 
     it('drain force-removes all entries', async () => {

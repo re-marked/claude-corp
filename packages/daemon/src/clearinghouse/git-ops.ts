@@ -135,6 +135,23 @@ export interface GitOps {
 
   /** Check whether the working tree has uncommitted changes. */
   isClean(worktreePath: string): Promise<Result<boolean>>;
+
+  /**
+   * Hard-reset the worktree to a ref (default HEAD). Discards
+   * tracked modifications. Used by the worktree pool's release
+   * path to clear leftover state before the next acquire.
+   */
+  resetHard(worktreePath: string, ref?: string): Promise<Result<void>>;
+
+  /**
+   * Remove untracked + ignored files via `git clean -fdx`. The pool
+   * pairs this with resetHard to fully reset a released worktree
+   * — without it, leftover artifacts (test outputs, generated
+   * files, dot-dirs created during a prior session) leak across
+   * holders and break worktree isolation guarantees (Codex P1
+   * catch on PR #192).
+   */
+  cleanWorkdir(worktreePath: string): Promise<Result<void>>;
 }
 
 export interface WorktreeEntry {
@@ -319,6 +336,27 @@ export const realGitOps: GitOps = {
     });
     if (!result.ok) return err(result.failure);
     return ok(result.value.stdout.trim().length === 0);
+  },
+
+  async resetHard(worktreePath, ref = 'HEAD') {
+    const result = await runGit(['reset', '--hard', ref], {
+      cwd: worktreePath,
+      operationLabel: `reset --hard ${ref}`,
+    });
+    if (!result.ok) return err(result.failure);
+    return ok(undefined);
+  },
+
+  async cleanWorkdir(worktreePath) {
+    // -f force, -d directories, -x untracked + ignored. Aggressive
+    // by design — the pool only calls this between holders, when
+    // we genuinely want a pristine surface.
+    const result = await runGit(['clean', '-fdx'], {
+      cwd: worktreePath,
+      operationLabel: 'clean -fdx',
+    });
+    if (!result.ok) return err(result.failure);
+    return ok(undefined);
   },
 };
 

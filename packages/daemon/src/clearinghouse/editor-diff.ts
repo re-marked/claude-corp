@@ -358,6 +358,18 @@ function stringify(v: unknown): string {
  *   `<additions>\t<deletions>\t<path>`
  * Binary files appear as `-\t-\t<path>` — we treat as 0/0 and let
  * the filter rules drop them.
+ *
+ * Renames produce two non-trivial path forms (Codex P2 catch on PR
+ * #192):
+ *   - With shared prefix: `12\t3\tsrc/{old.ts => new.ts}`
+ *   - With shared suffix: `12\t3\t{lib => src}/util.ts`
+ *   - Top-level:          `12\t3\told.ts => new.ts`
+ *
+ * `--name-status` always reports the new path, so to merge cleanly
+ * we normalize the rename forms to the new path here. Without this,
+ * merges into ReviewableFile use the literal brace string and
+ * status lookups miss → renamed files get classified as 'unknown'
+ * and validateCommentPosition rejects valid comments on them.
  */
 export function parseNumstatOutput(stdout: string): NumstatRow[] {
   const rows: NumstatRow[] = [];
@@ -367,15 +379,38 @@ export function parseNumstatOutput(stdout: string): NumstatRow[] {
     if (parts.length < 3) continue;
     const adds = parts[0] === '-' ? 0 : parseInt(parts[0]!, 10);
     const dels = parts[1] === '-' ? 0 : parseInt(parts[1]!, 10);
-    const path = parts.slice(2).join('\t');
-    if (path.length === 0) continue;
+    const rawPath = parts.slice(2).join('\t');
+    if (rawPath.length === 0) continue;
     rows.push({
       additions: Number.isFinite(adds) ? adds : 0,
       deletions: Number.isFinite(dels) ? dels : 0,
-      path,
+      path: normalizeRenamePath(rawPath),
     });
   }
   return rows;
+}
+
+/**
+ * Normalize git's rename-path forms to the new (post-rename) path,
+ * matching what `--name-status` reports.
+ *
+ *   `src/{old.ts => new.ts}`        →  `src/new.ts`
+ *   `{lib => src}/util.ts`          →  `src/util.ts`
+ *   `src/{old => new}/sub/x.ts`     →  `src/new/sub/x.ts`
+ *   `old.ts => new.ts`              →  `new.ts`
+ *   `regular/path/file.ts`          →  unchanged
+ */
+export function normalizeRenamePath(raw: string): string {
+  // Brace form: prefix{X => Y}suffix → prefix + Y + suffix
+  const braceMatch = /\{([^{}]*?)\s*=>\s*([^{}]*?)\}/.exec(raw);
+  if (braceMatch) {
+    const replacement = braceMatch[2]!;
+    return raw.slice(0, braceMatch.index) + replacement + raw.slice(braceMatch.index + braceMatch[0].length);
+  }
+  // No-brace form: `old => new` (top-level)
+  const arrowMatch = /^(.+?)\s*=>\s*(.+)$/.exec(raw);
+  if (arrowMatch) return arrowMatch[2]!;
+  return raw;
 }
 
 /**
