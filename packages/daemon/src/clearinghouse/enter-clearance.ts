@@ -229,21 +229,26 @@ export async function enterClearance(opts: EnterClearanceOpts): Promise<Result<E
 }
 
 /**
- * Pre-check helper: is the corp 1.12-aware (i.e., does its role
- * registry contain `pressman` and `editor` entries)? Audit calls
- * this to decide whether to fire enterClearance at all — pre-1.12
- * corps shouldn't be affected.
+ * Pre-check: is this CORP using the clearinghouse flow? Audit calls
+ * this to decide whether to fire enterClearance — corps that haven't
+ * hired a Pressman shouldn't have their audit flow rerouted.
  *
- * Returns true when both roles are present in the in-memory
- * registry (which is bundled at build time, not per-corp). For
- * v1, that's a global bool; once role registry is per-corp, this
- * check reads the corp's actual registry.
+ * Detection: presence of any Member with `role === 'pressman'` in
+ * the corp's members.json. The Pressman is the queue processor —
+ * without one, submissions go nowhere. So "Pressman is hired" is
+ * the operationally meaningful gate.
+ *
+ * Returns false when members.json can't be read (defensive — a
+ * corp with broken members.json shouldn't have audit divert into
+ * a new flow until the substrate is healthy again).
  */
-export function isClearinghouseAwareCorp(): boolean {
-  // Roles are bundled at compile time today. Both `pressman` and
-  // `editor` ship in this repo's roles.ts as of PR 1; their
-  // presence is the v1 marker for "this codebase has 1.12 wired."
-  // Future per-corp registry would replace this with a corp.json
-  // lookup.
-  return true;
+export function isClearinghouseAwareCorp(corpRoot: string): boolean {
+  try {
+    const { readConfig, MEMBERS_JSON } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
+    const { join } = require('node:path') as typeof import('node:path');
+    const members = readConfig<Array<{ role?: string }>>(join(corpRoot, MEMBERS_JSON));
+    return members.some((m) => m.role === 'pressman');
+  } catch {
+    return false;
+  }
 }
