@@ -451,10 +451,12 @@ async function fireEnterClearance(
     if (!contractId) {
       // Standalone task (no contract OR broken linkage). The
       // clearinghouse flow needs a contract for cascade purposes,
-      // so we fall back to the normal close path that
-      // promotePendingHandoff would have taken with
-      // deferTaskClose=false. Without this fallback the task stays
-      // in under_review forever (Codex P1 catch on PR #194).
+      // so this task can't enter the lane at all — fall back to
+      // the normal close path. This is the ONE branch where
+      // unconditional close is correct: the task isn't a
+      // clearinghouse candidate to begin with, so there's no
+      // unshipped work being hidden by closing it. (Codex P1 on
+      // PR #194 originally surfaced this strand.)
       const fallback = runDeferredCloseFallback(corpRoot, slug, taskId, 'no contract contains this task');
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
         event: 'enter-clearance-skipped',
@@ -466,23 +468,24 @@ async function fireEnterClearance(
       return;
     }
 
-    // Derive branch via git in the worktree. Fall through with a
-    // logged skip if it can't be read (worktree isn't a git repo,
-    // detached HEAD, etc.) — agent gets to retry manually via
-    // cc-cli clearinghouse submit if needed.
+    // Derive branch via git in the worktree. We do NOT fall back
+    // close on a branch read failure — the work hasn't reached
+    // origin yet, and a silent close would advance the contract
+    // chain as if it had. Leave the task at under_review; the
+    // agent's next session re-runs `cc-cli done` after fixing the
+    // sandbox state, audit re-fires this path, and the lane gets
+    // its second chance. (Codex P1 follow-up on PR #194.)
     const branch = readCurrentBranch(workspacePath);
     if (!branch || branch === 'HEAD' || branch === 'main') {
       const reason = branch
         ? `worktree on '${branch}' — refusing to merge into itself`
         : 'could not read current branch';
-      const fallback = runDeferredCloseFallback(corpRoot, slug, taskId, reason);
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
-        event: 'enter-clearance-skipped',
+        event: 'enter-clearance-blocked',
         reason,
         taskId,
         contractId,
-        fallbackClosed: fallback.closed,
-        fallbackErrors: fallback.errors,
+        // No fallbackClosed — task stays at under_review by design.
       });
       return;
     }
@@ -511,16 +514,14 @@ async function fireEnterClearance(
         pushedSha: result.value.pushedSha ?? null,
       });
     } else {
-      // enterClearance failed mid-flight (push rejection, chit-store
-      // error, etc). The task is still at under_review with the
-      // close deferred — same stranded-task problem as the skip
-      // paths above. Fall back to closing so it doesn't sit forever.
-      const fallback = runDeferredCloseFallback(
-        corpRoot,
-        slug,
-        taskId,
-        `enterClearance failed: ${result.failure.pedagogicalSummary}`,
-      );
+      // enterClearance failed (push race, hook rejection, chit-
+      // store error, etc). Do NOT fall back to close — nothing
+      // shipped to origin AND/OR no submission was queued, so
+      // closing would hide unmerged work and falsely advance the
+      // contract chain. Leave the task at under_review; the
+      // author addresses the cause and re-runs `cc-cli done`,
+      // which re-fires audit. The pedagogical summary in the
+      // log gives them the diagnosis. (Codex P1 follow-up.)
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
         event: 'enter-clearance-failed',
         taskId,
@@ -529,17 +530,12 @@ async function fireEnterClearance(
         category: result.failure.category,
         summary: result.failure.pedagogicalSummary,
         retryable: result.failure.retryable,
-        fallbackClosed: fallback.closed,
-        fallbackErrors: fallback.errors,
       });
     }
   } catch (err) {
-    // Any uncaught path also strands the task. Best-effort fallback
-    // close so the corp doesn't end up with a permanent under_review
-    // chit; logAuditError captures the original cause.
-    try {
-      runDeferredCloseFallback(corpRoot, slug, taskId, 'fireEnterClearance threw — see audit error log');
-    } catch { /* best-effort */ }
+    // Uncaught path: same as a typed enterClearance failure —
+    // safer to leave the task at under_review than to close on
+    // an unknown error mode that might indicate partial state.
     logAuditError(corpRoot, slug, err);
   }
 }

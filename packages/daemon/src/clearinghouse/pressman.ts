@@ -90,9 +90,16 @@ export async function hirePressman(
   const corpRoot = daemon.corpRoot;
   const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
 
-  // Idempotent check — match on either the displayName or the role.
+  // Idempotent check — match on either the displayName or the role,
+  // BUT skip archived (fired) members. Otherwise hirePressman returns
+  // hired: false with an archived slug, and callers think a Pressman
+  // is available while dispatch paths intentionally skip archived
+  // agents — submissions accumulate with no worker. (Codex P2 on
+  // PR #194.)
   const displayName = opts.displayName ?? 'Pressman';
-  const existing = members.find((m) => m.displayName === displayName || m.role === 'pressman');
+  const existing = members.find(
+    (m) => m.status !== 'archived' && (m.displayName === displayName || m.role === 'pressman'),
+  );
   if (existing) {
     log(`[pressman] hire skipped: existing Pressman '${existing.displayName}' (${existing.id})`);
     return { hired: false, slug: existing.id };
