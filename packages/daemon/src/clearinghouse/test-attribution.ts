@@ -241,22 +241,51 @@ export interface RunOnRefResult {
 export async function runTestsOnRef(opts: RunOnRefOpts): Promise<Result<RunOnRefResult>> {
   const { worktreePath, refToTest, restoreRef, gitOps, testOpts } = opts;
 
-  // 1. Switch to the target ref. If this fails, we never moved off
+  // 1. Clean the worktree before switching refs. Caller's prior
+  // step (the PR test run) likely left untracked artifacts: build
+  // outputs, coverage dirs, generated files. checkoutRef is non-
+  // force by design, so any dirt makes step 2 fail and attribution
+  // collapses into generic-failure handling. resetHard + cleanWorkdir
+  // is the protocol checkoutRef's doc-comment specifies.
+  // Codex round 2 P1: PR-vs-main attribution flow couldn't reach
+  // the ref switch because the PR test always left artifacts behind.
+  const preCleanReset = await gitOps.resetHard(worktreePath);
+  if (!preCleanReset.ok) return err(preCleanReset.failure);
+  const preCleanWorkdir = await gitOps.cleanWorkdir(worktreePath);
+  if (!preCleanWorkdir.ok) return err(preCleanWorkdir.failure);
+
+  // 2. Switch to the target ref. If this fails, we never moved off
   // the original — return err and let the caller decide.
   const checkoutResult = await gitOps.checkoutRef(worktreePath, refToTest);
   if (!checkoutResult.ok) {
     return err(checkoutResult.failure);
   }
 
-  // 2. Run tests at the target ref.
+  // 3. Run tests at the target ref.
   const testResult = await runTests({ ...testOpts, cwd: worktreePath });
   if (!testResult.ok) {
     // Best-effort restore — we already have an error to surface.
+    // Clean the worktree first because the failed test run on
+    // refToTest may have left its own artifacts.
+    await gitOps.resetHard(worktreePath).catch(() => undefined);
+    await gitOps.cleanWorkdir(worktreePath).catch(() => undefined);
     await gitOps.checkoutRef(worktreePath, restoreRef).catch(() => undefined);
     return err(testResult.failure);
   }
 
-  // 3. Restore. Surface restore failure as a side-channel via the
+  // 4. Clean again before the restore checkout — the refToTest
+  // test run left its own artifacts behind. Same protocol as before
+  // the first checkout.
+  const postCleanReset = await gitOps.resetHard(worktreePath);
+  if (!postCleanReset.ok) {
+    return ok({ result: testResult.value, restoreFailure: postCleanReset.failure });
+  }
+  const postCleanWorkdir = await gitOps.cleanWorkdir(worktreePath);
+  if (!postCleanWorkdir.ok) {
+    return ok({ result: testResult.value, restoreFailure: postCleanWorkdir.failure });
+  }
+
+  // 5. Restore. Surface restore failure as a side-channel via the
   // result shape so the test data still reaches the caller (it's
   // useful even if the worktree is now half-broken).
   const restoreResult = await gitOps.checkoutRef(worktreePath, restoreRef);
