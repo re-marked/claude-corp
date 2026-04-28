@@ -135,17 +135,20 @@ Lifecycle subcommands (Pressman session walks these in order):
                     Ensure isolated worktree at deterministic path.
 
   rebase            --from <slug> --submission <id> --worktree <path>
-                    --branch <name> [--base <branch>] [--json]
+                    --branch <name> [--base <branch>]
+                    [--narrative "..."] [--json]
                     Fetch base + rebase. Classifies into clean,
                     auto-resolved, needs-author, sanity-failed, fatal.
 
   test              --from <slug> --submission <id> --worktree <path>
-                    [--command "..."] [--max-retries <n>] [--json]
+                    [--command "..."] [--max-retries <n>]
+                    [--narrative "..."] [--json]
                     Run tests with one flake retry. Classifies into
                     passed-first, flake, consistent-fail, inconclusive.
 
   attribute         --from <slug> --submission <id> --worktree <path>
-                    --branch <name> [--base <ref>] [--command "..."] [--json]
+                    --branch <name> [--base <ref>] [--command "..."]
+                    [--narrative "..."] [--json]
                     Project 1.12.3 — re-run failed tests on
                     origin/main + compare failure sets. Classifies
                     into pr-introduced, main-regression, mixed, or
@@ -153,25 +156,29 @@ Lifecycle subcommands (Pressman session walks these in order):
                     main-regression goes to engineering-lead.
 
   merge             --from <slug> --submission <id> --worktree <path>
-                    --branch <name> [--json]
+                    --branch <name> [--narrative "..."] [--json]
                     Push to origin. Classifies into merged, race,
                     hook-rejected, branch-deleted, fatal.
 
 Terminal-state subcommands:
   finalize          --from <slug> --submission <id>
-                    [--merge-sha <sha>] [--worktree <path>] [--json]
+                    [--merge-sha <sha>] [--worktree <path>]
+                    [--narrative "..."] [--json]
                     On clean merge: cascade chit graph + release lock
                     + remove worktree.
 
   file-blocker      --from <slug> --submission <id>
                     --kind <rebase-conflict|test-fail|hook-reject>
                     --summary "..." --detail "..."
-                    [--worktree <path>] [--json]
-                    Cut escalation chit for author's role + fail
-                    submission + release.
+                    [--route-to <role-or-slug>] [--worktree <path>]
+                    [--json]
+                    Cut escalation chit + fail submission + release.
+                    Default routes to author; --route-to overrides
+                    (e.g. engineering-lead for main-regression).
 
   mark-failed       --from <slug> --submission <id> --reason "..."
-                    [--requeue] [--worktree <path>] [--json]
+                    [--requeue] [--worktree <path>]
+                    [--narrative "..."] [--json]
                     Terminal-fail OR push-race re-queue (under cap)
                     + release.
 

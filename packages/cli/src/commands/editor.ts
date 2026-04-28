@@ -148,19 +148,21 @@ Lifecycle subcommands (Editor session walks these in order):
                     monotonically.
 
 Terminal-state subcommands:
-  approve           --from <slug> --task <id> --worktree <path> [--json]
+  approve           --from <slug> --task <id> --worktree <path>
+                    [--narrative "..."] [--json]
                     Pass review. Fires enterClearance with
                     reviewBypassed=false; clears review state on
                     success.
 
   reject            --from <slug> --task <id> --reason "..."
-                    --detail "..." [--json]
+                    --detail "..." [--narrative "..."] [--json]
                     Fail review. Increments task.editorReviewRound,
                     sets capHit if at cap, files escalation chit
-                    routing to author's role.
+                    routing to author's role. Narrative defaults to
+                    --reason when omitted.
 
   bypass            --from <slug> --task <id> --reason "..."
-                    --worktree <path> [--json]
+                    --worktree <path> [--narrative "..."] [--json]
                     Self-bypass — set capHit, fire enterClearance with
                     reviewBypassed=true. Rare; usually audit triggers
                     bypass when the cap is reached automatically.
