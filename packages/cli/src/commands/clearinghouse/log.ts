@@ -21,8 +21,9 @@
  *
  * Filters apply across all modes:
  *   --since ISO / --until ISO  Bounded time range.
- *   --today / --this-week /    Convenience presets.
- *   --this-month
+ *   --today / --last-7d /      Convenience presets. Rolling-N-day
+ *   --last-30d                 windows; not calendar week / month
+ *                              boundaries (the prior names misled).
  *   --merged-only              Terminal-mode: only submission-finalized.
  *   --blocked-only             Terminal-mode: only submission-blocked.
  *   --failed-only              Terminal-mode: only submission-failed.
@@ -50,8 +51,8 @@ interface Opts {
   since?: string;
   until?: string;
   today?: boolean;
-  'this-week'?: boolean;
-  'this-month'?: boolean;
+  'last-7d'?: boolean;
+  'last-30d'?: boolean;
   'merged-only'?: boolean;
   'blocked-only'?: boolean;
   'failed-only'?: boolean;
@@ -172,12 +173,12 @@ function resolveTimeWindow(opts: Opts): { since?: string; until?: string } {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     return { since: start.toISOString() };
   }
-  if (opts['this-week']) {
+  if (opts['last-7d']) {
     const start = new Date(now);
     start.setDate(start.getDate() - 7);
     return { since: start.toISOString() };
   }
-  if (opts['this-month']) {
+  if (opts['last-30d']) {
     const start = new Date(now);
     start.setDate(start.getDate() - 30);
     return { since: start.toISOString() };
@@ -325,8 +326,8 @@ function parseOpts(rawArgs: string[]): Opts {
       since: { type: 'string' },
       until: { type: 'string' },
       today: { type: 'boolean' },
-      'this-week': { type: 'boolean' },
-      'this-month': { type: 'boolean' },
+      'last-7d': { type: 'boolean' },
+      'last-30d': { type: 'boolean' },
       'merged-only': { type: 'boolean' },
       'blocked-only': { type: 'boolean' },
       'failed-only': { type: 'boolean' },

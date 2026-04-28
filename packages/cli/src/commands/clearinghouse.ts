@@ -190,7 +190,7 @@ Admin/debug:
   status            [--json]
                     Lock holder, queue depth, recent submissions.
 
-  log               [--today | --this-week | --this-month |
+  log               [--today | --last-7d | --last-30d |
                     --since <iso> | --until <iso>]
                     [--merged-only | --blocked-only | --failed-only]
                     [--role <id>] [--replay <submission-id>]
