@@ -85,30 +85,25 @@ export function MemberSidebar({ members, channelMemberIds, visible, daemonClient
       try {
         const queue = rankQueue(corpRoot);
         const lock = readClearinghouseLock(corpRoot);
-        // Recent merges: submission-finalized events in the last hour.
+        // Recent activity: rolling-hour counts pulled from the
+        // append-only lane-event log. submission-finalized → merges,
+        // submission-blocked → blockers. Both rates symmetrical.
+        // Codex round 1: blockers used to query submissionStatus
+        // === 'conflict', but fileBlocker calls markSubmissionFailed
+        // (sets 'failed'), so the conflict counter never tripped.
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
         const events = queryChits<'lane-event'>(corpRoot, {
           types: ['lane-event'],
           scopes: ['corp'],
         });
         let recentMerges = 0;
+        let openBlockers = 0;
         for (const e of events.chits) {
           const ev = e.chit as Chit<'lane-event'>;
-          if (ev.fields['lane-event'].kind !== 'submission-finalized') continue;
           if ((ev.createdAt ?? '') < oneHourAgo) continue;
-          recentMerges++;
-        }
-        // Open blockers: clearance-submission chits with submissionStatus
-        // === 'conflict' (terminal-but-recoverable; awaiting author).
-        const subs = queryChits<'clearance-submission'>(corpRoot, {
-          types: ['clearance-submission'],
-          scopes: ['corp'],
-          statuses: ['active'],
-        });
-        let openBlockers = 0;
-        for (const s of subs.chits) {
-          const f = (s.chit as Chit<'clearance-submission'>).fields['clearance-submission'];
-          if (f.submissionStatus === 'conflict') openBlockers++;
+          const kind = ev.fields['lane-event'].kind;
+          if (kind === 'submission-finalized') recentMerges++;
+          else if (kind === 'submission-blocked') openBlockers++;
         }
         // Editor in-flight: tasks with non-null reviewerClaim.
         const tasks = queryChits<'task'>(corpRoot, {

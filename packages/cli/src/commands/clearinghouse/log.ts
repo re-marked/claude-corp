@@ -35,6 +35,7 @@ import {
   queryChits,
   readConfig,
   getRole,
+  findChitById,
   MEMBERS_JSON,
   type Chit,
   type Member,
@@ -198,18 +199,22 @@ function resolveSlugsForRole(corpRoot: string, roleId: string): Set<string> {
 function resolveEventSubmitter(corpRoot: string, e: Chit<'lane-event'>): string | null {
   // Prefer the submission's submitter when populated. Fall back to
   // the task's assignee/handedBy. Both are best-effort lookups.
+  //
+  // Codex P1 catch: prior version used dynamic require() inside a
+  // try/catch, which throws unconditionally in @claudecorp/cli's ESM
+  // build — every call returned null, degrading every label to
+  // 'unknown' and silently dropping all events from --role filtering.
+  // Top-level import fixes both.
   const f = e.fields['lane-event'];
   if (f.submissionId) {
     try {
-      const { findChitById } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
       const hit = findChitById(corpRoot, f.submissionId);
       if (hit && hit.chit.type === 'clearance-submission') {
         return (hit.chit as Chit<'clearance-submission'>).fields['clearance-submission'].submitter;
       }
-    } catch { /* fall through */ }
+    } catch { /* fall through to task lookup */ }
   }
   try {
-    const { findChitById } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
     const hit = findChitById(corpRoot, f.taskId);
     if (hit && hit.chit.type === 'task') {
       const tf = (hit.chit as Chit<'task'>).fields.task;
