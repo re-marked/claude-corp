@@ -96,6 +96,11 @@ export async function cmdClearinghouse(rawArgs: string[]): Promise<void> {
       await cmdClearinghouseStatus(subArgs);
       break;
     }
+    case 'log': {
+      const { cmdClearinghouseLog } = await import('./clearinghouse/log.js');
+      await cmdClearinghouseLog(subArgs);
+      break;
+    }
     default: {
       console.error(`cc-cli clearinghouse: unknown subcommand "${subcommand}"`);
       console.error('');
@@ -167,6 +172,16 @@ Terminal-state subcommands:
 Admin/debug:
   status            [--json]
                     Lock holder, queue depth, recent submissions.
+
+  log               [--today | --this-week | --this-month |
+                    --since <iso> | --until <iso>]
+                    [--merged-only | --blocked-only | --failed-only]
+                    [--role <id>] [--replay <submission-id>]
+                    [--verbose] [--json]
+                    Project 1.12.3 — the lane's diary. Renders
+                    lane-events chronologically: terminal events
+                    only by default; --verbose for the firehose;
+                    --replay <id> for one submission's full journey.
 
 Walked order in patrol/clearing:
   pick → acquire-worktree → rebase → test → merge → finalize
