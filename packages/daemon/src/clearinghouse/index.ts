@@ -233,6 +233,19 @@ export type {
   HirePressmanResult,
 } from './pressman.js';
 
+// ─── editor ──────────────────────────────────────────────────────────
+// Convenience hire for the Editor Employee. Same pattern as Pressman:
+// founder opt-in via `cc-cli hire --role editor` (manual auto-loaded);
+// this export is for tests + the future bacteria-scaling integration.
+export {
+  hireEditor,
+  buildEditorRules,
+} from './editor.js';
+export type {
+  HireEditorOpts,
+  HireEditorResult,
+} from './editor.js';
+
 // ─── pressman-runtime ────────────────────────────────────────────────
 // Wake dispatch + reactive watcher + Pulse-fallback sweep. Wired into
 // daemon.ts at start. Pressman session walks patrol/clearing on each

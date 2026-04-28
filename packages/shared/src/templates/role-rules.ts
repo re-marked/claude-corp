@@ -15,6 +15,7 @@
  */
 
 import { pressmanRules } from './pressman-bootstrap.js';
+import { editorRules } from './editor-bootstrap.js';
 import type { TemplateHarness } from './rules.js';
 
 export interface RoleSpecificRulesOpts {
@@ -42,7 +43,11 @@ export function roleSpecificAgentsContent(opts: RoleSpecificRulesOpts): string |
         rank: opts.rank,
         ...(opts.harness ? { harness: opts.harness } : {}),
       });
-    // Editor's manual ships in 1.12.2 (PR 4) — slot will go here.
+    case 'editor':
+      return editorRules({
+        rank: opts.rank,
+        ...(opts.harness ? { harness: opts.harness } : {}),
+      });
     default:
       return undefined;
   }
