@@ -362,6 +362,24 @@ export interface TaskFields {
    * `findOrphanedProcessingSubmissions` for the Pressman lane.
    */
   reviewerClaim?: { slug: string; claimedAt: string } | null;
+  /**
+   * Project 1.12.2 — branch the author committed their work on,
+   * captured by audit at `editorReviewRequested = true` time.
+   * Editor's `acquireEditorWorktree` checks this branch out into
+   * its own isolated worktree (`.clearinghouse/editor-wt-N`) so
+   * Editor reviews a stable snapshot regardless of what the
+   * author's sandbox does between audit and Editor's wake.
+   *
+   * Cleared on approve (the branch info has moved into the
+   * clearance-submission chit at that point) and on reject (the
+   * author's next `cc-cli done` re-fires audit, which captures
+   * the current branch fresh — could be the same branch, could
+   * differ if they rebased / re-branched between rounds).
+   *
+   * Null / undefined means "Editor has nothing to review on this
+   * task right now." pickNextReview filters on non-null.
+   */
+  branchUnderReview?: string | null;
 }
 
 export interface ContractFields {

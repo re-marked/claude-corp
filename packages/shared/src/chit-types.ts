@@ -258,6 +258,7 @@ function validateTask(fields: unknown): void {
       );
     }
   }
+  if (f.branchUnderReview !== undefined) requireStringOrNull(f.branchUnderReview, 'task.branchUnderReview');
 }
 
 function validateContract(fields: unknown): void {
