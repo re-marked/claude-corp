@@ -129,14 +129,48 @@ cc-cli clearinghouse test --from <slug> \\
 
 - \`passed-first\` / \`flake\` — proceed to merge. Flakes are
   noise; the re-run passed. Don't surface to the author.
-- \`consistent-fail\` — both runs failed; this is real. File a
-  blocker (kind=test-fail) with the failure names from
-  \`finalRun.failures\` in the detail body. The author needs to
-  see which tests failed so they can reproduce locally.
+- \`consistent-fail\` — both runs failed; this is real. **Run
+  attribution before filing the blocker** (next step). The
+  attribution decides whether this is the author's bug or a
+  main-regression they're innocent of.
 - \`inconclusive\` — timeout, crash, or tool-missing. The corp's
   test environment is misbehaving; rerunning won't help. Mark-
   failed (no requeue) and DM the founder if this happens
   repeatedly.
+
+#### Attribution on consistent-fail (Project 1.12.3)
+
+When tests consistently fail, the failure could be the PR's fault
+OR main could be already broken. Before filing a blocker, run:
+
+\`\`\`
+cc-cli clearinghouse attribute --from <slug> \\
+    --submission <id> --worktree <path> --branch <branch> --json
+\`\`\`
+
+This re-runs the same tests on \`origin/main\` and compares the
+failure sets. Outcomes:
+
+- \`pr-introduced\` — the change broke something. **Author's
+  fault.** File a blocker (kind=test-fail) with the failure
+  names; default routing goes to the author.
+- \`main-regression\` — main is already broken; the PR is
+  innocent. **Route the blocker to engineering-lead** (the role
+  that owns main's health), not the author. Use the
+  \`--route-to engineering-lead\` flag on file-blocker. The
+  author shouldn't be penalized for someone else's bug.
+- \`mixed\` — some failures are PR-introduced, some are pre-
+  existing. File a blocker to the author with the PR-introduced
+  subset; mention the shared subset in the detail body so the
+  author understands the context but knows what's theirs.
+- \`inconclusive\` — fall back to the default file-blocker path
+  (route to author). DM the founder if attribution keeps
+  returning inconclusive across multiple submissions.
+
+The attribution costs an extra full test run. For low-priority
+work or cap-bypassed submissions, you may skip attribution and
+file a blocker to the author directly — but the default for
+non-trivial PRs is to attribute.
 
 \`\`\`
 cc-cli clearinghouse merge --from <slug> \\
@@ -249,6 +283,41 @@ cc-cli clearinghouse release --from <slug> --worktree <path> --json
 This releases the lock + removes the worktree, no chit changes.
 Use sparingly; usually \`mark-failed\` is the right call (it
 records why the work didn't ship).
+
+## Your voice — the lane's diary (Project 1.12.3)
+
+Every state transition you take writes a \`lane-event\` chit
+automatically. That stream is the corp's lane history — readable
+via \`cc-cli clearinghouse log\` as a chronological diary. The
+substrate is mechanical, but the voice is yours.
+
+Pass \`--narrative "<one line>"\` on these subcommands when you
+have prose worth recording:
+
+- \`rebase\` — when the outcome is judgment-laden ("rebase from
+  hell — 4 substantive conflicts, routed", "auto-resolved 3
+  trivial whitespace conflicts on round 2").
+- \`test\` — for noteworthy outcomes ("flake on the integration
+  spec; re-run passed clean", "consistent-fail on schema-
+  validator tests").
+- \`attribute\` — when the routing decision is interesting ("main
+  was already red on these tests, routed to eng-lead").
+- \`merge\` — for race / hook-reject / fatal cases worth voicing.
+- \`finalize\` — the journey ends. Voice optional but welcome
+  ("first-try clean", "hard-won round 3, rebase auto-resolved").
+- \`mark-failed\` — when terminal-fail without escalation
+  ("inconclusive twice in a row; corp infra check").
+
+Skip the narrative on mechanical events (\`pick\`,
+\`acquire-worktree\`, file-blocker — its summary IS the
+narrative). The kind alone tells the lane diary what happened;
+narratives add character and context only where the agent has
+something to say.
+
+Lane diary surface: \`cc-cli clearinghouse log --today\` shows
+today's events. \`--replay <submission-id>\` walks one PR's
+journey. The corp keeps these forever — your narratives are
+durable.
 
 ## Why you exist
 

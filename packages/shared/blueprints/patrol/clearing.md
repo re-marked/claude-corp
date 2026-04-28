@@ -91,15 +91,41 @@ steps:
         the author.
 
       - `consistent-fail` — both runs failed on the same tests.
-        File a blocker (kind=`test-fail`) with the failure names
-        from `test.finalRun.failures` in the detail body. The
-        author needs to see exactly which tests failed.
+        Run attribution next (next step) before filing the blocker —
+        the failure may be a main-regression the PR is innocent of.
 
       - `inconclusive` — timeout, crash, or tool-missing. The corp's
         test environment is misbehaving in a way re-running won't
         fix. Use `mark-failed` (no requeue). If you see this twice
         in a row across different submissions, DM the founder —
         the corp infrastructure may be sick.
+  - id: attribute
+    title: "Attribution on consistent-fail (Project 1.12.3)"
+    description: |
+      Run `cc-cli clearinghouse attribute --from <slug>
+      --submission <id> --worktree <path> --branch <branch> --json`.
+
+      Re-runs the same tests on `origin/main` and compares failure
+      sets. Outcomes drive blocker routing:
+
+      - `pr-introduced` — PR's fault. File a blocker (kind=
+        test-fail) — default routes to author. Failure names go in
+        the detail body.
+      - `main-regression` — main is broken; the PR is innocent.
+        File a blocker (kind=test-fail) WITH `--route-to
+        engineering-lead`; the role responsible for main's health
+        owns the fix, not the PR author.
+      - `mixed` — split outcomes. Default route to author with
+        the PR-introduced subset called out; mention the shared-
+        with-main subset in the detail body so the author has
+        context but knows what's theirs.
+      - `inconclusive` — fall back to default file-blocker (route
+        to author). DM founder if attribution stays inconclusive
+        across multiple submissions.
+
+      Skip attribution only on cap-bypassed or low-priority work
+      where the cost of an extra test run exceeds the routing
+      value. Default for non-trivial PRs is to attribute.
   - id: merge
     title: Push the rebased branch
     description: |

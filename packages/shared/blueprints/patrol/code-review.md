@@ -50,6 +50,13 @@ steps:
         is standalone.
       - `diff.files` (path, status, additions, deletions),
         `diff.filteredFiles`, `diff.oversized` + reason.
+      - `relevantPatterns` (Project 1.12.3) — pattern-observation
+        chits the corp accumulated for this task's role + corp-
+        wide. **Priors for the drift pass.** When a pattern recurs
+        in this PR, file a blocker AND a fresh observation at
+        session end with `linkedComments` citing both prior and
+        current evidence. The recurrence count is what compounds
+        into CULTURE.md material later.
 
       If `diff.oversized` is true, reject immediately with a
       drift-blocker pointing at the scope-creep — don't try to
@@ -143,6 +150,37 @@ steps:
         nit         could-fix; advisory.
 
       Severity × category = 6 combinations. Pick deliberately.
+  - id: file-pattern-if-noticed
+    title: "(Optional) File a pattern-observation if a theme recurred"
+    description: |
+      Project 1.12.3 — at session end, before approve/reject,
+      consider whether anything you saw in this review is part
+      of a recurring pattern worth recording for future sessions.
+
+      File when:
+      - You saw 2+ similar findings across multiple sessions for
+        the same subject (role / area / corp-wide). One sighting
+        is a finding; three is a pattern.
+      - A pattern in `relevantPatterns` (returned by `diff` step)
+        recurred in this PR. File a fresh observation noting the
+        continuation, with `--linked-comments` citing both prior
+        and current evidence. The accumulating count is what
+        makes it CULTURE.md material later.
+
+      Don't file when:
+      - Single-PR observations — those are review-comments.
+      - A recent active observation already covers this exact
+        subject + finding. Read `relevantPatterns` first.
+
+      Command:
+
+        cc-cli editor file-pattern --from <slug>
+            --kind <role|codebase-area|corp-wide>
+            [--role <id>] [--area <path>]
+            --finding "..." [--linked-comments id,id,...] --json
+
+      Same pedagogical shape as review-comments: issue + why +
+      direction, one paragraph.
   - id: approve-or-reject
     title: Terminal — approve clean, reject if any blocker
     description: |
