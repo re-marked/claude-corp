@@ -412,13 +412,29 @@ async function approveAndMaybePromote(corpRoot: string, slug: string): Promise<v
           },
         );
 
-        // Project 1.12: fire enterClearance to push branch + create
-        // submission + advance task workflow. Best-effort: failures
-        // log to the audit trail but don't block the approve emit
-        // (the agent's session still ends; the founder can recover
-        // via cc-cli clearinghouse submit or by inspecting the log).
+        // Project 1.12: branching on editor-aware vs. clearinghouse-
+        // only behavior:
+        //
+        //   editor-aware + !capHit → dispatch Editor; do NOT fire
+        //     enterClearance now. Editor's approve / bypass fires it.
+        //   editor-aware + capHit  → bypass Editor; fire enterClearance
+        //     directly with reviewBypassed=true.
+        //   clearinghouse-only     → fire enterClearance directly with
+        //     reviewBypassed=true (1.12.1 behavior; same as bypass path).
+        //   neither                → normal close path (no defer).
+        //
+        // Best-effort everywhere; failures log without blocking the
+        // approve emit.
         if (clearinghouseActive && promotion.closedTaskId) {
-          await fireEnterClearance(corpRoot, slug, promotion.closedTaskId, workspace);
+          const { isEditorAwareCorp } = await import('@claudecorp/daemon');
+          const editorActive = isEditorAwareCorp(corpRoot);
+          const taskCapHit = readTaskEditorCapHit(corpRoot, promotion.closedTaskId);
+
+          if (editorActive && !taskCapHit) {
+            await dispatchEditorReview(corpRoot, slug, promotion.closedTaskId, workspace);
+          } else {
+            await fireEnterClearance(corpRoot, slug, promotion.closedTaskId, workspace);
+          }
         }
       }
     }
@@ -426,6 +442,91 @@ async function approveAndMaybePromote(corpRoot: string, slug: string): Promise<v
     logAuditError(corpRoot, slug, err);
   }
   emitDecision({ decision: 'approve' });
+}
+
+function readTaskEditorCapHit(corpRoot: string, taskId: string): boolean {
+  try {
+    const hit = findChitById(corpRoot, taskId);
+    if (!hit || hit.chit.type !== 'task') return false;
+    return (hit.chit as Chit<'task'>).fields.task.editorReviewCapHit === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Project 1.12.2 — editor-aware approve path. Captures the author's
+ * branch into the task chit and flips editorReviewRequested. Editor's
+ * watcher / Pulse-fallback sweep dispatches a session that walks
+ * patrol/code-review and either approves (firing enterClearance) or
+ * rejects (filing comments + escalation). The author's session ends
+ * here; they learn the outcome via inbox / DM / next-session Casket.
+ *
+ * Best-effort: a setEditorReviewRequested failure is logged but
+ * doesn't block the approve emit. If the request fails, no Editor
+ * dispatch will occur for this task; founder sees it via
+ * `cc-cli editor status` and can manually re-fire.
+ *
+ * Falls back to enterClearance (with reviewBypassed=true) when the
+ * branch can't be read, since without a branch Editor has nothing
+ * to review and the task would strand at under_review otherwise —
+ * mirroring fireEnterClearance's branch-issue handling.
+ */
+async function dispatchEditorReview(
+  corpRoot: string,
+  slug: string,
+  taskId: string,
+  workspacePath: string,
+): Promise<void> {
+  try {
+    const branch = readCurrentBranch(workspacePath);
+    if (!branch || branch === 'HEAD' || branch === 'main') {
+      // No reviewable branch — fall back to bypass path so the
+      // submission still flows (with reviewBypassed=true).
+      logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
+        event: 'editor-dispatch-skipped',
+        reason: branch
+          ? `worktree on '${branch}' — refusing to dispatch Editor`
+          : 'could not read current branch',
+        taskId,
+      });
+      await fireEnterClearance(corpRoot, slug, taskId, workspacePath);
+      return;
+    }
+
+    const { setEditorReviewRequested } = await import('@claudecorp/daemon');
+    const result = setEditorReviewRequested({
+      corpRoot,
+      taskId,
+      branchUnderReview: branch,
+      requestedBy: slug,
+    });
+    if (!result.ok) {
+      logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
+        event: 'editor-dispatch-failed',
+        taskId,
+        branch,
+        summary: result.failure.pedagogicalSummary,
+      });
+      // Fall back to bypass path so the work doesn't strand.
+      await fireEnterClearance(corpRoot, slug, taskId, workspacePath);
+      return;
+    }
+
+    logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
+      event: 'editor-dispatch-requested',
+      taskId,
+      branch,
+    });
+  } catch (err) {
+    logAuditError(corpRoot, slug, err);
+    // Best-effort fallback so failures here don't strand the task.
+    try {
+      await fireEnterClearance(corpRoot, slug, taskId, workspacePath);
+    } catch (innerErr) {
+      logAuditError(corpRoot, slug, innerErr);
+    }
+  }
 }
 
 /**
