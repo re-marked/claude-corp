@@ -636,6 +636,7 @@ async function fireEnterClearance(
         taskId,
         contractId,
         branch,
+        reviewRound,
         submissionId: result.value.submissionId,
         pushedSha: result.value.pushedSha ?? null,
       });
@@ -653,6 +654,7 @@ async function fireEnterClearance(
         taskId,
         contractId,
         branch,
+        reviewRound,
         category: result.failure.category,
         summary: result.failure.pedagogicalSummary,
         retryable: result.failure.retryable,
