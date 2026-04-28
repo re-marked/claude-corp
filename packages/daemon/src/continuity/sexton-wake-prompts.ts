@@ -40,8 +40,12 @@ import {
   readBacteriaEvents,
   readPausedRoles,
   listActiveBreakers,
+  rankQueue,
+  readClearinghouseLock,
+  queryChits,
   type ApoptoseEvent,
   type BacteriaEvent,
+  type Chit,
   type Member,
   readConfig,
   MEMBERS_JSON,
@@ -199,12 +203,13 @@ export function dispatchMessageFor(
   // working session.
   const poolSection = action === 'nudge' ? '' : composePoolActivitySection(corpRoot);
   const breakerSection = action === 'nudge' ? '' : composeActiveBreakersSection(corpRoot);
+  const clearinghouseSection = action === 'nudge' ? '' : composeClearinghouseSection(corpRoot);
 
   switch (action) {
     case 'start':
-      return START_MESSAGE + poolSection + breakerSection;
+      return START_MESSAGE + poolSection + breakerSection + clearinghouseSection;
     case 'wake':
-      return WAKE_MESSAGE + poolSection + breakerSection;
+      return WAKE_MESSAGE + poolSection + breakerSection + clearinghouseSection;
     case 'nudge':
       return NUDGE_MESSAGE;
     case 'nothing':
@@ -386,6 +391,121 @@ function composeActiveBreakersSection(corpRoot: string | undefined): string {
   lines.push(
     'Reset path: `cc-cli breaker reset --slug <slug>` (after fixing the cause). Forensic detail: `cc-cli breaker show <slug>`.',
   );
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+// ─── Clearinghouse section (Project 1.12.3) ─────────────────────────
+
+/**
+ * Reads the merge-lane state and recent lane-events; composes a
+ * one-section summary for Sexton's wake/start prompt. Sexton uses
+ * this to flag lane health issues — stuck queues, repeated
+ * main-regression attribution, accumulating blockers — without the
+ * founder having to grep diaries.
+ *
+ * Returns empty string when the corp has no lane activity to report
+ * (no in-flight, empty queue, no recent events). Sexton stays
+ * focused on patrols when the lane is quiet.
+ *
+ * Window: events since start-of-day for the rolling stats. The lock
+ * + queue are point-in-time reads.
+ */
+function composeClearinghouseSection(corpRoot: string | undefined): string {
+  if (!corpRoot) return '';
+
+  let lock: ReturnType<typeof readClearinghouseLock>;
+  let queue: ReturnType<typeof rankQueue>;
+  let eventsResult: ReturnType<typeof queryChits<'lane-event'>>;
+  try {
+    lock = readClearinghouseLock(corpRoot);
+    queue = rankQueue(corpRoot);
+    eventsResult = queryChits<'lane-event'>(corpRoot, {
+      types: ['lane-event'],
+      scopes: ['corp'],
+    });
+  } catch {
+    return '';
+  }
+
+  const startOfDay = startOfTodayIso();
+  const todayEvents = eventsResult.chits
+    .map((c) => c.chit as Chit<'lane-event'>)
+    .filter((e) => (e.createdAt ?? '') >= startOfDay);
+
+  // Aggregate stats over today's window.
+  let merged = 0;
+  let blocked = 0;
+  let failed = 0;
+  let attributedMain = 0;
+  let attributedMixed = 0;
+  let editorRejected = 0;
+  let editorBypassed = 0;
+  for (const e of todayEvents) {
+    const k = e.fields['lane-event'].kind;
+    if (k === 'submission-finalized') merged++;
+    else if (k === 'submission-blocked') blocked++;
+    else if (k === 'submission-failed') failed++;
+    else if (k === 'tests-attributed-main') attributedMain++;
+    else if (k === 'tests-attributed-mixed') attributedMixed++;
+    else if (k === 'editor-rejected') editorRejected++;
+    else if (k === 'editor-bypassed') editorBypassed++;
+  }
+
+  // Skip when nothing to say — quiet lane shouldn't fill space.
+  const queueDepth = queue.length;
+  const lockHeld = lock.heldBy !== null;
+  const anyToday =
+    merged + blocked + failed + attributedMain + attributedMixed + editorRejected + editorBypassed > 0;
+  if (!lockHeld && queueDepth === 0 && !anyToday) return '';
+
+  const lines: string[] = [];
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  lines.push('## Active clearinghouse');
+  lines.push('');
+
+  if (lockHeld) {
+    lines.push(
+      `Lock held by \`${lock.heldBy}\` on submission \`${lock.submissionId ?? '?'}\` since ${lock.claimedAt ?? '?'}.`,
+    );
+  } else {
+    lines.push('Lock free.');
+  }
+  lines.push(`Queue depth: ${queueDepth}.`);
+
+  if (anyToday) {
+    lines.push('');
+    lines.push('Today:');
+    if (merged > 0) lines.push(`  - ${merged} merged.`);
+    if (blocked > 0) lines.push(`  - ${blocked} blocked (escalation chits routed to authors / engineering-lead).`);
+    if (failed > 0) lines.push(`  - ${failed} failed (terminal — see \`cc-cli clearinghouse log --failed-only --today\`).`);
+    if (editorRejected > 0) lines.push(`  - ${editorRejected} review rounds rejected by Editor.`);
+    if (editorBypassed > 0) lines.push(`  - ${editorBypassed} cap-bypassed (Editor capped out — review process or contract decomposition may be too coarse for the affected role).`);
+    if (attributedMain > 0) {
+      lines.push(`  - ${attributedMain} test failure(s) attributed to MAIN regression — engineering-lead notified, PR authors innocent.`);
+    }
+    if (attributedMixed > 0) {
+      lines.push(`  - ${attributedMixed} mixed test attributions (PR-introduced + pre-existing main failures).`);
+    }
+  }
+
+  // Loud signal: repeated main-regressions in one day mean main's
+  // health is degrading; Sexton should escalate to founder rather
+  // than wait for the next sweep.
+  if (attributedMain >= 2) {
+    lines.push('');
+    lines.push(`**Signal:** ${attributedMain} main-regressions today. Worth flagging to the founder — main's health is degrading faster than the engineering-lead can address.`);
+  }
+  if (editorBypassed >= 2) {
+    lines.push('');
+    lines.push(`**Signal:** ${editorBypassed} cap-bypasses today. The review process is consistently failing to converge for some role — investigate via \`cc-cli editor list\` filtered to the affected role.`);
+  }
+
+  lines.push('');
+  lines.push('Diary: `cc-cli clearinghouse log --today`. Forensic per-submission: `cc-cli clearinghouse show <id>`.');
   lines.push('');
 
   return lines.join('\n');
