@@ -356,7 +356,7 @@ describe('rejectReview', () => {
   beforeEach(() => { corpRoot = mkdtempSync(join(tmpdir(), 'reject-')); });
   afterEach(() => { try { rmSync(corpRoot, { recursive: true, force: true }); } catch { /* Windows */ } });
 
-  it('increments editorReviewRound + clears claim + files escalation', () => {
+  it('increments editorReviewRound + clears claim + files escalation + reverts workflowStatus to in_progress', () => {
     const task = createTask(corpRoot, {
       editorReviewRequested: true,
       branchUnderReview: 'feat/x',
@@ -383,6 +383,10 @@ describe('rejectReview', () => {
       expect(f.editorReviewRequested).toBe(false);
       expect(f.reviewerClaim).toBeNull();
       expect(f.branchUnderReview).toBeNull();
+      // Codex P1 round 3: workflowStatus must move under_review →
+      // in_progress so the author can re-run cc-cli done after
+      // addressing the rejection comments.
+      expect(f.workflowStatus).toBe('in_progress');
     }
   });
 
