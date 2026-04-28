@@ -78,20 +78,25 @@ export class LaneEventWatcher {
   private debounce = new Map<string, NodeJS.Timeout>();
   private dir: string;
   /**
-   * Boot timestamp captured at construction. Backfill on first
-   * subscribe replays events with mtime >= this — catches lane-
-   * events written during the lazy-wait gap before the watcher
-   * subscribed, without re-firing the entire historical archive
-   * on every daemon boot.
+   * Watermark advancing past the createdAt of the most recent
+   * event we've fully processed (notified or deterministically
+   * filtered). Initialized to boot time so the first subscribe
+   * replays gap events without flooding pre-boot history. Every
+   * subsequent subscribe — including post-error mid-life
+   * resubscribes — backfills only events the watermark hasn't
+   * yet covered, closing the 2s mid-day gap fs.watch leaves
+   * behind without re-firing all history.
+   *
+   * Codex round 3 P2: prior `bootTimestamp + didBackfill` design
+   * fixed cold-boot but lost mid-day gap events; the watermark
+   * unifies both cases.
    */
-  private bootTimestamp: string;
-  /** First-subscribe latch — re-subscribes after errors don't re-replay. */
-  private didBackfill = false;
+  private lastHandledMtime: string;
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
     this.dir = join(daemon.corpRoot, 'chits', 'lane-event');
-    this.bootTimestamp = new Date().toISOString();
+    this.lastHandledMtime = new Date().toISOString();
   }
 
   start(): void {
@@ -127,18 +132,12 @@ export class LaneEventWatcher {
         setTimeout(() => this.subscribe(), 2000);
       });
       log(`[lane-event-watcher] watching ${this.dir}`);
-      // Backfill once: lane-events written between daemon boot and
-      // the first successful subscribe (e.g. during the 30s lazy
-      // retry, or any errored-resubscribe gap) won't reach the
-      // watcher otherwise — fs.watch reports future changes only.
-      // mtime filter avoids replaying pre-boot history.
-      // Codex round 2 P2: gap-window blocker/merge notifications
-      // were silently dropped on a fresh corp where chits/lane-event
-      // didn't exist at constructor time.
-      if (!this.didBackfill) {
-        this.didBackfill = true;
-        void this.backfill();
-      }
+      // Backfill on every successful subscribe — initial or after
+      // a mid-life error-resubscribe. Watermark gate makes this a
+      // near-no-op in steady state (most files predate the
+      // watermark) while still covering the 2s gap fs.watch leaves
+      // when watcher.on('error') fires.
+      void this.backfill();
     } catch (err) {
       logError(`[lane-event-watcher] subscribe failed: ${err instanceof Error ? err.message : String(err)} — retrying in 5s`);
       setTimeout(() => this.subscribe(), 5000);
@@ -158,10 +157,12 @@ export class LaneEventWatcher {
       if (!entry.endsWith('.md')) continue;
       try {
         // mtime gate — cheap stat avoids reading + parsing every
-        // historical chit just to discover it predates this boot.
+        // historical chit just to discover it predates the
+        // watermark. Steady-state resubscribes filter out almost
+        // everything here without ever opening a chit file.
         const path = join(this.dir, entry);
         const st = await stat(path);
-        if (st.mtime.toISOString() < this.bootTimestamp) continue;
+        if (st.mtime.toISOString() <= this.lastHandledMtime) continue;
       } catch {
         continue;
       }
@@ -197,16 +198,30 @@ export class LaneEventWatcher {
       if (!hit || hit.chit.type !== 'lane-event') return;
       event = hit.chit as Chit<'lane-event'>;
     } catch {
-      return; // partial-write race; next change re-fires
+      return; // partial-write race; next change re-fires (no watermark advance)
     }
 
     const f = event.fields['lane-event'];
-    if (!NOTIFY_KINDS.has(f.kind)) return;
+    if (NOTIFY_KINDS.has(f.kind)) {
+      try {
+        await this.fire(f);
+      } catch (err) {
+        logError(`[lane-event-watcher] fire failed for ${chitId} (${f.kind}): ${err instanceof Error ? err.message : String(err)}`);
+        // Still advance — post()'s 5s dedup makes a backfill replay
+        // a no-op anyway, and we don't want a single transient post
+        // failure to stick the watermark forever.
+      }
+    }
+    // Advance the watermark once we've fully looked at the event,
+    // including filtered (non-NOTIFY_KINDS) cases — replaying them
+    // would just re-filter and waste cycles.
+    this.advanceWatermark(event.createdAt);
+  }
 
-    try {
-      await this.fire(f);
-    } catch (err) {
-      logError(`[lane-event-watcher] fire failed for ${chitId} (${f.kind}): ${err instanceof Error ? err.message : String(err)}`);
+  private advanceWatermark(createdAt: string | undefined): void {
+    if (!createdAt) return;
+    if (createdAt > this.lastHandledMtime) {
+      this.lastHandledMtime = createdAt;
     }
   }
 
