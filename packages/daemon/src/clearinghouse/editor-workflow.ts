@@ -147,6 +147,14 @@ export interface SetEditorReviewRequestedOpts {
  * IS held (Editor mid-review), it's also a no-op — the in-flight
  * review will resolve via approve / reject and audit re-fires next
  * cycle if needed.
+ *
+ * Defensive: refuses to set the flag on a task that isn't at
+ * `workflowStatus === 'under_review'`. Audit's invariant is to
+ * only call from the approve path (which always lands tasks at
+ * under_review) — but if a future caller fires this from elsewhere
+ * we'd silently mark non-review-eligible tasks for review and
+ * Editor would either skip them (workflowStatus filter in
+ * pickNextReview) or process them incorrectly. Reject loudly.
  */
 export function setEditorReviewRequested(
   opts: SetEditorReviewRequestedOpts,
@@ -161,6 +169,14 @@ export function setEditorReviewRequested(
   }
   const taskChit = hit.chit as Chit<'task'>;
   const taskFields = taskChit.fields.task;
+
+  if (taskFields.workflowStatus !== 'under_review') {
+    return err(failure(
+      'unknown',
+      `setEditorReviewRequested: task ${opts.taskId} is at workflowStatus='${taskFields.workflowStatus ?? 'unknown'}', expected 'under_review'`,
+      'audit fires this only on the approve path; non-approve callers indicate a logic error',
+    ));
+  }
 
   // Already requested + no in-flight claim? Idempotent no-op.
   if (taskFields.editorReviewRequested === true && (taskFields.reviewerClaim ?? null) === null) {
@@ -654,7 +670,7 @@ export function rejectReview(opts: RejectReviewOpts): Result<RejectReviewResult>
   }
 
   const newRound = (taskFields.editorReviewRound ?? 0) + 1;
-  const cap = resolveCap(taskFields);
+  const cap = resolveCap(opts.corpRoot, taskFields);
   const capHit = newRound >= cap;
 
   // 1. Update the task: increment round, maybe set capHit, clear
@@ -723,16 +739,36 @@ export function rejectReview(opts: RejectReviewOpts): Result<RejectReviewResult>
   return ok({ newRound, capHit, escalationId });
 }
 
-function resolveCap(taskFields: TaskFields): number {
-  // Cap lookup: assignee's role's editorReviewRoundCap, falls back
-  // to handedBy's role, falls back to the default. We can't look up
-  // a slug's role here without members.json — the assignee field
-  // holds slug or role string. Try to resolve as a role first; if
-  // that fails, default cap.
+function resolveCap(corpRoot: string, taskFields: TaskFields): number {
+  // Cap lookup walks slug → members.json → role → role's
+  // editorReviewRoundCap, falling back to the default. assignee /
+  // handedBy fields can hold either a slug (specific Member.id) or
+  // a role string — try both interpretations so per-role caps
+  // actually apply when the task is slug-assigned (the common case).
   const candidates = [taskFields.assignee, taskFields.handedBy].filter(
     (x): x is string => typeof x === 'string' && x.length > 0,
   );
+
+  let members: Member[] | null = null;
+  try {
+    members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  } catch {
+    // members.json unreadable — fall through to role-string-only
+    // resolution + default.
+  }
+
   for (const candidate of candidates) {
+    // First: candidate-as-slug → resolve role via members.json.
+    if (members) {
+      const member = members.find((m) => m.id === candidate);
+      if (member?.role) {
+        const role = getRole(member.role);
+        if (role && typeof role.editorReviewRoundCap === 'number') {
+          return role.editorReviewRoundCap;
+        }
+      }
+    }
+    // Second: candidate-as-role-string (legacy / unassigned tasks).
     const role = getRole(candidate);
     if (role && typeof role.editorReviewRoundCap === 'number') {
       return role.editorReviewRoundCap;
@@ -884,6 +920,136 @@ export function releaseReview(opts: ReleaseReviewOpts): Result<void> {
     ));
   }
   return ok(undefined);
+}
+
+// ─── Stale-claim recovery (mirrors the Pressman lane's resume) ───────
+
+/**
+ * A task whose `reviewerClaim.slug` references an Editor that's no
+ * longer alive. Identified by the daemon-side sweep so claims left
+ * behind by crashed Editors don't strand tasks indefinitely.
+ */
+export interface OrphanedReviewerClaim {
+  readonly taskId: string;
+  /** Slug that held the claim — used in the audit-log reason on reset. */
+  readonly orphanedFrom: string;
+  /** Original claim timestamp, for retrospective. */
+  readonly claimedAt: string;
+}
+
+/**
+ * Walk active tasks, return any whose `reviewerClaim` is held by a
+ * slug the supplied predicate reports as not-alive. Pure-ish: only
+ * I/O is the chit query; the aliveness predicate is supplied by the
+ * caller (typically composed from processManager.getAgent).
+ *
+ * Mirrors `findOrphanedProcessingSubmissions` in the Pressman lane.
+ */
+export function findOrphanedReviewerClaims(
+  corpRoot: string,
+  isAlive: (slug: string) => boolean,
+): ReadonlyArray<OrphanedReviewerClaim> {
+  let result: ReturnType<typeof queryChits<'task'>>;
+  try {
+    result = queryChits<'task'>(corpRoot, {
+      types: ['task'],
+      statuses: ['active'],
+    });
+  } catch {
+    return [];
+  }
+  const orphans: OrphanedReviewerClaim[] = [];
+  for (const c of result.chits) {
+    const t = c.chit as Chit<'task'>;
+    const claim = t.fields.task.reviewerClaim ?? null;
+    if (!claim) continue;
+    if (isAlive(claim.slug)) continue;
+    orphans.push({
+      taskId: t.id,
+      orphanedFrom: claim.slug,
+      claimedAt: claim.claimedAt,
+    });
+  }
+  return orphans;
+}
+
+/**
+ * Reset one task's reviewerClaim back to null so the next Editor
+ * pickNextReview can re-claim. Idempotent: no-op when the claim
+ * has already been cleared. Records `output` annotation for
+ * retrospective so a founder grepping later sees what happened.
+ *
+ * Does NOT increment `editorReviewRound` — the original Editor
+ * never finished, so this isn't a rejection. The replacement
+ * Editor reviews the same round fresh.
+ */
+export function resetOrphanedReviewerClaim(
+  corpRoot: string,
+  taskId: string,
+  reason: string,
+): void {
+  const hit = findChitById(corpRoot, taskId);
+  if (!hit || hit.chit.type !== 'task') return;
+  const taskChit = hit.chit as Chit<'task'>;
+  const taskFields = taskChit.fields.task;
+  if ((taskFields.reviewerClaim ?? null) === null) return;
+
+  const scope = chitScopeFromPath(corpRoot, hit.path);
+  try {
+    updateChit<'task'>(corpRoot, scope, 'task', taskChit.id, {
+      updatedBy: 'system:editor-resume',
+      fields: {
+        task: {
+          ...taskFields,
+          reviewerClaim: null,
+          output: ((taskFields.output ?? '') + `\n[reviewer-claim reset: ${reason}]`).trim(),
+        },
+      },
+    });
+  } catch (cause) {
+    // Best-effort — surface to stderr so the daemon log captures it
+    // but don't throw, mirroring resumeClearinghouse's posture.
+    process.stderr.write(
+      `[editor-workflow:resume] reset failed for ${taskId}: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+    );
+  }
+}
+
+export interface ResumeEditorReviewsResult {
+  readonly claimsReset: number;
+}
+
+/**
+ * Boot-time + periodic sweeper composer for the editor lane. Walks
+ * orphaned reviewer claims (claimer not alive per `isAlive`) and
+ * resets each so the next Editor wake re-picks. Best-effort per
+ * orphan; one failure doesn't poison the rest.
+ *
+ * Daemon calls this at startup (after processManager initializes,
+ * so `isAlive` returns meaningful values) and from the editor sweep
+ * at regular cadence.
+ */
+export function resumeEditorReviews(
+  corpRoot: string,
+  isAlive: (slug: string) => boolean,
+): ResumeEditorReviewsResult {
+  const orphans = findOrphanedReviewerClaims(corpRoot, isAlive);
+  let resetCount = 0;
+  for (const o of orphans) {
+    try {
+      resetOrphanedReviewerClaim(
+        corpRoot,
+        o.taskId,
+        `Editor '${o.orphanedFrom}' no longer alive at resume time — claim cleared.`,
+      );
+      resetCount++;
+    } catch (cause) {
+      process.stderr.write(
+        `[editor-workflow:resume] reset threw for ${o.taskId}: ${cause instanceof Error ? cause.message : String(cause)}\n`,
+      );
+    }
+  }
+  return { claimsReset: resetCount };
 }
 
 // ─── Internals ───────────────────────────────────────────────────────

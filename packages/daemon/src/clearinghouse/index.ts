@@ -262,6 +262,9 @@ export {
   rejectReview,
   bypassReview,
   releaseReview,
+  findOrphanedReviewerClaims,
+  resetOrphanedReviewerClaim,
+  resumeEditorReviews,
 } from './editor-workflow.js';
 export type {
   PickedReview,
@@ -279,4 +282,6 @@ export type {
   BypassReviewOpts,
   ReleaseReviewOpts,
   SetEditorReviewRequestedOpts,
+  OrphanedReviewerClaim,
+  ResumeEditorReviewsResult,
 } from './editor-workflow.js';
