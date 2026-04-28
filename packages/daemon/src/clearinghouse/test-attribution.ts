@@ -208,32 +208,62 @@ export interface RunOnRefOpts {
 
 /**
  * Switch the worktree to `refToTest`, run tests, restore to
- * `restoreRef`. Best-effort restore: if the restore fails after
- * a successful test run, we surface that as a separate failure —
- * the test result still bubbles up, but the worktree is now in
- * a known-broken state and the caller should release/recreate it.
+ * `restoreRef`. Three failure shapes:
+ *
+ *   - checkout-to-refToTest fails → return err; restore not attempted
+ *     (we never moved off the original ref, so worktree is still
+ *     valid).
+ *   - tests run but checkout-back-to-restoreRef fails → return ok
+ *     with the test result, but the worktree is in a known-broken
+ *     state. Caller should release/recreate it. Surfaced via the
+ *     {@link RunOnRefResult.restoreFailure} optional field rather
+ *     than dropping the test result, since the test data is still
+ *     valid.
+ *   - test runner fails → return err; restore is attempted but
+ *     errors swallowed (we already have an err to report).
  *
  * This is the impure counterpart to the pure `attributeFailure` /
  * `compareRuns` functions. Pressman composes them when it wants
- * to do main-attribution.
- *
- * Note: `gitOps` doesn't expose `checkout` directly (we kept the
- * GitOps interface tight). For v1 we'd add a `checkoutRef` method;
- * since we don't have it, this is a v2 implementation hook. The
- * shape exists so callers know what to expect; the body throws if
- * called until the GitOps extension lands.
+ * to do main-attribution. Project 1.12.3 lands the real impl now
+ * that GitOps.checkoutRef exists.
  */
-export async function runTestsOnRef(opts: RunOnRefOpts): Promise<Result<TestRunResult>> {
-  // Forward-compat stub: the GitOps interface needs a `checkoutRef`
-  // method to land cleanly. Adding it is a one-liner extension in
-  // a future PR; for now we surface the gap explicitly so callers
-  // see it at orchestration time rather than silently doing the
-  // wrong thing.
-  return err(failure(
-    'unknown',
-    `runTestsOnRef requires gitOps.checkoutRef which isn't implemented yet — Pressman in PR 3 should add the method or run main-tests via a separate worktree.`,
-    `opts.refToTest=${opts.refToTest}; opts.restoreRef=${opts.restoreRef}`,
-  ));
+export interface RunOnRefResult {
+  /** The test outcome from the refToTest run. */
+  readonly result: TestRunResult;
+  /**
+   * Populated when the post-test restore-checkout failed. Test
+   * data is still valid; worktree is in an unknown branch state
+   * and the caller should release it before another acquire.
+   */
+  readonly restoreFailure?: FailureRecord;
+}
+
+export async function runTestsOnRef(opts: RunOnRefOpts): Promise<Result<RunOnRefResult>> {
+  const { worktreePath, refToTest, restoreRef, gitOps, testOpts } = opts;
+
+  // 1. Switch to the target ref. If this fails, we never moved off
+  // the original — return err and let the caller decide.
+  const checkoutResult = await gitOps.checkoutRef(worktreePath, refToTest);
+  if (!checkoutResult.ok) {
+    return err(checkoutResult.failure);
+  }
+
+  // 2. Run tests at the target ref.
+  const testResult = await runTests({ ...testOpts, cwd: worktreePath });
+  if (!testResult.ok) {
+    // Best-effort restore — we already have an error to surface.
+    await gitOps.checkoutRef(worktreePath, restoreRef).catch(() => undefined);
+    return err(testResult.failure);
+  }
+
+  // 3. Restore. Surface restore failure as a side-channel via the
+  // result shape so the test data still reaches the caller (it's
+  // useful even if the worktree is now half-broken).
+  const restoreResult = await gitOps.checkoutRef(worktreePath, restoreRef);
+  const out: RunOnRefResult = restoreResult.ok
+    ? { result: testResult.value }
+    : { result: testResult.value, restoreFailure: restoreResult.failure };
+  return ok(out);
 }
 
 /**

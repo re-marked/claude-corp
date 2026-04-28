@@ -152,6 +152,26 @@ export interface GitOps {
    * catch on PR #192).
    */
   cleanWorkdir(worktreePath: string): Promise<Result<void>>;
+
+  /**
+   * Project 1.12.3 — switch the worktree's HEAD to the named ref.
+   *
+   * Used by the test-attribution flow: Pressman calls this to
+   * temporarily check out `origin/main` before re-running tests, so
+   * `attributeFailure` can compare PR-vs-main outcomes. Caller is
+   * responsible for restoring the original ref after the comparison.
+   *
+   * Refuses when the working tree has uncommitted changes (git
+   * checkout's default behavior). Caller should call cleanWorkdir +
+   * resetHard first if they need a force-checkout — kept conservative
+   * because force-checkout-with-dirty-tree silently discards work,
+   * which would be catastrophic mid-rebase.
+   *
+   * Detached HEAD is fine when ref is a sha or a remote ref like
+   * `origin/main`. The restore checkout brings HEAD back to the
+   * original branch / ref the caller supplies.
+   */
+  checkoutRef(worktreePath: string, ref: string): Promise<Result<void>>;
 }
 
 export interface WorktreeEntry {
@@ -354,6 +374,19 @@ export const realGitOps: GitOps = {
     const result = await runGit(['clean', '-fdx'], {
       cwd: worktreePath,
       operationLabel: 'clean -fdx',
+    });
+    if (!result.ok) return err(result.failure);
+    return ok(undefined);
+  },
+
+  async checkoutRef(worktreePath, ref) {
+    // Plain `git checkout <ref>` — no --force. If the working tree
+    // has uncommitted changes git refuses with a non-zero exit and
+    // a clear error; the caller should resetHard + cleanWorkdir
+    // first if they need to force.
+    const result = await runGit(['checkout', ref], {
+      cwd: worktreePath,
+      operationLabel: `checkout ${ref}`,
     });
     if (!result.ok) return err(result.failure);
     return ok(undefined);

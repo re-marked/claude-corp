@@ -143,6 +143,7 @@ export type {
   RunComparison,
   AttributedFailure,
   RunOnRefOpts,
+  RunOnRefResult,
   RunWithFlakeRetryOpts,
   RunWithFlakeRetryResult,
 } from './test-attribution.js';
