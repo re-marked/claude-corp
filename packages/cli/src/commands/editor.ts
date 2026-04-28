@@ -59,6 +59,11 @@ export async function cmdEditor(rawArgs: string[]): Promise<void> {
       await cmdEditorFileComment(subArgs);
       break;
     }
+    case 'file-pattern': {
+      const { cmdEditorFilePattern } = await import('./editor/file-pattern.js');
+      await cmdEditorFilePattern(subArgs);
+      break;
+    }
     case 'approve': {
       const { cmdEditorApprove } = await import('./editor/approve.js');
       await cmdEditorApprove(subArgs);
@@ -121,6 +126,16 @@ Lifecycle subcommands (Editor session walks these in order):
                     --review-round <n> [--json]
                     Cut review-comment chit. Severity 'blocker' rejects
                     the round; 'suggestion'/'nit' advisory only.
+
+  file-pattern      --from <slug>
+                    --kind <role|codebase-area|corp-wide>
+                    [--role <id>] [--area <path>]
+                    --finding "..." [--linked-comments <id,id,...>] [--json]
+                    Project 1.12.3 — record a recurring theme as a
+                    pattern-observation chit. Future review sessions
+                    read relevant observations as priors for the
+                    drift pass; the corp's review taste tightens
+                    monotonically.
 
 Terminal-state subcommands:
   approve           --from <slug> --task <id> --worktree <path> [--json]

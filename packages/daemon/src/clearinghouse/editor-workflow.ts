@@ -62,6 +62,8 @@ import {
   type LaneEventFields,
   type LaneEventKind,
   type LaneEventPayload,
+  type PatternObservationFields,
+  type PatternSubject,
   type ReviewCommentFields,
   type TaskFields,
   type TaskWorkflowStatus,
@@ -92,6 +94,29 @@ export interface ReviewContext {
   readonly task: TaskFields;
   readonly contract: ContractFields | null;
   readonly contractId: string | null;
+  /**
+   * Project 1.12.3 — pattern-observation chits relevant to this
+   * review. Returned as priors for the drift pass: Editor reads the
+   * recurring themes the corp has flagged for this role + corp-wide
+   * before forming its own findings.
+   *
+   * Filter applied:
+   *   - corp-wide observations: always included.
+   *   - role-scoped: included when the subject role matches either
+   *     the task's assignee role (resolved via members.json when
+   *     assignee is a slug) or the task's handedBy role.
+   *   - codebase-area: NOT auto-included in v1 — would require
+   *     touched-path data this primitive doesn't have. Editor's
+   *     session can query area-specific observations separately
+   *     via `cc-cli chit list --type pattern-observation` if the
+   *     diff scope makes them relevant.
+   *
+   * Sorted createdAt desc — most recent observations first, so the
+   * agent sees current patterns at a glance. Active observations
+   * only (closed/burning excluded — those have been retired or
+   * dismissed).
+   */
+  readonly relevantPatterns: readonly Chit<'pattern-observation'>[];
 }
 
 export interface ApproveReviewResult {
@@ -533,6 +558,11 @@ export function loadReviewContext(opts: LoadReviewContextOpts): Result<ReviewCon
     // Soft-fail — contract lookup is best-effort.
   }
 
+  // Project 1.12.3 — load relevant pattern-observations as priors
+  // for the drift pass. Best-effort; chit-store I/O failures fall
+  // through with empty priors.
+  const relevantPatterns = loadRelevantPatterns(opts.corpRoot, taskFields);
+
   return ok({
     taskId: opts.taskId,
     branchUnderReview: taskFields.branchUnderReview,
@@ -540,7 +570,138 @@ export function loadReviewContext(opts: LoadReviewContextOpts): Result<ReviewCon
     task: taskFields,
     contract,
     contractId,
+    relevantPatterns,
   });
+}
+
+/**
+ * Resolve the role of a slug-or-role-string. When the candidate
+ * looks up as a Member, returns that Member's role; otherwise
+ * (treats the candidate AS a role string) returns it directly.
+ * Used for both pattern-observation relevance and elsewhere in
+ * editor-workflow's resolveCap.
+ */
+function resolveRoleOf(corpRoot: string, candidate: string | null | undefined): string | null {
+  if (!candidate) return null;
+  try {
+    const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+    const member = members.find((m) => m.id === candidate);
+    if (member?.role) return member.role;
+  } catch {
+    // members.json unreadable — fall through to candidate-as-role.
+  }
+  // If the candidate is a known role id, return it directly. Otherwise
+  // null — assignee was a slug we couldn't resolve to a member.
+  const role = getRole(candidate);
+  return role ? candidate : null;
+}
+
+function loadRelevantPatterns(
+  corpRoot: string,
+  taskFields: TaskFields,
+): readonly Chit<'pattern-observation'>[] {
+  const assigneeRole = resolveRoleOf(corpRoot, taskFields.assignee);
+  const handedByRole = resolveRoleOf(corpRoot, taskFields.handedBy);
+  const relevantRoles = new Set<string>();
+  if (assigneeRole) relevantRoles.add(assigneeRole);
+  if (handedByRole) relevantRoles.add(handedByRole);
+
+  let result: ReturnType<typeof queryChits<'pattern-observation'>>;
+  try {
+    result = queryChits<'pattern-observation'>(corpRoot, {
+      types: ['pattern-observation'],
+      scopes: ['corp'],
+      statuses: ['active'],
+    });
+  } catch {
+    return [];
+  }
+
+  const matched: Chit<'pattern-observation'>[] = [];
+  for (const c of result.chits) {
+    const subject = c.chit.fields['pattern-observation'].subject;
+    if (subject.kind === 'corp-wide') {
+      matched.push(c.chit as Chit<'pattern-observation'>);
+    } else if (subject.kind === 'role' && subject.role && relevantRoles.has(subject.role)) {
+      matched.push(c.chit as Chit<'pattern-observation'>);
+    }
+    // codebase-area not filtered here; v1 leaves area-specific
+    // observations to manual querying via cc-cli chit list.
+  }
+  matched.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  return matched;
+}
+
+// ─── filePatternObservation ──────────────────────────────────────────
+
+export interface FilePatternObservationOpts {
+  corpRoot: string;
+  /** Editor's Member.id. Authored on the chit's reviewerSlug + createdBy. */
+  reviewerSlug: string;
+  /** What the pattern is about — discriminator + matching detail field. */
+  subject: PatternSubject;
+  /**
+   * One-paragraph finding describing the pattern. Pedagogical shape:
+   * the *what* (the editor saw), the *why* (it matters), and (when
+   * applicable) the *fix* worth pushing on.
+   */
+  finding: string;
+  /**
+   * Optional review-comment chit ids that informed this observation.
+   * Lets readers walk from the pattern back to specific instances.
+   */
+  linkedComments?: readonly string[] | null;
+}
+
+export interface FilePatternObservationResult {
+  /** Chit id of the new pattern-observation. */
+  readonly observationId: string;
+}
+
+/**
+ * Project 1.12.3 — Editor's writer for pattern-observation chits.
+ *
+ * The compounding-judgment loop's emit point: at session end, when
+ * Editor noticed a recurring theme worth recording, this primitive
+ * creates the observation chit that future loadReviewContext calls
+ * will return as a prior.
+ *
+ * Pure event-sourced — each call writes a new chit. The agent
+ * decides whether the new finding is novel by reading existing
+ * observations (from loadReviewContext.relevantPatterns or via
+ * cc-cli chit list); this primitive doesn't dedupe or merge.
+ *
+ * Subject-kind consistency is enforced by the chit-types validator
+ * (role requires role string; codebase-area requires path; corp-wide
+ * requires neither). Validation failure surfaces as the typed err.
+ */
+export function filePatternObservation(
+  opts: FilePatternObservationOpts,
+): Result<FilePatternObservationResult> {
+  const fields: PatternObservationFields = {
+    reviewerSlug: opts.reviewerSlug,
+    subject: opts.subject,
+    finding: opts.finding,
+    ...(opts.linkedComments && opts.linkedComments.length > 0
+      ? { linkedComments: [...opts.linkedComments] }
+      : {}),
+  };
+  let chit: Chit<'pattern-observation'>;
+  try {
+    chit = createChit<'pattern-observation'>(opts.corpRoot, {
+      type: 'pattern-observation',
+      scope: 'corp',
+      createdBy: opts.reviewerSlug,
+      fields: { 'pattern-observation': fields },
+    });
+  } catch (cause) {
+    return err(failure(
+      'unknown',
+      `filePatternObservation: chit creation failed`,
+      cause instanceof Error ? cause.message : String(cause),
+    ));
+  }
+  return ok({ observationId: chit.id });
 }
 
 // ─── fileReviewComment ───────────────────────────────────────────────
