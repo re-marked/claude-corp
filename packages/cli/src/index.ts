@@ -273,6 +273,15 @@ async function run() {
       await cmdClearinghouse(process.argv.slice(3));
       break;
     }
+    case 'editor': {
+      // Project 1.12.2: Editor's primitives surface — pick / acquire-
+      // worktree / diff / file-comment / approve / reject / bypass /
+      // release / status. Walked by the Editor Employee session per
+      // the patrol/code-review blueprint (bug pass + drift pass).
+      const { cmdEditor } = await import('./commands/editor.js');
+      await cmdEditor(process.argv.slice(3));
+      break;
+    }
     case 'tame': {
       const { cmdTame } = await import('./commands/tame.js');
       await cmdTame({
