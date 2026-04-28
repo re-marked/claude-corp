@@ -303,7 +303,7 @@ export function MemberSidebar({ members, channelMemberIds, visible, daemonClient
             <Box gap={0}>
               <Text color={STATUS.broken?.color ?? COLORS.muted}>{STATUS.broken?.icon ?? '!'}</Text>
               <Text> </Text>
-              <Text color={COLORS.text}>Blockers</Text>
+              <Text color={COLORS.text}>Blocked 1h</Text>
               <Text> </Text>
               <Text color={COLORS.muted} wrap="end">{laneSnapshot.openBlockers}</Text>
             </Box>
