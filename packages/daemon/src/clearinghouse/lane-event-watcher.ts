@@ -40,6 +40,7 @@
  */
 
 import { watch, type FSWatcher, existsSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   readConfig,
@@ -76,10 +77,21 @@ export class LaneEventWatcher {
   private watcher: FSWatcher | null = null;
   private debounce = new Map<string, NodeJS.Timeout>();
   private dir: string;
+  /**
+   * Boot timestamp captured at construction. Backfill on first
+   * subscribe replays events with mtime >= this — catches lane-
+   * events written during the lazy-wait gap before the watcher
+   * subscribed, without re-firing the entire historical archive
+   * on every daemon boot.
+   */
+  private bootTimestamp: string;
+  /** First-subscribe latch — re-subscribes after errors don't re-replay. */
+  private didBackfill = false;
 
   constructor(daemon: Daemon) {
     this.daemon = daemon;
     this.dir = join(daemon.corpRoot, 'chits', 'lane-event');
+    this.bootTimestamp = new Date().toISOString();
   }
 
   start(): void {
@@ -115,9 +127,53 @@ export class LaneEventWatcher {
         setTimeout(() => this.subscribe(), 2000);
       });
       log(`[lane-event-watcher] watching ${this.dir}`);
+      // Backfill once: lane-events written between daemon boot and
+      // the first successful subscribe (e.g. during the 30s lazy
+      // retry, or any errored-resubscribe gap) won't reach the
+      // watcher otherwise — fs.watch reports future changes only.
+      // mtime filter avoids replaying pre-boot history.
+      // Codex round 2 P2: gap-window blocker/merge notifications
+      // were silently dropped on a fresh corp where chits/lane-event
+      // didn't exist at constructor time.
+      if (!this.didBackfill) {
+        this.didBackfill = true;
+        void this.backfill();
+      }
     } catch (err) {
       logError(`[lane-event-watcher] subscribe failed: ${err instanceof Error ? err.message : String(err)} — retrying in 5s`);
       setTimeout(() => this.subscribe(), 5000);
+    }
+  }
+
+  private async backfill(): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.dir);
+    } catch (err) {
+      logError(`[lane-event-watcher] backfill readdir failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    let replayed = 0;
+    for (const entry of entries) {
+      if (!entry.endsWith('.md')) continue;
+      try {
+        // mtime gate — cheap stat avoids reading + parsing every
+        // historical chit just to discover it predates this boot.
+        const path = join(this.dir, entry);
+        const st = await stat(path);
+        if (st.mtime.toISOString() < this.bootTimestamp) continue;
+      } catch {
+        continue;
+      }
+      try {
+        await this.handle(entry);
+        replayed++;
+      } catch (err) {
+        logError(`[lane-event-watcher] backfill handle failed for ${entry}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (replayed > 0) {
+      log(`[lane-event-watcher] backfilled ${replayed} gap-window event(s)`);
     }
   }
 
