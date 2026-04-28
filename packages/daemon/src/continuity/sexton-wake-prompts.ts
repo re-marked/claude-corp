@@ -241,7 +241,8 @@ function composePoolActivitySection(corpRoot: string | undefined): string {
   try {
     events = readBacteriaEvents(corpRoot, { since: startOfDay });
     paused = readPausedRoles(corpRoot);
-  } catch {
+  } catch (err) {
+    logError(`[sexton-wake] composePoolActivitySection failed — ${err instanceof Error ? err.message : String(err)}`);
     return '';
   }
 
@@ -319,7 +320,8 @@ function composeActiveBreakersSection(corpRoot: string | undefined): string {
   try {
     allTrips = listActiveBreakers(corpRoot, { includeCleared: true });
     members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
-  } catch {
+  } catch (err) {
+    logError(`[sexton-wake] composeActiveBreakersSection failed — ${err instanceof Error ? err.message : String(err)}`);
     return '';
   }
 
