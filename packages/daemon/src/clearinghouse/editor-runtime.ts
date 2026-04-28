@@ -272,15 +272,30 @@ export class EditorReviewWatcher {
       return;
     }
     const f = chit.fields.task;
-    // Dispatch only when review is requested AND not already
-    // claimed AND not capHit AND at under_review.
-    if (f.editorReviewRequested !== true) return;
-    if ((f.reviewerClaim ?? null) !== null) return;
-    if (f.editorReviewCapHit === true) return;
-    if (f.workflowStatus !== 'under_review') return;
-    if (!f.branchUnderReview) return;
-    log(`[editor-runtime] watcher: review-eligible task detected (${chitId}) — dispatching wake`);
-    await dispatchEditor(this.daemon);
+
+    // Fast path — the changed task is itself review-eligible.
+    // Common case: audit's setEditorReviewRequested fires; watcher
+    // sees the flag flip; we dispatch for THIS task immediately.
+    if (
+      f.editorReviewRequested === true
+      && (f.reviewerClaim ?? null) === null
+      && f.editorReviewCapHit !== true
+      && f.workflowStatus === 'under_review'
+      && f.branchUnderReview
+    ) {
+      log(`[editor-runtime] watcher: review-eligible task detected (${chitId}) — dispatching wake`);
+      await dispatchEditor(this.daemon);
+      return;
+    }
+
+    // Safety-net path — the changed task isn't review-eligible (e.g.
+    // Editor's own approve/reject just cleared the flag), but OTHER
+    // pending review-eligible tasks may still need attention. Without
+    // this scan, the next pending task would wait up to one Pulse
+    // sweep cadence (5min) for dispatch — too long. The dispatch is
+    // busy-skip-safe so the scan firing while Editor is still mid-
+    // turn-exit is a no-op.
+    void this.scanAndDispatchIfWork();
   }
 }
 
