@@ -51,6 +51,7 @@ import {
   MEMBERS_JSON,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
+import { logError } from '../logger.js';
 
 // ─── Dispatch message templates ─────────────────────────────────────
 
@@ -425,7 +426,12 @@ function composeClearinghouseSection(corpRoot: string | undefined): string {
       types: ['lane-event'],
       scopes: ['corp'],
     });
-  } catch {
+  } catch (err) {
+    // Codex round 3 P3: previous silent return masked corrupted
+    // chits/lane-event dirs — Sexton digest just zeroed without any
+    // signal. Logging keeps the digest defensive (still returns '')
+    // but surfaces the disk-state problem to the operator.
+    logError(`[sexton-wake] composeClearinghouseSection failed — ${err instanceof Error ? err.message : String(err)}`);
     return '';
   }
 
