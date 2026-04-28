@@ -163,6 +163,13 @@ steps:
         cap; files an escalation chit routing to the author's
         role via Hand 1.4.1.
 
+      If approve itself fails (push race, hook reject, network,
+      fatal), don't loop. push-rejection-race is transient — retry
+      once. push-rejection-hook is permanent until the author
+      addresses the hook complaint — reject with the hook output
+      in --detail so the author can fix it. Network / disk / fatal
+      → DM the founder; infra may be sick.
+
       Then exit cleanly. Your session is done; the next wake
       brings the next task.
   - id: cap-bypass-watch

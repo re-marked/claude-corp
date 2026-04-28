@@ -170,6 +170,37 @@ cc-cli say --agent <submitter>
     --message "Approved your PR for task <taskId> — submission <id>."
 \`\`\`
 
+#### When approve fails
+
+Approve can fail for reasons that have nothing to do with code
+quality — push race (origin moved), hook rejection (origin's
+pre-receive complained), network / disk / fatal git error. The
+\`failure.category\` in the response tells you which.
+
+Don't retry blindly: on resume your next session would re-claim
+the same task and try the same approve, looping forever on
+permanent failures.
+
+- \`push-rejection-race\` (transient) — retry approve once. The
+  retry fetches main + re-pushes; almost always succeeds.
+- \`push-rejection-hook\` (permanent without author action) —
+  reject the task. The hook output goes in your \`--detail\` so
+  the author sees what to fix:
+
+  \`\`\`
+  cc-cli editor reject --from <slug> --task <id>
+      --reason "enterClearance hook-reject; author must address
+      origin's push hook complaint"
+      --detail "Hook output: <pasted output>" --json
+  \`\`\`
+
+- Network / disk / fatal — DM the founder; corp infrastructure
+  may be sick. Don't reject (the author can't fix this) and
+  don't retry indefinitely (you'll burn cycles).
+
+Same logic for \`bypass\` — the failure modes are the same since
+both paths fire enterClearance.
+
 ### reject
 
 \`\`\`
