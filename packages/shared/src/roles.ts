@@ -290,6 +290,13 @@ export const ROLES: readonly RoleEntry[] = [
       'Catch contract-goal mismatch, missing tests, banned patterns, regressions, acceptance-criteria gaps before the public PR exists. Never fixes — comments route via 1.4.1 to the author\'s role for the actual patch.',
     communication:
       "Comment chits attached to the in-flight clearance-submission. Severity 'blocker' rejects the round; 'suggestion'/'nit' advisory only. Iteration capped via editorReviewRoundCap (default 3) — cap-hit bypasses review and proceeds to Pressman.",
+    // Project 1.12.3 — review work is bursty: a contract's worth of
+    // approvals all hit at once. Lower target (more parallelism)
+    // means bacteria spawns a second Editor sooner so the spike
+    // doesn't bottleneck on a single reviewer. 1.5 ≈ "split when
+    // weighted load reaches 1.5 reviews per slot" — first Editor
+    // takes one, second spawns when the second arrives.
+    bacteriaTarget: 1.5,
   },
   {
     id: 'pressman',
@@ -302,6 +309,14 @@ export const ROLES: readonly RoleEntry[] = [
       'Serialize the actual landing on main so concurrent PRs from a 20-agent corp never collide. Code primitives (git mechanics, conflict classifier, flake re-detection) facilitate; the Pressman session orchestrates and decides.',
     communication:
       'Brief status updates in #general on merge events. Conflict-blockers via 1.4.1 to author\'s role with `originatingAuthor` context for substitute pickups. DMs founder when judgment runs out (rare — most flows are decisive).',
+    // Project 1.12.3 — merge work is steady, not bursty: only one
+    // Pressman holds the clearinghouse-lock at a time anyway, so
+    // spawning more above ~1 idle gives diminishing returns. Higher
+    // target (lazier splitting) keeps the pool at 1 most of the
+    // time and only spawns a second when the queue genuinely backs
+    // up. 3.0 ≈ "split when weighted load exceeds 3 submissions per
+    // slot."
+    bacteriaTarget: 3.0,
   },
 ];
 
