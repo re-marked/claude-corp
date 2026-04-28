@@ -246,6 +246,19 @@ export type {
   HireEditorResult,
 } from './editor.js';
 
+// ─── editor-runtime ──────────────────────────────────────────────────
+// Wake dispatch + reactive watcher + Pulse-fallback sweep for the
+// Editor lane. Wired into daemon.ts at start. Editor session walks
+// patrol/code-review on each wake; the runtime decides only WHEN
+// to wake.
+export {
+  dispatchEditor,
+  EditorReviewWatcher,
+  editorSweep,
+  editorBootRecover,
+  EDITOR_SWEEP_INTERVAL_MS,
+} from './editor-runtime.js';
+
 // ─── pressman-runtime ────────────────────────────────────────────────
 // Wake dispatch + reactive watcher + Pulse-fallback sweep. Wired into
 // daemon.ts at start. Pressman session walks patrol/clearing on each
