@@ -68,6 +68,9 @@ import {
   type Chit,
   type ClearanceSubmissionFields,
   type EscalationFields,
+  type LaneEventFields,
+  type LaneEventKind,
+  type LaneEventPayload,
   type Member,
 } from '@claudecorp/shared';
 import { failure, ok, err, type Result } from './failure-taxonomy.js';
@@ -103,6 +106,70 @@ export const PRESSMAN_RETRY_CAP = 3;
  * lifetime; short enough to keep the on-disk path readable.
  */
 const WORKTREE_PREFIX_LEN = 12;
+
+// ─── lane-event emission helper ──────────────────────────────────────
+
+/**
+ * Project 1.12.3 — emit a lane-event chit recording one state
+ * transition. Best-effort: emission failure surfaces to stderr but
+ * never blocks the calling primitive's main return value. The corp
+ * staying functional matters more than any single event landing.
+ *
+ * Every primitive that performs a state transition calls this with
+ * the appropriate kind. Narratives are optional — agent-supplied via
+ * the CLI when the agent has prose worth recording, null otherwise
+ * (renderers fall back to a kind-derived default phrase). Daemon-
+ * emitted events (resume sweeps, watcher fallbacks) leave both
+ * `emittedBy` and `narrative` null.
+ */
+function emitLaneEvent(opts: {
+  corpRoot: string;
+  submissionId: string;
+  taskId: string;
+  kind: LaneEventKind;
+  emittedBy: string | null;
+  narrative?: string | null;
+  payload?: LaneEventPayload | null;
+}): void {
+  try {
+    const fields: LaneEventFields = {
+      submissionId: opts.submissionId,
+      taskId: opts.taskId,
+      kind: opts.kind,
+      emittedBy: opts.emittedBy,
+      ...(opts.narrative !== undefined ? { narrative: opts.narrative } : {}),
+      ...(opts.payload !== undefined ? { payload: opts.payload } : {}),
+    };
+    createChit<'lane-event'>(opts.corpRoot, {
+      type: 'lane-event',
+      scope: 'corp',
+      createdBy: opts.emittedBy ?? 'system:lane',
+      status: 'active',
+      fields: { 'lane-event': fields },
+    });
+  } catch (cause) {
+    process.stderr.write(
+      `[clearinghouse:lane-event] emit failed for ${opts.kind} (submission ${opts.submissionId}): ${cause instanceof Error ? cause.message : String(cause)}\n`,
+    );
+  }
+}
+
+/**
+ * Resolve the taskId for a submission id without forcing every
+ * caller to redundantly read the submission chit. Returns null
+ * if the submission isn't found — the lane-event will be skipped
+ * in that case (the calling primitive's failure will already
+ * have logged the missing submission).
+ */
+function taskIdFromSubmission(corpRoot: string, submissionId: string): string | null {
+  try {
+    const hit = findChitById(corpRoot, submissionId);
+    if (!hit || hit.chit.type !== 'clearance-submission') return null;
+    return (hit.chit as Chit<'clearance-submission'>).fields['clearance-submission'].taskId;
+  } catch {
+    return null;
+  }
+}
 
 // ─── pickNext ────────────────────────────────────────────────────────
 
@@ -247,6 +314,18 @@ export function pickNext(opts: PickNextOpts): Result<PickedSubmission | null> {
     ));
   }
 
+  // Emit submission-claimed lane-event. Resume path doesn't emit
+  // (no new state transition; the same Pressman is just picking
+  // back up where they left off).
+  emitLaneEvent({
+    corpRoot: opts.corpRoot,
+    submissionId: top.chit.id,
+    taskId: topFields.taskId,
+    kind: 'submission-claimed',
+    emittedBy: opts.pressmanSlug,
+    payload: { branch: topFields.branch },
+  });
+
   return ok(toPickedSubmission(top.chit.id, topFields, top.score, false));
 }
 
@@ -353,6 +432,23 @@ export async function acquireWorktree(opts: AcquireWorktreeOpts): Promise<Result
   // 4. Add a fresh worktree.
   const add = await gitOps.worktreeAdd(opts.branch, path, { cwd: opts.corpRoot });
   if (!add.ok) return err(add.failure);
+
+  // Emit worktree-acquired. Best-effort taskId lookup; if the
+  // submission has been deleted between caller's pickNext and
+  // here, we just skip the event — primitive's main return is
+  // still valid.
+  const taskId = taskIdFromSubmission(opts.corpRoot, opts.submissionId);
+  if (taskId) {
+    emitLaneEvent({
+      corpRoot: opts.corpRoot,
+      submissionId: opts.submissionId,
+      taskId,
+      kind: 'worktree-acquired',
+      emittedBy: null, // primitive-emitted; agent didn't author this transition
+      payload: { branch: opts.branch },
+    });
+  }
+
   return ok({ path });
 }
 
@@ -369,6 +465,20 @@ export interface RebaseStepOpts {
   /** Base branch the rebase targets. Defaults to {@link DEFAULT_BASE_BRANCH}. */
   baseBranch?: string;
   gitOps?: GitOps;
+  /**
+   * Project 1.12.3 — optional 1-line agent prose recorded on the
+   * emitted lane-event. Agent's voice for what just happened
+   * ("rebase from hell — 7 conflicts, 4 substantive, routed").
+   * Null/absent fine when the kind-derived auto-summary is enough.
+   */
+  narrative?: string | null;
+  /**
+   * Project 1.12.3 — agent slug authoring the action. Threaded
+   * through to the emitted lane-event's emittedBy. Null when this
+   * primitive is daemon-emitted (rare for rebaseStep — typically
+   * agent-driven).
+   */
+  emittedBy?: string | null;
 }
 
 /**
@@ -391,23 +501,70 @@ export interface RebaseStepOpts {
 export async function rebaseStep(opts: RebaseStepOpts): Promise<Result<RebaseAttemptResult>> {
   const gitOps = opts.gitOps ?? realGitOps;
   const baseBranch = opts.baseBranch ?? DEFAULT_BASE_BRANCH;
+  const taskId = taskIdFromSubmission(opts.corpRoot, opts.submissionId);
 
   // Fetch first — without an updated origin/<base>, the rebase
   // would target a stale commit.
   const fetchResult = await gitOps.fetchOrigin({ branch: baseBranch, cwd: opts.worktreePath });
   if (!fetchResult.ok) {
+    if (taskId) {
+      emitLaneEvent({
+        corpRoot: opts.corpRoot,
+        submissionId: opts.submissionId,
+        taskId,
+        kind: 'rebase-fatal',
+        emittedBy: opts.emittedBy ?? null,
+        narrative: opts.narrative ?? null,
+        payload: {
+          branch: opts.branch,
+          failureCategory: fetchResult.failure.category,
+          failureSummary: fetchResult.failure.pedagogicalSummary,
+        },
+      });
+    }
     return ok({
       outcome: 'fatal',
       failureRecord: fetchResult.failure,
     });
   }
 
-  return attemptRebase({
+  const result = await attemptRebase({
     worktreePath: opts.worktreePath,
     baseBranch: `origin/${baseBranch}`,
     prBranch: opts.branch,
     gitOps,
   });
+
+  // Emit a lane-event keyed off the typed outcome. Five kinds map
+  // 1:1 with RebaseAttemptOutcome.
+  if (result.ok && taskId) {
+    const r = result.value;
+    const kind: LaneEventKind =
+      r.outcome === 'clean' ? 'rebase-clean'
+      : r.outcome === 'auto-resolved' ? 'rebase-auto-resolved'
+      : r.outcome === 'needs-author' ? 'rebase-needs-author'
+      : r.outcome === 'sanity-failed' ? 'rebase-sanity-failed'
+      : 'rebase-fatal';
+    const payload: LaneEventPayload = { branch: opts.branch };
+    if (r.conflictedFiles?.length) payload.conflictedFiles = [...r.conflictedFiles];
+    if (r.autoResolvedFiles?.length) payload.autoResolvedFiles = [...r.autoResolvedFiles];
+    if (r.autoResolutionRounds !== undefined) payload.autoResolutionRounds = r.autoResolutionRounds;
+    if (r.failureRecord) {
+      payload.failureCategory = r.failureRecord.category;
+      payload.failureSummary = r.failureRecord.pedagogicalSummary;
+    }
+    emitLaneEvent({
+      corpRoot: opts.corpRoot,
+      submissionId: opts.submissionId,
+      taskId,
+      kind,
+      emittedBy: opts.emittedBy ?? null,
+      narrative: opts.narrative ?? null,
+      payload,
+    });
+  }
+
+  return result;
 }
 
 // ─── testStep ────────────────────────────────────────────────────────
@@ -423,6 +580,10 @@ export interface TestStepOpts {
   testArgs?: readonly string[];
   /** Override flake-retry count (default 1 from runWithFlakeRetry). */
   maxRetries?: number;
+  /** Project 1.12.3 — agent's voice on the emitted lane-event. */
+  narrative?: string | null;
+  /** Project 1.12.3 — agent slug authoring the action. */
+  emittedBy?: string | null;
 }
 
 /**
@@ -442,10 +603,41 @@ export async function testStep(opts: TestStepOpts): Promise<Result<RunWithFlakeR
     ...(opts.testProgram ? { program: opts.testProgram } : {}),
     ...(opts.testArgs ? { args: opts.testArgs } : {}),
   };
-  return runWithFlakeRetry({
+  const result = await runWithFlakeRetry({
     runOpts,
     ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}),
   });
+
+  // Emit a lane-event per classifiedAs outcome. 'passed-first' and
+  // 'flake' both map to 'tests-passed' / 'tests-flake' kinds; the
+  // distinction Pressman cares about (re-run was needed) is on the
+  // kind itself.
+  if (result.ok) {
+    const taskId = taskIdFromSubmission(opts.corpRoot, opts.submissionId);
+    if (taskId) {
+      const t = result.value;
+      const kind: LaneEventKind =
+        t.classifiedAs === 'passed-first' ? 'tests-passed'
+        : t.classifiedAs === 'flake' ? 'tests-flake'
+        : t.classifiedAs === 'consistent-fail' ? 'tests-consistent-fail'
+        : 'tests-inconclusive';
+      const payload: LaneEventPayload = { testDurationMs: t.finalRun.durationMs };
+      if (t.finalRun.failures.length > 0) {
+        payload.failureNames = t.finalRun.failures.map((f) => f.name);
+      }
+      emitLaneEvent({
+        corpRoot: opts.corpRoot,
+        submissionId: opts.submissionId,
+        taskId,
+        kind,
+        emittedBy: opts.emittedBy ?? null,
+        narrative: opts.narrative ?? null,
+        payload,
+      });
+    }
+  }
+
+  return result;
 }
 
 // ─── attributeStep ───────────────────────────────────────────────────
@@ -464,6 +656,10 @@ export interface AttributeStepOpts {
   testProgram?: string;
   testArgs?: readonly string[];
   gitOps?: GitOps;
+  /** Project 1.12.3 — agent's voice on the emitted lane-event. */
+  narrative?: string | null;
+  /** Project 1.12.3 — agent slug authoring the action. */
+  emittedBy?: string | null;
 }
 
 export interface AttributeStepResult {
@@ -555,6 +751,40 @@ export async function attributeStep(
   if (!refResult.ok) return err(refResult.failure);
 
   const attribution = attributeFailure(prResult.value, refResult.value.result);
+
+  // Emit attribution lane-event keyed off the typed kind. Four
+  // outcome kinds map to the AttributedFailure union (no-failure
+  // is unreachable on the consistent-fail caller path, but we
+  // handle it defensively).
+  const taskId = taskIdFromSubmission(opts.corpRoot, opts.submissionId);
+  if (taskId) {
+    const kind: LaneEventKind =
+      attribution.kind === 'pr-introduced' ? 'tests-attributed-pr'
+      : attribution.kind === 'main-regression' ? 'tests-attributed-main'
+      : attribution.kind === 'mixed' ? 'tests-attributed-mixed'
+      : 'tests-attributed-inconclusive';
+    const payload: LaneEventPayload = { branch: opts.branch };
+    if (attribution.kind === 'pr-introduced') {
+      payload.failureNames = attribution.prFailures.map((f) => f.name);
+    } else if (attribution.kind === 'main-regression') {
+      payload.failureNames = attribution.sharedFailures.map((f) => f.name);
+    } else if (attribution.kind === 'mixed') {
+      payload.failureNames = [
+        ...attribution.prOnly.map((f) => f.name),
+        ...attribution.sharedWithMain.map((f) => f.name),
+      ];
+    }
+    emitLaneEvent({
+      corpRoot: opts.corpRoot,
+      submissionId: opts.submissionId,
+      taskId,
+      kind,
+      emittedBy: opts.emittedBy ?? null,
+      narrative: opts.narrative ?? null,
+      payload,
+    });
+  }
+
   const out: AttributeStepResult = refResult.value.restoreFailure
     ? { attribution, mainResult: refResult.value.result, restoreFailure: refResult.value.restoreFailure }
     : { attribution, mainResult: refResult.value.result };
@@ -569,6 +799,10 @@ export interface MergeStepOpts {
   worktreePath: string;
   branch: string;
   gitOps?: GitOps;
+  /** Project 1.12.3 — agent's voice on the emitted lane-event. */
+  narrative?: string | null;
+  /** Project 1.12.3 — agent slug authoring the action. */
+  emittedBy?: string | null;
 }
 
 /**
@@ -585,11 +819,42 @@ export interface MergeStepOpts {
  */
 export async function mergeStep(opts: MergeStepOpts): Promise<Result<MergeAttemptResult>> {
   const gitOps = opts.gitOps ?? realGitOps;
-  return attemptMerge({
+  const result = await attemptMerge({
     worktreePath: opts.worktreePath,
     prBranch: opts.branch,
     gitOps,
   });
+
+  if (result.ok) {
+    const taskId = taskIdFromSubmission(opts.corpRoot, opts.submissionId);
+    if (taskId) {
+      const m = result.value;
+      const kind: LaneEventKind =
+        m.outcome === 'merged' ? 'merge-success'
+        : m.outcome === 'race' ? 'merge-race'
+        : m.outcome === 'hook-rejected' ? 'merge-hook-rejected'
+        : m.outcome === 'branch-deleted' ? 'merge-branch-deleted'
+        : 'merge-fatal';
+      const payload: LaneEventPayload = { branch: opts.branch };
+      if (m.mergeCommitSha) payload.mergeCommitSha = m.mergeCommitSha;
+      if (m.hookOutput) payload.hookOutput = m.hookOutput;
+      if (m.failureRecord) {
+        payload.failureCategory = m.failureRecord.category;
+        payload.failureSummary = m.failureRecord.pedagogicalSummary;
+      }
+      emitLaneEvent({
+        corpRoot: opts.corpRoot,
+        submissionId: opts.submissionId,
+        taskId,
+        kind,
+        emittedBy: opts.emittedBy ?? null,
+        narrative: opts.narrative ?? null,
+        payload,
+      });
+    }
+  }
+
+  return result;
 }
 
 // ─── finalizeMerged ──────────────────────────────────────────────────
@@ -604,6 +869,8 @@ export interface FinalizeMergedOpts {
   /** Worktree to remove. Optional — if omitted, no cleanup. */
   worktreePath?: string;
   gitOps?: GitOps;
+  /** Project 1.12.3 — agent's voice on the emitted lane-event. */
+  narrative?: string | null;
 }
 
 /**
@@ -619,6 +886,12 @@ export interface FinalizeMergedOpts {
 export async function finalizeMerged(opts: FinalizeMergedOpts): Promise<Result<void>> {
   const gitOps = opts.gitOps ?? realGitOps;
   let cascadeError: Error | undefined;
+
+  // Capture taskId BEFORE the cascade — markSubmissionMerged updates
+  // the submission chit but doesn't change the taskId field. Reading
+  // up-front means even cascade-failure paths can still emit the
+  // submission-finalized event with the right linkage.
+  const taskId = taskIdFromSubmission(opts.corpRoot, opts.submissionId);
 
   try {
     markSubmissionMerged({
@@ -640,6 +913,29 @@ export async function finalizeMerged(opts: FinalizeMergedOpts): Promise<Result<v
   // not, hence the ordering.
   if (opts.worktreePath) {
     await gitOps.worktreeRemove(opts.worktreePath, { force: true, cwd: opts.corpRoot }).catch(() => undefined);
+  }
+
+  // Emit submission-finalized — the journey ended in success. We
+  // emit even when cascadeError fired because the merge DID land
+  // on origin (the cascade failure is about chit-graph
+  // bookkeeping, not the actual ship). The lane diary should
+  // reflect "shipped" + a separate signal about the cascade.
+  if (taskId) {
+    const payload: LaneEventPayload = {};
+    if (opts.mergeCommitSha) payload.mergeCommitSha = opts.mergeCommitSha;
+    if (cascadeError) {
+      payload.failureCategory = 'cascade-error';
+      payload.failureSummary = cascadeError.message;
+    }
+    emitLaneEvent({
+      corpRoot: opts.corpRoot,
+      submissionId: opts.submissionId,
+      taskId,
+      kind: 'submission-finalized',
+      emittedBy: opts.slug,
+      narrative: opts.narrative ?? null,
+      payload,
+    });
   }
 
   if (cascadeError) {
@@ -787,6 +1083,25 @@ export async function fileBlocker(opts: FileBlockerOpts): Promise<Result<FileBlo
     await gitOps.worktreeRemove(opts.worktreePath, { force: true, cwd: opts.corpRoot }).catch(() => undefined);
   }
 
+  // Emit submission-blocked. The agent's narrative comes from the
+  // summary/detail it already supplied — we don't duplicate as a
+  // separate narrative; the kind + payload tell the lane diary
+  // what kind of blocker fired.
+  emitLaneEvent({
+    corpRoot: opts.corpRoot,
+    submissionId: opts.submissionId,
+    taskId: subFields.taskId,
+    kind: 'submission-blocked',
+    emittedBy: opts.slug,
+    narrative: opts.summary,
+    payload: {
+      branch: subFields.branch,
+      ...(escalationId ? { escalationId } : {}),
+      failureCategory: opts.kind,
+      failureSummary: opts.summary,
+    },
+  });
+
   if (escalationError) {
     return err(failure(
       'unknown',
@@ -820,6 +1135,11 @@ export interface MarkFailedAndReleaseOpts {
   requeue?: boolean;
   worktreePath?: string;
   gitOps?: GitOps;
+  /**
+   * Project 1.12.3 — agent's voice on the emitted lane-event when
+   * the path terminal-fails (not on requeue, which doesn't emit).
+   */
+  narrative?: string | null;
 }
 
 export interface MarkFailedAndReleaseResult {
@@ -903,6 +1223,27 @@ export async function markFailedAndRelease(
     if (opts.worktreePath) {
       await gitOps.worktreeRemove(opts.worktreePath, { force: true, cwd: opts.corpRoot }).catch(() => undefined);
     }
+  }
+
+  // Emit submission-failed only on terminal fail. Requeue means
+  // the submission isn't actually failing — it's going back in line
+  // for another attempt; the next pickNext will emit submission-
+  // claimed when it's re-claimed. No event for the requeue itself
+  // (would clutter the diary with state-machine bookkeeping the
+  // agent's voice can't enrich anyway).
+  if (!requeued) {
+    emitLaneEvent({
+      corpRoot: opts.corpRoot,
+      submissionId: opts.submissionId,
+      taskId: subFields.taskId,
+      kind: 'submission-failed',
+      emittedBy: opts.slug,
+      narrative: opts.narrative ?? null,
+      payload: {
+        branch: subFields.branch,
+        failureSummary: opts.reason,
+      },
+    });
   }
 
   return ok({ requeued, retryCount: finalRetryCount });

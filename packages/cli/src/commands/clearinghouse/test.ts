@@ -16,6 +16,7 @@ interface Opts {
   worktree?: string;
   command?: string;
   'max-retries'?: string;
+  narrative?: string;
   corp?: string;
   json?: boolean;
 }
@@ -35,8 +36,10 @@ export async function cmdClearinghouseTest(rawArgs: string[]): Promise<void> {
     corpRoot,
     submissionId: opts.submission!,
     worktreePath: opts.worktree!,
+    emittedBy: opts.from!,
     ...(opts.command ? { testCommand: opts.command } : {}),
     ...(maxRetries !== undefined ? { maxRetries } : {}),
+    ...(opts.narrative ? { narrative: opts.narrative } : {}),
   });
 
   if (opts.json) {
@@ -77,6 +80,7 @@ function parseOpts(rawArgs: string[]): Opts {
       worktree: { type: 'string' },
       command: { type: 'string' },
       'max-retries': { type: 'string' },
+      narrative: { type: 'string' },
       corp: { type: 'string' },
       json: { type: 'boolean' },
     },

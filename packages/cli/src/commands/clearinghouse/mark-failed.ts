@@ -23,6 +23,7 @@ interface Opts {
   reason?: string;
   requeue?: boolean;
   worktree?: string;
+  narrative?: string;
   corp?: string;
   json?: boolean;
 }
@@ -41,6 +42,7 @@ export async function cmdClearinghouseMarkFailed(rawArgs: string[]): Promise<voi
     slug: opts.from!,
     requeue: opts.requeue === true,
     ...(opts.worktree ? { worktreePath: opts.worktree } : {}),
+    ...(opts.narrative ? { narrative: opts.narrative } : {}),
   });
 
   if (opts.json) {
@@ -73,6 +75,7 @@ function parseOpts(rawArgs: string[]): Opts {
       reason: { type: 'string' },
       requeue: { type: 'boolean' },
       worktree: { type: 'string' },
+      narrative: { type: 'string' },
       corp: { type: 'string' },
       json: { type: 'boolean' },
     },

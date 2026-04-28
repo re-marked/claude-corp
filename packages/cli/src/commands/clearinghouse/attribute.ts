@@ -22,6 +22,7 @@ interface Opts {
   branch?: string;
   base?: string;
   command?: string;
+  narrative?: string;
   corp?: string;
   json?: boolean;
 }
@@ -39,8 +40,10 @@ export async function cmdClearinghouseAttribute(rawArgs: string[]): Promise<void
     submissionId: opts.submission!,
     worktreePath: opts.worktree!,
     branch: opts.branch!,
+    emittedBy: opts.from!,
     ...(opts.base ? { baseRef: opts.base } : {}),
     ...(opts.command ? { testCommand: opts.command } : {}),
+    ...(opts.narrative ? { narrative: opts.narrative } : {}),
   });
 
   if (opts.json) {
@@ -99,6 +102,7 @@ function parseOpts(rawArgs: string[]): Opts {
       branch: { type: 'string' },
       base: { type: 'string' },
       command: { type: 'string' },
+      narrative: { type: 'string' },
       corp: { type: 'string' },
       json: { type: 'boolean' },
     },

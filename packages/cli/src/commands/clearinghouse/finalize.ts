@@ -16,6 +16,7 @@ interface Opts {
   submission?: string;
   'merge-sha'?: string;
   worktree?: string;
+  narrative?: string;
   corp?: string;
   json?: boolean;
 }
@@ -32,6 +33,7 @@ export async function cmdClearinghouseFinalize(rawArgs: string[]): Promise<void>
     slug: opts.from!,
     ...(opts['merge-sha'] ? { mergeCommitSha: opts['merge-sha'] } : {}),
     ...(opts.worktree ? { worktreePath: opts.worktree } : {}),
+    ...(opts.narrative ? { narrative: opts.narrative } : {}),
   });
 
   if (opts.json) {
@@ -59,6 +61,7 @@ function parseOpts(rawArgs: string[]): Opts {
       submission: { type: 'string' },
       'merge-sha': { type: 'string' },
       worktree: { type: 'string' },
+      narrative: { type: 'string' },
       corp: { type: 'string' },
       json: { type: 'boolean' },
     },
