@@ -244,3 +244,39 @@ export {
   clearinghouseBootRecover,
   CLEARINGHOUSE_SWEEP_INTERVAL_MS,
 } from './pressman-runtime.js';
+
+// ─── editor-workflow ─────────────────────────────────────────────────
+// Stateless step primitives for the Editor lane. Editor session
+// composes these via cc-cli editor subcommands per the
+// patrol/code-review blueprint. Lane state lives on the task chit
+// (editorReviewRound / capHit / requested / reviewerClaim /
+// branchUnderReview) since Editor runs PRE-submission.
+export {
+  isEditorAwareCorp,
+  setEditorReviewRequested,
+  pickNextReview,
+  acquireEditorWorktree,
+  loadReviewContext,
+  fileReviewComment,
+  approveReview,
+  rejectReview,
+  bypassReview,
+  releaseReview,
+} from './editor-workflow.js';
+export type {
+  PickedReview,
+  ReviewContext,
+  ApproveReviewResult,
+  RejectReviewResult,
+  BypassReviewResult,
+  PickNextReviewOpts,
+  AcquireEditorWorktreeOpts,
+  LoadReviewContextOpts,
+  FileReviewCommentOpts,
+  FileReviewCommentResult,
+  ApproveReviewOpts,
+  RejectReviewOpts,
+  BypassReviewOpts,
+  ReleaseReviewOpts,
+  SetEditorReviewRequestedOpts,
+} from './editor-workflow.js';
