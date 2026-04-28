@@ -49,6 +49,8 @@ import {
   chitScopeFromPath,
   queryChits,
   readConfig,
+  validateTransition,
+  TaskTransitionError,
   MEMBERS_JSON,
   EDITOR_REVIEW_ROUND_CAP_DEFAULT,
   getRole,
@@ -58,6 +60,7 @@ import {
   type EscalationFields,
   type ReviewCommentFields,
   type TaskFields,
+  type TaskWorkflowStatus,
 } from '@claudecorp/shared';
 import { failure, ok, err, type Result } from './failure-taxonomy.js';
 import { realGitOps, type GitOps } from './git-ops.js';
@@ -672,37 +675,43 @@ export function rejectReview(opts: RejectReviewOpts): Result<RejectReviewResult>
   const newRound = (taskFields.editorReviewRound ?? 0) + 1;
   const cap = resolveCap(opts.corpRoot, taskFields);
   const capHit = newRound >= cap;
+  const submitter = taskFields.assignee ?? taskFields.handedBy ?? 'unknown';
 
-  // 1. Update the task: increment round, maybe set capHit, clear
-  // claim + request flag + branchUnderReview (next audit-approve
-  // re-fires with a fresh branch capture).
-  const scope = chitScopeFromPath(opts.corpRoot, hit.path);
-  try {
-    updateChit<'task'>(opts.corpRoot, scope, 'task', taskChit.id, {
-      updatedBy: opts.reviewerSlug,
-      fields: {
-        task: {
-          ...taskFields,
-          editorReviewRound: newRound,
-          editorReviewCapHit: capHit,
-          editorReviewRequested: false,
-          reviewerClaim: null,
-          branchUnderReview: null,
-        },
-      },
-    });
-  } catch (cause) {
-    return err(failure(
-      'unknown',
-      `rejectReview: task chit update failed`,
-      cause instanceof Error ? cause.message : String(cause),
-    ));
+  // Resolve the under_review → in_progress transition via the
+  // 'audit-block' trigger (mirrors revertTaskFromUnderReview's
+  // pattern). Without flipping workflowStatus back, `cc-cli done`
+  // refuses to handoff (it requires in_progress) and the author
+  // can't re-submit after fixing the comments. Task would strand
+  // until manual intervention. (Codex P1 from PR #195 round 3.)
+  //
+  // Falls through to keeping the workflowStatus on the rare case
+  // where the transition is rejected (pre-1.3 chits without
+  // workflowStatus, or a state we don't expect — audit-block
+  // doesn't transition from non-under_review states cleanly).
+  // The escalation chit still gets filed; the task just doesn't
+  // get its workflow advanced. Founder can manually fix.
+  let nextWorkflowStatus: TaskWorkflowStatus | null | undefined =
+    taskFields.workflowStatus;
+  if (taskFields.workflowStatus) {
+    try {
+      nextWorkflowStatus = validateTransition(
+        taskFields.workflowStatus,
+        'audit-block',
+        taskChit.id,
+      );
+    } catch (cause) {
+      if (!(cause instanceof TaskTransitionError)) throw cause;
+      // Keep the existing workflowStatus; escalation will still surface.
+    }
   }
 
-  // 2. File escalation chit so Hand 1.4.1 routes a blocker to the
-  // author's role. Body summarizes the rejection; the per-comment
-  // chits (filed via fileReviewComment) carry the line-level detail.
-  const submitter = taskFields.assignee ?? taskFields.handedBy ?? 'unknown';
+  // Order matters for failure recovery: file the escalation chit
+  // FIRST. If escalation creation fails, the task is unchanged and
+  // the reviewer can retry rejectReview cleanly. The previous order
+  // (task mutation first, escalation second) left the task with
+  // claim/branch cleared but no escalation when escalation fails —
+  // limbo state requiring manual intervention. (Codex P2 from PR
+  // #195 round 3.)
   const escalationFields: EscalationFields = {
     originatingChit: opts.taskId,
     reason: opts.reason,
@@ -731,7 +740,37 @@ export function rejectReview(opts: RejectReviewOpts): Result<RejectReviewResult>
   } catch (cause) {
     return err(failure(
       'unknown',
-      `rejectReview: escalation chit creation failed`,
+      `rejectReview: escalation chit creation failed; task unchanged, reviewer can retry`,
+      cause instanceof Error ? cause.message : String(cause),
+    ));
+  }
+
+  // Now mutate the task: increment round, maybe set capHit,
+  // transition workflowStatus back to in_progress, clear review
+  // state (next audit-approve re-fires with a fresh branch capture).
+  // If THIS step fails after the escalation was filed, we have a
+  // ghost escalation but the task is at least retryable — better
+  // than the inverse failure mode which was caught by Codex.
+  const scope = chitScopeFromPath(opts.corpRoot, hit.path);
+  try {
+    updateChit<'task'>(opts.corpRoot, scope, 'task', taskChit.id, {
+      updatedBy: opts.reviewerSlug,
+      fields: {
+        task: {
+          ...taskFields,
+          ...(nextWorkflowStatus ? { workflowStatus: nextWorkflowStatus } : {}),
+          editorReviewRound: newRound,
+          editorReviewCapHit: capHit,
+          editorReviewRequested: false,
+          reviewerClaim: null,
+          branchUnderReview: null,
+        },
+      },
+    });
+  } catch (cause) {
+    return err(failure(
+      'unknown',
+      `rejectReview: escalation ${escalationId} created but task chit update failed; task may be retryable but escalation already filed`,
       cause instanceof Error ? cause.message : String(cause),
     ));
   }
