@@ -263,6 +263,14 @@ export {
   EDITOR_SWEEP_INTERVAL_MS,
 } from './editor-runtime.js';
 
+// ─── lane-event-watcher ──────────────────────────────────────────────
+// Project 1.12.3 — daemon-side notification fallback. Watches
+// chits/lane-event/ and fires channel + DM posts on terminal
+// state events so #general gets the merge announcements + authors
+// get the blocker / approval DMs even when an agent's session
+// died before sending its own message.
+export { LaneEventWatcher } from './lane-event-watcher.js';
+
 // ─── pressman-runtime ────────────────────────────────────────────────
 // Wake dispatch + reactive watcher + Pulse-fallback sweep. Wired into
 // daemon.ts at start. Pressman session walks patrol/clearing on each
