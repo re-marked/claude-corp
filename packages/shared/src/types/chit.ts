@@ -1060,9 +1060,35 @@ export interface ClearanceSubmissionFields {
    * The rich state machine. chit.status follows but is coarser
    * (active / completed / failed / closed). See lifecycle docstring.
    */
-  submissionStatus: 'queued' | 'processing' | 'merged' | 'conflict' | 'rejected' | 'failed';
+  submissionStatus:
+    | 'queued'
+    | 'processing'
+    | 'merged'
+    | 'conflict'
+    | 'rejected'
+    | 'failed'
+    /**
+     * Project 1.12.3 reserved value — Pressman is investigating
+     * possible flakiness on this submission. No behavior change in
+     * 1.12.3; reserved for when Pressman wants to mark a submission
+     * as "hold for re-test" without flipping it back to queued
+     * (which would let another Pressman pick it up). Future use
+     * once attribution flow grows a "wait for green main" mode.
+     */
+    | 'flake-suspected';
   /** Phase-2 mechanical-retry counter. Penalized in priority formula. */
   retryCount: number;
+  /**
+   * Project 1.12.3 — forward-compat marker for parallel-lane
+   * isolation. When multi-Pressman lands, scopeKeys identifies which
+   * subspace of the codebase this submission touches (e.g. `["pkg:cli",
+   * "pkg:shared"]`); two submissions with disjoint scopeKeys can
+   * merge in parallel without conflict-risk, two with overlapping
+   * keys serialize. Empty/null/absent in 1.12.3 — no consumer yet.
+   * Schema is non-breaking so future scope-aware Pressmen can ship
+   * without migrating existing submissions.
+   */
+  scopeKeys?: string[] | null;
   /** Phase-1 Editor-iteration counter. NOT penalized in priority formula. */
   reviewRound: number;
   /**

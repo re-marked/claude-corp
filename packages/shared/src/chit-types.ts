@@ -749,6 +749,9 @@ function validateClearanceSubmission(fields: unknown): void {
 
   // The rich state machine. chit.status is coarser; this is the
   // source of truth for "where is this submission in the lane."
+  // Project 1.12.3 reserves `flake-suspected` — no current writer,
+  // accepted in the validator so future Pressman flake-investigation
+  // mode can ship without a schema bump.
   requireEnum(f.submissionStatus, 'clearance-submission.submissionStatus', [
     'queued',
     'processing',
@@ -756,6 +759,7 @@ function validateClearanceSubmission(fields: unknown): void {
     'conflict',
     'rejected',
     'failed',
+    'flake-suspected',
   ] as const);
 
   // Counters — integers, generous ceiling. retryCount and
@@ -785,6 +789,13 @@ function validateClearanceSubmission(fields: unknown): void {
   // Latest-failure prose. Free form. Refreshed per attempt; per-attempt
   // detail lives in step-log chits, not here.
   if (f.lastFailureReason !== undefined) requireStringOrNull(f.lastFailureReason, 'clearance-submission.lastFailureReason');
+
+  // Project 1.12.3 forward-compat: scopeKeys for parallel-lane
+  // isolation. Empty/null/absent in v1; future scope-aware Pressman
+  // populates from the diff's touched packages.
+  if (f.scopeKeys !== undefined && f.scopeKeys !== null) {
+    requireStringArray(f.scopeKeys, 'clearance-submission.scopeKeys');
+  }
 }
 
 function validateReviewComment(fields: unknown): void {
