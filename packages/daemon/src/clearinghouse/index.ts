@@ -198,6 +198,7 @@ export {
   markFailedAndRelease,
   releaseAll,
   cleanupOrphanWorktrees,
+  attributeStep,
   DEFAULT_BASE_BRANCH,
   PRESSMAN_RETRY_CAP,
 } from './workflow.js';
@@ -218,6 +219,8 @@ export type {
   ReleaseAllOpts,
   CleanupOrphanWorktreesOpts,
   CleanupOrphanWorktreesResult,
+  AttributeStepOpts,
+  AttributeStepResult,
 } from './workflow.js';
 
 // ─── pressman ────────────────────────────────────────────────────────

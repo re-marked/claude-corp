@@ -74,7 +74,15 @@ import { failure, ok, err, type Result } from './failure-taxonomy.js';
 import { realGitOps, type GitOps } from './git-ops.js';
 import { attemptRebase, type RebaseAttemptResult } from './rebase-flow.js';
 import { attemptMerge, type MergeAttemptResult } from './merge-flow.js';
-import { runWithFlakeRetry, type RunWithFlakeRetryResult } from './test-attribution.js';
+import {
+  runWithFlakeRetry,
+  runTestsOnRef,
+  attributeFailure,
+  type RunWithFlakeRetryResult,
+  type AttributedFailure,
+} from './test-attribution.js';
+import { runTests, type TestRunResult } from './tests-runner.js';
+import type { FailureRecord } from './failure-taxonomy.js';
 import { WORKTREE_PARENT_DIR, WORKTREE_GITIGNORE } from './worktree-pool.js';
 
 // ─── Config ──────────────────────────────────────────────────────────
@@ -440,6 +448,119 @@ export async function testStep(opts: TestStepOpts): Promise<Result<RunWithFlakeR
   });
 }
 
+// ─── attributeStep ───────────────────────────────────────────────────
+
+export interface AttributeStepOpts {
+  corpRoot: string;
+  submissionId: string;
+  /** Worktree where the PR's tests already failed. */
+  worktreePath: string;
+  /** The PR branch — the worktree's current ref, restored after main test. */
+  branch: string;
+  /** Base ref to attribute against. Default 'origin/main'. */
+  baseRef?: string;
+  /** Optional override for the test command. Mirrors testStep's options. */
+  testCommand?: string;
+  testProgram?: string;
+  testArgs?: readonly string[];
+  gitOps?: GitOps;
+}
+
+export interface AttributeStepResult {
+  /** Attribution outcome — pr-introduced / main-regression / mixed / inconclusive / no-failure. */
+  readonly attribution: AttributedFailure;
+  /**
+   * The main-side test result, exposed so the agent can include
+   * specifics in the blocker body (which tests failed on main, etc).
+   */
+  readonly mainResult: TestRunResult;
+  /**
+   * Set when the post-attribution restore-checkout failed; the
+   * worktree is in an unknown state and the agent should release
+   * (or re-acquire) before further use. The attribution data is
+   * still valid.
+   */
+  readonly restoreFailure?: FailureRecord;
+}
+
+/**
+ * Project 1.12.3 — attribution step the agent calls AFTER testStep
+ * returns `consistent-fail`. Re-runs the same test command on the
+ * base ref (default `origin/main`), compares failure sets, returns
+ * an AttributedFailure the agent uses to decide blocker routing:
+ *
+ *   pr-introduced  → fileBlocker default-routes to author.
+ *   main-regression → fileBlocker(routeTo: 'engineering-lead').
+ *                     The PR is innocent; engineering-lead is the
+ *                     role responsible for main's health.
+ *   mixed          → fileBlocker default-routes to author with
+ *                    shared-with-main flagged in the detail body
+ *                    so the substitute sees both the author-owned
+ *                    and pre-existing failures.
+ *   inconclusive   → fileBlocker default-routes to author (fall
+ *                    back to current behavior; agent might also
+ *                    DM founder if attribution stays inconclusive
+ *                    across multiple submissions).
+ *   no-failure     → unreachable on the consistent-fail path; the
+ *                    agent's session would have moved to merge already.
+ *
+ * The attribution involves an extra full test run, so the agent
+ * decides when it's worth running. Default: always for consistent-
+ * fail. Cap-bypassed submissions or low-priority work might skip
+ * to save the cost — agent's call.
+ *
+ * Restore semantics: the worktree is checked out back to `branch`
+ * after the main run. If the restore fails, the test data still
+ * surfaces but `restoreFailure` is set so the agent knows to
+ * release before the next acquire.
+ */
+export async function attributeStep(
+  opts: AttributeStepOpts,
+): Promise<Result<AttributeStepResult>> {
+  const gitOps = opts.gitOps ?? realGitOps;
+  const baseRef = opts.baseRef ?? 'origin/main';
+
+  // We need the PR-side test result to compare against. The agent
+  // is calling attributeStep AFTER testStep returned consistent-
+  // fail, so we re-run on the PR branch first to get a fresh
+  // failure set (matches the same conditions as the main run).
+  // Alternative: have the agent pass the prior testStep result.
+  // We re-run for honesty — same environment, same time window.
+  const prResult = await runTests({
+    cwd: opts.worktreePath,
+    ...(opts.testCommand ? { command: opts.testCommand } : {}),
+    ...(opts.testProgram ? { program: opts.testProgram } : {}),
+    ...(opts.testArgs ? { args: opts.testArgs } : {}),
+  });
+  if (!prResult.ok) return err(prResult.failure);
+
+  // Run the same tests on the base ref via runTestsOnRef, which
+  // handles checkout-to-ref + run + restore-to-branch. Restore
+  // failures surface via the return shape.
+  const refResult = await runTestsOnRef({
+    worktreePath: opts.worktreePath,
+    refToTest: baseRef,
+    restoreRef: opts.branch,
+    gitOps,
+    ...(opts.testCommand || opts.testProgram || opts.testArgs
+      ? {
+          testOpts: {
+            ...(opts.testCommand ? { command: opts.testCommand } : {}),
+            ...(opts.testProgram ? { program: opts.testProgram } : {}),
+            ...(opts.testArgs ? { args: opts.testArgs } : {}),
+          },
+        }
+      : {}),
+  });
+  if (!refResult.ok) return err(refResult.failure);
+
+  const attribution = attributeFailure(prResult.value, refResult.value.result);
+  const out: AttributeStepResult = refResult.value.restoreFailure
+    ? { attribution, mainResult: refResult.value.result, restoreFailure: refResult.value.restoreFailure }
+    : { attribution, mainResult: refResult.value.result };
+  return ok(out);
+}
+
 // ─── mergeStep ───────────────────────────────────────────────────────
 
 export interface MergeStepOpts {
@@ -553,6 +674,16 @@ export interface FileBlockerOpts {
   /** Worktree to remove on close. Optional. */
   worktreePath?: string;
   gitOps?: GitOps;
+  /**
+   * Project 1.12.3 — optional override for the escalation chit's
+   * `to` field. Default routes to the submission's submitter (the
+   * PR author). Set to a role id (e.g. `'engineering-lead'`) when
+   * the blocker is for someone other than the author — typically
+   * after attribution determined the failure was a main regression
+   * the author is innocent of. Hand 1.4.1's role-resolver finds an
+   * Employee at that role.
+   */
+  routeTo?: string | null;
 }
 
 export interface FileBlockerResult {
@@ -598,7 +729,14 @@ export async function fileBlocker(opts: FileBlockerOpts): Promise<Result<FileBlo
   const subFields = subChit.fields['clearance-submission'];
 
   // 2. Create the escalation chit. Body composes both summary and
-  // detail in pedagogical shape (issue + why + what to do).
+  // detail in pedagogical shape (issue + why + what to do). The
+  // routeTo override (Project 1.12.3) lets the caller route to a
+  // role other than the author when attribution determines this
+  // isn't the author's bug — e.g. main-regression goes to
+  // engineering-lead, with originatingAuthor preserved in the body
+  // so the substitute sees who's PR triggered the discovery.
+  const recipient = opts.routeTo ?? subFields.submitter;
+  const isReroute = recipient !== subFields.submitter;
   let escalationId: string | undefined;
   let escalationError: Error | undefined;
   try {
@@ -606,7 +744,7 @@ export async function fileBlocker(opts: FileBlockerOpts): Promise<Result<FileBlo
       originatingChit: opts.submissionId,
       reason: opts.summary,
       from: opts.slug,
-      to: subFields.submitter,
+      to: recipient,
       severity: 'blocker',
     };
     const escalationChit = createChit(opts.corpRoot, {
@@ -619,8 +757,9 @@ export async function fileBlocker(opts: FileBlockerOpts): Promise<Result<FileBlo
         `**Kind:** ${opts.kind}\n` +
         `**Submission:** ${opts.submissionId}\n` +
         `**Task:** ${subFields.taskId}\n` +
-        `**Originating author:** ${subFields.submitter}\n\n` +
-        `## What happened\n\n${opts.summary}\n\n` +
+        `**Originating author:** ${subFields.submitter}\n` +
+        (isReroute ? `**Routed to:** ${recipient} (not the author — see attribution)\n` : '') +
+        `\n## What happened\n\n${opts.summary}\n\n` +
         `## Detail\n\n${opts.detail}\n`,
     });
     escalationId = escalationChit.id;

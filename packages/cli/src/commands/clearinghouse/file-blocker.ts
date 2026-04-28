@@ -22,6 +22,7 @@ interface Opts {
   summary?: string;
   detail?: string;
   worktree?: string;
+  'route-to'?: string;
   corp?: string;
   json?: boolean;
 }
@@ -46,6 +47,7 @@ export async function cmdClearinghouseFileBlocker(rawArgs: string[]): Promise<vo
     detail: opts.detail!,
     slug: opts.from!,
     ...(opts.worktree ? { worktreePath: opts.worktree } : {}),
+    ...(opts['route-to'] ? { routeTo: opts['route-to'] } : {}),
   });
 
   if (opts.json) {
@@ -76,6 +78,7 @@ function parseOpts(rawArgs: string[]): Opts {
       summary: { type: 'string' },
       detail: { type: 'string' },
       worktree: { type: 'string' },
+      'route-to': { type: 'string' },
       corp: { type: 'string' },
       json: { type: 'boolean' },
     },

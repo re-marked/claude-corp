@@ -61,6 +61,11 @@ export async function cmdClearinghouse(rawArgs: string[]): Promise<void> {
       await cmdClearinghouseTest(subArgs);
       break;
     }
+    case 'attribute': {
+      const { cmdClearinghouseAttribute } = await import('./clearinghouse/attribute.js');
+      await cmdClearinghouseAttribute(subArgs);
+      break;
+    }
     case 'merge': {
       const { cmdClearinghouseMerge } = await import('./clearinghouse/merge.js');
       await cmdClearinghouseMerge(subArgs);
@@ -123,6 +128,14 @@ Lifecycle subcommands (Pressman session walks these in order):
                     [--command "..."] [--max-retries <n>] [--json]
                     Run tests with one flake retry. Classifies into
                     passed-first, flake, consistent-fail, inconclusive.
+
+  attribute         --from <slug> --submission <id> --worktree <path>
+                    --branch <name> [--base <ref>] [--command "..."] [--json]
+                    Project 1.12.3 — re-run failed tests on
+                    origin/main + compare failure sets. Classifies
+                    into pr-introduced, main-regression, mixed, or
+                    inconclusive. Drives blocker routing —
+                    main-regression goes to engineering-lead.
 
   merge             --from <slug> --submission <id> --worktree <path>
                     --branch <name> [--json]
