@@ -1250,8 +1250,18 @@ export interface ReviewCommentFields {
  * Per-event chits never get re-opened — they're append-only.
  */
 export interface LaneEventFields {
-  /** Submission this event belongs to. Canonical link for grouping a PR's journey. */
-  submissionId: string;
+  /**
+   * Submission this event belongs to. Canonical link for grouping
+   * a PR's post-submission journey.
+   *
+   * Optional because Editor's pre-submission events fire before
+   * the clearance-submission chit exists — `editor-claimed`,
+   * `editor-rejected`, and `editor-released` always have null
+   * submissionId; `editor-approved` and `editor-bypassed` populate
+   * it because enterClearance creates the submission inside those
+   * primitives. taskId is the always-required link.
+   */
+  submissionId?: string | null;
   /**
    * Task this submission settles. Denormalized from the submission for
    * cheap query-by-task — `cc-cli clearinghouse log --task <id>` shouldn't

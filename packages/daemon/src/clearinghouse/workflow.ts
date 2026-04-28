@@ -122,9 +122,10 @@ const WORKTREE_PREFIX_LEN = 12;
  * emitted events (resume sweeps, watcher fallbacks) leave both
  * `emittedBy` and `narrative` null.
  */
-function emitLaneEvent(opts: {
+export function emitLaneEvent(opts: {
   corpRoot: string;
-  submissionId: string;
+  /** submissionId optional for Editor pre-submission events. */
+  submissionId?: string | null;
   taskId: string;
   kind: LaneEventKind;
   emittedBy: string | null;

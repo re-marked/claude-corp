@@ -853,9 +853,10 @@ function validateReviewComment(fields: unknown): void {
 function validateLaneEvent(fields: unknown): void {
   const f = requireObject(fields, 'lane-event') as Partial<LaneEventFields>;
 
-  // Linkage — submissionId + taskId both required so queries can
-  // filter either way without joining.
-  requireNonEmptyString(f.submissionId, 'lane-event.submissionId');
+  // Linkage — taskId always required (canonical link). submissionId
+  // optional for editor pre-submission events that fire before
+  // enterClearance has created the submission chit.
+  if (f.submissionId !== undefined) requireStringOrNull(f.submissionId, 'lane-event.submissionId');
   requireNonEmptyString(f.taskId, 'lane-event.taskId');
 
   // Kind enumeration — full taxonomy enforced. Adding a new kind

@@ -15,6 +15,7 @@ interface Opts {
   task?: string;
   reason?: string;
   detail?: string;
+  narrative?: string;
   corp?: string;
   json?: boolean;
 }
@@ -33,6 +34,7 @@ export async function cmdEditorReject(rawArgs: string[]): Promise<void> {
     reviewerSlug: opts.from!,
     reason: opts.reason!,
     detail: opts.detail!,
+    ...(opts.narrative ? { narrative: opts.narrative } : {}),
   });
 
   if (opts.json) {
@@ -61,6 +63,7 @@ function parseOpts(rawArgs: string[]): Opts {
       task: { type: 'string' },
       reason: { type: 'string' },
       detail: { type: 'string' },
+      narrative: { type: 'string' },
       corp: { type: 'string' },
       json: { type: 'boolean' },
     },

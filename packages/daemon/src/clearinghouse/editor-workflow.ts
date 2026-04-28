@@ -59,13 +59,16 @@ import {
   type Member,
   type ContractFields,
   type EscalationFields,
+  type LaneEventFields,
+  type LaneEventKind,
+  type LaneEventPayload,
   type ReviewCommentFields,
   type TaskFields,
   type TaskWorkflowStatus,
 } from '@claudecorp/shared';
 import { failure, ok, err, type Result } from './failure-taxonomy.js';
 import { realGitOps, type GitOps } from './git-ops.js';
-import { acquireWorktree, type AcquiredWorktree } from './workflow.js';
+import { acquireWorktree, emitLaneEvent, type AcquiredWorktree } from './workflow.js';
 import { enterClearance } from './enter-clearance.js';
 
 // ─── Shapes ──────────────────────────────────────────────────────────
@@ -399,6 +402,24 @@ export function pickNextReview(opts: PickNextReviewOpts): Result<PickedReview | 
   }
 
   const picked = toPickedReview(rereadTask, opts.corpRoot, false);
+
+  // Emit editor-claimed. submissionId is null — Editor runs pre-
+  // submission, the clearance-submission chit doesn't exist yet.
+  // The taskId carries the canonical link.
+  if (picked) {
+    emitLaneEvent({
+      corpRoot: opts.corpRoot,
+      submissionId: null,
+      taskId: rereadTask.id,
+      kind: 'editor-claimed',
+      emittedBy: opts.editorSlug,
+      payload: {
+        branch: rereadTask.fields.task.branchUnderReview ?? undefined,
+        reviewRound: rereadTask.fields.task.editorReviewRound ?? 0,
+      },
+    });
+  }
+
   return ok(picked);
 }
 
@@ -611,6 +632,8 @@ export interface ApproveReviewOpts {
   /** Editor's worktree path — used as cwd for `git push`. */
   worktreePath: string;
   gitOps?: GitOps;
+  /** Project 1.12.3 — agent's voice on the emitted lane-event. */
+  narrative?: string | null;
 }
 
 /**
@@ -672,6 +695,24 @@ export async function approveReview(
   // Clear review state on success.
   clearTaskReviewState(opts.corpRoot, opts.taskId, opts.reviewerSlug);
 
+  // Emit editor-approved. The submission was just created by
+  // enterClearance — populate submissionId so log-readers can
+  // join Editor's approve to the subsequent Pressman events on
+  // the same submission.
+  emitLaneEvent({
+    corpRoot: opts.corpRoot,
+    submissionId: ec.value.submissionId,
+    taskId: opts.taskId,
+    kind: 'editor-approved',
+    emittedBy: opts.reviewerSlug,
+    narrative: opts.narrative ?? null,
+    payload: {
+      branch: branchUnderReview,
+      reviewRound: currentRound,
+      ...(ec.value.pushedSha ? { mergeCommitSha: ec.value.pushedSha } : {}),
+    },
+  });
+
   const out: ApproveReviewResult = {
     submissionId: ec.value.submissionId,
     reviewRound: currentRound,
@@ -690,6 +731,12 @@ export interface RejectReviewOpts {
   reason: string;
   /** Pedagogical body for the escalation chit; should reference the per-comment chits. */
   detail: string;
+  /**
+   * Project 1.12.3 — agent's voice on the emitted lane-event.
+   * Default falls back to opts.reason when null/absent (the
+   * rejection summary IS the agent's voice on this transition).
+   */
+  narrative?: string | null;
 }
 
 /**
@@ -827,6 +874,26 @@ export function rejectReview(opts: RejectReviewOpts): Result<RejectReviewResult>
     ));
   }
 
+  // Emit editor-rejected. submissionId is null — Editor's reject
+  // never reaches enterClearance; the next round (or cap-bypass)
+  // is the one that creates a submission. Narrative defaults to
+  // the rejection summary when the caller didn't supply one
+  // explicitly.
+  emitLaneEvent({
+    corpRoot: opts.corpRoot,
+    submissionId: null,
+    taskId: opts.taskId,
+    kind: 'editor-rejected',
+    emittedBy: opts.reviewerSlug,
+    narrative: opts.narrative ?? opts.reason,
+    payload: {
+      reviewRound: newRound,
+      capHit,
+      escalationId,
+      failureSummary: opts.reason,
+    },
+  });
+
   return ok({ newRound, capHit, escalationId });
 }
 
@@ -878,6 +945,11 @@ export interface BypassReviewOpts {
   reason: string;
   worktreePath: string;
   gitOps?: GitOps;
+  /**
+   * Project 1.12.3 — agent's voice on the emitted lane-event.
+   * Defaults to opts.reason when null/absent.
+   */
+  narrative?: string | null;
 }
 
 /**
@@ -958,6 +1030,24 @@ export async function bypassReview(
     }
   }
 
+  // Emit editor-bypassed. Submission was just created by enterClearance
+  // so submissionId IS populated — log-readers can join Editor's bypass
+  // to the subsequent Pressman events.
+  emitLaneEvent({
+    corpRoot: opts.corpRoot,
+    submissionId: ec.value.submissionId,
+    taskId: opts.taskId,
+    kind: 'editor-bypassed',
+    emittedBy: opts.reviewerSlug,
+    narrative: opts.narrative ?? opts.reason,
+    payload: {
+      branch: branchUnderReview,
+      reviewRound: currentRound,
+      capHit: true,
+      failureSummary: opts.reason,
+    },
+  });
+
   const out: BypassReviewResult = {
     submissionId: ec.value.submissionId,
     reviewRound: currentRound,
@@ -1010,6 +1100,20 @@ export function releaseReview(opts: ReleaseReviewOpts): Result<void> {
       cause instanceof Error ? cause.message : String(cause),
     ));
   }
+
+  // Emit editor-released. submissionId is null — releaseReview
+  // never reaches enterClearance.
+  emitLaneEvent({
+    corpRoot: opts.corpRoot,
+    submissionId: null,
+    taskId: opts.taskId,
+    kind: 'editor-released',
+    emittedBy: opts.reviewerSlug,
+    payload: {
+      reviewRound: taskFields.editorReviewRound ?? 0,
+    },
+  });
+
   return ok(undefined);
 }
 
