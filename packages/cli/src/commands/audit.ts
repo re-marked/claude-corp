@@ -415,10 +415,18 @@ async function approveAndMaybePromote(corpRoot: string, slug: string): Promise<v
         // Project 1.12: branching on editor-aware vs. clearinghouse-
         // only behavior:
         //
-        //   editor-aware + !capHit → dispatch Editor; do NOT fire
-        //     enterClearance now. Editor's approve / bypass fires it.
+        //   editor-aware + !capHit + has-contract → dispatch Editor;
+        //     do NOT fire enterClearance now. Editor's approve /
+        //     bypass fires it.
         //   editor-aware + capHit  → bypass Editor; fire enterClearance
         //     directly with reviewBypassed=true.
+        //   editor-aware + no-contract → fire enterClearance, which
+        //     handles standalone tasks via its no-contract fallback
+        //     close path (Codex P1 from PR #194). Without this guard
+        //     audit would dispatch Editor for a task whose
+        //     approveReview / bypassReview both hard-fail on null
+        //     contractId — task stranded in under_review forever.
+        //     (Codex P1 from PR #195.)
         //   clearinghouse-only     → fire enterClearance directly with
         //     reviewBypassed=true (1.12.1 behavior; same as bypass path).
         //   neither                → normal close path (no defer).
@@ -429,8 +437,9 @@ async function approveAndMaybePromote(corpRoot: string, slug: string): Promise<v
           const { isEditorAwareCorp } = await import('@claudecorp/daemon');
           const editorActive = isEditorAwareCorp(corpRoot);
           const taskCapHit = readTaskEditorCapHit(corpRoot, promotion.closedTaskId);
+          const taskHasContract = findContractContainingTask(corpRoot, promotion.closedTaskId) !== null;
 
-          if (editorActive && !taskCapHit) {
+          if (editorActive && !taskCapHit && taskHasContract) {
             await dispatchEditorReview(corpRoot, slug, promotion.closedTaskId, workspace);
           } else {
             await fireEnterClearance(corpRoot, slug, promotion.closedTaskId, workspace);
