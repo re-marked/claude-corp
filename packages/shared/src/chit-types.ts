@@ -139,6 +139,12 @@ function requireInteger(v: unknown, field: string, min: number, max: number): vo
   }
 }
 
+function requireBoolean(v: unknown, field: string): void {
+  if (typeof v !== 'boolean') {
+    throw new ChitValidationError(`${field} must be a boolean`, field);
+  }
+}
+
 function requireStringArray(v: unknown, field: string): void {
   if (!Array.isArray(v) || !v.every((x) => typeof x === 'string')) {
     throw new ChitValidationError(`${field} must be an array of strings`, field);
@@ -229,6 +235,30 @@ function validateTask(fields: unknown): void {
   // explicitly (distinct from undefined which means "field not present"
   // on pre-1.3 chits); both are legal.
   if (f.output !== undefined) requireStringOrNull(f.output, 'task.output');
+  // Project 1.12.2 — Editor review state. All four fields optional;
+  // pre-1.12.2 chits and tasks that never reached under_review have
+  // them undefined. requireInteger floor of 0 (counter never decreases).
+  if (f.editorReviewRound !== undefined && f.editorReviewRound !== null) {
+    requireInteger(f.editorReviewRound, 'task.editorReviewRound', 0, 1_000_000);
+  }
+  if (f.editorReviewCapHit !== undefined && f.editorReviewCapHit !== null) {
+    requireBoolean(f.editorReviewCapHit, 'task.editorReviewCapHit');
+  }
+  if (f.editorReviewRequested !== undefined && f.editorReviewRequested !== null) {
+    requireBoolean(f.editorReviewRequested, 'task.editorReviewRequested');
+  }
+  if (f.reviewerClaim !== undefined && f.reviewerClaim !== null) {
+    const claim = requireObject(f.reviewerClaim, 'task.reviewerClaim') as { slug?: unknown; claimedAt?: unknown };
+    requireNonEmptyString(claim.slug, 'task.reviewerClaim.slug');
+    optionalIsoTimestamp(claim.claimedAt, 'task.reviewerClaim.claimedAt');
+    if (claim.claimedAt === undefined || claim.claimedAt === null) {
+      throw new ChitValidationError(
+        'task.reviewerClaim.claimedAt is required when reviewerClaim is set',
+        'task.reviewerClaim.claimedAt',
+      );
+    }
+  }
+  if (f.branchUnderReview !== undefined) requireStringOrNull(f.branchUnderReview, 'task.branchUnderReview');
 }
 
 function validateContract(fields: unknown): void {
@@ -757,9 +787,11 @@ function validateClearanceSubmission(fields: unknown): void {
 function validateReviewComment(fields: unknown): void {
   const f = requireObject(fields, 'review-comment') as Partial<ReviewCommentFields>;
 
-  // Linkage — submissionId + taskId both required so queries can
-  // filter either way without walking the chain.
-  requireNonEmptyString(f.submissionId, 'review-comment.submissionId');
+  // Linkage — taskId is required + canonical (Editor's review runs
+  // pre-submission so submissionId is often null at write time).
+  // submissionId is optional; null is the default state for
+  // pre-submission comments. (Project 1.12.2.)
+  if (f.submissionId !== undefined) requireStringOrNull(f.submissionId, 'review-comment.submissionId');
   requireNonEmptyString(f.taskId, 'review-comment.taskId');
   requireNonEmptyString(f.reviewerSlug, 'review-comment.reviewerSlug');
 
@@ -780,6 +812,12 @@ function validateReviewComment(fields: unknown): void {
 
   // Severity — only blocker rejects the round; others advisory.
   requireEnum(f.severity, 'review-comment.severity', ['blocker', 'suggestion', 'nit'] as const);
+
+  // Project 1.12.2 — category names which kind of problem this is.
+  // bug = correctness/perf/security/maintain (Codex-style); drift =
+  // implementation diverges from task / contract spec. Required so
+  // Sexton's wake digest + CULTURE.md compounding can split the two.
+  requireEnum(f.category, 'review-comment.category', ['bug', 'drift'] as const);
 
   // Comment content. issue + why both required + non-empty —
   // Editor must articulate both for the comment to compound into

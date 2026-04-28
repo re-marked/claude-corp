@@ -233,6 +233,32 @@ export type {
   HirePressmanResult,
 } from './pressman.js';
 
+// ─── editor ──────────────────────────────────────────────────────────
+// Convenience hire for the Editor Employee. Same pattern as Pressman:
+// founder opt-in via `cc-cli hire --role editor` (manual auto-loaded);
+// this export is for tests + the future bacteria-scaling integration.
+export {
+  hireEditor,
+  buildEditorRules,
+} from './editor.js';
+export type {
+  HireEditorOpts,
+  HireEditorResult,
+} from './editor.js';
+
+// ─── editor-runtime ──────────────────────────────────────────────────
+// Wake dispatch + reactive watcher + Pulse-fallback sweep for the
+// Editor lane. Wired into daemon.ts at start. Editor session walks
+// patrol/code-review on each wake; the runtime decides only WHEN
+// to wake.
+export {
+  dispatchEditor,
+  EditorReviewWatcher,
+  editorSweep,
+  editorBootRecover,
+  EDITOR_SWEEP_INTERVAL_MS,
+} from './editor-runtime.js';
+
 // ─── pressman-runtime ────────────────────────────────────────────────
 // Wake dispatch + reactive watcher + Pulse-fallback sweep. Wired into
 // daemon.ts at start. Pressman session walks patrol/clearing on each
@@ -244,3 +270,44 @@ export {
   clearinghouseBootRecover,
   CLEARINGHOUSE_SWEEP_INTERVAL_MS,
 } from './pressman-runtime.js';
+
+// ─── editor-workflow ─────────────────────────────────────────────────
+// Stateless step primitives for the Editor lane. Editor session
+// composes these via cc-cli editor subcommands per the
+// patrol/code-review blueprint. Lane state lives on the task chit
+// (editorReviewRound / capHit / requested / reviewerClaim /
+// branchUnderReview) since Editor runs PRE-submission.
+export {
+  isEditorAwareCorp,
+  setEditorReviewRequested,
+  pickNextReview,
+  acquireEditorWorktree,
+  loadReviewContext,
+  fileReviewComment,
+  approveReview,
+  rejectReview,
+  bypassReview,
+  releaseReview,
+  findOrphanedReviewerClaims,
+  resetOrphanedReviewerClaim,
+  resumeEditorReviews,
+} from './editor-workflow.js';
+export type {
+  PickedReview,
+  ReviewContext,
+  ApproveReviewResult,
+  RejectReviewResult,
+  BypassReviewResult,
+  PickNextReviewOpts,
+  AcquireEditorWorktreeOpts,
+  LoadReviewContextOpts,
+  FileReviewCommentOpts,
+  FileReviewCommentResult,
+  ApproveReviewOpts,
+  RejectReviewOpts,
+  BypassReviewOpts,
+  ReleaseReviewOpts,
+  SetEditorReviewRequestedOpts,
+  OrphanedReviewerClaim,
+  ResumeEditorReviewsResult,
+} from './editor-workflow.js';

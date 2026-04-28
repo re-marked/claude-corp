@@ -313,6 +313,73 @@ export interface TaskFields {
    * step didn't write an output summary" rather than as a failure.
    */
   output?: string | null;
+  /**
+   * Project 1.12.2 — Editor review counter. Increments at each
+   * Editor `reject`. Survives across audit cycles (an under_review →
+   * blocked → in_progress → under_review oscillation by the author
+   * keeps the same counter). When this reaches the role's
+   * `editorReviewRoundCap` (default 3), `editorReviewCapHit` flips
+   * true and the next audit-approve bypasses Editor.
+   *
+   * Distinct from `review-comment.reviewRound`: this counter tracks
+   * "how many times Editor said no on this task," while a comment's
+   * reviewRound is "which review pass produced this comment." When
+   * Editor files a comment in round N, the comment's reviewRound is
+   * N+1 (1-indexed; round 1 is the first review pass after 0 prior
+   * rejections).
+   *
+   * Null / undefined === 0 prior rejections — pre-1.12.2 chits and
+   * fresh tasks both read as no review history.
+   */
+  editorReviewRound?: number | null;
+  /**
+   * Project 1.12.2 — set true when `editorReviewRound` reaches the
+   * role's cap. Audit reads this and bypasses Editor on next approve,
+   * firing enterClearance with `reviewBypassed: true` so the
+   * submission proceeds to the Pressman lane without further Editor
+   * iteration. NOT a permanent gate — re-creating the task or
+   * resetting via cc-cli would clear it.
+   */
+  editorReviewCapHit?: boolean | null;
+  /**
+   * Project 1.12.2 — set true by audit's approve path on
+   * editor-aware corps when this task is review-eligible (audit
+   * approved + clearinghouse-aware + editor-aware + !capHit).
+   * EditorReviewWatcher + the editor sweep both treat this as the
+   * "Editor: please look at this" signal, decoupling the audit
+   * trigger from the Editor's wake mechanism. Cleared by Editor's
+   * `approveReview` / `rejectReview` when the task exits the review
+   * cycle.
+   */
+  editorReviewRequested?: boolean | null;
+  /**
+   * Project 1.12.2 — non-null while an Editor session is mid-review
+   * on this task. Prevents two Editors (when bacteria scales the
+   * pool in 1.12.3) from racing on the same task. Claim atomically
+   * before reading the diff; release on approve / reject / abandon.
+   * `claimedAt` is an ISO timestamp; stale claims (claimer not
+   * alive) get reaped by the editor sweep, mirroring
+   * `findOrphanedProcessingSubmissions` for the Pressman lane.
+   */
+  reviewerClaim?: { slug: string; claimedAt: string } | null;
+  /**
+   * Project 1.12.2 — branch the author committed their work on,
+   * captured by audit at `editorReviewRequested = true` time.
+   * Editor's `acquireEditorWorktree` checks this branch out into
+   * its own isolated worktree (`.clearinghouse/editor-wt-N`) so
+   * Editor reviews a stable snapshot regardless of what the
+   * author's sandbox does between audit and Editor's wake.
+   *
+   * Cleared on approve (the branch info has moved into the
+   * clearance-submission chit at that point) and on reject (the
+   * author's next `cc-cli done` re-fires audit, which captures
+   * the current branch fresh — could be the same branch, could
+   * differ if they rebased / re-branched between rounds).
+   *
+   * Null / undefined means "Editor has nothing to review on this
+   * task right now." pickNextReview filters on non-null.
+   */
+  branchUnderReview?: string | null;
 }
 
 export interface ContractFields {
@@ -1050,12 +1117,21 @@ export interface ClearanceSubmissionFields {
  * or made moot by re-review.
  */
 export interface ReviewCommentFields {
-  /** Chit id of the clearance-submission this comment is on. */
-  submissionId: string;
+  /**
+   * Chit id of the clearance-submission this comment is on. Optional
+   * because Editor's review runs BEFORE enterClearance creates the
+   * submission — pre-submission comments carry null and only get a
+   * submissionId backfilled if approve later writes one (currently
+   * not done; taskId is the canonical link). Required-ness was
+   * relaxed in Project 1.12.2 when Editor became pre-push.
+   */
+  submissionId?: string | null;
   /**
    * Chit id of the task this submission settles. Denormalized from
    * the submission for cheap filtering — `cc-cli chit list --type
    * review-comment --task <id>` shouldn't have to walk submissions.
+   * Canonical link in the pre-submission flow (where submissionId
+   * is null).
    */
   taskId: string;
   /** Member id of the Editor who wrote it. */
@@ -1070,6 +1146,29 @@ export interface ReviewCommentFields {
    * Severity. Only `blocker` rejects the round. See docstring.
    */
   severity: 'blocker' | 'suggestion' | 'nit';
+  /**
+   * Project 1.12.2 — what kind of problem this comment names.
+   *
+   *   - `bug`    — a Codex-style correctness / performance / security /
+   *                maintainability issue in the code itself. Reading
+   *                only the diff + related files surfaces these. The
+   *                category Codex catches.
+   *   - `drift`  — implementation diverges from what the task /
+   *                contract specified. Underdevelopment (missing
+   *                acceptance criteria), scope creep (touching code
+   *                outside the contract goal), underplanning (literal
+   *                criteria pass but spirit missed). Requires reading
+   *                task.acceptanceCriteria + contract.goal alongside
+   *                the diff. Where Editor beats Codex — it's why we
+   *                have a per-corp Editor at all.
+   *
+   * Severity is orthogonal: a drift-blocker is "you missed half the
+   * acceptance criteria"; a bug-nit is a typo in a comment. The
+   * combination is what surfaces in Sexton's wake digest + becomes
+   * CULTURE.md substrate ("this role keeps producing drift = the
+   * spec process is too coarse for them").
+   */
+  category: 'bug' | 'drift';
   /** One-line summary of the issue. Required + non-empty. */
   issue: string;
   /** Pedagogical explanation — why this matters, what it could break, the principle behind it. The CULTURE.md substrate. */

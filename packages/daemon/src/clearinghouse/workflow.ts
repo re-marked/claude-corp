@@ -271,6 +271,14 @@ export interface AcquireWorktreeOpts {
   branch: string;
   /** Inject a mock GitOps for tests. */
   gitOps?: GitOps;
+  /**
+   * Path prefix under `<corpRoot>/.clearinghouse/`. Defaults to `'wt'`
+   * for Pressman's submission-keyed worktrees. Editor passes
+   * `'editor-wt'` (with an id derived from taskId) so its worktrees
+   * land in a separate namespace and can't collide with Pressman's.
+   * 1.12.2 widened this so the same primitive serves both lanes.
+   */
+  pathPrefix?: string;
 }
 
 export interface AcquiredWorktree {
@@ -318,10 +326,13 @@ export async function acquireWorktree(opts: AcquireWorktreeOpts): Promise<Result
     ));
   }
 
-  // 2. Compute deterministic path from the submission id (not the
-  // branch — branches can be renamed; submissions are immutable).
-  const prefix = opts.submissionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, WORKTREE_PREFIX_LEN);
-  const path = join(parent, `wt-${prefix}`);
+  // 2. Compute deterministic path from the id (not the branch —
+  // branches can be renamed; ids are immutable). Prefix
+  // 'wt'|'editor-wt' separates Pressman + Editor worktrees so the
+  // two lanes can't collide.
+  const idPrefix = opts.submissionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, WORKTREE_PREFIX_LEN);
+  const dirPrefix = opts.pathPrefix ?? 'wt';
+  const path = join(parent, `${dirPrefix}-${idPrefix}`);
 
   // 3. If path exists, force-remove first. We don't try to inspect
   // its state and reuse — leftover rebase / merge / index state
@@ -773,15 +784,18 @@ export interface CleanupOrphanWorktreesResult {
 }
 
 /**
- * Walk `<corpRoot>/.clearinghouse/wt-*` directories; remove any
- * whose submission-id prefix doesn't match an active clearance-
- * submission chit. Used at daemon boot to clean up after a prior
- * session that died mid-walk without finalizing.
+ * Walk `<corpRoot>/.clearinghouse/{wt,editor-wt}-*` directories; remove
+ * any whose id prefix doesn't match a live chit. Used at daemon boot
+ * to clean up after a prior session that died mid-walk.
  *
- * "Active" here means status='active' chit-lifecycle wise — completed
- * and failed submissions have moved off active, so their worktrees
- * are fair game. A queued/processing submission's worktree is
- * preserved (it's mid-flight).
+ * Live sets:
+ *   - For `wt-*` dirs: active clearance-submission chits.
+ *   - For `editor-wt-*` dirs: active task chits whose
+ *     `branchUnderReview` is non-null AND the task isn't terminal.
+ *     We err on the side of keeping editor worktrees while a task is
+ *     under_review or in any review-requested state — the next
+ *     acquire force-removes anyway, so a stale dir from a recent
+ *     session is harmless to keep around briefly.
  *
  * Best-effort per dir: a single failure doesn't poison the rest.
  * Returns counts so the caller can log a summary.
@@ -793,18 +807,33 @@ export async function cleanupOrphanWorktrees(
   const parent = join(opts.corpRoot, WORKTREE_PARENT_DIR);
   if (!existsSync(parent)) return ok({ removed: 0, failed: 0 });
 
-  // Collect prefixes of submissions that should keep their worktrees.
-  const livePrefixes = new Set<string>();
+  // Collect prefixes of submissions + review-eligible tasks that
+  // should keep their worktrees.
+  const liveSubmissionPrefixes = new Set<string>();
+  const liveTaskPrefixes = new Set<string>();
   try {
-    const subs = (await import('@claudecorp/shared')).queryChits<'clearance-submission'>(opts.corpRoot, {
+    const shared = await import('@claudecorp/shared');
+    const subs = shared.queryChits<'clearance-submission'>(opts.corpRoot, {
       types: ['clearance-submission'],
       scopes: ['corp'],
       statuses: ['active'],
     });
     for (const c of subs.chits) {
-      const id = c.chit.id;
-      const prefix = id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, WORKTREE_PREFIX_LEN);
-      livePrefixes.add(prefix);
+      const prefix = c.chit.id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, WORKTREE_PREFIX_LEN);
+      liveSubmissionPrefixes.add(prefix);
+    }
+    const tasks = shared.queryChits<'task'>(opts.corpRoot, {
+      types: ['task'],
+      statuses: ['active'],
+    });
+    for (const c of tasks.chits) {
+      const f = c.chit.fields.task;
+      // Keep editor-wt for tasks whose review state is in flight —
+      // either explicitly requested or held by a claim.
+      if (f.editorReviewRequested === true || (f.reviewerClaim ?? null) !== null) {
+        const prefix = c.chit.id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, WORKTREE_PREFIX_LEN);
+        liveTaskPrefixes.add(prefix);
+      }
     }
   } catch {
     // Chit query failure: be conservative and don't remove anything.
@@ -827,10 +856,21 @@ export async function cleanupOrphanWorktrees(
   let removed = 0;
   let failed = 0;
   for (const name of entries) {
-    const match = name.match(/^wt-([a-zA-Z0-9_-]+)$/);
-    if (!match) continue;
-    const prefix = match[1]!;
-    if (livePrefixes.has(prefix)) continue;
+    let prefix: string | null = null;
+    let kindLive: Set<string> | null = null;
+    const editorMatch = name.match(/^editor-wt-([a-zA-Z0-9_-]+)$/);
+    if (editorMatch) {
+      prefix = editorMatch[1]!;
+      kindLive = liveTaskPrefixes;
+    } else {
+      const pressmanMatch = name.match(/^wt-([a-zA-Z0-9_-]+)$/);
+      if (pressmanMatch) {
+        prefix = pressmanMatch[1]!;
+        kindLive = liveSubmissionPrefixes;
+      }
+    }
+    if (!prefix || !kindLive) continue;
+    if (kindLive.has(prefix)) continue;
     const path = join(parent, name);
     const result = await gitOps.worktreeRemove(path, { force: true, cwd: opts.corpRoot });
     if (result.ok) removed++;
