@@ -36,6 +36,8 @@ export interface FieldsForType {
   'breaker-trip': BreakerTripFields;
   'clearance-submission': ClearanceSubmissionFields;
   'review-comment': ReviewCommentFields;
+  'lane-event': LaneEventFields;
+  'pattern-observation': PatternObservationFields;
 }
 
 /**
@@ -1183,4 +1185,233 @@ export interface ReviewCommentFields {
   suggestedPatch?: string | null;
   /** Which Phase-1 round this comment came from. Lets the corp track "issues we caught in round 1 vs round 2." */
   reviewRound: number;
+}
+
+/**
+ * Project 1.12.3 — lane-event chit type.
+ *
+ * Immutable forensic record of a single state transition in the
+ * Clearinghouse merge lane. Every meaningful step Pressman or Editor
+ * takes — claim, rebase, test, attribute, merge, approve, reject —
+ * writes one of these. The chronological stream is the corp's lane
+ * diary: queryable, replayable, durable.
+ *
+ * Three uses:
+ *   1. Forensic. `cc-cli clearinghouse show <submission>` renders
+ *      the timeline. Bug reports become trivial — every transition
+ *      is on disk.
+ *   2. Aggregation. Sexton's wake digest pulls rolling-window stats
+ *      (merges per hour, blocker count, attribution outcomes) from
+ *      this stream. Notifications watcher fires DM/channel posts
+ *      when terminal events land.
+ *   3. Voice. The optional `narrative` field carries the agent's
+ *      1-line prose ("first-try clean, no conflicts" or "the rebase
+ *      from hell — 7 conflicts, 4 substantive, routed"). Accumulates
+ *      into the corp's lane writing voice.
+ *
+ * ### Why one chit type, not two
+ *
+ * Pressman events and Editor events share the same submission/task
+ * threading and the same renderers (timeline, log, digest). Splitting
+ * into `pressman-event` + `editor-event` would fragment every reader.
+ * One type with a `kind` discriminator keeps the diary unified.
+ *
+ * ### Lifecycle
+ *
+ * Non-ephemeral. The lane's history is durable corp memory — surviving
+ * for years is a feature. chit.status is `active` on creation and
+ * `closed` only via the shared abort-mid-write `burning` terminal.
+ * Per-event chits never get re-opened — they're append-only.
+ */
+export interface LaneEventFields {
+  /** Submission this event belongs to. Canonical link for grouping a PR's journey. */
+  submissionId: string;
+  /**
+   * Task this submission settles. Denormalized from the submission for
+   * cheap query-by-task — `cc-cli clearinghouse log --task <id>` shouldn't
+   * have to walk submissions to filter.
+   */
+  taskId: string;
+  /**
+   * Which kind of state transition this records. The full taxonomy
+   * spans 6 categories: submission lifecycle, rebase outcomes, test
+   * outcomes, attribution outcomes, merge outcomes, editor terminal.
+   */
+  kind: LaneEventKind;
+  /**
+   * Member.id of the agent who emitted this event. Null when the
+   * event was emitted by daemon-side machinery (resume sweeps,
+   * watcher fallbacks, boot recovery) — agents don't author those.
+   */
+  emittedBy: string | null;
+  /**
+   * Optional 1-line agent prose. The "voice" of the lane. Pressman
+   * writes these on judgment-laden events ("auto-resolved 3 trivial
+   * conflicts on round 2"); Editor writes them on terminal events
+   * ("approved round 1, no blockers"). Daemon-emitted events leave
+   * this null. Renderers fall back to a kind-derived default
+   * description when null.
+   */
+  narrative?: string | null;
+  /**
+   * Optional structural payload, kind-specific. Renderers and queries
+   * read defensively — fields are populated only when relevant. The
+   * type stays permissive (no per-kind discrimination) because the
+   * combinatorial cost of a discriminated union per kind exceeds the
+   * type-safety win at this scale.
+   */
+  payload?: LaneEventPayload | null;
+}
+
+/**
+ * Project 1.12.3 — discriminator for lane-event kinds. Six categories:
+ *
+ *   submission lifecycle  — queued, claimed, finalized, blocked, failed
+ *   worktree              — acquired
+ *   rebase                — clean, auto-resolved, needs-author,
+ *                           sanity-failed, fatal
+ *   tests                 — passed, flake, consistent-fail, inconclusive
+ *   attribution           — pr, main, mixed, inconclusive
+ *   merge                 — success, race, hook-rejected, branch-deleted, fatal
+ *   editor                — claimed, approved, rejected, bypassed, released
+ *
+ * The validator enforces this set; new kinds require schema bump.
+ */
+export type LaneEventKind =
+  // Submission lifecycle
+  | 'submission-queued'
+  | 'submission-claimed'
+  | 'submission-finalized'
+  | 'submission-blocked'
+  | 'submission-failed'
+  // Worktree
+  | 'worktree-acquired'
+  // Rebase
+  | 'rebase-clean'
+  | 'rebase-auto-resolved'
+  | 'rebase-needs-author'
+  | 'rebase-sanity-failed'
+  | 'rebase-fatal'
+  // Tests
+  | 'tests-passed'
+  | 'tests-flake'
+  | 'tests-consistent-fail'
+  | 'tests-inconclusive'
+  // Attribution (Project 1.12.3 attribution flow output)
+  | 'tests-attributed-pr'
+  | 'tests-attributed-main'
+  | 'tests-attributed-mixed'
+  | 'tests-attributed-inconclusive'
+  // Merge
+  | 'merge-success'
+  | 'merge-race'
+  | 'merge-hook-rejected'
+  | 'merge-branch-deleted'
+  | 'merge-fatal'
+  // Editor
+  | 'editor-claimed'
+  | 'editor-approved'
+  | 'editor-rejected'
+  | 'editor-bypassed'
+  | 'editor-released';
+
+/**
+ * Permissive payload for lane-events. All fields optional; each kind
+ * populates the relevant subset. Validators check shape per field
+ * when present, not which fields are present.
+ */
+export interface LaneEventPayload {
+  /** Resulting commit sha. Populated on `merge-success`. */
+  mergeCommitSha?: string;
+  /** Branch name. Populated on most events that involve a branch. */
+  branch?: string;
+  /** Conflicted file paths. Populated on `rebase-needs-author`. */
+  conflictedFiles?: string[];
+  /** Files Pressman auto-resolved. Populated on `rebase-auto-resolved`. */
+  autoResolvedFiles?: string[];
+  /** Number of auto-resolution rounds the rebase took. */
+  autoResolutionRounds?: number;
+  /** Test failure names. Populated on `tests-consistent-fail` + attribution. */
+  failureNames?: string[];
+  /** Test run duration in milliseconds. Populated on test events. */
+  testDurationMs?: number;
+  /** Failure category from the PR 2 taxonomy. Populated on fatal/blocked events. */
+  failureCategory?: string;
+  /** Pedagogical failure summary. Populated alongside failureCategory. */
+  failureSummary?: string;
+  /** Editor review round (1-indexed). Populated on editor events. */
+  reviewRound?: number;
+  /** Cap-hit flag. Populated on `editor-rejected` when this round triggered the cap. */
+  capHit?: boolean;
+  /** Escalation chit id. Populated on blocker-filing events. */
+  escalationId?: string;
+  /** Hook output. Populated on `merge-hook-rejected`. */
+  hookOutput?: string;
+}
+
+/**
+ * Project 1.12.3 — pattern-observation chit type.
+ *
+ * The compounding-judgment substrate. At the end of a review session,
+ * Editor optionally files zero-or-more of these if they noticed a
+ * recurring theme. Future review sessions read relevant observations
+ * (filtered by subject) as **priors** for the drift pass — the corp's
+ * editor learns its own taste over time.
+ *
+ * Pure event-sourced: each observation is its own chit. Aggregation
+ * happens at query time. No `recurrenceCount` stored; readers count
+ * matching observations across the active set. New observations don't
+ * mutate prior chits — the agent reads recent ones for the subject
+ * and decides whether the new finding is novel.
+ *
+ * After 100 reviews the editor's perspective IS the corp's perspective.
+ * Project 5's CULTURE.md emerges from real work via this substrate,
+ * before the formal CULTURE.md primitive lands.
+ *
+ * ### Lifecycle
+ *
+ * Non-ephemeral. Observations are durable institutional memory.
+ * chit.status `active` on creation; `closed` when an observation is
+ * deemed stale (the pattern stopped recurring) or dismissed (false
+ * positive). burning is the shared abort-mid-write terminal.
+ */
+export interface PatternObservationFields {
+  /** Member.id of the Editor who filed it. */
+  reviewerSlug: string;
+  /** What the pattern is about — role-scoped, area-scoped, or corp-wide. */
+  subject: PatternSubject;
+  /**
+   * One-paragraph finding describing the pattern. Pedagogical shape:
+   * the *what* the editor saw + the *why* it matters + (when applicable)
+   * the *fix* worth pushing on. Same register as a review-comment's
+   * `why` field, scaled up to a multi-review trend.
+   */
+  finding: string;
+  /**
+   * Optional review-comment chit ids that informed this observation —
+   * the specific instances that made the pattern visible. Lets a reader
+   * walk from a pattern back to its evidence.
+   */
+  linkedComments?: string[] | null;
+}
+
+/**
+ * Pattern subject — what dimension the observation groups by.
+ *
+ *   role          A specific role (e.g. backend-engineer keeps shipping
+ *                 without happy-path tests).
+ *   codebase-area A path prefix (e.g. packages/daemon/src/clearinghouse
+ *                 keeps producing drift-blockers about side effects).
+ *   corp-wide     Cross-cutting (e.g. PR titles trend toward over-broad
+ *                 scope across roles).
+ *
+ * `role` populates `role`. `codebase-area` populates `codebaseArea`.
+ * `corp-wide` populates neither. Validator enforces the consistency.
+ */
+export interface PatternSubject {
+  kind: 'role' | 'codebase-area' | 'corp-wide';
+  /** Required when kind='role'. */
+  role?: string | null;
+  /** Required when kind='codebase-area'. */
+  codebaseArea?: string | null;
 }
