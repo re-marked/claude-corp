@@ -101,6 +101,16 @@ export async function cmdClearinghouse(rawArgs: string[]): Promise<void> {
       await cmdClearinghouseLog(subArgs);
       break;
     }
+    case 'list': {
+      const { cmdClearinghouseList } = await import('./clearinghouse/list.js');
+      await cmdClearinghouseList(subArgs);
+      break;
+    }
+    case 'show': {
+      const { cmdClearinghouseShow } = await import('./clearinghouse/show.js');
+      await cmdClearinghouseShow(subArgs);
+      break;
+    }
     default: {
       console.error(`cc-cli clearinghouse: unknown subcommand "${subcommand}"`);
       console.error('');
@@ -182,6 +192,19 @@ Admin/debug:
                     lane-events chronologically: terminal events
                     only by default; --verbose for the firehose;
                     --replay <id> for one submission's full journey.
+
+  list              [--status <state>] [--role <id>] [--include-merged]
+                    [--include-failed] [--since <iso>] [--until <iso>]
+                    [--limit <n>] [--json]
+                    Project 1.12.3 — paginated submission browser.
+                    Defaults to active (queued/processing/conflict);
+                    flags widen to terminal states.
+
+  show <id>         [--json]
+                    Project 1.12.3 — forensic per-submission view:
+                    summary, lane-event timeline, review-comments
+                    grouped by severity + category, escalation
+                    chain.
 
 Walked order in patrol/clearing:
   pick → acquire-worktree → rebase → test → merge → finalize

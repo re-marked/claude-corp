@@ -89,6 +89,16 @@ export async function cmdEditor(rawArgs: string[]): Promise<void> {
       await cmdEditorStatus(subArgs);
       break;
     }
+    case 'list': {
+      const { cmdEditorList } = await import('./editor/list.js');
+      await cmdEditorList(subArgs);
+      break;
+    }
+    case 'show': {
+      const { cmdEditorShow } = await import('./editor/show.js');
+      await cmdEditorShow(subArgs);
+      break;
+    }
     default: {
       console.error(`cc-cli editor: unknown subcommand "${subcommand}"`);
       console.error('');
@@ -163,6 +173,20 @@ Admin/debug:
   status            [--json]
                     In-flight review claims + recent comments + tasks
                     awaiting review.
+
+  list              [--patterns] [--task <id>] [--role <id>]
+                    [--severity <blocker|suggestion|nit>]
+                    [--category <bug|drift>]
+                    [--subject-kind <role|codebase-area|corp-wide>]
+                    [--include-closed] [--limit <n>] [--json]
+                    Project 1.12.3 — review-comment browser. Default
+                    lists active comments; --patterns lists
+                    pattern-observation chits instead.
+
+  show <task-id>    [--json]
+                    Project 1.12.3 — forensic per-task review view:
+                    task summary, review-comments grouped by round,
+                    Editor lane-events, escalations.
 
 Walked order in patrol/code-review:
   pick → acquire-worktree → diff → file-comment* → approve | reject
