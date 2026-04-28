@@ -51,6 +51,7 @@ import {
   readConfig,
   validateTransition,
   TaskTransitionError,
+  ChitConcurrentModificationError,
   MEMBERS_JSON,
   EDITOR_REVIEW_ROUND_CAP_DEFAULT,
   getRole,
@@ -285,12 +286,50 @@ export function pickNextReview(opts: PickNextReviewOpts): Result<PickedReview | 
   }
 
   // 3. Resume path — if a task already has this Editor's claim,
-  // return it without re-claiming.
+  // return it without re-claiming. BUT recheck eligibility before
+  // returning: clearTaskReviewState (called from approveReview) is
+  // best-effort and swallows update failures, so a task that
+  // actually moved to clearance state may still carry our stale
+  // claim. Without the recheck, this resume branch would keep
+  // returning that ghost task forever, starving real pending
+  // reviews. (Codex P2 #2 from PR #195 round 4.)
   for (const c of tasks.chits) {
-    const f = (c.chit as Chit<'task'>).fields.task;
-    if (f.reviewerClaim?.slug === opts.editorSlug) {
-      const resumed = toPickedReview(c.chit as Chit<'task'>, opts.corpRoot, true);
+    const t = c.chit as Chit<'task'>;
+    const f = t.fields.task;
+    if (f.reviewerClaim?.slug !== opts.editorSlug) continue;
+
+    const stillEligible =
+      f.editorReviewRequested === true
+      && f.editorReviewCapHit !== true
+      && f.workflowStatus === 'under_review'
+      && Boolean(f.branchUnderReview);
+
+    if (stillEligible) {
+      const resumed = toPickedReview(t, opts.corpRoot, true);
       if (resumed) return ok(resumed);
+      continue;
+    }
+
+    // Stale self-claim — task moved on (approve cascade dropped its
+    // request flag, audit moved it to clearance, etc). Best-effort
+    // clear the stale claim so the slot frees up; fall through to
+    // the fresh-pick path so we don't return null when other work
+    // is ready.
+    try {
+      const scope = chitScopeFromPath(opts.corpRoot, c.path);
+      updateChit<'task'>(opts.corpRoot, scope, 'task', t.id, {
+        updatedBy: opts.editorSlug,
+        expectedUpdatedAt: t.updatedAt,
+        fields: {
+          task: {
+            ...f,
+            reviewerClaim: null,
+          },
+        },
+      });
+    } catch {
+      // Concurrent write or any failure — leave for the
+      // resumeEditorReviews sweep to clean up.
     }
   }
 
@@ -319,8 +358,15 @@ export function pickNextReview(opts: PickNextReviewOpts): Result<PickedReview | 
 
   const top = eligible[0]!;
   // 5. Claim atomically — re-read the task to confirm no other
-  // Editor beat us. If reviewerClaim is now non-null, we lost the
-  // race; yield. If it's still null, write the claim.
+  // Editor beat us, then write with expectedUpdatedAt so a
+  // concurrent claim between our read and our write throws
+  // ChitConcurrentModificationError instead of clobbering.
+  // Without optimistic concurrency, two Editors running in
+  // parallel can both pass the null-claim check and both
+  // overwrite each other's claim — last writer wins, both
+  // sessions believe they have the claim, one fails downstream
+  // in approveReview / fileReviewComment after doing review work.
+  // (Codex P2 #1 from PR #195 round 4.)
   const reread = findChitById(opts.corpRoot, top.id);
   if (!reread || reread.chit.type !== 'task') return ok(null);
   const rereadTask = reread.chit as Chit<'task'>;
@@ -331,6 +377,7 @@ export function pickNextReview(opts: PickNextReviewOpts): Result<PickedReview | 
   try {
     updateChit<'task'>(opts.corpRoot, scope, 'task', rereadTask.id, {
       updatedBy: opts.editorSlug,
+      expectedUpdatedAt: rereadTask.updatedAt,
       fields: {
         task: {
           ...rereadTask.fields.task,
@@ -339,6 +386,11 @@ export function pickNextReview(opts: PickNextReviewOpts): Result<PickedReview | 
       },
     });
   } catch (cause) {
+    if (cause instanceof ChitConcurrentModificationError) {
+      // Lost the race to a concurrent Editor. Yield — next wake
+      // re-evaluates, and the winner is now claim-holder.
+      return ok(null);
+    }
     return err(failure(
       'unknown',
       `pickNextReview: failed to claim task ${rereadTask.id}`,
