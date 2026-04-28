@@ -490,16 +490,19 @@ async function dispatchEditorReview(
   try {
     const branch = readCurrentBranch(workspacePath);
     if (!branch || branch === 'HEAD' || branch === 'main') {
-      // No reviewable branch — fall back to bypass path so the
-      // submission still flows (with reviewBypassed=true).
+      // No reviewable branch. Don't fall back to fireEnterClearance —
+      // it bails on the same branch condition (enter-clearance-blocked
+      // path post-Codex-PR-#194), so the fallback was a no-op. Just
+      // log and leave the task at under_review; author re-runs
+      // cc-cli done after fixing the sandbox, audit re-fires this
+      // path with a readable branch. (Codex P2 from PR #195.)
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
-        event: 'editor-dispatch-skipped',
+        event: 'editor-dispatch-blocked',
         reason: branch
           ? `worktree on '${branch}' — refusing to dispatch Editor`
           : 'could not read current branch',
         taskId,
       });
-      await fireEnterClearance(corpRoot, slug, taskId, workspacePath);
       return;
     }
 
@@ -600,6 +603,18 @@ async function fireEnterClearance(
       return;
     }
 
+    // Preserve the accumulated round count for cap-hit submissions
+    // — when audit's editor-aware branch falls through here because
+    // task.editorReviewCapHit is true, the task carries the count of
+    // prior rejections. Hard-coding reviewRound: 0 would drop that
+    // signal and make cap-hit submissions look identical to first-
+    // pass clearinghouse-only ones in the data. (Codex P2 from PR #195.)
+    const taskHit = findChitById(corpRoot, taskId);
+    const reviewRound =
+      taskHit && taskHit.chit.type === 'task'
+        ? ((taskHit.chit as Chit<'task'>).fields.task.editorReviewRound ?? 0)
+        : 0;
+
     const result = await enterClearance({
       corpRoot,
       taskId,
@@ -607,11 +622,12 @@ async function fireEnterClearance(
       branch,
       submitter: slug,
       worktreePath: workspacePath,
-      // PR 3 default: Editor doesn't exist yet, every submission
-      // gets reviewBypassed: true. PR 4 will pass this from
-      // Editor's approve / cap-hit decision.
+      // reviewBypassed: true here — Editor either doesn't exist on
+      // this corp (clearinghouse-only) or has been cap-bypassed
+      // (task.editorReviewCapHit). The non-bypassed approve path
+      // goes through editor-workflow.approveReview, not this helper.
       reviewBypassed: true,
-      reviewRound: 0,
+      reviewRound,
     });
 
     if (result.ok) {
