@@ -260,6 +260,44 @@ describe('pickNextReview', () => {
     expect(result.value!.resumed).toBe(true);
   });
 
+  it('does not resume a stale self-claim on a task that has moved past under_review', () => {
+    // approveReview's clearTaskReviewState is best-effort; a task
+    // that successfully entered clearance can still carry the
+    // Editor's reviewerClaim if the clear update silently failed.
+    // Without re-checking eligibility on resume, pickNextReview
+    // would keep returning that ghost task forever, starving real
+    // pending reviews. (Codex P2 #2 from PR #195 round 4.)
+    writeMembers(corpRoot, [
+      { id: 'editor-1', displayName: 'Editor', type: 'agent', rank: 'worker', role: 'editor' },
+    ]);
+    // Stale self-claim on a task already in clearance state.
+    const stale = createTask(corpRoot, {
+      workflowStatus: 'clearance',
+      editorReviewRequested: false,
+      branchUnderReview: null,
+      reviewerClaim: { slug: 'editor-1', claimedAt: '2026-04-28T12:00:00.000Z' },
+    });
+    // A real pending task ready for review.
+    const pending = createTask(corpRoot, {
+      editorReviewRequested: true,
+      branchUnderReview: 'feat/real',
+    });
+
+    const result = pickNextReview({ corpRoot, editorSlug: 'editor-1' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).not.toBeNull();
+    expect(result.value!.taskId).toBe(pending.id);
+    expect(result.value!.resumed).toBe(false);
+
+    // The stale claim should have been cleared as a side effect.
+    const after = findChitById(corpRoot, stale.id);
+    if (after) {
+      const f = (after.chit as Chit<'task'>).fields.task;
+      expect(f.reviewerClaim).toBeNull();
+    }
+  });
+
   it('skips capHit tasks even when requested', () => {
     writeMembers(corpRoot, [
       { id: 'editor-1', displayName: 'Editor', type: 'agent', rank: 'worker', role: 'editor' },
