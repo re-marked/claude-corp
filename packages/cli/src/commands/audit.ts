@@ -55,6 +55,10 @@ import {
   promotePendingHandoff,
   completeDeferredTaskClose,
   revertTaskFromUnderReview,
+  validateTransition,
+  TaskTransitionError,
+  updateChit,
+  chitScopeFromPath,
   buildPreCompactInstructions,
   buildCheckpointObservation,
   createChit,
@@ -464,6 +468,60 @@ function readTaskEditorCapHit(corpRoot: string, taskId: string): boolean {
 }
 
 /**
+ * Revert a deferred-close task back to in_progress when the audit-
+ * approve path bails before the work could enter clearance. Without
+ * this, `cc-cli done` refuses the handoff transition (it requires
+ * in_progress) and the author can't self-retry — the task strands
+ * at under_review until manual recovery.
+ *
+ * Mirrors the rejectReview round-3 fix (`audit-block` trigger) for
+ * the audit-side bail paths: branch-unreadable in dispatchEditorReview,
+ * branch-unreadable in fireEnterClearance, enterClearance-failure,
+ * and the catch-all exception path. (Codex P1 round 5 + the same
+ * shape in three other audit paths I caught while addressing it.)
+ *
+ * Best-effort: a transition error (pre-1.3 chit, unexpected state)
+ * leaves the task at its current workflowStatus and logs the cause.
+ * The audit log entry will already record why we're bailing; this
+ * helper just adds a state-machine transition so the author has a
+ * recovery path.
+ */
+function revertTaskWorkflowToInProgress(
+  corpRoot: string,
+  taskId: string,
+  slug: string,
+): { reverted: boolean; reason?: string } {
+  try {
+    const hit = findChitById(corpRoot, taskId);
+    if (!hit || hit.chit.type !== 'task') {
+      return { reverted: false, reason: 'task not found' };
+    }
+    const taskChit = hit.chit as Chit<'task'>;
+    const ws = taskChit.fields.task.workflowStatus;
+    if (!ws) {
+      return { reverted: false, reason: 'task has no workflowStatus (pre-1.3)' };
+    }
+    let next;
+    try {
+      next = validateTransition(ws, 'audit-block', taskChit.id);
+    } catch (cause) {
+      if (cause instanceof TaskTransitionError) {
+        return { reverted: false, reason: cause.message };
+      }
+      throw cause;
+    }
+    const scope = chitScopeFromPath(corpRoot, hit.path);
+    updateChit(corpRoot, scope, 'task', taskChit.id, {
+      updatedBy: slug,
+      fields: { task: { ...taskChit.fields.task, workflowStatus: next } } as never,
+    });
+    return { reverted: true };
+  } catch (err) {
+    return { reverted: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Project 1.12.2 — editor-aware approve path. Captures the author's
  * branch into the task chit and flips editorReviewRequested. Editor's
  * watcher / Pulse-fallback sweep dispatches a session that walks
@@ -490,18 +548,20 @@ async function dispatchEditorReview(
   try {
     const branch = readCurrentBranch(workspacePath);
     if (!branch || branch === 'HEAD' || branch === 'main') {
-      // No reviewable branch. Don't fall back to fireEnterClearance —
-      // it bails on the same branch condition (enter-clearance-blocked
-      // path post-Codex-PR-#194), so the fallback was a no-op. Just
-      // log and leave the task at under_review; author re-runs
-      // cc-cli done after fixing the sandbox, audit re-fires this
-      // path with a readable branch. (Codex P2 from PR #195.)
+      // No reviewable branch. Revert workflowStatus → in_progress
+      // so the author can re-run cc-cli done after fixing the
+      // sandbox state — without the revert, done refuses the
+      // handoff transition (only in_progress accepted) and the
+      // task strands. (Codex P1 round 5 from PR #195.)
+      const revert = revertTaskWorkflowToInProgress(corpRoot, taskId, slug);
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
         event: 'editor-dispatch-blocked',
         reason: branch
           ? `worktree on '${branch}' — refusing to dispatch Editor`
           : 'could not read current branch',
         taskId,
+        revertedToInProgress: revert.reverted,
+        revertReason: revert.reason ?? null,
       });
       return;
     }
@@ -584,21 +644,23 @@ async function fireEnterClearance(
     // Derive branch via git in the worktree. We do NOT fall back
     // close on a branch read failure — the work hasn't reached
     // origin yet, and a silent close would advance the contract
-    // chain as if it had. Leave the task at under_review; the
-    // agent's next session re-runs `cc-cli done` after fixing the
-    // sandbox state, audit re-fires this path, and the lane gets
-    // its second chance. (Codex P1 follow-up on PR #194.)
+    // chain as if it had. Revert workflowStatus to in_progress
+    // (Codex P1 round 5 follow-up: same author-can't-retry shape
+    // as the dispatchEditorReview branch case) so the agent can
+    // re-run cc-cli done after fixing the sandbox state.
     const branch = readCurrentBranch(workspacePath);
     if (!branch || branch === 'HEAD' || branch === 'main') {
       const reason = branch
         ? `worktree on '${branch}' — refusing to merge into itself`
         : 'could not read current branch';
+      const revert = revertTaskWorkflowToInProgress(corpRoot, taskId, slug);
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
         event: 'enter-clearance-blocked',
         reason,
         taskId,
         contractId,
-        // No fallbackClosed — task stays at under_review by design.
+        revertedToInProgress: revert.reverted,
+        revertReason: revert.reason ?? null,
       });
       return;
     }
@@ -645,10 +707,11 @@ async function fireEnterClearance(
       // store error, etc). Do NOT fall back to close — nothing
       // shipped to origin AND/OR no submission was queued, so
       // closing would hide unmerged work and falsely advance the
-      // contract chain. Leave the task at under_review; the
-      // author addresses the cause and re-runs `cc-cli done`,
-      // which re-fires audit. The pedagogical summary in the
-      // log gives them the diagnosis. (Codex P1 follow-up.)
+      // contract chain. Revert workflowStatus → in_progress so
+      // the author CAN re-run cc-cli done after addressing the
+      // root cause (Codex P1 round 5 follow-up); the failure
+      // category in the log gives them the diagnosis.
+      const revert = revertTaskWorkflowToInProgress(corpRoot, taskId, slug);
       logAuditDecision(corpRoot, slug, { decision: 'approve' }, {
         event: 'enter-clearance-failed',
         taskId,
@@ -658,12 +721,16 @@ async function fireEnterClearance(
         category: result.failure.category,
         summary: result.failure.pedagogicalSummary,
         retryable: result.failure.retryable,
+        revertedToInProgress: revert.reverted,
+        revertReason: revert.reason ?? null,
       });
     }
   } catch (err) {
     // Uncaught path: same as a typed enterClearance failure —
-    // safer to leave the task at under_review than to close on
-    // an unknown error mode that might indicate partial state.
+    // revert workflowStatus so the author can self-retry rather
+    // than waiting on manual recovery. Best-effort; revert errors
+    // surface in the audit log via logAuditError after.
+    try { revertTaskWorkflowToInProgress(corpRoot, taskId, slug); } catch { /* noop */ }
     logAuditError(corpRoot, slug, err);
   }
 }
