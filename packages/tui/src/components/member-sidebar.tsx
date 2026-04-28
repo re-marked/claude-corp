@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from '@claude-code-kit/ink-renderer';
-import { getRole, listActiveBreakers, type Member } from '@claudecorp/shared';
+import {
+  getRole,
+  listActiveBreakers,
+  rankQueue,
+  readClearinghouseLock,
+  queryChits,
+  type Member,
+  type Chit,
+} from '@claudecorp/shared';
 import { COLORS, STATUS, BORDER_STYLE } from '../theme.js';
 import type { DaemonClient } from '../lib/daemon-client.js';
 
@@ -16,6 +24,18 @@ interface Props {
 export function MemberSidebar({ members, channelMemberIds, visible, daemonClient, corpRoot }: Props) {
   const [agentStatuses, setAgentStatuses] = useState<Record<string, string>>({});
   const [trippedSlugs, setTrippedSlugs] = useState<Set<string>>(new Set());
+  // Project 1.12.3: clearinghouse lane snapshot for the sidebar.
+  // Queue depth + in-flight + recent-merge count + open-blocker
+  // count, refreshed on the same cadence as the rest of the
+  // sidebar reads. Empty initial state so the sidebar renders
+  // before the first read completes.
+  const [laneSnapshot, setLaneSnapshot] = useState<{
+    queueDepth: number;
+    lockHeldBy: string | null;
+    recentMerges: number;
+    openBlockers: number;
+    editorInFlight: number;
+  }>({ queueDepth: 0, lockHeldBy: null, recentMerges: 0, openBlockers: 0, editorInFlight: 0 });
 
   // Fetch real-time agent statuses from daemon
   useEffect(() => {
@@ -53,6 +73,61 @@ export function MemberSidebar({ members, channelMemberIds, visible, daemonClient
     };
     fetchBreakers();
     const interval = setInterval(fetchBreakers, 10000);
+    return () => clearInterval(interval);
+  }, [visible, corpRoot]);
+
+  // Project 1.12.3: clearinghouse lane snapshot. Reads queue +
+  // lock + recent lane-events on the same 10s cadence; fails open
+  // on any read error so a corrupt chit never throws to render.
+  useEffect(() => {
+    if (!visible || !corpRoot) return;
+    const fetchLane = () => {
+      try {
+        const queue = rankQueue(corpRoot);
+        const lock = readClearinghouseLock(corpRoot);
+        // Recent activity: rolling-hour counts pulled from the
+        // append-only lane-event log. submission-finalized → merges,
+        // submission-blocked → blockers. Both rates symmetrical.
+        // Codex round 1: blockers used to query submissionStatus
+        // === 'conflict', but fileBlocker calls markSubmissionFailed
+        // (sets 'failed'), so the conflict counter never tripped.
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        const events = queryChits<'lane-event'>(corpRoot, {
+          types: ['lane-event'],
+          scopes: ['corp'],
+        });
+        let recentMerges = 0;
+        let openBlockers = 0;
+        for (const e of events.chits) {
+          const ev = e.chit as Chit<'lane-event'>;
+          if ((ev.createdAt ?? '') < oneHourAgo) continue;
+          const kind = ev.fields['lane-event'].kind;
+          if (kind === 'submission-finalized') recentMerges++;
+          else if (kind === 'submission-blocked') openBlockers++;
+        }
+        // Editor in-flight: tasks with non-null reviewerClaim.
+        const tasks = queryChits<'task'>(corpRoot, {
+          types: ['task'],
+          statuses: ['active'],
+        });
+        let editorInFlight = 0;
+        for (const t of tasks.chits) {
+          const f = (t.chit as Chit<'task'>).fields.task;
+          if ((f.reviewerClaim ?? null) !== null) editorInFlight++;
+        }
+        setLaneSnapshot({
+          queueDepth: queue.length,
+          lockHeldBy: lock.heldBy,
+          recentMerges,
+          openBlockers,
+          editorInFlight,
+        });
+      } catch {
+        // Fail open — leave previous snapshot in place.
+      }
+    };
+    fetchLane();
+    const interval = setInterval(fetchLane, 10000);
     return () => clearInterval(interval);
   }, [visible, corpRoot]);
 
@@ -180,6 +255,61 @@ export function MemberSidebar({ members, channelMemberIds, visible, daemonClient
           );
         })}
       </Box>
+
+      {(laneSnapshot.queueDepth > 0
+        || laneSnapshot.lockHeldBy !== null
+        || laneSnapshot.recentMerges > 0
+        || laneSnapshot.openBlockers > 0
+        || laneSnapshot.editorInFlight > 0) && (
+        <Box flexDirection="column" marginTop={1}>
+          <Box>
+            <Text bold color={COLORS.primary}>Lane</Text>
+          </Box>
+          {laneSnapshot.queueDepth > 0 && (
+            <Box gap={0}>
+              <Text color={COLORS.muted}>•</Text>
+              <Text> </Text>
+              <Text color={COLORS.text}>Queue</Text>
+              <Text> </Text>
+              <Text color={COLORS.muted} wrap="end">{laneSnapshot.queueDepth}</Text>
+            </Box>
+          )}
+          {laneSnapshot.lockHeldBy !== null && (
+            <Box gap={0}>
+              <Text color={STATUS.working?.color ?? COLORS.muted}>●</Text>
+              <Text> </Text>
+              <Text color={COLORS.text} wrap="end">In flight</Text>
+            </Box>
+          )}
+          {laneSnapshot.editorInFlight > 0 && (
+            <Box gap={0}>
+              <Text color={COLORS.muted}>•</Text>
+              <Text> </Text>
+              <Text color={COLORS.text}>Reviews</Text>
+              <Text> </Text>
+              <Text color={COLORS.muted} wrap="end">{laneSnapshot.editorInFlight}</Text>
+            </Box>
+          )}
+          {laneSnapshot.recentMerges > 0 && (
+            <Box gap={0}>
+              <Text color={COLORS.muted}>•</Text>
+              <Text> </Text>
+              <Text color={COLORS.text}>Merged 1h</Text>
+              <Text> </Text>
+              <Text color={COLORS.muted} wrap="end">{laneSnapshot.recentMerges}</Text>
+            </Box>
+          )}
+          {laneSnapshot.openBlockers > 0 && (
+            <Box gap={0}>
+              <Text color={STATUS.broken?.color ?? COLORS.muted}>{STATUS.broken?.icon ?? '!'}</Text>
+              <Text> </Text>
+              <Text color={COLORS.text}>Blocked 1h</Text>
+              <Text> </Text>
+              <Text color={COLORS.muted} wrap="end">{laneSnapshot.openBlockers}</Text>
+            </Box>
+          )}
+        </Box>
+      )}
 
       <Box marginTop={1}>
         <Text color={COLORS.muted}>Press 'm' to hide</Text>

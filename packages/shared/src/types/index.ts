@@ -75,4 +75,9 @@ export type {
   BreakerTripFields,
   ClearanceSubmissionFields,
   ReviewCommentFields,
+  LaneEventFields,
+  LaneEventKind,
+  LaneEventPayload,
+  PatternObservationFields,
+  PatternSubject,
 } from './chit.js';

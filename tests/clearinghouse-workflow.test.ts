@@ -70,6 +70,7 @@ function buildMockGitOps(scripts: Partial<GitOps> = {}): GitOps {
     isClean: scripts.isClean ?? (async () => ok(true)),
     resetHard: scripts.resetHard ?? noopAsync,
     cleanWorkdir: scripts.cleanWorkdir ?? noopAsync,
+    checkoutRef: scripts.checkoutRef ?? noopAsync,
   };
 }
 

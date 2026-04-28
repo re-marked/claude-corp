@@ -41,6 +41,9 @@ import type {
   BreakerTripFields,
   ClearanceSubmissionFields,
   ReviewCommentFields,
+  LaneEventFields,
+  PatternObservationFields,
+  PatternSubject,
 } from './types/chit.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -746,6 +749,9 @@ function validateClearanceSubmission(fields: unknown): void {
 
   // The rich state machine. chit.status is coarser; this is the
   // source of truth for "where is this submission in the lane."
+  // Project 1.12.3 reserves `flake-suspected` — no current writer,
+  // accepted in the validator so future Pressman flake-investigation
+  // mode can ship without a schema bump.
   requireEnum(f.submissionStatus, 'clearance-submission.submissionStatus', [
     'queued',
     'processing',
@@ -753,6 +759,7 @@ function validateClearanceSubmission(fields: unknown): void {
     'conflict',
     'rejected',
     'failed',
+    'flake-suspected',
   ] as const);
 
   // Counters — integers, generous ceiling. retryCount and
@@ -782,6 +789,13 @@ function validateClearanceSubmission(fields: unknown): void {
   // Latest-failure prose. Free form. Refreshed per attempt; per-attempt
   // detail lives in step-log chits, not here.
   if (f.lastFailureReason !== undefined) requireStringOrNull(f.lastFailureReason, 'clearance-submission.lastFailureReason');
+
+  // Project 1.12.3 forward-compat: scopeKeys for parallel-lane
+  // isolation. Empty/null/absent in v1; future scope-aware Pressman
+  // populates from the diff's touched packages.
+  if (f.scopeKeys !== undefined && f.scopeKeys !== null) {
+    requireStringArray(f.scopeKeys, 'clearance-submission.scopeKeys');
+  }
 }
 
 function validateReviewComment(fields: unknown): void {
@@ -834,6 +848,126 @@ function validateReviewComment(fields: unknown): void {
 
   // Round counter — integer >= 1 (round 1 is the first review pass).
   requireInteger(f.reviewRound, 'review-comment.reviewRound', 1, 1_000_000);
+}
+
+function validateLaneEvent(fields: unknown): void {
+  const f = requireObject(fields, 'lane-event') as Partial<LaneEventFields>;
+
+  // Linkage — taskId always required (canonical link). submissionId
+  // optional for editor pre-submission events that fire before
+  // enterClearance has created the submission chit.
+  if (f.submissionId !== undefined) requireStringOrNull(f.submissionId, 'lane-event.submissionId');
+  requireNonEmptyString(f.taskId, 'lane-event.taskId');
+
+  // Kind enumeration — full taxonomy enforced. Adding a new kind
+  // requires a schema bump here AND the LaneEventKind union in
+  // types/chit.ts; the two-touch-point cost is the right friction
+  // for a vocabulary that consumers (renderers, aggregators) all
+  // switch on.
+  requireEnum(f.kind, 'lane-event.kind', [
+    'submission-queued',
+    'submission-claimed',
+    'submission-finalized',
+    'submission-blocked',
+    'submission-failed',
+    'worktree-acquired',
+    'rebase-clean',
+    'rebase-auto-resolved',
+    'rebase-needs-author',
+    'rebase-sanity-failed',
+    'rebase-fatal',
+    'tests-passed',
+    'tests-flake',
+    'tests-consistent-fail',
+    'tests-inconclusive',
+    'tests-attributed-pr',
+    'tests-attributed-main',
+    'tests-attributed-mixed',
+    'tests-attributed-inconclusive',
+    'merge-success',
+    'merge-race',
+    'merge-hook-rejected',
+    'merge-branch-deleted',
+    'merge-fatal',
+    'editor-claimed',
+    'editor-approved',
+    'editor-rejected',
+    'editor-bypassed',
+    'editor-released',
+  ] as const);
+
+  // Emitter is required-or-null. String when an agent emitted; null
+  // when the daemon emitted (resume sweeps, watcher fallbacks).
+  if (f.emittedBy !== undefined) requireStringOrNull(f.emittedBy, 'lane-event.emittedBy');
+  else throw new ChitValidationError('lane-event.emittedBy is required (use null for daemon-emitted events)', 'lane-event.emittedBy');
+
+  // Narrative is optional + nullable.
+  if (f.narrative !== undefined) requireStringOrNull(f.narrative, 'lane-event.narrative');
+
+  // Payload — permissive shape. Each field validated when present.
+  if (f.payload !== undefined && f.payload !== null) {
+    const p = requireObject(f.payload, 'lane-event.payload') as Record<string, unknown>;
+    if (p.mergeCommitSha !== undefined) requireNonEmptyString(p.mergeCommitSha, 'lane-event.payload.mergeCommitSha');
+    if (p.branch !== undefined) requireNonEmptyString(p.branch, 'lane-event.payload.branch');
+    if (p.conflictedFiles !== undefined) requireStringArray(p.conflictedFiles, 'lane-event.payload.conflictedFiles');
+    if (p.autoResolvedFiles !== undefined) requireStringArray(p.autoResolvedFiles, 'lane-event.payload.autoResolvedFiles');
+    if (p.autoResolutionRounds !== undefined) requireInteger(p.autoResolutionRounds, 'lane-event.payload.autoResolutionRounds', 0, 10_000);
+    if (p.failureNames !== undefined) requireStringArray(p.failureNames, 'lane-event.payload.failureNames');
+    if (p.testDurationMs !== undefined) requireInteger(p.testDurationMs, 'lane-event.payload.testDurationMs', 0, 24 * 60 * 60 * 1000);
+    if (p.failureCategory !== undefined) requireNonEmptyString(p.failureCategory, 'lane-event.payload.failureCategory');
+    if (p.failureSummary !== undefined) requireNonEmptyString(p.failureSummary, 'lane-event.payload.failureSummary');
+    if (p.reviewRound !== undefined) requireInteger(p.reviewRound, 'lane-event.payload.reviewRound', 0, 1_000_000);
+    if (p.capHit !== undefined) requireBoolean(p.capHit, 'lane-event.payload.capHit');
+    if (p.escalationId !== undefined) requireNonEmptyString(p.escalationId, 'lane-event.payload.escalationId');
+    if (p.hookOutput !== undefined) requireNonEmptyString(p.hookOutput, 'lane-event.payload.hookOutput');
+  }
+}
+
+function validatePatternObservation(fields: unknown): void {
+  const f = requireObject(fields, 'pattern-observation') as Partial<PatternObservationFields>;
+
+  requireNonEmptyString(f.reviewerSlug, 'pattern-observation.reviewerSlug');
+  requireNonEmptyString(f.finding, 'pattern-observation.finding');
+
+  // Subject — discriminated by kind, with kind-consistency enforced.
+  const subject = requireObject(f.subject, 'pattern-observation.subject') as Partial<PatternSubject>;
+  requireEnum(subject.kind, 'pattern-observation.subject.kind', ['role', 'codebase-area', 'corp-wide'] as const);
+
+  if (subject.kind === 'role') {
+    requireNonEmptyString(subject.role, 'pattern-observation.subject.role');
+    if (subject.codebaseArea !== undefined && subject.codebaseArea !== null) {
+      throw new ChitValidationError(
+        'pattern-observation.subject.codebaseArea must be null/absent when kind=role',
+        'pattern-observation.subject.codebaseArea',
+      );
+    }
+  } else if (subject.kind === 'codebase-area') {
+    requireNonEmptyString(subject.codebaseArea, 'pattern-observation.subject.codebaseArea');
+    if (subject.role !== undefined && subject.role !== null) {
+      throw new ChitValidationError(
+        'pattern-observation.subject.role must be null/absent when kind=codebase-area',
+        'pattern-observation.subject.role',
+      );
+    }
+  } else {
+    // corp-wide — both detail fields must be absent.
+    if (subject.role !== undefined && subject.role !== null) {
+      throw new ChitValidationError(
+        'pattern-observation.subject.role must be null/absent when kind=corp-wide',
+        'pattern-observation.subject.role',
+      );
+    }
+    if (subject.codebaseArea !== undefined && subject.codebaseArea !== null) {
+      throw new ChitValidationError(
+        'pattern-observation.subject.codebaseArea must be null/absent when kind=corp-wide',
+        'pattern-observation.subject.codebaseArea',
+      );
+    }
+  }
+
+  if (f.linkedComments !== undefined && f.linkedComments !== null) {
+    requireStringArray(f.linkedComments, 'pattern-observation.linkedComments');
+  }
 }
 
 function validateBreakerTrip(fields: unknown): void {
@@ -1186,6 +1320,40 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     terminalStatuses: ['closed', 'burning'],
     destructionPolicy: 'keep-forever',
     validate: validateReviewComment,
+  },
+  {
+    id: 'lane-event',
+    idPrefix: 'le',
+    // Non-ephemeral. Lane history is durable corp memory — every PR's
+    // journey through the merge lane stays on disk for retrospectives,
+    // forensic debugging, and the lane-narrative voice that compounds
+    // over time. Surviving for years is a feature, not noise.
+    defaultEphemeral: false,
+    defaultTTL: null,
+    defaultStatus: 'active',
+    // Append-only model: events never re-open. `closed` is unused on
+    // the happy path; `burning` is the shared abort-mid-write terminal
+    // every chit type tolerates by convention.
+    validStatuses: ['active', 'closed', 'burning'],
+    terminalStatuses: ['closed', 'burning'],
+    destructionPolicy: 'keep-forever',
+    validate: validateLaneEvent,
+  },
+  {
+    id: 'pattern-observation',
+    idPrefix: 'po',
+    // Non-ephemeral. Editor's accumulated observations ARE the corp's
+    // emerging review culture — proto-CULTURE.md material that Project
+    // 5.2 will formalize. Stale observations get manually closed by
+    // the founder when a pattern stops recurring; otherwise they
+    // persist to inform future review sessions as priors.
+    defaultEphemeral: false,
+    defaultTTL: null,
+    defaultStatus: 'active',
+    validStatuses: ['active', 'closed', 'burning'],
+    terminalStatuses: ['closed', 'burning'],
+    destructionPolicy: 'keep-forever',
+    validate: validatePatternObservation,
   },
   {
     id: 'breaker-trip',

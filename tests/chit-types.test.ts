@@ -95,6 +95,18 @@ describe('CHIT_TYPES registry invariants', () => {
     // Severity 'blocker' rejects the round; 'suggestion'/'nit'
     // advisory only.
     'review-comment',
+    // Project 1.12.3: lane-event — immutable forensic record of a
+    // single state transition in the Clearinghouse merge lane.
+    // Pressman + Editor write these at every meaningful step;
+    // chronological stream is the corp's queryable lane diary.
+    // Non-ephemeral; durable corp memory.
+    'lane-event',
+    // Project 1.12.3: pattern-observation — Editor's compounding
+    // judgment substrate. Filed at session end when a recurring
+    // theme is worth recording; future sessions read relevant
+    // observations as priors for the drift pass. Proto-CULTURE.md
+    // material before Project 5.2 formalizes.
+    'pattern-observation',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {

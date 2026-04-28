@@ -687,6 +687,7 @@ bare`;
       isClean: scripts.isClean ?? (async () => ok(true)),
       resetHard: scripts.resetHard ?? noop,
       cleanWorkdir: scripts.cleanWorkdir ?? noop,
+      checkoutRef: scripts.checkoutRef ?? noop,
     };
   }
 

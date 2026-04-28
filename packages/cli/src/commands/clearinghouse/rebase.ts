@@ -18,6 +18,7 @@ interface Opts {
   worktree?: string;
   branch?: string;
   base?: string;
+  narrative?: string;
   corp?: string;
   json?: boolean;
 }
@@ -35,7 +36,9 @@ export async function cmdClearinghouseRebase(rawArgs: string[]): Promise<void> {
     submissionId: opts.submission!,
     worktreePath: opts.worktree!,
     branch: opts.branch!,
+    emittedBy: opts.from!,
     ...(opts.base ? { baseBranch: opts.base } : {}),
+    ...(opts.narrative ? { narrative: opts.narrative } : {}),
   });
 
   if (opts.json) {
@@ -82,6 +85,7 @@ function parseOpts(rawArgs: string[]): Opts {
       worktree: { type: 'string' },
       branch: { type: 'string' },
       base: { type: 'string' },
+      narrative: { type: 'string' },
       corp: { type: 'string' },
       json: { type: 'boolean' },
     },

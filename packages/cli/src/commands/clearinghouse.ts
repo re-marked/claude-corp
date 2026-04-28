@@ -61,6 +61,11 @@ export async function cmdClearinghouse(rawArgs: string[]): Promise<void> {
       await cmdClearinghouseTest(subArgs);
       break;
     }
+    case 'attribute': {
+      const { cmdClearinghouseAttribute } = await import('./clearinghouse/attribute.js');
+      await cmdClearinghouseAttribute(subArgs);
+      break;
+    }
     case 'merge': {
       const { cmdClearinghouseMerge } = await import('./clearinghouse/merge.js');
       await cmdClearinghouseMerge(subArgs);
@@ -91,6 +96,21 @@ export async function cmdClearinghouse(rawArgs: string[]): Promise<void> {
       await cmdClearinghouseStatus(subArgs);
       break;
     }
+    case 'log': {
+      const { cmdClearinghouseLog } = await import('./clearinghouse/log.js');
+      await cmdClearinghouseLog(subArgs);
+      break;
+    }
+    case 'list': {
+      const { cmdClearinghouseList } = await import('./clearinghouse/list.js');
+      await cmdClearinghouseList(subArgs);
+      break;
+    }
+    case 'show': {
+      const { cmdClearinghouseShow } = await import('./clearinghouse/show.js');
+      await cmdClearinghouseShow(subArgs);
+      break;
+    }
     default: {
       console.error(`cc-cli clearinghouse: unknown subcommand "${subcommand}"`);
       console.error('');
@@ -115,35 +135,50 @@ Lifecycle subcommands (Pressman session walks these in order):
                     Ensure isolated worktree at deterministic path.
 
   rebase            --from <slug> --submission <id> --worktree <path>
-                    --branch <name> [--base <branch>] [--json]
+                    --branch <name> [--base <branch>]
+                    [--narrative "..."] [--json]
                     Fetch base + rebase. Classifies into clean,
                     auto-resolved, needs-author, sanity-failed, fatal.
 
   test              --from <slug> --submission <id> --worktree <path>
-                    [--command "..."] [--max-retries <n>] [--json]
+                    [--command "..."] [--max-retries <n>]
+                    [--narrative "..."] [--json]
                     Run tests with one flake retry. Classifies into
                     passed-first, flake, consistent-fail, inconclusive.
 
+  attribute         --from <slug> --submission <id> --worktree <path>
+                    --branch <name> [--base <ref>] [--command "..."]
+                    [--narrative "..."] [--json]
+                    Project 1.12.3 — re-run failed tests on
+                    origin/main + compare failure sets. Classifies
+                    into pr-introduced, main-regression, mixed, or
+                    inconclusive. Drives blocker routing —
+                    main-regression goes to engineering-lead.
+
   merge             --from <slug> --submission <id> --worktree <path>
-                    --branch <name> [--json]
+                    --branch <name> [--narrative "..."] [--json]
                     Push to origin. Classifies into merged, race,
                     hook-rejected, branch-deleted, fatal.
 
 Terminal-state subcommands:
   finalize          --from <slug> --submission <id>
-                    [--merge-sha <sha>] [--worktree <path>] [--json]
+                    [--merge-sha <sha>] [--worktree <path>]
+                    [--narrative "..."] [--json]
                     On clean merge: cascade chit graph + release lock
                     + remove worktree.
 
   file-blocker      --from <slug> --submission <id>
                     --kind <rebase-conflict|test-fail|hook-reject>
                     --summary "..." --detail "..."
-                    [--worktree <path>] [--json]
-                    Cut escalation chit for author's role + fail
-                    submission + release.
+                    [--route-to <role-or-slug>] [--worktree <path>]
+                    [--json]
+                    Cut escalation chit + fail submission + release.
+                    Default routes to author; --route-to overrides
+                    (e.g. engineering-lead for main-regression).
 
   mark-failed       --from <slug> --submission <id> --reason "..."
-                    [--requeue] [--worktree <path>] [--json]
+                    [--requeue] [--worktree <path>]
+                    [--narrative "..."] [--json]
                     Terminal-fail OR push-race re-queue (under cap)
                     + release.
 
@@ -154,6 +189,29 @@ Terminal-state subcommands:
 Admin/debug:
   status            [--json]
                     Lock holder, queue depth, recent submissions.
+
+  log               [--today | --last-7d | --last-30d |
+                    --since <iso> | --until <iso>]
+                    [--merged-only | --blocked-only | --failed-only]
+                    [--role <id>] [--replay <submission-id>]
+                    [--verbose] [--json]
+                    Project 1.12.3 — the lane's diary. Renders
+                    lane-events chronologically: terminal events
+                    only by default; --verbose for the firehose;
+                    --replay <id> for one submission's full journey.
+
+  list              [--status <state>] [--role <id>] [--include-merged]
+                    [--include-failed] [--since <iso>] [--until <iso>]
+                    [--limit <n>] [--json]
+                    Project 1.12.3 — paginated submission browser.
+                    Defaults to active (queued/processing/conflict);
+                    flags widen to terminal states.
+
+  show <id>         [--json]
+                    Project 1.12.3 — forensic per-submission view:
+                    summary, lane-event timeline, review-comments
+                    grouped by severity + category, escalation
+                    chain.
 
 Walked order in patrol/clearing:
   pick → acquire-worktree → rebase → test → merge → finalize

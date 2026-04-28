@@ -109,6 +109,14 @@ Returns the FULL review context in one call:
 - \`diff\` — file list (path, status, additions, deletions),
   filtered files (e.g. lockfiles), oversized flag + reason.
 - \`branchUnderReview\` and \`currentRound\`.
+- \`relevantPatterns\` (Project 1.12.3) — pattern-observation
+  chits the corp has accumulated for this task's role + corp-
+  wide. **Use these as priors for the drift pass.** Each carries
+  a finding ("backend-engineer keeps shipping without happy-path
+  tests"); apply it as a lens when reading the diff. If the
+  pattern recurs in this PR, that's a strong signal worth a
+  blocker — and worth filing a fresh observation at session end
+  to compound the recurrence count.
 
 If \`oversized\` is true, the review is too big to do well; reject
 with a drift-blocker explaining the scope-creep and ask the author
@@ -337,6 +345,85 @@ across multiple tasks of the same role:
 cc-cli say --agent <founder-slug>
     --message "Editor capping out on <role>'s submissions repeatedly — review process or contract decomposition may be too coarse for them."
 \`\`\`
+
+## Filing pattern-observations at session end (Project 1.12.3)
+
+After approve / reject, you may optionally file a
+\`pattern-observation\` chit if you noticed a recurring theme worth
+recording. These chits accumulate over time and feed back into
+future review sessions as priors via \`loadReviewContext.relevantPatterns\`.
+**This is the corp's review taste developing.**
+
+Three subject kinds:
+
+- \`role\` — patterns about a specific role's work.
+  E.g. *"backend-engineer keeps shipping without happy-path tests
+  on auth-related code; the omission has caused two main-
+  regressions this month — push harder on test coverage in
+  reject prose for backend-engineer auth PRs"*.
+- \`codebase-area\` — patterns scoped to a path prefix.
+  E.g. *"\`packages/daemon/src/clearinghouse/\` rebases keep
+  surfacing in 3+-file conflicts; consider per-PR scope discipline
+  for this module"*.
+- \`corp-wide\` — cross-cutting patterns.
+  E.g. *"PR titles have been trending toward over-broad scope
+  this month; authors are bundling 3-4 features per PR — drift-
+  pass should push back harder on scope creep"*.
+
+Command:
+
+\`\`\`
+cc-cli editor file-pattern --from <slug> \\
+    --kind <role|codebase-area|corp-wide> \\
+    [--role <id>]   (when kind=role)
+    [--area <path>] (when kind=codebase-area)
+    --finding "..." \\
+    [--linked-comments <comment-id,comment-id,...>] \\
+    --json
+\`\`\`
+
+**When to file:**
+- After 2+ similar findings across multiple sessions for the same
+  subject. One sighting is a finding; three is a pattern.
+- When you saw the same pattern referenced in
+  \`relevantPatterns\` and it recurred again — file a fresh
+  observation noting the continuation, with the linked comments
+  citing both the previous and current instances. The accumulating
+  count is what makes it CULTURE.md material later.
+- When the pattern is novel enough that the corp wouldn't see it
+  without your voice (corp-wide observations are rare; file when
+  you genuinely see it).
+
+**When NOT to file:**
+- Single-PR observations — those are review-comments, not
+  patterns.
+- Things that already have a recent active observation for the
+  same subject — read \`relevantPatterns\` first; don't duplicate.
+
+**Pedagogical shape** for the \`finding\` text: same as
+review-comments — issue + why + (when applicable) the suggested
+direction. One paragraph.
+
+## Your voice — the lane's diary
+
+Every editor-side state transition (claim, approve, reject,
+bypass, release) writes a \`lane-event\` chit automatically. The
+stream is queryable via \`cc-cli clearinghouse log\` for the
+post-submission view, or \`cc-cli editor list\` /
+\`cc-cli editor show <task-id>\` for the editor-side detail.
+
+Pass \`--narrative "<one line>"\` on:
+
+- \`approve\` — when the journey was notable ("clean — first-
+  round approval", "round 3, capped Toast's stuck point").
+- \`reject\` — defaults to \`reason\` when omitted; pass
+  explicitly when you want different prose for the diary vs the
+  escalation chit.
+- \`bypass\` — same.
+
+Skip narrative on \`pick\` and \`release\` (mechanical) and
+\`file-comment\` (the comment IS the voice). Daemon-emitted
+events leave it null automatically.
 
 ## Why you exist
 

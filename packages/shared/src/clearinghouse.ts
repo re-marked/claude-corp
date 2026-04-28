@@ -191,13 +191,37 @@ const FREE_LOCK: ClearinghouseLockState = {
 };
 
 /**
+ * Project 1.12.3 — forward-compat helper for lane-aware lock paths.
+ *
+ * v1 always passes `'default'` (or omits laneId entirely) so the path
+ * is the legacy `<corpRoot>/clearinghouse-lock.json`. Future multi-
+ * Pressman with parallel lanes will pass a real laneId derived from
+ * `ClearanceSubmissionFields.scopeKeys` to get per-lane locks like
+ * `clearinghouse-lock-pkg-cli.json`. The schema change is non-
+ * breaking — existing callers (and existing on-disk locks) keep
+ * working unchanged.
+ *
+ * Default-named ('default') maps back to the legacy filename so v1
+ * lock files don't migrate. Other lane ids get the templated form.
+ */
+export function getClearinghouseLockPath(corpRoot: string, laneId: string = 'default'): string {
+  if (laneId === 'default') return join(corpRoot, CLEARINGHOUSE_LOCK_JSON);
+  // Sanitize laneId so it's safe as a filename. Disallow path
+  // separators, dots, and non-ASCII; collapse anything else into
+  // hyphens. Defensive — lane ids will be derived from package names
+  // in future, all ASCII, but better to enforce here than trust.
+  const safe = laneId.replace(/[^a-zA-Z0-9_-]/g, '-');
+  return join(corpRoot, `clearinghouse-lock-${safe}.json`);
+}
+
+/**
  * Read the lock file. Returns the free-lock state when the file
  * doesn't exist (no Pressman has ever claimed) or is corrupt
  * (defense in depth — a bad lock file shouldn't permanently block
  * the lane; chit-hygiene will surface the corruption separately).
  */
 export function readClearinghouseLock(corpRoot: string): ClearinghouseLockState {
-  const path = join(corpRoot, CLEARINGHOUSE_LOCK_JSON);
+  const path = getClearinghouseLockPath(corpRoot);
   if (!existsSync(path)) return { ...FREE_LOCK };
   try {
     const raw = readFileSync(path, 'utf-8');
@@ -220,7 +244,7 @@ export function readClearinghouseLock(corpRoot: string): ClearinghouseLockState 
  * the daemon level handles concurrent writers).
  */
 function writeLockState(corpRoot: string, state: ClearinghouseLockState): void {
-  const path = join(corpRoot, CLEARINGHOUSE_LOCK_JSON);
+  const path = getClearinghouseLockPath(corpRoot);
   const tmpPath = `${path}.tmp`;
   writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf-8');
   renameSync(tmpPath, path);

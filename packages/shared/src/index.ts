@@ -59,6 +59,11 @@ export type {
   BreakerTripFields,
   ClearanceSubmissionFields,
   ReviewCommentFields,
+  LaneEventFields,
+  LaneEventKind,
+  LaneEventPayload,
+  PatternObservationFields,
+  PatternSubject,
 } from './types/index.js';
 
 // Parsers
@@ -305,6 +310,7 @@ export {
   scoreSubmission,
   rankQueue,
   readClearinghouseLock,
+  getClearinghouseLockPath,
   claimClearinghouseLock,
   releaseClearinghouseLock,
   forceReleaseClearinghouseLock,

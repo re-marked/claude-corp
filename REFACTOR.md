@@ -2302,9 +2302,21 @@ Multiple Editors (when bacteria scales the pool in 1.12.3) round-robin via per-t
 
 ---
 
-### 1.12.3 — Integration + ship-criterion demo (PR 5 of 1.12)
+### 1.12.3 — Integration + ship-criterion demo (PR 5 of 1.12) **[shipped PR #196]**
 
 The "walk away overnight" PR. By 1.12.3 end, the Project 1 ship criterion is real — hand 5 tasks, walk away, come back to 4 merged + 1 blocker in inbox.
+
+**What actually shipped (mid-PR additions agreed with Mark beyond the original plan):**
+
+The original plan covered A-G below. During building, Mark and I agreed on three additions that gave the lane memory, judgment that compounds, and a voice — the substrate-level features that turn the lane from mechanism into something the corp actually feels alive in:
+
+- **Lane-event chit type.** Every Pressman + Editor state transition writes an immutable chit (claim / rebase outcome / test outcome / attribution / merge / approve / reject / etc — 28 kinds total). Chronological stream is the corp's diary. Optional `narrative` field carries the agent's 1-line voice ("first-try clean, no conflicts" / "rebase from hell — 4 substantive routed"). Daemon-emitted events (resume sweeps, watcher fallbacks) leave it null.
+- **Pattern-observation chit type.** Editor's compounding-judgment substrate. At session end Editor optionally files observations subject-scoped to a role / codebase-area / corp-wide. Future review sessions read relevant patterns via `loadReviewContext.relevantPatterns` as priors for the drift pass — corp's review taste tightens monotonically. Proto-CULTURE.md material before Project 5 formalizes it.
+- **`cc-cli clearinghouse log` — the diary reader.** Walks lane-events chronologically; default shows terminal events only; `--verbose` for the firehose; `--replay <id>` for one PR's full journey. After the corp runs for a week the diary becomes its actual readable history.
+
+**E2E test (F below) — Mark is doing manually as a user.** Not in this PR per his decision; the substrate is here, the executable test stays his to run.
+
+#### What's new (final shape)
 
 #### What's new
 
@@ -2371,9 +2383,21 @@ These are documentation-shape additions. No behavior change in 1.12.3, but the s
 7. `test(1.12.3): end-to-end fixture — Project 1 ship criterion executable`
 8. `feat(1.12.3): TUI sidebar — clearance queue + recent merges rollup`
 
-#### Project 1 closes when 1.12.3 lands
+#### Project 1 closes when 1.12.3 lands **[shipped]**
 
-After 1.12.3, Project 1's full ship criterion runs as an actual integration test. Project 1 is done. Move on to Project 2 (Workflow Substrate) per the existing roadmap.
+Project 1 is done. The "walk away overnight" demo runs end-to-end via Mark's manual user-test (the executable form of the ship criterion, by his choice — not bundled in this PR). What ships in 1.12.3 makes that test real:
+
+- Bacteria scaling for Pressman + Editor pools (auto-scaling under burst).
+- Founder observability: `cc-cli clearinghouse status / list / show / log`, `cc-cli editor list / show` (file-pattern, file-comment, etc).
+- Channel + DM notifications: daemon-side `LaneEventWatcher` guarantees terminal-state posts even when an agent's session dies before sending its own.
+- Sexton wake digest: `composeClearinghouseSection` surfaces lane health as part of the daily corp pulse.
+- Test attribution: `GitOps.checkoutRef` + `runTestsOnRef` + `attributeStep` + `--route-to engineering-lead` route main-regressions away from innocent PR authors. The lead-the-field piece — none of bors-ng / Mergify / GitHub Merge Queue / Atlantis / Gas Town does this.
+- Forward-compat schema markers: `scopeKeys`, lane-aware lock path, `flake-suspected`. No behavior change in 1.12.3; the substrate is ready when queue depth justifies parallel lanes.
+- TUI sidebar lane rollup: queue depth, in-flight, recent merges, open blockers visible alongside bacteria role rollups.
+
+Plus the three substrate-level additions named at the top of this section (lane-events, pattern-observations, `cc-cli clearinghouse log`) that compound across time — the corp now has memory + voice + a self-tightening review taste.
+
+Move on to Project 2 (Workflow Substrate) per the existing roadmap.
 
 ---
 

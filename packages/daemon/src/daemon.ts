@@ -46,6 +46,7 @@ import {
   editorSweep,
   EDITOR_SWEEP_INTERVAL_MS,
 } from './clearinghouse/editor-runtime.js';
+import { LaneEventWatcher } from './clearinghouse/lane-event-watcher.js';
 import { ClockManager } from './clock-manager.js';
 import { LoopManager } from './loops.js';
 import { CronManager } from './crons.js';
@@ -83,6 +84,7 @@ export class Daemon {
   contractWatcher: ContractWatcher;
   clearanceSubmissionWatcher: ClearanceSubmissionWatcher;
   editorReviewWatcher: EditorReviewWatcher;
+  laneEventWatcher: LaneEventWatcher;
   clocks: ClockManager;
   loops: LoopManager;
   crons: CronManager;
@@ -176,6 +178,7 @@ export class Daemon {
     this.contractWatcher = new ContractWatcher(this);
     this.clearanceSubmissionWatcher = new ClearanceSubmissionWatcher(this);
     this.editorReviewWatcher = new EditorReviewWatcher(this);
+    this.laneEventWatcher = new LaneEventWatcher(this);
     this.clocks = new ClockManager(this.events);
     this.loops = new LoopManager(this);
     this.crons = new CronManager(this);
@@ -497,6 +500,11 @@ export class Daemon {
     // on corps without a hired Editor.
     void editorBootRecover(this);
     this.editorReviewWatcher.start();
+    // Project 1.12.3: lane-event notification watcher — daemon-side
+    // fallback for terminal-state DM/channel posts. Mirrors the
+    // existing watcher pattern; subscribes lazily on the lane-event
+    // chits dir.
+    this.laneEventWatcher.start();
     this.clocks.register({
       id: 'editor-sweep',
       name: 'Editor Sweep',
@@ -845,6 +853,7 @@ export class Daemon {
     this.contractWatcher.stop();
     this.clearanceSubmissionWatcher.stop();
     this.editorReviewWatcher.stop();
+    this.laneEventWatcher.stop();
     this.autoemon.stop(); // Persist autoemon state before shutdown
     this.crons.stopAll(); // Stop croner jobs before ClockManager
     this.loops.shutdown(); // Flush loop stats

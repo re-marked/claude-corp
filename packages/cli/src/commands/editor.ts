@@ -59,6 +59,11 @@ export async function cmdEditor(rawArgs: string[]): Promise<void> {
       await cmdEditorFileComment(subArgs);
       break;
     }
+    case 'file-pattern': {
+      const { cmdEditorFilePattern } = await import('./editor/file-pattern.js');
+      await cmdEditorFilePattern(subArgs);
+      break;
+    }
     case 'approve': {
       const { cmdEditorApprove } = await import('./editor/approve.js');
       await cmdEditorApprove(subArgs);
@@ -82,6 +87,16 @@ export async function cmdEditor(rawArgs: string[]): Promise<void> {
     case 'status': {
       const { cmdEditorStatus } = await import('./editor/status.js');
       await cmdEditorStatus(subArgs);
+      break;
+    }
+    case 'list': {
+      const { cmdEditorList } = await import('./editor/list.js');
+      await cmdEditorList(subArgs);
+      break;
+    }
+    case 'show': {
+      const { cmdEditorShow } = await import('./editor/show.js');
+      await cmdEditorShow(subArgs);
       break;
     }
     default: {
@@ -122,20 +137,32 @@ Lifecycle subcommands (Editor session walks these in order):
                     Cut review-comment chit. Severity 'blocker' rejects
                     the round; 'suggestion'/'nit' advisory only.
 
+  file-pattern      --from <slug>
+                    --kind <role|codebase-area|corp-wide>
+                    [--role <id>] [--area <path>]
+                    --finding "..." [--linked-comments <id,id,...>] [--json]
+                    Project 1.12.3 — record a recurring theme as a
+                    pattern-observation chit. Future review sessions
+                    read relevant observations as priors for the
+                    drift pass; the corp's review taste tightens
+                    monotonically.
+
 Terminal-state subcommands:
-  approve           --from <slug> --task <id> --worktree <path> [--json]
+  approve           --from <slug> --task <id> --worktree <path>
+                    [--narrative "..."] [--json]
                     Pass review. Fires enterClearance with
                     reviewBypassed=false; clears review state on
                     success.
 
   reject            --from <slug> --task <id> --reason "..."
-                    --detail "..." [--json]
+                    --detail "..." [--narrative "..."] [--json]
                     Fail review. Increments task.editorReviewRound,
                     sets capHit if at cap, files escalation chit
-                    routing to author's role.
+                    routing to author's role. Narrative defaults to
+                    --reason when omitted.
 
   bypass            --from <slug> --task <id> --reason "..."
-                    --worktree <path> [--json]
+                    --worktree <path> [--narrative "..."] [--json]
                     Self-bypass — set capHit, fire enterClearance with
                     reviewBypassed=true. Rare; usually audit triggers
                     bypass when the cap is reached automatically.
@@ -148,6 +175,20 @@ Admin/debug:
   status            [--json]
                     In-flight review claims + recent comments + tasks
                     awaiting review.
+
+  list              [--patterns] [--task <id>] [--role <id>]
+                    [--severity <blocker|suggestion|nit>]
+                    [--category <bug|drift>]
+                    [--subject-kind <role|codebase-area|corp-wide>]
+                    [--include-closed] [--limit <n>] [--json]
+                    Project 1.12.3 — review-comment browser. Default
+                    lists active comments; --patterns lists
+                    pattern-observation chits instead.
+
+  show <task-id>    [--json]
+                    Project 1.12.3 — forensic per-task review view:
+                    task summary, review-comments grouped by round,
+                    Editor lane-events, escalations.
 
 Walked order in patrol/code-review:
   pick → acquire-worktree → diff → file-comment* → approve | reject
