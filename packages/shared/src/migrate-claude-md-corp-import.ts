@@ -9,37 +9,102 @@
  * entirely after upgrade: hook stdout no longer carries it, and
  * their @imports list doesn't reference it.
  *
- * The migration regenerates CLAUDE.md from the current template using
- * the member's recorded kind/role/displayName/agentDir. Idempotent:
- * agents whose CLAUDE.md already contains `@./CORP.md` are skipped.
- * Agents without CLAUDE.md (OpenClaw-only — they don't get a
- * CLAUDE.md file because OpenClaw reads the workspace bootstrap
+ * ## Surgical, not regenerative
+ *
+ * The migration **inserts a single new section** (`## The corp manual`
+ * + `@./CORP.md` import + short description) into the existing file.
+ * It does NOT regenerate from `buildThinClaudeMd`. CLAUDE.md is the
+ * surface where role-specific instructions live — the CEO and the
+ * founder add content there over time, and a regenerative migration
+ * would clobber that. Surgical-insert preserves whatever's already
+ * there and only adds the missing import.
+ *
+ * Anchor strategy: insert before the first matching anchor heading,
+ * checked in priority order. If none match (hand-written CLAUDE.md
+ * that doesn't follow the template), append to the end of the file.
+ *
+ * Idempotent: agents whose CLAUDE.md already contains `@./CORP.md`
+ * are skipped. Agents without CLAUDE.md (OpenClaw-only — they don't
+ * get a CLAUDE.md file because OpenClaw reads the workspace bootstrap
  * natively) are also skipped.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { atomicWriteSync } from './atomic-write.js';
 import { readConfig } from './parsers/index.js';
-import { buildThinClaudeMd } from './templates/claude-md.js';
 import { MEMBERS_JSON } from './constants.js';
 import type { Member } from './types/member.js';
 
 const CORP_IMPORT_LINE = '@./CORP.md';
 
+/**
+ * The block we inject. Mirrors the corresponding section in the
+ * current `buildThinClaudeMd` template — keeping the wording in
+ * sync means an agent doesn't see a different framing depending
+ * on whether their CLAUDE.md was newly scaffolded or migrated.
+ */
+const CORP_MANUAL_SECTION = `## The corp manual
+
+@./CORP.md
+
+This is the corp's full ops reference — chits, casket, audit, hand,
+patrols, commands, escalation, the works. Regenerated on every
+SessionStart by \`cc-cli wtf\`, so what you see here is current as
+of this turn. Re-run \`cc-cli wtf\` mid-session if state changed
+materially and you need a fresh snapshot.
+
+`;
+
+/**
+ * Anchors checked in priority order. Insert position is *before*
+ * the first matching heading — keeps the new section near the top
+ * of the live-state cluster (above STATUS/TASKS/inbox), which is
+ * where it conceptually belongs.
+ */
+const ANCHORS = [
+  '## Your live operational state',
+  '## Your inbox',
+  "## What you'll get dynamically",
+] as const;
+
 export interface ClaudeMdCorpImportResult {
-  /** Files rewritten with the current template (now include `@./CORP.md`). */
-  upgraded: Array<{ agentSlug: string; agentDir: string }>;
-  /** Skipped because the file already contains the import OR no CLAUDE.md exists. */
+  /** Files updated — `@./CORP.md` section was inserted. */
+  upgraded: Array<{ agentSlug: string; agentDir: string; insertedAt: 'anchor' | 'end' }>;
+  /** Skipped — already has the import OR no CLAUDE.md OR archived OR no workspace. */
   skipped: Array<{ agentSlug: string; agentDir: string; reason: 'already-current' | 'no-claude-md' | 'archived' | 'no-workspace' }>;
   /** Errors — read or write failure. The migration continues past these. */
   errors: Array<{ agentSlug: string; agentDir: string; reason: string }>;
 }
 
 /**
- * Walk members.json for the corp, regenerate CLAUDE.md for any agent
- * whose existing CLAUDE.md is missing the `@./CORP.md` import. Safe
- * to call at every daemon startup — already-current files are skipped
- * by the substring check, so the second invocation is a no-op.
+ * Splice `CORP_MANUAL_SECTION` into `existing` content. Returns the
+ * updated content + a tag indicating whether an anchor was found
+ * (so the caller can log "inserted before anchor X" vs "appended").
+ *
+ * Pure — used by the migration walker but extracted so unit tests
+ * can exercise the splice logic without touching the filesystem.
+ */
+export function insertCorpManualSection(existing: string): { content: string; insertedAt: 'anchor' | 'end' } {
+  for (const anchor of ANCHORS) {
+    const idx = existing.indexOf(anchor);
+    if (idx !== -1) {
+      return {
+        content: existing.slice(0, idx) + CORP_MANUAL_SECTION + existing.slice(idx),
+        insertedAt: 'anchor',
+      };
+    }
+  }
+  // No anchor present — append to end. Hand-written CLAUDE.md that
+  // doesn't follow the template still gets the import, just at the
+  // bottom rather than in the canonical position.
+  const trailing = existing.endsWith('\n') ? '' : '\n';
+  return { content: existing + trailing + '\n' + CORP_MANUAL_SECTION, insertedAt: 'end' };
+}
+
+/**
+ * Walk members.json, surgical-insert `@./CORP.md` into any agent's
+ * CLAUDE.md that's missing it. Safe to call at every daemon startup —
+ * already-current files are skipped by the substring check.
  *
  * Returns a structured result the caller logs. Failure to read
  * members.json returns an empty result rather than throwing — the
@@ -55,8 +120,6 @@ export function migrateClaudeMdForCorpImport(corpRoot: string): ClaudeMdCorpImpo
     return result;
   }
 
-  const corpName = corpRoot.split(/[/\\]/).pop() ?? 'corp';
-
   for (const member of members) {
     if (member.type !== 'agent') continue;
     if (member.status === 'archived') {
@@ -70,8 +133,8 @@ export function migrateClaudeMdForCorpImport(corpRoot: string): ClaudeMdCorpImpo
 
     const claudeMdPath = join(member.agentDir, 'CLAUDE.md');
     if (!existsSync(claudeMdPath)) {
-      // OpenClaw agents won't have CLAUDE.md — that's fine, they
-      // load the workspace bootstrap natively. Nothing to migrate.
+      // OpenClaw agents won't have CLAUDE.md — they load the workspace
+      // bootstrap natively. Nothing to migrate.
       result.skipped.push({ agentSlug: member.id, agentDir: member.agentDir, reason: 'no-claude-md' });
       continue;
     }
@@ -93,21 +156,11 @@ export function migrateClaudeMdForCorpImport(corpRoot: string): ClaudeMdCorpImpo
       continue;
     }
 
-    // Regenerate from current template. Kind defaults to 'partner' for
-    // pre-1.1 agents (the AgentKind doc-comment treats undefined as
-    // partner — every pre-split agent was persistent-named). Role
-    // falls back to rank when the member predates the role-registry.
-    const fresh = buildThinClaudeMd({
-      kind: member.kind ?? 'partner',
-      displayName: member.displayName,
-      role: member.role ?? member.rank,
-      corpName,
-      workspacePath: member.agentDir,
-    });
+    const { content: updated, insertedAt } = insertCorpManualSection(content);
 
     try {
-      atomicWriteSync(claudeMdPath, fresh);
-      result.upgraded.push({ agentSlug: member.id, agentDir: member.agentDir });
+      atomicWriteSync(claudeMdPath, updated);
+      result.upgraded.push({ agentSlug: member.id, agentDir: member.agentDir, insertedAt });
     } catch (err) {
       result.errors.push({
         agentSlug: member.id,
