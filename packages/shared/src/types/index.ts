@@ -31,7 +31,7 @@ export type {
   TeamStatus,
 } from './team.js';
 
-export type { Corporation, DmMode } from './corp.js';
+export type { Corporation, CorpPreferences, DmMode } from './corp.js';
 export type { Project, ProjectType } from './project.js';
 export type { AgentConfig } from './agent-config.js';
 export type { Clock, ClockType, ClockStatus, ScheduledClock, ScheduledClockStatus, CronTaskTemplate } from './clock.js';
