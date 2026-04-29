@@ -33,6 +33,8 @@ import { hireJanitor } from './janitor.js';
 import { hireWarden } from './warden.js';
 import { hireHerald } from './herald.js';
 import { hirePlanner } from './planner.js';
+import { hirePressman } from './clearinghouse/pressman.js';
+import { hireEditor } from './clearinghouse/editor.js';
 import { ContractWatcher } from './contract-watcher.js';
 import {
   ClearanceSubmissionWatcher,
@@ -783,6 +785,22 @@ export class Daemon {
       await hirePlanner(this);
     } catch (err) {
       logError(`[daemon] Failed to bootstrap Planner agent: ${err}`);
+    }
+    // Project 1.12+: every corp ships with a clearinghouse (lock,
+    // queue, watchers, sweepers, lane-events). Pressman + Editor are
+    // the workers that consume that infrastructure — without them
+    // queued submissions sit forever and review-eligible tasks never
+    // get picked up. Both hire functions are idempotent: existing
+    // non-archived members short-circuit. Project 1 closer.
+    try {
+      await hirePressman(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Pressman agent: ${err}`);
+    }
+    try {
+      await hireEditor(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Editor agent: ${err}`);
     }
   }
 
