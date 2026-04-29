@@ -109,16 +109,30 @@ export async function cmdWtf(opts: WtfOpts): Promise<void> {
     return;
   }
 
-  emitSystemReminder(header, corpMd);
+  emitSystemReminder(header);
 }
 
 // ─── Output ─────────────────────────────────────────────────────────
 
-function emitSystemReminder(header: string, corpMd: string): void {
+/**
+ * Emit ONLY the situational header to stdout. CORP.md (the static-
+ * ish manual portion) lives on disk after \`atomicWriteSync\` above
+ * and reaches the agent via CLAUDE.md's \`@./CORP.md\` import.
+ *
+ * Why split: claude-code's SessionStart hook caps stdout-injected
+ * system-reminders at ~2KB. Pumping 40-50KB of CORP.md through this
+ * path silently truncated the manual to a preview, leaving every
+ * Partner agent operating on partial info since Project 0.7 shipped.
+ * @import has no such cap — claude-code re-resolves it every turn,
+ * so a fresh wtf rewrite is visible immediately.
+ *
+ * The header stays on stdout because it's situational ("you're CEO,
+ * inbox: 3, casket idle, time: 7:30am") — content that's specific
+ * to the wake reason and doesn't belong in the persistent file.
+ */
+function emitSystemReminder(header: string): void {
   process.stdout.write('<system-reminder>\n');
   process.stdout.write(header);
-  process.stdout.write('\n---\n\n');
-  process.stdout.write(corpMd);
   process.stdout.write('</system-reminder>\n');
 }
 

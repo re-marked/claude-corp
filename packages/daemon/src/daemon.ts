@@ -397,6 +397,32 @@ export class Daemon {
       logError(`[daemon] Workspace filename migration threw: ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    // Project 1.13: backfill `@./CORP.md` import in claude-code agents'
+    // CLAUDE.md. Pre-1.13 templates didn't include the import, and the
+    // wtf stdout trim means CORP.md no longer reaches them via hook
+    // injection — without this surgical insert, those agents lose
+    // CORP.md entirely on next dispatch. Idempotent: agents whose
+    // CLAUDE.md already contains the import are skipped. Surgical
+    // (NOT regenerative) — preserves any role-specific instructions
+    // the CEO or founder added to CLAUDE.md over time.
+    try {
+      const { migrateClaudeMdForCorpImport } = await import('@claudecorp/shared');
+      const claudeMigration = migrateClaudeMdForCorpImport(this.corpRoot);
+      if (claudeMigration.upgraded.length > 0) {
+        log(`[daemon] Inserted @./CORP.md into CLAUDE.md for ${claudeMigration.upgraded.length} agent(s)`);
+        for (const u of claudeMigration.upgraded) {
+          log(`[daemon]   ${u.agentSlug} (${u.insertedAt === 'anchor' ? 'at anchor' : 'appended'}): ${u.agentDir}`);
+        }
+      }
+      if (claudeMigration.errors.length > 0) {
+        for (const e of claudeMigration.errors) {
+          logError(`[daemon] CLAUDE.md insert failed for ${e.agentSlug} (${e.agentDir}): ${e.reason}`);
+        }
+      }
+    } catch (err) {
+      logError(`[daemon] CLAUDE.md @./CORP.md migration threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Sync corp-level skills to all agent workspaces
     try {
       const { syncSkillsToAllAgents } = await import('@claudecorp/shared');

@@ -162,6 +162,14 @@ describe('buildThinClaudeMd — @imports (Project 1.1 kind-aware split)', () => 
     expect(buildThinClaudeMd(employeeOpts())).toContain(path);
   });
 
+  it('both kinds import @./CORP.md (manual delivered via @import not hook stdout)', () => {
+    // The hook-stdout path caps at ~2KB but CORP.md is ~50KB; before
+    // this @import every Partner read only a 4% preview of the manual.
+    // Both kinds get CORP.md because both run through cc-cli wtf.
+    expect(buildThinClaudeMd(partnerOpts())).toContain('@./CORP.md');
+    expect(buildThinClaudeMd(employeeOpts())).toContain('@./CORP.md');
+  });
+
   it("Employee CLAUDE.md explains why they have no soul files + points at CORP.md", () => {
     const out = buildThinClaudeMd(employeeOpts());
     // Template wraps the phrase across a line break: "ephemeral\nrole-slots".
