@@ -527,7 +527,7 @@ export class Daemon {
       id: 'herald-narration',
       name: 'Herald Narration',
       type: 'heartbeat',
-      intervalMs: 5 * 60 * 1000,
+      intervalMs: 30 * 60 * 1000,
       target: 'Herald',
       description: 'Herald summarizes corp activity → writes NARRATION.md',
       callback: () => this.dispatchHeraldNarration(),
