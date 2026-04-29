@@ -260,9 +260,24 @@ async function executeApoptose(
   // dreams can distinguish "lived but never named" from "lived as X").
   const chosenName = member.displayName !== member.id ? member.displayName : null;
 
-  // Finally remove the Member record. Name returns to the pool by
-  // virtue of no-longer-existing in members.json.
-  const updated = members.filter((m) => m.id !== action.slug);
+  // Finally archive the Member record. The decision module already
+  // filters out `status === 'archived'` from its pool view, so an
+  // archived slot is invisible to bacteria's count-and-target math
+  // — same effect as removal for the live decision, but the record
+  // stays for auditability + lineage continuity.
+  //
+  // Project 1.13.x: previously this was a destructive `members.filter`
+  // that wiped the entry entirely. That worked for transient pool
+  // slots (whose names are pool-tracked + recyclable) but was
+  // catastrophic against role-name singletons (Pressman, Editor —
+  // auto-hired with the role's literal slug, no upstream re-create
+  // path). Archiving lets all callers — including future "reactivate
+  // this slot" flows — see the slot's history. Re-mitose still gets
+  // a fresh suffix via pickFreshSlug; archived ids stay in the
+  // taken-set so they don't collide with newly-spawned siblings.
+  const updated = members.map((m) =>
+    m.id === action.slug ? { ...m, status: 'archived' as const } : m,
+  );
   writeConfig(join(corpRoot, MEMBERS_JSON), updated);
 
   // Witness the death in the bacteria-events log. Order: AFTER the
