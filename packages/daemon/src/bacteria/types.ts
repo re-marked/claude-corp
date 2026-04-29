@@ -199,6 +199,25 @@ export const TARGET_WEIGHTED_PER_SLOT = 1.5;
 export const APOPTOSIS_HYSTERESIS_MS = 3 * 60 * 1000;
 
 /**
+ * Minimum active slots per role — bacteria refuses to apoptose past
+ * this floor, even when the queue is fully drained and hysteresis
+ * has elapsed. Default 1: every registered worker role keeps at
+ * least one slot alive, ready to wake when work arrives. The
+ * alternative (apoptose-to-zero on quiet) leaves the role member-
+ * less, which combined with the auto-hire-on-boot shape of system
+ * roles like Pressman + Editor (re-create only at daemon restart)
+ * means a quiet 3-minute window strands the clearinghouse until
+ * the next restart — exactly the bug Project 1.13.x's finale
+ * surfaced.
+ *
+ * Per-role override on RoleEntry.bacteriaFloor (Project 1.13.x).
+ * Set to 0 to opt out — appropriate for purely on-demand roles
+ * where the cost of keeping an idle slot outweighs the wake-up
+ * latency of cold mitose.
+ */
+export const MIN_ACTIVE_SLOTS_PER_ROLE = 1;
+
+/**
  * Reactor cadence — how often the bacteria tick fires when no
  * external event triggers it. 5 seconds is fast enough that a task
  * landing in an empty queue gets a slot spawned within 5s of the
