@@ -19,6 +19,7 @@ export type {
   Team,
   TeamStatus,
   Corporation,
+  CorpPreferences,
   Project,
   ProjectType,
   AgentConfig,

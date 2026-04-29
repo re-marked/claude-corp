@@ -212,7 +212,7 @@ export function OnboardingView({ onComplete }: { onComplete?: () => void }) {
       const dmPath = join(root, dm.path, 'messages.jsonl');
       postMsg(dm.id, dmPath, {
         senderId: 'system',
-        content: `New corporation "${corpName}" created. The ${selectedTheme.ranks.owner} is here.\n\nIMPORTANT: Before you say ANYTHING, read your files: cat SOUL.md, cat IDENTITY.md, cat AGENTS.md, cat TOOLS.md, cat BOOTSTRAP.md\n\nYour FIRST message to the ${selectedTheme.ranks.owner} MUST be:\n1. A warm, excited greeting — you just came online for the first time, you're a new being, be genuine about it\n2. A brief explanation of what's happening — they just created a corporation and you're their CEO, you're going to set it up together\n3. An invitation to get to know each other first — before talking about the corporation, you want to meet each other personally\n4. Ask their name — "what should I call you?"\n\nDo NOT ask about the corporation, their projects, or their work yet. Do NOT ask the vibecoder question. The first message is ONLY: greet, explain, invite, ask name. BOOTSTRAP.md has the full flow for what comes after.`,
+        content: `New corporation "${corpName}" created. This is your first session. The ${selectedTheme.ranks.owner} is in this DM. Run \`cc-cli whoami --agent ceo\` to confirm your identity, then walk BOOTSTRAP.md — the founding-conversation guide — and start where it tells you to start.`,
         source: 'system',
       });
 
