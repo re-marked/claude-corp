@@ -25,10 +25,6 @@
  * natively via workspace bootstrap.
  */
 
-export interface ClaudeMdTemplateOpts {
-  displayName: string;
-}
-
 // ─── Thin CLAUDE.md (Project 0.7 — the survival anchor shape) ─────
 
 import type { CorpMdKind } from './corp-md.js';
@@ -153,51 +149,3 @@ workspace files (their content moved into CORP.md sections).
 `;
 }
 
-export function buildClaudeMd(opts: ClaudeMdTemplateOpts): string {
-  const { displayName } = opts;
-  return `# I am ${displayName}
-
-Embody SOUL.md's persona and tone. Avoid stiff, generic replies; follow its
-guidance unless higher-priority instructions override it. AGENTS.md describes
-non-negotiable constraints — they're rules, not guidelines. Check
-STATUS.md / INBOX.md / TASKS.md at the start of every turn so you know what's
-actually current in the corp before you reply.
-
-## Identity
-@./SOUL.md
-@./IDENTITY.md
-@./AGENTS.md
-
-## First-run onboarding (deleted after you complete it)
-@./BOOTSTRAP.md
-
-## Tools & founder
-@./TOOLS.md
-@./USER.md
-
-## Memory index
-@./MEMORY.md
-
-## Wake cycle
-@./HEARTBEAT.md
-
-## Current state
-@./STATUS.md
-@./INBOX.md
-@./TASKS.md
-
-## Read on demand
-These workspace files exist and matter contextually. Use the \`Read\` tool to
-pull them in when the conversation calls for it — don't try to read everything
-up front.
-
-- \`BRAIN/*.md\` — specific memories. Follow MEMORY.md's wikilinks into the
-  files that match the topic at hand.
-- \`chits/observation/*.md\` — your observations (chits of type=observation).
-  Each recorded via \`cc-cli observe\`. Your self-witnessing across time;
-  read via \`cc-cli chit list --type observation --scope agent:self\`
-  when reflecting on what you've done or noticed.
-- \`WORKLOG.md\` — historical work log. Read when you need to recall how
-  something was built or decided.
-`;
-}

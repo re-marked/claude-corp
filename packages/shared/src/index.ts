@@ -641,9 +641,7 @@ export {
   type ServiceArtifact,
 } from './templates/supervisor/index.js';
 export {
-  buildClaudeMd,
   buildThinClaudeMd,
-  type ClaudeMdTemplateOpts,
   type ThinClaudeMdOpts,
 } from './templates/claude-md.js';
 export {
