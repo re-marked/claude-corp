@@ -144,8 +144,9 @@ SessionStart auto-runs \`cc-cli wtf\`. wtf rewrites CORP.md on disk
 (picked up by the \`@./CORP.md\` import above) and emits a short
 situational header as a \`<system-reminder>\`. Two paths, one source
 of truth — wtf decides what's current, you read it via @import.
-Don't \`@import\` AGENTS.md or TOOLS.md; those no longer exist as
-workspace files (their content moved into CORP.md sections).
+Don't \`@import\` AGENTS.md or TOOLS.md;
+those no longer exist as workspace files (their content moved into
+CORP.md sections).
 `;
 }
 
