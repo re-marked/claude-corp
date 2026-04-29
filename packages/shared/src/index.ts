@@ -505,6 +505,10 @@ export {
   type WorkspaceMigrationResult,
 } from './migrate-workspace-filenames.js';
 export {
+  migrateClaudeMdForCorpImport,
+  type ClaudeMdCorpImportResult,
+} from './migrate-claude-md-corp-import.js';
+export {
   reconcileAgentWorkspace,
   type ReconcileAgentWorkspaceOpts,
   type ReconcileAgentWorkspaceResult,

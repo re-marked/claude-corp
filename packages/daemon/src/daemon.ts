@@ -397,6 +397,30 @@ export class Daemon {
       logError(`[daemon] Workspace filename migration threw: ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    // Project 1.13: backfill `@./CORP.md` import in claude-code agents'
+    // CLAUDE.md. Pre-1.13 templates didn't include the import, and the
+    // wtf stdout trim means CORP.md no longer reaches them via hook
+    // injection — without this regen, those agents lose CORP.md
+    // entirely on next dispatch. Idempotent: agents whose CLAUDE.md
+    // already contains the import are skipped.
+    try {
+      const { migrateClaudeMdForCorpImport } = await import('@claudecorp/shared');
+      const claudeMigration = migrateClaudeMdForCorpImport(this.corpRoot);
+      if (claudeMigration.upgraded.length > 0) {
+        log(`[daemon] Regenerated CLAUDE.md for ${claudeMigration.upgraded.length} agent(s) (added @./CORP.md import)`);
+        for (const u of claudeMigration.upgraded) {
+          log(`[daemon]   ${u.agentSlug}: ${u.agentDir}`);
+        }
+      }
+      if (claudeMigration.errors.length > 0) {
+        for (const e of claudeMigration.errors) {
+          logError(`[daemon] CLAUDE.md regen failed for ${e.agentSlug} (${e.agentDir}): ${e.reason}`);
+        }
+      }
+    } catch (err) {
+      logError(`[daemon] CLAUDE.md @./CORP.md migration threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     // Sync corp-level skills to all agent workspaces
     try {
       const { syncSkillsToAllAgents } = await import('@claudecorp/shared');
