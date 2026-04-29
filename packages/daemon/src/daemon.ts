@@ -69,7 +69,7 @@ import { recoverCrashedAgents, recoverCeoGateway, recoverCorpGateway } from './d
 import { scanChitLifecycle } from './chit-lifecycle.js';
 import { corpHasOpenClawAgent } from './harness-resolve.js';
 import { killStaleProcesses } from './stale-cleanup.js';
-import { log, logError } from './logger.js';
+import { log, logError, setLogPath } from './logger.js';
 
 export class Daemon {
   corpRoot: string;
@@ -168,6 +168,11 @@ export class Daemon {
   constructor(corpRoot: string, globalConfig: GlobalConfig) {
     this.corpRoot = corpRoot;
     this.globalConfig = globalConfig;
+    // Point the logger at THIS corp's .daemon.log before any
+    // sub-component (process manager, watchers, autoemon, …)
+    // gets a chance to log. Without this, fixture daemons in
+    // tests bleed into a real corp's log file.
+    setLogPath(corpRoot);
     this.processManager = new ProcessManager(corpRoot, globalConfig);
     this.router = new MessageRouter(this);
     this.gitManager = new GitManager(corpRoot);

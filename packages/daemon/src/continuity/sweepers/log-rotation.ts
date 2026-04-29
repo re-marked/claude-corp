@@ -49,7 +49,7 @@
  * quiet again.
  */
 
-import { DAEMON_LOG_PATH } from '@claudecorp/shared';
+import { getDaemonLogPath } from '@claudecorp/shared';
 import { existsSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { log, logError } from '../../logger.js';
 import type { SweeperContext, SweeperResult } from './types.js';
@@ -70,27 +70,27 @@ const ROTATE_THRESHOLD_BYTES = 10 * 1024 * 1024;
 const MAX_ARCHIVES = 5;
 
 export async function runLogRotation(ctx: SweeperContext): Promise<SweeperResult> {
-  // Unused but kept in the signature so the module type-conforms
-  // — future variants might consume Daemon state to decide
-  // (e.g., never rotate mid-incident).
-  void ctx;
+  // Per-corp scoping: the sweeper rotates THIS daemon's log,
+  // resolved from its corp root. Archive paths sit alongside
+  // the live log (`<corpRoot>/.daemon.log.1` … `.5`).
+  const logPath = getDaemonLogPath(ctx.daemon.corpRoot);
 
-  if (!existsSync(DAEMON_LOG_PATH)) {
+  if (!existsSync(logPath)) {
     return {
       status: 'noop',
       findings: [],
-      summary: `log-rotation: no daemon log at ${DAEMON_LOG_PATH} (daemon may not have written yet).`,
+      summary: `log-rotation: no daemon log at ${logPath} (daemon may not have written yet).`,
     };
   }
 
   let size: number;
   try {
-    size = statSync(DAEMON_LOG_PATH).size;
+    size = statSync(logPath).size;
   } catch (err) {
     return {
       status: 'failed',
       findings: [],
-      summary: `log-rotation: stat on ${DAEMON_LOG_PATH} failed — ${err instanceof Error ? err.message : String(err)}`,
+      summary: `log-rotation: stat on ${logPath} failed — ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
@@ -107,8 +107,8 @@ export async function runLogRotation(ctx: SweeperContext): Promise<SweeperResult
   // make room for the previous one.
   try {
     for (let i = MAX_ARCHIVES - 1; i >= 1; i--) {
-      const src = archivePath(i);
-      const dst = archivePath(i + 1);
+      const src = archivePath(logPath, i);
+      const dst = archivePath(logPath, i + 1);
       if (existsSync(src)) {
         if (i + 1 > MAX_ARCHIVES) {
           // Shouldn't hit this case given the loop bounds; defensive.
@@ -123,7 +123,7 @@ export async function runLogRotation(ctx: SweeperContext): Promise<SweeperResult
     // Drop the oldest if it exists past the cap (from a prior
     // MAX_ARCHIVES value being larger). Keeps the directory clean
     // across config changes.
-    const overflow = archivePath(MAX_ARCHIVES + 1);
+    const overflow = archivePath(logPath, MAX_ARCHIVES + 1);
     if (existsSync(overflow)) {
       try {
         unlinkSync(overflow);
@@ -134,9 +134,9 @@ export async function runLogRotation(ctx: SweeperContext): Promise<SweeperResult
     }
 
     // Rotate the live log into slot 1.
-    const slot1 = archivePath(1);
+    const slot1 = archivePath(logPath, 1);
     if (existsSync(slot1)) unlinkSync(slot1);
-    renameSync(DAEMON_LOG_PATH, slot1);
+    renameSync(logPath, slot1);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logError(`[sweeper:log-rotation] rotation failed: ${message}`);
@@ -144,17 +144,17 @@ export async function runLogRotation(ctx: SweeperContext): Promise<SweeperResult
       status: 'failed',
       findings: [
         {
-          subject: DAEMON_LOG_PATH,
+          subject: logPath,
           severity: 'error',
           title: `log-rotation failed mid-rotation`,
-          body: `Attempted to rotate ${DAEMON_LOG_PATH} (${formatBytes(size)}) but hit an error: ${message}. The archive chain may be in an intermediate state — inspect ${DAEMON_LOG_PATH}.1 through .${MAX_ARCHIVES} and clean up manually if needed. The daemon will continue writing to whichever file currently exists at ${DAEMON_LOG_PATH}; if rotation left it missing, the next log call recreates it.`,
+          body: `Attempted to rotate ${logPath} (${formatBytes(size)}) but hit an error: ${message}. The archive chain may be in an intermediate state — inspect ${logPath}.1 through .${MAX_ARCHIVES} and clean up manually if needed. The daemon will continue writing to whichever file currently exists at ${logPath}; if rotation left it missing, the next log call recreates it.`,
         },
       ],
       summary: `log-rotation: failed mid-rotation — ${message}`,
     };
   }
 
-  log(`[sweeper:log-rotation] rotated ${DAEMON_LOG_PATH} (was ${formatBytes(size)})`);
+  log(`[sweeper:log-rotation] rotated ${logPath} (was ${formatBytes(size)})`);
 
   // Deliberately NO finding on successful rotation. A completed
   // rotation is a one-shot state CHANGE, not an ongoing problem —
@@ -180,8 +180,8 @@ export async function runLogRotation(ctx: SweeperContext): Promise<SweeperResult
   };
 }
 
-function archivePath(index: number): string {
-  return `${DAEMON_LOG_PATH}.${index}`;
+function archivePath(logPath: string, index: number): string {
+  return `${logPath}.${index}`;
 }
 
 function formatBytes(bytes: number): string {

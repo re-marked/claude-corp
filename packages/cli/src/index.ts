@@ -431,7 +431,10 @@ async function run() {
     }
     case 'logs': {
       const { cmdLogs } = await import('./commands/logs.js');
-      await cmdLogs({ last: parseInt(values.last as string) || 50 });
+      await cmdLogs({
+        last: parseInt(values.last as string) || 50,
+        corp: values.corp as string | undefined,
+      });
       break;
     }
     case 'activity':
