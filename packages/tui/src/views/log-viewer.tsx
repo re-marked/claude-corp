@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { Box, Text, useInput, ScrollBox, TerminalSizeContext } from '@claude-code-kit/ink-renderer';
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { DAEMON_LOG_PATH } from '@claudecorp/shared';
+import { getDaemonLogPath } from '@claudecorp/shared';
 import { COLORS, BORDER_STYLE } from '../theme.js';
 
 interface Props {
   onBack: () => void;
+  /** Active corp root — resolves the per-corp `.daemon.log` path. */
+  corpRoot: string;
 }
 
 interface LogEntry {
@@ -66,7 +68,7 @@ function sourceColor(source: string): string {
   return SOURCE_COLORS[source] ?? COLORS.muted;
 }
 
-export function LogViewer({ onBack }: Props) {
+export function LogViewer({ onBack, corpRoot }: Props) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [lastSize, setLastSize] = useState(0);
   const [filter, setFilter] = useState<Set<string>>(new Set()); // empty = show all
@@ -77,24 +79,25 @@ export function LogViewer({ onBack }: Props) {
   const termWidth = termSize?.columns ?? 120;
 
   const MAX_ENTRIES = 500;
+  const logPath = getDaemonLogPath(corpRoot);
 
   const loadLogs = useCallback(() => {
     if (paused) return;
-    if (!existsSync(DAEMON_LOG_PATH)) return;
+    if (!existsSync(logPath)) return;
 
     try {
-      const currentSize = statSync(DAEMON_LOG_PATH).size;
+      const currentSize = statSync(logPath).size;
       if (currentSize === lastSize) return;
       setLastSize(currentSize);
 
       // Read last ~50KB of the file for performance
-      const content = readFileSync(DAEMON_LOG_PATH, 'utf-8');
+      const content = readFileSync(logPath, 'utf-8');
       const lines = content.trim().split('\n');
       const tail = lines.slice(-MAX_ENTRIES);
       const parsed = tail.map(parseLine).filter((e): e is LogEntry => e !== null);
       setEntries(parsed);
     } catch {}
-  }, [lastSize, paused]);
+  }, [lastSize, paused, logPath]);
 
   // Initial load + live tail
   useEffect(() => {
