@@ -76,6 +76,7 @@ import {
   type ApoptoseAction,
   TARGET_WEIGHTED_PER_SLOT,
   APOPTOSIS_HYSTERESIS_MS,
+  MIN_ACTIVE_SLOTS_PER_ROLE,
   weightFor,
 } from './types.js';
 
@@ -119,11 +120,14 @@ export function decideBacteriaActions(opts: DecideOpts): DecideResult {
     if (role.tier !== 'worker') continue;
     if (pausedRoles.has(role.id)) continue;
 
-    // Per-role tuning (Project 1.10.4): RoleEntry can override the
-    // global TARGET_WEIGHTED_PER_SLOT + APOPTOSIS_HYSTERESIS_MS
-    // constants. Unset roles inherit the defaults.
+    // Per-role tuning (Project 1.10.4 + 1.13.x): RoleEntry can override
+    // the global TARGET_WEIGHTED_PER_SLOT, APOPTOSIS_HYSTERESIS_MS, and
+    // MIN_ACTIVE_SLOTS_PER_ROLE constants. Unset roles inherit the
+    // defaults. Floor below is the apoptose invariant — pool size never
+    // drops past `floor` even when the queue is fully drained.
     const targetPerSlot = role.bacteriaTarget ?? TARGET_WEIGHTED_PER_SLOT;
     const hysteresisMs = role.bacteriaHysteresisMs ?? APOPTOSIS_HYSTERESIS_MS;
+    const floor = role.bacteriaFloor ?? MIN_ACTIVE_SLOTS_PER_ROLE;
 
     // Pool members: active Employees of this role.
     const pool = members
@@ -208,7 +212,18 @@ export function decideBacteriaActions(opts: DecideOpts): DecideResult {
       // those whose hysteresis window has elapsed. Slots whose
       // hysteresis hasn't elapsed yet stay tracked in nextIdleSince
       // and may apoptose on a future tick.
+      //
+      // Floor invariant (Project 1.13.x): the active pool size never
+      // drops past `floor`. Cap apoptose count at the gap between
+      // current pool and floor so that — even with infinite hysteresis
+      // and zero queue — the role keeps at least `floor` slots alive,
+      // ready to pick up new work when it arrives. Without this,
+      // role-name singletons (Pressman, Editor) auto-hired with no
+      // upstream re-create path got culled to zero on quiet, leaving
+      // the clearinghouse workerless until daemon restart.
       const surplus = -delta;
+      const apoptoseCap = Math.max(0, pool.length - floor);
+      const apoptoseTarget = Math.min(surplus, apoptoseCap);
       const idleByAge = idle
         .map((slot) => ({
           slot,
@@ -217,7 +232,7 @@ export function decideBacteriaActions(opts: DecideOpts): DecideResult {
         .sort((a, b) => a.idleSince.localeCompare(b.idleSince));
       let apoptosed = 0;
       for (const { slot, idleSince } of idleByAge) {
-        if (apoptosed >= surplus) break;
+        if (apoptosed >= apoptoseTarget) break;
         const idleSinceMs = new Date(idleSince).getTime();
         if (nowMs - idleSinceMs < hysteresisMs) continue;
         const action: ApoptoseAction = {

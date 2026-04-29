@@ -86,6 +86,24 @@ export interface RoleEntry {
    */
   bacteriaHysteresisMs?: number;
   /**
+   * Bacteria minimum-active-slots floor override (Project 1.13.x).
+   * The decision module refuses to apoptose past this count even
+   * when the queue is fully drained and hysteresis has elapsed.
+   * Default is the global MIN_ACTIVE_SLOTS_PER_ROLE constant (1)
+   * — every registered worker role keeps at least one slot alive,
+   * ready to wake when work arrives.
+   *
+   * Set to 0 to allow apoptose-to-zero on quiet (rare; suitable
+   * only for on-demand roles where cold-start latency is cheaper
+   * than carrying an idle slot's context-load). Set higher than 1
+   * for roles that should always have multiple slots ready (e.g.,
+   * a clearinghouse role serving a high-throughput corp).
+   *
+   * Worker-tier only — non-worker roles never reach the bacteria
+   * decision module's apoptose math, so this is a no-op on them.
+   */
+  bacteriaFloor?: number;
+  /**
    * Crash-loop breaker threshold override (Project 1.11). When set,
    * the silent-exit detector trips a slot's breaker after this many
    * consecutive crashes; absent uses the global default (3).

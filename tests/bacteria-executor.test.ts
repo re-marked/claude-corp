@@ -304,9 +304,13 @@ describe('executeBacteriaActions', () => {
     const result = await executeBacteriaActions(ctx, [action]);
     expect(result).toEqual({ applied: 1, failed: 0 });
 
-    // Member removed.
+    // Member archived (preserves history; decision module's pool
+    // filter excludes archived members so bacteria still treats the
+    // slot as gone for count-and-target math).
     const members = JSON.parse(readFileSync(join(corpRoot, 'members.json'), 'utf-8')) as Member[];
-    expect(members.find((m) => m.id === slug)).toBeUndefined();
+    const archived = members.find((m) => m.id === slug);
+    expect(archived).toBeDefined();
+    expect(archived?.status).toBe('archived');
 
     // Obituary observation written.
     const obs = queryChits(corpRoot, { types: ['observation'], limit: 0 });

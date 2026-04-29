@@ -278,13 +278,19 @@ describe('decideBacteriaActions', () => {
 
   // ─── apoptose: hysteresis elapsed ─────────────────────────────────
 
-  it('apoptoses idle slots once hysteresis elapses (5 min > 3 min default)', () => {
+  it('apoptoses surplus idle slots once hysteresis elapses, leaving the floor intact', () => {
+    // 3 idle slots + queue=0 + floor=1 → 2 apoptoses (the surplus
+    // above the floor). Pre-1.13.x this expected 3 apoptoses, which
+    // would cull a role to zero on a quiet tick — the bug Project
+    // 1.13.x's finale surfaced.
     writeMembers([
       { id: 'backend-engineer-aa', role: 'backend-engineer', kind: 'employee' },
       { id: 'backend-engineer-bb', role: 'backend-engineer', kind: 'employee' },
+      { id: 'backend-engineer-cc', role: 'backend-engineer', kind: 'employee' },
     ]);
     makeIdleSlot('backend-engineer-aa');
     makeIdleSlot('backend-engineer-bb');
+    makeIdleSlot('backend-engineer-cc');
 
     const tick1 = decideBacteriaActions({
       corpRoot,
@@ -310,7 +316,13 @@ describe('decideBacteriaActions', () => {
     }
   });
 
-  it('apoptosed slots leave the idleSince map in nextState', () => {
+  it('respects the bacteriaFloor: refuses to apoptose the last slot when queue is empty', () => {
+    // The Project 1.13.x finale bug: Pressman + Editor were auto-hired
+    // as singletons (1 slot each), sat idle for 3 minutes during the
+    // CEO's contract decomposition, and bacteria culled them to zero —
+    // leaving the clearinghouse workerless. With floor=1, a sole idle
+    // slot stays alive across an arbitrary quiet window, ready to wake
+    // when work arrives.
     writeMembers([
       { id: 'backend-engineer-aa', role: 'backend-engineer', kind: 'employee' },
     ]);
@@ -327,8 +339,46 @@ describe('decideBacteriaActions', () => {
       now: NOW_PLUS_5_MIN,
     });
 
-    expect(tick2.actions.filter((a) => a.kind === 'apoptose')).toHaveLength(1);
-    expect(tick2.nextState.idleSince.has('backend-engineer-aa')).toBe(false);
+    // No apoptose — the lone slot is the floor.
+    expect(tick2.actions.filter((a) => a.kind === 'apoptose')).toHaveLength(0);
+    // idleSince is still tracked for the surviving slot (it's still
+    // idle, just protected by the floor — not pruned, not retired).
+    expect(tick2.nextState.idleSince.has('backend-engineer-aa')).toBe(true);
+  });
+
+  it('apoptosed slots leave the idleSince map in nextState', () => {
+    // 2 slots, floor=1, queue=0, hysteresis elapsed → 1 apoptose,
+    // 1 survives. Verifies that apoptose-side state pruning still
+    // works alongside the floor invariant.
+    writeMembers([
+      { id: 'backend-engineer-aa', role: 'backend-engineer', kind: 'employee' },
+      { id: 'backend-engineer-bb', role: 'backend-engineer', kind: 'employee' },
+    ]);
+    makeIdleSlot('backend-engineer-aa');
+    makeIdleSlot('backend-engineer-bb');
+
+    const tick1 = decideBacteriaActions({
+      corpRoot,
+      previousState: emptyBacteriaState(),
+      now: NOW,
+    });
+    const tick2 = decideBacteriaActions({
+      corpRoot,
+      previousState: tick1.nextState,
+      now: NOW_PLUS_5_MIN,
+    });
+
+    const apoptoses = tick2.actions.filter((a) => a.kind === 'apoptose');
+    expect(apoptoses).toHaveLength(1);
+    if (apoptoses[0]?.kind !== 'apoptose') throw new Error('narrowing');
+    const apoptosed = apoptoses[0].slug;
+    // The apoptosed slot's idleSince entry is dropped; the survivor's
+    // is kept (it's still idle, protected by the floor).
+    expect(tick2.nextState.idleSince.has(apoptosed)).toBe(false);
+    const survivor = apoptosed === 'backend-engineer-aa'
+      ? 'backend-engineer-bb'
+      : 'backend-engineer-aa';
+    expect(tick2.nextState.idleSince.has(survivor)).toBe(true);
   });
 
   // ─── busy → idleSince clears ──────────────────────────────────────
