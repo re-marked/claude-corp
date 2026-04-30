@@ -70,6 +70,24 @@ export interface ExecutorContext {
   readonly corpRoot: string;
   readonly globalConfig: GlobalConfig;
   readonly processManager: ProcessManager;
+  /**
+   * Codex P1 on PR #204: post-mitose wake dispatcher. Called after
+   * spawnAgent succeeds so the freshly-spawned slot gets a work
+   * session for its pre-loaded chit. Without this, the slot has
+   * `casket.currentStep` set but no first dispatch — the dream
+   * manager's idle-timer races ahead, fires a dream session against
+   * an empty observation set, times out at 5 min, and the assigned
+   * task never gets touched. We hit this live during the Project 1
+   * finale on `claude-test-corp` and traced it to the missing call
+   * here. Optional so tests can construct ExecutorContext without
+   * a full daemon; production wires this in daemon.ts to call
+   * `dispatchTaskToDm` from task-events.
+   */
+  readonly dispatchAfterMitose?: (
+    slug: string,
+    chitId: string,
+    chitTitle: string,
+  ) => void;
 }
 
 /**
@@ -180,6 +198,34 @@ async function executeMitose(
   // try/catch can log them.
   await processManager.spawnAgent(slug);
 
+  // Codex P1 on PR #204: trigger the wake dispatch for the assigned
+  // chit so the new slot's FIRST session is a work session against
+  // its casket pointer, not a race-loss to the dream manager.
+  // Without this, the slot has currentStep set + workspace ready,
+  // but no dispatch path fires — and after a few minutes idle, the
+  // dream manager kicks in (no observations to dream from → 5-min
+  // timeout → wasted dispatch). We saw this exact failure live in
+  // the Project 1 finale. Optional — tests construct ExecutorContext
+  // without dispatchAfterMitose, which is fine; production wires it.
+  if (ctx.dispatchAfterMitose) {
+    try {
+      const chitHit = findChitById(corpRoot, action.assignedChit);
+      // ChitWithBody returns the parsed chit; pull the task title
+      // for the DM message body. Fall back to chit id if the chit
+      // is missing or the type narrowing fails — rare, but the
+      // dispatch should still fire so the slot wakes.
+      const title =
+        chitHit?.chit.type === 'task'
+          ? (chitHit.chit.fields.task as TaskFields).title
+          : action.assignedChit;
+      ctx.dispatchAfterMitose(slug, action.assignedChit, title);
+    } catch (err) {
+      logError(
+        `[bacteria] post-mitose dispatch failed for ${slug} (chit=${action.assignedChit}): ${(err as Error).message}`,
+      );
+    }
+  }
+
   // Witness the birth in the bacteria-events log. Best-effort — if
   // the append fails, the slot is alive but unwitnessed; downstream
   // status / lineage views won't see it. Member record + obituary-
@@ -275,7 +321,21 @@ async function executeApoptose(
   // this slot" flows — see the slot's history. Re-mitose still gets
   // a fresh suffix via pickFreshSlug; archived ids stay in the
   // taken-set so they don't collide with newly-spawned siblings.
-  const updated = members.map((m) =>
+  //
+  // Codex P1 on PR #204: re-read members.json immediately before
+  // writing instead of mutating the early `members` snapshot from
+  // line 215. Steps 2-6 above (stopAgent, writeObituary,
+  // stripFromChannels, archiveSandbox, countCompletedTasksFor) are
+  // async or run on the order of seconds; if a hire/mitose path
+  // adds a new entry to members.json during that window, writing
+  // back the stale snapshot would clobber it — exactly the
+  // "members appear/disappear" lost-write behavior we documented
+  // from the Project 1 finale. Fresh-read-then-map keeps every
+  // newly-added entry intact and only flips the apoptose target's
+  // status. If the slug is already gone (someone else handled
+  // archive concurrently), this is an idempotent no-op.
+  const fresh = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  const updated = fresh.map((m) =>
     m.id === action.slug ? { ...m, status: 'archived' as const } : m,
   );
   writeConfig(join(corpRoot, MEMBERS_JSON), updated);

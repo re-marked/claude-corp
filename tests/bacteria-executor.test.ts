@@ -268,6 +268,52 @@ describe('executeBacteriaActions', () => {
     expect(fields.workflowStatus).toBe('dispatched');
   });
 
+  it('mitose calls dispatchAfterMitose with slug + chit id + chit title (Codex P1 PR #204)', async () => {
+    // Pre-1.13.x mitose only called spawnAgent; the slot had its
+    // casket pointer set but nothing dispatched a first work session,
+    // so the dream manager raced ahead and burned a 5-min dream
+    // dispatch instead. dispatchAfterMitose closes that gap by
+    // running the wake DM right after spawn.
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      createdBy: 'founder',
+      status: 'active',
+      fields: {
+        task: {
+          title: 'wake-dispatch task',
+          priority: 'normal',
+          assignee: 'backend-engineer',
+          workflowStatus: 'queued',
+          complexity: 'small',
+        },
+      },
+    });
+
+    const dispatchCalls: Array<{ slug: string; chitId: string; chitTitle: string }> = [];
+    const ctxWithDispatch: ExecutorContext = {
+      ...ctx,
+      dispatchAfterMitose: (slug, chitId, chitTitle) => {
+        dispatchCalls.push({ slug, chitId, chitTitle });
+      },
+    };
+
+    const action: MitoseAction = {
+      kind: 'mitose',
+      role: 'backend-engineer',
+      parentSlug: null,
+      generation: 0,
+      assignedChit: task.id,
+    };
+
+    await executeBacteriaActions(ctxWithDispatch, [action]);
+
+    expect(dispatchCalls).toHaveLength(1);
+    expect(dispatchCalls[0]!.slug).toMatch(/^backend-engineer-[a-z]{2}$/);
+    expect(dispatchCalls[0]!.chitId).toBe(task.id);
+    expect(dispatchCalls[0]!.chitTitle).toBe('wake-dispatch task');
+  });
+
   // ─── apoptose ─────────────────────────────────────────────────────
 
   it('apoptose removes the Member and writes an obituary observation', async () => {
