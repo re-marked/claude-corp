@@ -2401,6 +2401,117 @@ Move on to Project 2 (Workflow Substrate) per the existing roadmap.
 
 ---
 
+## Live bugs surfaced by the Project 1 finale (2026-04-29)
+
+The substrate ships clean (PRs merged, types pass, unit tests green) but the
+finale e2e on `claude-test-corp` exposed a stack of integration / runtime /
+prompt-layer bugs that prevent end-to-end "5 tasks → 4 merged + 1 blocker"
+from running unattended. Filed here so they don't get forgotten as Project 2
+begins.
+
+**Fixed during the finale run itself (PR #203):**
+
+- ✅ `bacteria.executeApoptose` was destructive — `members.filter` removed
+  the entry entirely. Now archives via `status: 'archived'`. (`5bb45fa`)
+- ✅ No apoptose floor — bacteria could cull a role to zero. Per-role
+  `bacteriaFloor` (default 1) added; pool size never drops past floor.
+  (`ebd17b2`)
+
+Remaining live bugs (none block ship, but block running end-to-end):
+
+### Platform / Windows-specific
+
+- **`cc-cli init` hangs at git step.** Creates corp dir + `members.json` with
+  founder, then awaits `git.init()` / `git.commitAll()` indefinitely. Never
+  returns, never registers in `corps/index.json`, never runs `setupCeo`.
+  Subsequent boot finds an orphan corp dir without a CEO. Workaround: use the
+  TUI onboarding flow.
+- **`killStaleProcesses` hangs on Windows in non-TTY contexts.** The execa
+  call to `cmd /c "netstat -ano | findstr :PORT | findstr LISTENING"` blocks
+  past its 5s timeout when daemon is launched from a Bash subprocess or
+  `Start-Process -NoNewWindow`. Daemon initialization gets stuck at
+  `Cleaning up stale processes — N PIDs, M ports`. Workaround: launch daemon
+  from a real TTY (sometimes intermittent — retry often works). Proper fix:
+  hard `Promise.race` deadline around the whole cleanup, fall through to
+  log+continue on timeout.
+
+### Lifecycle / race
+
+- **`members.json` write race — entries appear and disappear.** `cc-cli hire`
+  writes (and possibly bacteria executor writes) get clobbered by overlapping
+  writes from elsewhere. Most clearly observed: hire Pressman, immediately
+  query — pressman absent from `members.json`, then returns minutes later.
+  Suspected: an in-memory caching layer somewhere flushes stale snapshots over
+  fresh writes. Hardest of these to debug; needs a writer-audit pass.
+- **Mitose-spawn vs dream-manager race.** `bacteria.executeMitose` calls
+  `processManager.spawnAgent(slug)` to start the slot's process but doesn't
+  immediately dispatch a work session for the casket-pre-loaded chit. The
+  dream manager's idle-timer races ahead, fires a dream session against an
+  empty observation set, times out at 5 min. The mitose-assigned chit never
+  gets a work dispatch. Fix shape: spawn followed by an immediate work
+  dispatch on the assigned chit, OR dream-manager skips slots whose
+  `casket.current_step` is non-null.
+- **Daemon restart wipes orphan agent dirs.** Backend Engineer's workspace
+  was deleted on restart because no `members.json` entry existed for it
+  (member lost in the race above). Cleanup logic should archive (rename to
+  `.archived-<slug>-<timestamp>/`) rather than delete — same shape the
+  bacteria apoptose path already uses.
+- **`cc-cli status` shows phantom agents.** Output reported 8 idle agents
+  while `members.json` had only 7 entries. In-memory process-manager list
+  out of sync with disk. Display bug only — no behavioral impact.
+
+### Workflow / agent prompts (mostly Project 2 scope)
+
+- **`cc-cli hand` doesn't promote chit `status: draft → active`.** Tasks
+  created by CEO via `cc-cli task create` sit at `status: draft` after
+  `cc-cli hand --to <role>`. Bacteria's `queryChits({statuses: ['active']})`
+  filter excludes them — invisible to the queue-driven mitose path until
+  manually flipped. Fix: `hand` should promote draft → active atomically
+  on handoff.
+- **Engineers don't submit clearance after completing work.** Backend Engineer
+  created the right branch + committed `notes/welcome.md`, then went idle
+  without creating a `clearance-submission` chit. Gap between "I did the
+  work" and "I trigger the clearinghouse." The engineer's BOOTSTRAP /
+  CORP.md doesn't make the submit step load-bearing enough.
+- **Engineers work on the corp's main worktree directly.** Clearinghouse
+  pattern uses `<corpRoot>/wt/<task-id>/` worktrees, but the engineer never
+  invoked `acquire-worktree` — checked out the feature branch on the corp's
+  primary checkout. Pollutes the corp's git state across runs. Fix: the
+  engineer's prompt must drive `clearinghouse acquire-worktree` before any
+  code edits.
+
+### Substrate / chits
+
+- **Inbox-item chit creation fails for DM @mention references.** Router
+  emits `ERROR [router] inbox-item chit creation failed for ceo: references
+  contains invalid chit id: "dm-ceo-mark:m-19326e"`. The router passes
+  `<channel-id>:<message-id>` as a chit reference, but chit IDs follow
+  `chit-<type-prefix>-<hex>` shape — validator rejects. Either router mints
+  a real chit-id reference, or validator accepts message-id references for
+  inbox-item type only.
+
+### Auto-hire reliability
+
+- **Pressman + Editor auto-hire (PR #201) is unreliable on TUI-driven
+  onboarding.** Initial `claude-test-corp` was created via TUI; the first
+  ResumeView's daemon hired them, but entries didn't persist in
+  `members.json` until a much-later restart. Probably the same race as
+  the lifecycle bug above — TUI uses a temporary daemon for scaffolding
+  (separate from ResumeView's permanent one), and writes from one
+  daemon clobber the other.
+
+### Where these likely land
+
+- Workflow / prompt bugs (`hand` doesn't promote, engineers don't submit,
+  worktree isolation) plausibly dissolve as Project 2's workflow substrate
+  matures — that IS what Project 2 lands.
+- Race / lifecycle bugs (members.json drift, mitose-vs-dream, restart
+  cleanup) and Windows hangs are orthogonal to refactor scope. They need
+  targeted fixes regardless of where the plan sits — track as live parallel
+  work alongside Project 2, not deferred opener material.
+
+---
+
 ## Project 2: Workflow Substrate
 
 *Chains become real. Work propagates without the founder pushing it. Self-witnessing meta-layer arrives.*
