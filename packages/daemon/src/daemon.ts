@@ -71,6 +71,7 @@ import { recoverCrashedAgents, recoverCeoGateway, recoverCorpGateway } from './d
 import { scanChitLifecycle } from './chit-lifecycle.js';
 import { corpHasOpenClawAgent } from './harness-resolve.js';
 import { killStaleProcesses } from './stale-cleanup.js';
+import { dispatchTaskToDm } from './task-events.js';
 import { log, logError, setLogPath } from './logger.js';
 
 export class Daemon {
@@ -196,6 +197,13 @@ export class Daemon {
       corpRoot: this.corpRoot,
       globalConfig: this.globalConfig,
       processManager: this.processManager,
+      // Codex P1 on PR #204: route post-mitose wake dispatches
+      // through dispatchTaskToDm so the freshly-spawned slot's
+      // first session is a work session against its casket
+      // pointer, not a race-loss to the dream manager.
+      dispatchAfterMitose: (slug, chitId, chitTitle) => {
+        dispatchTaskToDm(this, slug, chitTitle, chitId);
+      },
     });
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
 
