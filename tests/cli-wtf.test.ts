@@ -139,11 +139,16 @@ describe('cmdWtf', () => {
       expect(stdoutText()).toMatch(/Inbox: empty\./);
     });
 
-    it('includes the Partner-specific kind section', async () => {
+    it('includes the Partner-specific kind section in CORP.md', async () => {
+      // Post-PR #200: wtf stdout carries only the situational header;
+      // the CORP.md manual body (with kind-section + ops content) is
+      // written to disk via atomicWriteSync, picked up by the agent
+      // through CLAUDE.md's @./CORP.md import. Assert against the
+      // file, not the stdout stream.
       await cmdWtf({ agent: 'ceo', hook: false, json: false });
-      const out = stdoutText();
-      expect(out).toContain('## You are a Partner');
-      expect(out).not.toContain('## You are an Employee');
+      const corpMd = readFileSync(join(tmpCorpRoot, 'agents', 'ceo', 'CORP.md'), 'utf-8');
+      expect(corpMd).toContain('## You are a Partner');
+      expect(corpMd).not.toContain('## You are an Employee');
     });
 
     it('writes CORP.md to the agent workspace', async () => {
@@ -165,11 +170,14 @@ describe('cmdWtf', () => {
     });
 
     it('identifies as Employee (from worker rank inference)', async () => {
+      // Header line (in stdout) AND CORP.md kind-section (on disk) —
+      // see Partner test above for the post-#200 split rationale.
       await cmdWtf({ agent: 'toast', hook: false, json: false });
       const out = stdoutText();
       expect(out).toMatch(/You are Toast, worker \(employee\)\./);
-      expect(out).toContain('## You are an Employee');
-      expect(out).not.toContain('## You are a Partner');
+      const corpMd = readFileSync(join(tmpCorpRoot, 'agents', 'toast', 'CORP.md'), 'utf-8');
+      expect(corpMd).toContain('## You are an Employee');
+      expect(corpMd).not.toContain('## You are a Partner');
     });
 
     it('renders handoff block from the agent\'s active handoff chit (Project 1.6)', async () => {
@@ -311,9 +319,17 @@ describe('cmdWtf', () => {
 
       await cmdWtf({ agent: 'ceo', hook: false, json: false });
       // If wtf had tried to contact a daemon, it would have failed or
-      // hung. Passing means the no-daemon path is clean.
+      // hung. Passing means the no-daemon path is clean. Post-#200
+      // the stdout header is intentionally compact (~400 chars); the
+      // full manual lives in CORP.md on disk. Assert on the
+      // structural markers that prove the no-daemon path produced a
+      // real situational header, not a stub.
       const out = stdoutText();
-      expect(out.length).toBeGreaterThan(500); // full output, not a stub
+      expect(out).toMatch(/^<system-reminder>/);
+      expect(out).toContain('You are CEO');
+      expect(out).toMatch(/Sandbox: /);
+      expect(out).toContain('CORP.md at:');
+      expect(existsSync(join(tmpCorpRoot, 'agents', 'ceo', 'CORP.md'))).toBe(true);
     });
   });
 

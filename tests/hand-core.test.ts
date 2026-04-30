@@ -73,6 +73,13 @@ describe('handChitToSlot', () => {
     expect(fields.handedBy).toBe('founder');
     expect(typeof fields.handedAt).toBe('string');
 
+    // Codex P1 on PR #204: hand promotes top-level chit status
+    // draft → active so bacteria's queue scanner (filters
+    // statuses: ['active']) can see handed work. Without this, a
+    // handed-but-still-draft chit was invisible to auto-scaling
+    // and queues stalled.
+    expect(hit.chit.status).toBe('active');
+
     // Tier 2 inbox-item landed on the target.
     const { chits: inbox } = queryChits(corpRoot, {
       types: ['inbox-item'],

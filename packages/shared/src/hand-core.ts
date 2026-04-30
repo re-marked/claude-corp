@@ -201,8 +201,19 @@ function writeTaskUpdate(
   partial: Partial<TaskFields>,
 ): void {
   const scope = chitScopeFromPath(corpRoot, hit.path);
+  // Codex P1 on PR #204: hand promotes draft → active. Tasks created
+  // via `cc-cli task create` default to top-level chit `status: draft`
+  // (template scaffold). Bacteria's queue-driven mitose path filters
+  // on `statuses: ['active']`, so a handed-but-still-draft chit stays
+  // invisible to auto-scaling and queue pickup — work stalls unless
+  // something else later promotes it. Promoting on hand makes the
+  // chit visible to bacteria as soon as it's been handed. Idempotent
+  // for chits that are already 'active' or in any non-draft state
+  // (we only promote from draft; never downgrade).
+  const promoteToActive = hit.chit.status === 'draft';
   updateChit(corpRoot, scope, 'task', hit.chit.id, {
     fields: { task: partial } as never,
+    ...(promoteToActive ? { status: 'active' as const } : {}),
     updatedBy: (partial.handedBy as string) ?? 'system',
   });
 }
