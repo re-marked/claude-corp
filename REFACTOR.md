@@ -1458,7 +1458,7 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 **Depends on:** 1.2 (Casket), 1.3 (chain semantics in Tasks).
 **PRs:** 4-5.
 
-### 1.9 — Watchdog chain: Pulse / Alarum / Sexton / helpers + patrol blueprint library (absorbs 2.2)
+### 1.9 — Watchdog chain: Pulse / Alarum / Sexton / helpers + patrol blueprint library (absorbs 2.2) **[shipped PRs #174-180]**
 
 **Shipping status (2026-04-24).** Most of 1.9 has shipped across a PR series:
 
@@ -1622,7 +1622,7 @@ Stability boundary sits at the destructive-action boundary and the first-N-runs 
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.4 (role-resolver for Sexton's redistribute action), 1.6 (handoff chit for Sexton's continuity across sessions), 1.8 (Blueprint-as-molecule — Sexton's patrols + sweepers ARE blueprints).
 **PRs:** 6-7 (bumped from 5-6 to accommodate sweeper substrate + `cc-cli sweeper new` authoring flow).
 
-### 1.10 — Auto-scaling Employee pool (bacteria) **[pending]**
+### 1.10 — Auto-scaling Employee pool (bacteria) **[shipped PRs #182-186]**
 
 Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Sexton (1.9) can also trigger wakes on idle-with-work agents during her patrol.
 
@@ -1652,7 +1652,7 @@ Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (ei
 **Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.9 (Sexton for wake)
 **PRs:** 3
 
-### 1.11 — Crash-loop circuit breaker **[pending]**
+### 1.11 — Crash-loop circuit breaker **[shipped PR #187]**
 
 > **Design turn (2026-04-25):** The original 1.11 spec had two governors: per-hour dispatch budget + crash-loop circuit breaker. The dispatch-budget half got cut. Reasoning: claude-code's underlying constraint is a **5-hour rolling % window** of account budget (not per-hour token quotas), and the platform already enforces it. Reimplementing a parallel meter at the daemon layer would create two sources of truth that drift, and would be solving a problem the platform already handles. Token-cost observability also got cut for the same reason — `cc-cli costs` can come back as a follow-up if the founder wants visibility, but it doesn't gate dispatches. What remained worth shipping: the **crash-loop circuit breaker** — qualitatively different because it's not a usage cap, it's "this slot has silent-exited N times in M min, stop respawning it." Claude-code's 5h window catches the burn eventually, but in the meantime silentexit sweeper keeps respawning the broken slot every patrol tick, each spawn paying context-load tokens for nothing. The breaker stops that loop early. (Memory: `reference_claude_code_budget_window.md`.)
 
@@ -1838,7 +1838,7 @@ Codex round expected. Pattern same as PRs #182-186.
 **Depends on:** 1.1 (Employee kind for role scoping), 1.9 (silentexit sweeper as the detector source), 1.10 (bacteria slug-avoidance integration).
 **PRs:** 1 (single beefy PR matching 1.10's shape).
 
-### 1.12 — Clearinghouse: pre-push review + merge lane **[pending]**
+### 1.12 — Clearinghouse: pre-push review + merge lane **[shipped PRs #191, #192]**
 
 > **Naming locked (2026-04-26):** Mark renamed the primitive from the placeholder "Shipping" to **Clearinghouse** — the place, the phase, AND the team name. The status field that contracts/tasks/sandboxes carry while inside the clearinghouse phase is **`clearance`**. Two Employee roles staff the phase: **Editor** (pre-push code review) and **Pressman** (post-push git mechanics + merge). Secondary names (CLI verb, chit type id, lock chit name, daemon module paths) below are best-guess; confirm with Mark at implementation start. (Memory: `project_clearinghouse_naming.md`.)
 
@@ -1958,7 +1958,7 @@ Author's mental model stays simple: *I run `cc-cli done`. The system handles the
 
 ---
 
-### 1.12.1 — Pressman session rebuild **[NEXT — start here on resume]**
+### 1.12.1 — Pressman session rebuild **[shipped PR #194]**
 
 > **Compaction handoff (2026-04-26):** Previous Claude shipped PR 3 of 1.12 (#193) with a daemon-`setInterval` Pressman scheduler instead of a real Employee session. The spec (above, line 1854) says *"not a sweeper, not a cron job; an Employee with a session and a CLAUDE.md."* Mark caught the deviation; this section is the rebuild plan. Memory `feedback_no_v1_v2_postponing.md` captures the underlying failure mode (rationalizing scope reduction as "v1 ships X, v2 evolves to Y") so the next Claude doesn't recreate it. Read that memory + this section before touching any code.
 
@@ -2163,7 +2163,7 @@ Concrete branch points where the agent decides (not the code):
 
 ---
 
-### 1.12.2 — Editor session (PR 4 of 1.12)
+### 1.12.2 — Editor session (PR 4 of 1.12) **[shipped PR #195]**
 
 Adds the pre-push code review phase. By the time PR #193 + 1.12.1 land, the corp can already merge — every submission flows with `reviewBypassed: true` because Editor doesn't exist yet. 1.12.2 inserts Editor between audit-approve and `enterClearance`, so the public PR that appears on GitHub has actually been internally reviewed.
 
@@ -2383,9 +2383,9 @@ These are documentation-shape additions. No behavior change in 1.12.3, but the s
 7. `test(1.12.3): end-to-end fixture — Project 1 ship criterion executable`
 8. `feat(1.12.3): TUI sidebar — clearance queue + recent merges rollup`
 
-#### Project 1 closes when 1.12.3 lands **[shipped]**
+#### Project 1 closes when 1.12.3 lands + 1.13 wraps **[shipped — 1.13 added as the actual closer; PR #197]**
 
-Project 1 is done. The "walk away overnight" demo runs end-to-end via Mark's manual user-test (the executable form of the ship criterion, by his choice — not bundled in this PR). What ships in 1.12.3 makes that test real:
+Project 1 is done. 1.12.3 (PR #196) shipped the substrate the "walk away overnight" criterion runs against — clearinghouse, lane-events, pattern-observations, log diary, attribution flow. 1.13 (PR #197) was added mid-build as the founding-flow closer: refreshed BOOTSTRAP.md with calibration phase, fixed the stale onboarding kickoff, plus a stabilization stack (PRs #198-203) that scoped the daemon log per corp, auto-hired Pressman + Editor, fixed CORP.md @import truncation, and patched bacteria's destructive-apoptose + missing-floor bugs. What 1.12.3 + 1.13 make real:
 
 - Bacteria scaling for Pressman + Editor pools (auto-scaling under burst).
 - Founder observability: `cc-cli clearinghouse status / list / show / log`, `cc-cli editor list / show` (file-pattern, file-comment, etc).
@@ -2898,12 +2898,12 @@ Decided: everything in the "Decisions Made" section above.
 Still being discussed: the two remaining open questions (Partner demotion, voice-preservation invasiveness).
 
 **Implementation-detail depth:**
-- Project 1 sub-projects (1.1 through 1.9) have concrete file paths, test strategy, and dependencies spelled out. Most have shipped (see per-section [shipped] markers); 1.10-1.12 are spec-complete and ready to pick up.
+- Project 1 sub-projects (1.1 through 1.13) have concrete file paths, test strategy, and dependencies spelled out, all shipped — see per-section [shipped] markers. The "Live bugs surfaced by the Project 1 finale" section above documents the integration-time gaps that surfaced during the closing e2e run; some dissolve as Project 2's workflow substrate matures, others are orthogonal parallel work.
 - Projects 2 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
 
-**Shipped as of 2026-04-24:**
+**Shipped as of 2026-04-29:**
 - **Project 0** — Chits, lifecycle, wtf + CORP.md + audit gate + inbox — complete.
-- **Project 1** — 1.1 (Employee/Partner), 1.2 (Casket), 1.3 (chain + state machine), 1.4 (Hand rewrite) + 1.4.1 (block), 1.6 (Dredge-via-handoff-chits), 1.7 (Partner compaction), 1.8 (Blueprint-as-molecule), 1.9.0-1.9.4 (sweeper substrate + Sexton role + Pulse/Alarum + Sexton runtime).
+- **Project 1** — Complete. 1.1 (Employee/Partner), 1.2 (Casket), 1.3 (chain + state machine), 1.4 (Hand rewrite) + 1.4.1 (block), 1.6 (Dredge-via-handoff-chits), 1.7 (Partner compaction), 1.8 (Blueprint-as-molecule), 1.9 (sweeper substrate + Sexton role + Pulse/Alarum + Sexton runtime + patrol blueprints), 1.10 (bacteria + cc-cli whoami + observability), 1.11 (crash-loop circuit breaker), 1.12 + 1.12.1-1.12.3 (clearinghouse: substrate + Pressman + Editor + walk-away-overnight closer), 1.13 (founding-flow refresh + stabilization stack PRs #198-203).
 
 **In flight (open PRs, 1.9.5 phase):**
 - PR #178 — OS supervisor configs (systemd/launchd/Task Scheduler install + uninstall).
