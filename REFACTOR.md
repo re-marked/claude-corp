@@ -2490,6 +2490,33 @@ Remaining live bugs (none block ship, but block running end-to-end):
   a real chit-id reference, or validator accepts message-id references for
   inbox-item type only.
 
+- **Audit-approve transition bypasses the state machine on the
+  clearinghouse path.** Surfaced during Codex round 4 review on PR #204
+  (after the `clearance` row was added to `TRANSITION_RULES`). The table
+  encodes `under_review: { 'audit-approve': 'completed' }` — direct to
+  terminal — but for tasks that go through the Pressman lane, the real
+  flow is `under_review → enterClearance → clearance → merge → completed`.
+  `packages/daemon/src/clearinghouse/enter-clearance.ts:213` writes
+  `workflowStatus: 'clearance'` directly without going through
+  `validateTransition`, so the state-machine layer never sees the
+  `under_review → clearance` step. The bypass works only because nothing
+  enforces the missing transition; the mechanical-enforcement guarantee
+  Project 1.3 was supposed to provide is silently broken on this path.
+
+  Two clean fix shapes (either, not both):
+  1. Split `audit-approve` into context-aware variants:
+     `audit-approve-direct` (under_review → completed, for tasks that
+     don't go through clearinghouse) and `audit-approve-submit`
+     (under_review → clearance, fired by `enterClearance`). Both rules
+     in `TRANSITION_RULES`, callers pick the right one.
+  2. Keep `audit-approve` as-is, add a new `submit-for-clearance`
+     trigger (under_review → clearance), rewire `enterClearance` to
+     call `validateTransition` with the new trigger. The `audit-approve
+     → completed` rule stays for the no-clearinghouse path.
+
+  Touches `audit.ts` CLI, `enter-clearance.ts`, every test exercising
+  audit-approve. Real Project 2 scope, not a Codex-round expansion.
+
 ### Auto-hire reliability
 
 - **Pressman + Editor auto-hire (PR #201) is unreliable on TUI-driven
