@@ -126,6 +126,26 @@ async function executeMitose(
 ): Promise<void> {
   const { corpRoot, globalConfig, processManager } = ctx;
 
+  // Codex P2 round 5 on PR #204: validate the assigned chit exists
+  // AND is a task BEFORE any side-effecting writes (workspace,
+  // member registry, channels, casket pointer). Without this guard,
+  // advanceCurrentStep would write the new slot's `current_step` to
+  // a non-existent or wrong-type chit; the slot would then appear
+  // BUSY to bacteria's decision module (currentStep != null) but
+  // never get real work — phantom-busy, contributing zero capacity
+  // until manual repair. Validating up-front fails fast: log the
+  // race / corruption, skip the mitose entirely, let the next
+  // bacteria tick re-decide against a fresh corp state.
+  const preflight = findChitById(corpRoot, action.assignedChit);
+  if (!preflight || preflight.chit.type !== 'task') {
+    logError(
+      `[bacteria] mitose: assigned chit ${action.assignedChit} ${
+        preflight ? `is type '${preflight.chit.type}' (expected 'task')` : 'does not exist'
+      } — aborting mitose for role ${action.role} (no slot created, no workspace touched).`,
+    );
+    return;
+  }
+
   const slug = pickFreshSlug(corpRoot, action.role);
   const corpHarness = readCorpHarness(corpRoot);
 

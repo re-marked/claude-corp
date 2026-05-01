@@ -314,6 +314,70 @@ describe('executeBacteriaActions', () => {
     expect(dispatchCalls[0]!.chitTitle).toBe('wake-dispatch task');
   });
 
+  it('mitose aborts cleanly when assignedChit is missing — no slot, no workspace, no member (Codex P2 round 5 PR #204)', async () => {
+    // Pre-fix: advanceCurrentStep ran first, then claimAssignedChit
+    // logged a missing-chit error. The slot was already created with
+    // a casket pointer at a non-existent chit — bacteria's decision
+    // module saw currentStep != null and treated the slot as BUSY,
+    // so it never re-mitosed and never apoptose'd. Phantom-busy slot
+    // contributing zero capacity until manual repair.
+    const action: MitoseAction = {
+      kind: 'mitose',
+      role: 'backend-engineer',
+      parentSlug: null,
+      generation: 0,
+      assignedChit: 'chit-t-doesnotexist',
+    };
+
+    const dispatchCalls: string[] = [];
+    const ctxWithDispatch: ExecutorContext = {
+      ...ctx,
+      dispatchAfterMitose: (slug) => {
+        dispatchCalls.push(slug);
+      },
+    };
+
+    await executeBacteriaActions(ctxWithDispatch, [action]);
+
+    // No slot was spawned — pre-validation aborted the mitose.
+    expect(stubPM.spawnCalls).toEqual([]);
+    expect(dispatchCalls).toEqual([]);
+    // No agent dirs or members written.
+    const agentsDir = join(corpRoot, 'agents');
+    const dirs = existsSync(agentsDir) ? readdirSync(agentsDir) : [];
+    expect(dirs).toEqual([]);
+    const membersStr = readFileSync(join(corpRoot, 'members.json'), 'utf-8');
+    expect(membersStr.trim()).toBe('[]');
+  });
+
+  it('mitose aborts cleanly when assignedChit is wrong type (e.g., observation, not task)', async () => {
+    // Belt-and-suspenders alongside the missing-chit case above.
+    const obs = createChit(corpRoot, {
+      type: 'observation',
+      scope: 'corp',
+      createdBy: 'founder',
+      fields: {
+        observation: { category: 'NOTICE', subject: 'x', importance: 3 },
+      } as never,
+    });
+
+    const action: MitoseAction = {
+      kind: 'mitose',
+      role: 'backend-engineer',
+      parentSlug: null,
+      generation: 0,
+      assignedChit: obs.id,
+    };
+
+    await executeBacteriaActions(ctx, [action]);
+
+    // Same invariants: no slot, no workspace, no spawn.
+    expect(stubPM.spawnCalls).toEqual([]);
+    const agentsDir = join(corpRoot, 'agents');
+    const dirs = existsSync(agentsDir) ? readdirSync(agentsDir) : [];
+    expect(dirs).toEqual([]);
+  });
+
   // ─── apoptose ─────────────────────────────────────────────────────
 
   it('apoptose removes the Member and writes an obituary observation', async () => {

@@ -267,6 +267,49 @@ describe('chain walker', () => {
       });
     });
 
+    it('role-queued blocked dependent gets unblock-to-queue (Codex P1 round 5 PR #204)', () => {
+      // Pre-fix: unblocking a role-queued dependent always fired
+      // `unblock` → in_progress, leaving the task with assignee=role-id
+      // and workflowStatus=in_progress. Bacteria's queue scanner
+      // (filters queued|dispatched + assignee===role) ignored it,
+      // and no slot existed yet to redispatch into — permanent orphan.
+      // Now: chain walker checks if assignee resolves via isKnownRole
+      // and emits the unblock-to-queue trigger that targets `queued`,
+      // putting the task back where bacteria can pick it up.
+      const dep = createChit(corpRoot, {
+        type: 'task', scope: 'corp',
+        fields: { task: { title: 'dep', priority: 'normal', workflowStatus: 'in_progress' } },
+        createdBy: 'ceo', status: 'active',
+      });
+      const child = createChit(corpRoot, {
+        type: 'task', scope: 'corp',
+        fields: {
+          task: {
+            title: 'role-queued child',
+            priority: 'normal',
+            workflowStatus: 'blocked',
+            assignee: 'backend-engineer', // role-id, not a slot slug
+          },
+        },
+        createdBy: 'ceo', status: 'active',
+        dependsOn: [dep.id],
+      });
+      updateChit(corpRoot, 'corp', 'task', dep.id, {
+        status: 'completed',
+        fields: { task: { workflowStatus: 'completed' } } as never,
+        updatedBy: 'ceo',
+      });
+
+      const result = advanceChain(corpRoot, dep.id);
+      expect(result.closedClassification).toBe('success');
+      expect(result.dependentDeltas).toHaveLength(1);
+      expect(result.dependentDeltas[0]).toMatchObject({
+        chitId: child.id,
+        trigger: 'unblock-to-queue',
+        reason: 'all-satisfied',
+      });
+    });
+
     it('on failure close, cascades block delta to non-blocked dependents', () => {
       const dep = createChit(corpRoot, {
         type: 'task', scope: 'corp',

@@ -45,6 +45,7 @@ import {
 } from './task-state-machine.js';
 import { advanceCurrentStep } from './casket.js';
 import { createInboxItem } from './inbox.js';
+import { isKnownRole } from './roles.js';
 
 // ─── Error types ────────────────────────────────────────────────────
 
@@ -223,8 +224,13 @@ export interface AdvanceChainResult {
 
 export interface DependentDelta {
   readonly chitId: string;
-  /** 'unblock' when all deps now satisfied; 'block' when a terminal-failure dep cascaded. */
-  readonly trigger: Extract<TaskTransitionTrigger, 'unblock' | 'block'>;
+  /**
+   * - `unblock` — slot-assigned task: blocked → in_progress (resume).
+   * - `unblock-to-queue` — role-queued task: blocked → queued (back
+   *   to bacteria's pickup path; Codex P1 round 5 on PR #204).
+   * - `block` — terminal-failure dep cascaded: → blocked.
+   */
+  readonly trigger: Extract<TaskTransitionTrigger, 'unblock' | 'unblock-to-queue' | 'block'>;
   /** Detail reason — carried into the transition log / audit trail. */
   readonly reason: ReadinessReason;
 }
@@ -336,9 +342,31 @@ function computeDependentDeltas(
     const depWs = getWorkflowStatus(chit);
     if (depWs !== 'blocked') continue;
 
+    // Codex P1 round 5 on PR #204: pick the right unblock trigger
+    // based on whether the dependent is role-queued or slot-assigned.
+    // Role-queued tasks (assignee === <role-id>, not yet claimed by a
+    // specific slot) need to land back in `queued` so bacteria's
+    // queue scanner + role-resolver can re-pick them. Slot-assigned
+    // tasks unblock to `in_progress` so the existing assignee resumes.
+    // Without this branch, role-queued blocked-then-unblocked tasks
+    // ended up at `in_progress` with a role-id assignee — invisible
+    // to bacteria (filter is queued|dispatched), un-redispatchable
+    // (no slot to write a casket for), permanent orphan.
+    //
+    // Type narrowing: chit.type was already implicitly task by the
+    // time we reach here (depWs === 'blocked' is task-only state)
+    // but TS doesn't see that flow — narrow explicitly so
+    // chit.fields.task access is sound.
+    let assignee: string | null = null;
+    if (chit.type === 'task') {
+      const fields = chit.fields.task as TaskFields;
+      assignee = fields.assignee ?? null;
+    }
+    const isRoleQueued = assignee !== null && isKnownRole(assignee);
+
     deltas.push({
       chitId: chit.id,
-      trigger: 'unblock',
+      trigger: isRoleQueued ? 'unblock-to-queue' : 'unblock',
       reason: 'all-satisfied',
     });
   }

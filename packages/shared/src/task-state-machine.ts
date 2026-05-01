@@ -47,10 +47,24 @@ export type TaskTransitionTrigger =
   /** `cc-cli block` files a blocker chit against this task. */
   | 'block'
   /**
-   * All blocker chits reached terminal-success; task resumes.
+   * All blocker chits reached terminal-success; task resumes to
+   * `in_progress`. Used when a slot is already actively assigned
+   * (assignee is a slot id, not a role queue).
    * Chain walker fires this automatically on blocker close (1.4.1).
    */
   | 'unblock'
+  /**
+   * Codex P1 round 5 on PR #204: parallel of `unblock` for
+   * role-queued tasks. When a dependent task is sitting at
+   * `assignee === <role-id>` (waiting in bacteria's role queue,
+   * never claimed by a specific slot) and gets blocked then
+   * unblocked, plain `unblock → in_progress` orphans it: bacteria
+   * only picks up `queued|dispatched` rows with a role-id
+   * assignee, and `redispatchUnblocked` can't write a casket for
+   * a role. Chain walker fires this trigger instead, sending
+   * blocked → queued so the role-queue pickup path can re-claim.
+   */
+  | 'unblock-to-queue'
   /** `cc-cli done` — agent declares completion, audit-gate pending. */
   | 'handoff'
   /** Audit gate approved the handoff; chain walker can consume this task. */
@@ -174,9 +188,16 @@ export const TRANSITION_RULES: {
     cancel: 'cancelled',
   },
   blocked: {
-    // Blocker closed; resume work. Chain walker fires this trigger
+    // Blocker closed on a task with a slot-assigned engineer;
+    // resume work in_progress. Chain walker fires this trigger
     // after verifying every depends_on has reached terminal-success.
     unblock: 'in_progress',
+    // Codex P1 round 5 PR #204: blocker closed on a role-queued
+    // task (assignee is a role-id, never claimed by a slot).
+    // Send back to `queued` so bacteria + role-resolver can re-pick
+    // the row; in_progress would orphan it (bacteria's queue scanner
+    // ignores in_progress + can't write a role-level casket).
+    'unblock-to-queue': 'queued',
     // Stacking blockers: additional blocker filed while already blocked
     // is still `block` — no state change, but we preserve the trigger
     // legality so the transition log captures the additional blocker.
