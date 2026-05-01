@@ -60,13 +60,17 @@ describe('taskToChit — pure mapping', () => {
     expect(chit.tags).toEqual([]);
     expect(chit.fields.task.title).toBe('sample task');
     expect(chit.fields.task.priority).toBe('normal');
-    expect(chit.fields.task.workflowStatus).toBe('pending');
+    // Legacy `pending` TaskStatus → 1.3 `draft` workflowStatus (rename
+    // landed in the 1.3 state-machine expansion).
+    expect(chit.fields.task.workflowStatus).toBe('draft');
   });
 
   it('maps every TaskStatus to the right coarse + fine pair', () => {
+    // Legacy TaskStatus → (chit.status, fields.task.workflowStatus)
+    // Post-1.3: `pending`/`assigned` rename to `draft`/`queued`.
     const mappings = [
-      ['pending', 'draft', 'pending'],
-      ['assigned', 'draft', 'assigned'],
+      ['pending', 'draft', 'draft'],
+      ['assigned', 'draft', 'queued'],
       ['in_progress', 'active', 'in_progress'],
       ['blocked', 'active', 'blocked'],
       ['completed', 'completed', 'completed'],

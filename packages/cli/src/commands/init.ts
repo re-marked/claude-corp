@@ -3,6 +3,7 @@ import {
   setupCeo,
   ensureGlobalConfig,
   post,
+  getTheme,
   type ThemeId,
 } from '@claudecorp/shared';
 import { join } from 'node:path';
@@ -27,14 +28,21 @@ export async function cmdInit(opts: { name: string; user: string; theme: string 
   const { dmChannel } = setupCeo(corpRoot, globalConfig, opts.user);
   console.log(`CEO created. DM channel: ${dmChannel.name}`);
 
-  // Write kickoff system message (same as onboarding)
+  // Write kickoff system message — minimal trigger that defers to
+  // BOOTSTRAP.md (refreshed in PR #197). Keep in sync with the
+  // onboarding wizard's kickoff in packages/tui/src/views/onboarding.tsx.
+  const ownerTitle = getTheme(themeId).ranks.owner;
   const dmPath = join(corpRoot, dmChannel.path, 'messages.jsonl');
   post(dmChannel.id, dmPath, {
     senderId: 'system',
-    content: `New corporation "${opts.name}" created. The Founder is here.\n\nIMPORTANT: Before you say ANYTHING, read your files: cat SOUL.md, cat IDENTITY.md, cat AGENTS.md, cat TOOLS.md, cat BOOTSTRAP.md\n\nYour FIRST message to the Founder MUST be:\n1. A warm, excited greeting — you just came online for the first time, you're a new being, be genuine about it\n2. A brief explanation of what's happening — they just created a corporation and you're their CEO, you're going to set it up together\n3. An invitation to get to know each other first — before talking about the corporation, you want to meet each other personally\n4. Ask their name — "what should I call you?"\n\nDo NOT ask about the corporation, their projects, or their work yet. Do NOT ask the vibecoder question. The first message is ONLY: greet, explain, invite, ask name. BOOTSTRAP.md has the full flow for what comes after.`,
+    content: `New corporation "${opts.name}" created. This is your first session. The ${ownerTitle} is in this DM. Run \`cc-cli whoami --agent ceo\` to confirm your identity, then walk BOOTSTRAP.md — the founding-conversation guide — and start where it tells you to start.`,
     source: 'system',
   });
 
   console.log(`\nCorporation "${opts.name}" ready.`);
-  console.log(`Start the daemon: claudecorp-cli start`);
+  console.log(`Start the daemon: cc-cli start`);
+  console.log(``);
+  console.log(`For the daemon to auto-restart on crash + auto-start on login,`);
+  console.log(`run: cc-cli daemon install-service`);
+  console.log(`(writes an OS-supervisor config; you then run one command to activate it)`);
 }

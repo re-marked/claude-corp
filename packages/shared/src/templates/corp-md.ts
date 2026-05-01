@@ -19,7 +19,18 @@
  * the OpenClaw daemon fragment, so both substrates see identical text.
  */
 
-export type CorpMdKind = 'partner' | 'employee';
+import type { AgentKind } from '../types/member.js';
+import { getRole } from '../roles.js';
+
+/**
+ * @deprecated Use `AgentKind` from `@claudecorp/shared` (or
+ * `./types/member.js` internally). Kept as an alias so existing
+ * imports keep working; new code should import AgentKind directly.
+ * Both types carry identical values ('employee' | 'partner') —
+ * they're structurally the same shape under two names, duplication
+ * being the tax of adding AgentKind incrementally in 1.1.
+ */
+export type CorpMdKind = AgentKind;
 
 export interface CorpMdOpts {
   /** Partner (persistent identity) vs Employee (ephemeral slot). Drives which kind-specific sections appear. */
@@ -28,8 +39,24 @@ export interface CorpMdOpts {
   agentSlug: string;
   /** Human-readable name. For Partners this is the founder-given name; for Employees their self-chosen slot name. */
   displayName: string;
-  /** Role — e.g. 'CEO', 'Backend Engineer', 'Herald'. Displayed in the heading. */
+  /**
+   * Role label for display in the heading — e.g. 'CEO', 'Backend
+   * Engineer', 'Herald'. This is the FREE-FORM string shown to the
+   * agent; it can be anything the caller wants to call the role.
+   * Distinct from `roleId` which is the registry key.
+   */
   role: string;
+  /**
+   * Role registry id (Project 1.1) — matches an entry in
+   * `packages/shared/src/roles.ts`. When set, triggers the "Your
+   * Role" CORP.md section rendered from the registry entry's
+   * description + purpose + communication fields. When absent, the
+   * section is skipped — legacy pre-1.1 agents whose Member.role
+   * isn't populated just don't see the role section (forward-compat;
+   * no fake-data fallback). Typical usage: pass the Member.role
+   * field verbatim.
+   */
+  roleId?: string;
   /** Corp name — e.g. 'my-corporation'. */
   corpName: string;
   /** Absolute workspace path for this agent. Used in file-path examples. */
@@ -45,6 +72,7 @@ export function buildCorpMd(opts: CorpMdOpts): string {
     intro(),
     architecture(opts),
     roles(),
+    yourRoleSection(opts),
     nonNegotiables(),
     coreConcepts(),
     chitLifecycle(),
@@ -126,7 +154,7 @@ function roles(): string {
 | **HR** | Hiring + onboarding. |
 | **Janitor** | Repo hygiene, merge-conflict resolution. |
 | **Adviser** | Strategic counsel for CEO. |
-| **Failsafe** | Agent recovery, restart, health monitoring. |
+| **Sexton** | Caretaker of continuity. Orchestrates patrol blueprints, dispatches sweepers, escalates when a human call is needed. |
 
 ### Project / team level
 
@@ -134,6 +162,39 @@ function roles(): string {
 |---|---|---|
 | **Partner by role** | Persistent | Role leaders (Engineering Lead, QA Lead, Contract Lead). Hold relationship + judgment. |
 | **Employee by role** | Ephemeral | Workers (Backend Engineer, Frontend Engineer, QA Engineer). Spin up, do work, decommission. Role-level pre-BRAIN accumulates across their collective work. |`;
+}
+
+/**
+ * "Your Role" section — rendered dynamically from the role registry
+ * when opts.roleId matches a known entry. Triple-layer content:
+ * description (what this role IS), purpose (what it DOES), and
+ * communication (how it talks). Gives the agent a focused frame for
+ * their specific role on top of the generic roles() table above.
+ *
+ * Returns empty string when roleId is absent or unknown — legacy
+ * agents pre-1.1 don't have Member.role set, so their CORP.md simply
+ * skips this section rather than fabricating fake data. Post-1.1
+ * hires always carry a role; the section renders for them.
+ */
+function yourRoleSection(opts: CorpMdOpts): string {
+  if (!opts.roleId) return '';
+  const entry = getRole(opts.roleId);
+  if (!entry) return '';
+
+  return `## Your Role — ${entry.displayName}
+
+_${entry.description}_
+
+**What you do**
+
+${entry.purpose}
+
+**How your role communicates**
+
+${entry.communication}
+
+_(Source: the role registry at \`packages/shared/src/roles.ts\`. Your
+IDENTITY.md is personal color on top of this structural frame.)_`;
 }
 
 function nonNegotiables(): string {

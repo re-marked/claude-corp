@@ -29,6 +29,21 @@ export interface WtfOpts {
   agent?: string;
   corp?: string;
   hook: boolean;
+  /**
+   * Project 1.6. When true, read the handoff chit without consuming
+   * it (status stays 'active'). Default false → wtf closes the
+   * handoff as part of its run, so the next invocation gets the
+   * "no active handoff" steady-state.
+   *
+   * The founder / debug tooling uses --peek for non-destructive
+   * inspection ("what's waiting for this agent?") without spending
+   * the one-shot signal.
+   *
+   * Optional — legacy callers that predate this flag get the
+   * default-consume behavior (undefined → !undefined → true →
+   * consumeHandoff=true). Only the --peek path needs to pass it.
+   */
+  peek?: boolean;
   json: boolean;
 }
 
@@ -67,6 +82,14 @@ export async function cmdWtf(opts: WtfOpts): Promise<void> {
     workspacePath: member.agentDir,
     generatedAt: new Date().toISOString(),
     now: new Date(),
+    // Project 1.1 — pass explicit kind + role when the member record
+    // carries them. buildWtfOutput prefers these over rank-based
+    // inference and the role-is-rank display fallback respectively.
+    ...(member.kind ? { kind: member.kind } : {}),
+    ...(member.role ? { roleId: member.role } : {}),
+    // Project 1.6 — default-consume. --peek flips to peek-only so
+    // diagnostic reads don't spend the one-shot handoff signal.
+    consumeHandoff: !opts.peek,
   });
 
   // Write CORP.md for the agent to re-read cheaply without spawning wtf again.
@@ -86,16 +109,30 @@ export async function cmdWtf(opts: WtfOpts): Promise<void> {
     return;
   }
 
-  emitSystemReminder(header, corpMd);
+  emitSystemReminder(header);
 }
 
 // ─── Output ─────────────────────────────────────────────────────────
 
-function emitSystemReminder(header: string, corpMd: string): void {
+/**
+ * Emit ONLY the situational header to stdout. CORP.md (the static-
+ * ish manual portion) lives on disk after \`atomicWriteSync\` above
+ * and reaches the agent via CLAUDE.md's \`@./CORP.md\` import.
+ *
+ * Why split: claude-code's SessionStart hook caps stdout-injected
+ * system-reminders at ~2KB. Pumping 40-50KB of CORP.md through this
+ * path silently truncated the manual to a preview, leaving every
+ * Partner agent operating on partial info since Project 0.7 shipped.
+ * @import has no such cap — claude-code re-resolves it every turn,
+ * so a fresh wtf rewrite is visible immediately.
+ *
+ * The header stays on stdout because it's situational ("you're CEO,
+ * inbox: 3, casket idle, time: 7:30am") — content that's specific
+ * to the wake reason and doesn't belong in the persistent file.
+ */
+function emitSystemReminder(header: string): void {
   process.stdout.write('<system-reminder>\n');
   process.stdout.write(header);
-  process.stdout.write('\n---\n\n');
-  process.stdout.write(corpMd);
   process.stdout.write('</system-reminder>\n');
 }
 

@@ -9,9 +9,33 @@ import {
   writeConfig,
   MEMBERS_JSON,
   CORP_JSON,
+  findActiveBreaker,
 } from '@claudecorp/shared';
 import { CorpGateway } from './corp-gateway.js';
 import { log, logError } from './logger.js';
+
+/**
+ * Thrown by ProcessManager.spawnAgent when an active crash-loop
+ * breaker (Project 1.11) is refusing to respawn the slot. Callers
+ * — silentexit sweeper's respawn loop, bacteria executor, the hire
+ * CLI command — catch this specifically and surface a clean message
+ * pointing the founder at `cc-cli breaker reset --slug <slug>`
+ * instead of letting the raw stack trace bubble. The trip chit id
+ * is on the error so callers can include it in their surface text.
+ */
+export class BreakerTrippedError extends Error {
+  constructor(
+    readonly slug: string,
+    readonly tripChitId: string,
+  ) {
+    super(
+      `Crash-loop breaker is active for ${slug} (trip chit ${tripChitId}). ` +
+        `Reset with \`cc-cli breaker reset --slug ${slug}\` or remove the slot ` +
+        `with \`cc-cli fire --remove --slug ${slug}\`.`,
+    );
+    this.name = 'BreakerTrippedError';
+  }
+}
 
 /**
  * Resolve the corp-wide default harness from corp.json. Returns the
@@ -173,6 +197,16 @@ export class ProcessManager {
     if (!member) throw new Error(`Member ${memberId} not found`);
     if (member.type !== 'agent') throw new Error(`Member ${memberId} is not an agent`);
     if (!member.agentDir) throw new Error(`Member ${memberId} has no agentDir`);
+
+    // Project 1.11: refuse spawn when the slot's crash-loop breaker
+    // is active. Sits AFTER member-not-found (we want a clean
+    // "member not found" for typos, not a confusing breaker error)
+    // and BEFORE the harness branch (so claude-code agents are
+    // refused too, not just openclaw).
+    const trip = findActiveBreaker(this.corpRoot, memberId);
+    if (trip) {
+      throw new BreakerTrippedError(memberId, trip.id);
+    }
 
     // Resolve effective harness: per-member > corp default > 'openclaw'.
     // Non-openclaw agents (claude-code, future harnesses) don't need a

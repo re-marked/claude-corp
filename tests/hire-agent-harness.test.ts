@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ProcessManager } from '../packages/daemon/src/process-manager.js';
@@ -160,6 +160,62 @@ describe('hireAgent — harness-aware registration', () => {
     const proc = daemon.processManager.getAgent(member.id);
     expect(proc!.mode).toBe('harness');
     expect(proc!.status).toBe('ready');
+  });
+
+  it('identityContent is written to IDENTITY.md verbatim for Partner hires (1.9.2 pass-through)', async () => {
+    // HireOpts.identityContent (added in 1.9.2 for Sexton's caretaker
+    // voice) threads through hireAgent → setupAgentWorkspace → the
+    // workspace's IDENTITY.md file. Without this test, a future
+    // refactor of hire.ts could silently drop the field and the
+    // regression would only surface when a founder noticed an
+    // agent's IDENTITY.md showed the generic template instead of the
+    // role-specific voice. This pin is cheap + catches real drift.
+    setupCorp(corpRoot, { harness: 'claude-code' });
+    const daemon = makeDaemon(corpRoot);
+    const customIdentity = '# Custom Identity\n\nI am a test Partner with a specific voice.\n';
+
+    const { member } = await hireAgent(daemon as unknown as Parameters<typeof hireAgent>[0], {
+      creatorId: 'ceo',
+      agentName: 'voiced',
+      displayName: 'Voiced',
+      rank: 'worker',
+      kind: 'partner', // Partners get IDENTITY.md; Employees skip it per 1.1
+      identityContent: customIdentity,
+    });
+
+    expect(member.agentDir).toBeTruthy();
+    const identityPath = join(corpRoot, member.agentDir!, 'IDENTITY.md');
+    expect(existsSync(identityPath)).toBe(true);
+    expect(readFileSync(identityPath, 'utf-8')).toBe(customIdentity);
+  });
+
+  it('identityContent absent: Partner falls back to generic defaultIdentity template', async () => {
+    // Negative pin — when the caller omits identityContent, setup-
+    // AgentWorkspace's existing default kicks in (defaultIdentity
+    // template with displayName + rank interpolated). This guards
+    // against someone "simplifying" the optional field by making it
+    // required, which would break the existing non-Sexton hire paths.
+    setupCorp(corpRoot, { harness: 'claude-code' });
+    const daemon = makeDaemon(corpRoot);
+
+    const { member } = await hireAgent(daemon as unknown as Parameters<typeof hireAgent>[0], {
+      creatorId: 'ceo',
+      agentName: 'plain',
+      displayName: 'Plain',
+      rank: 'worker',
+      kind: 'partner',
+      // identityContent: undefined
+    });
+
+    const identityPath = join(corpRoot, member.agentDir!, 'IDENTITY.md');
+    expect(existsSync(identityPath)).toBe(true);
+    const onDisk = readFileSync(identityPath, 'utf-8');
+    // Default template carries the displayName in the Basics section —
+    // if this assertion fails, either the default template broke OR
+    // the pass-through path started leaking custom content from an
+    // earlier test's bleed. Both are real bugs.
+    expect(onDisk).toContain('**Name:** Plain');
+    expect(onDisk).not.toContain('I am a test Partner with a specific voice.');
   });
 
   it('openclaw corp without ready gateway: hired worker still uses registerGatewayAgent', async () => {

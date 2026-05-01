@@ -74,8 +74,10 @@ describe('buildHookSettings — Claude Code nested shape (matcher + hooks array)
     const { hooks } = buildHookSettings(partnerOpts());
     for (const key of ['SessionStart', 'PreCompact', 'Stop', 'UserPromptSubmit'] as const) {
       const inner = hooks[key]![0]!.hooks;
-      // PreCompact gets two commands (audit + wtf) under one matcher;
-      // the other events get one. All entries must be the same shape.
+      // All four events carry exactly one command under their matcher
+      // (1.7 follow-up: PreCompact lost its second `cc-cli wtf`
+      // command — that was summary-shape pollution). Shape still
+      // uniform across events.
       expect(inner.length).toBeGreaterThanOrEqual(1);
       for (const entry of inner) {
         expect(entry).toEqual({ type: 'command', command: expect.any(String) });
@@ -107,16 +109,20 @@ describe('buildHookSettings — each hook command content', () => {
     expect(hooks.SessionStart![0]!.hooks[0]!.command).toBe('cc-cli wtf --agent ceo --hook');
   });
 
-  it('PreCompact (Partner) fires audit + wtf in order — audit gates, wtf refreshes context', () => {
-    // Audit MUST run first: if it blocks, compaction is rejected and
-    // wtf's context-refresh would be wasted work. Wtf second: on
-    // approve, the post-compact summary is built against fresh state.
+  it('PreCompact (Partner) fires ONLY `cc-cli audit` — summary-shaping channel, not a wtf dump', () => {
+    // Claude Code's PreCompact output protocol merges hook stdout into
+    // the summarization prompt via mergeHookInstructions (leaked
+    // services/compact/autoCompact.ts). `cc-cli audit` emits targeted
+    // summary-shaping text (Casket pointer, chit ids, open questions,
+    // founder's /compact arg). A second `cc-cli wtf --hook` in the
+    // chain would pipe the full CORP.md + system-reminder payload
+    // into the same merged prompt, flooding/diluting the shape the
+    // audit template was specifically crafted to produce. CORP.md
+    // freshness after compact is already covered by the SessionStart
+    // hook when the post-compact session boots.
     const { hooks } = buildHookSettings(partnerOpts({ agentSlug: 'ceo' }));
     const commands = hooks.PreCompact![0]!.hooks.map((h) => h.command);
-    expect(commands).toEqual([
-      'cc-cli audit --agent ceo',
-      'cc-cli wtf --agent ceo --hook',
-    ]);
+    expect(commands).toEqual(['cc-cli audit --agent ceo']);
   });
 
   it('Stop fires `cc-cli audit --agent <slug>` — audit gate', () => {

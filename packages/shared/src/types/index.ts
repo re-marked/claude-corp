@@ -5,6 +5,7 @@ export type {
   MemberType,
   MemberScope,
   AgentWorkStatus,
+  AgentKind,
 } from './member.js';
 
 export type {
@@ -30,7 +31,7 @@ export type {
   TeamStatus,
 } from './team.js';
 
-export type { Corporation, DmMode } from './corp.js';
+export type { Corporation, CorpPreferences, DmMode } from './corp.js';
 export type { Project, ProjectType } from './project.js';
 export type { AgentConfig } from './agent-config.js';
 export type { Clock, ClockType, ClockStatus, ScheduledClock, ScheduledClockStatus, CronTaskTemplate } from './clock.js';
@@ -65,4 +66,18 @@ export type {
   InboxItemFields,
   InboxItemTier,
   InboxItemSource,
+  EscalationFields,
+  BlueprintFields,
+  BlueprintStep,
+  BlueprintVar,
+  SweeperRunFields,
+  KinkFields,
+  BreakerTripFields,
+  ClearanceSubmissionFields,
+  ReviewCommentFields,
+  LaneEventFields,
+  LaneEventKind,
+  LaneEventPayload,
+  PatternObservationFields,
+  PatternSubject,
 } from './chit.js';

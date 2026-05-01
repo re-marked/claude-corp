@@ -114,9 +114,9 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 
 | # | Project | Contents | Purpose | Rough PR count |
 |---|-------|----------|---------|----------------|
-| 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 |
-| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Three-tier watchdog (Witness/Failsafe/Dogs), Bacteria scaling, Budget governor, Refinery (merge discipline) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, failures self-heal at agent/role level, merge lane holds. | 18-24 (moved Refinery + budget-governor + circuit-breaker in from Project 3; added dynamic-blocker + structured-I/O sub-projects) |
-| 2 | Workflow Substrate | Blueprint-as-molecule (reusable workflow templates), Failsafe patrol molecules, self-witnessing meta-layer, convoy ergonomics (fan-out + synthesis wrapping around existing chain substrate) | Agents walk chains, work propagates automatically, Employees review themselves, standard patterns ship as TOML templates | 10-12 |
+| 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 **[shipped]** |
+| 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Crash-loop breaker, Clearinghouse (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 **[~92% shipped as of 2026-04-26: 1.1-1.4.1, 1.6-1.11 all landed; 1.12 Clearinghouse not yet started]** |
+| 2 | Workflow Substrate | Built-in blueprint library (domain workflows: ship-feature, fix-bug, etc.), self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 6-8 (slimmer — Blueprint substrate + patrol blueprints moved to Project 1 since the watchdog chain needs them on day one) |
 | 3 | Autonomous Operations | Advanced Witness patrols (corp-wide anomaly detection), stall/escalation routing, daemon-level auto-recovery | What's left of corp healing after Project 1's mechanical watchdogs ship — cross-agent coordination + daemon-restart survival. | 6-8 (slimmer — Refinery + circuit-breaker moved to Project 1) |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
 | 5 | Culture Transmission | Feedback-propagation, CULTURE.md made load-bearing | Culture actually shapes behavior | 5-7 |
@@ -213,7 +213,8 @@ Each type registers its configuration:
 - `handoff` — ephemeral always, destroyed once read by successor session (Dredge consumes it and burns it).
 - `dispatch-context` — ephemeral, tracks an in-flight dispatch between agents; burns on dispatch completion.
 - `pre-brain-entry` — ephemeral by default at the role level; auto-promotes to permanent via 4-signal rule and becomes part of the role's distilled pre-BRAIN library.
-- `step-log` — non-ephemeral (Temporal memoization pattern), one per Task-execution phase, used for crash recovery.
+- `step-log` — ephemeral with 7d TTL + `destroy-if-not-promoted` (Temporal memoization pattern), one per Task-execution phase, used for crash recovery. Harness-emitted on every dispatch (not agent-written); see 1.6 for the emission contract + how silent-exit respawn reads it. Unreferenced step-logs destruct at TTL; cited ones (by observations / post-mortems) promote via the normal 4-signal rule.
+- `kink` — **[shipped 1.9.5]** ephemeral with 7d TTL + `destroy-if-not-promoted`. Operational findings emitted by sweepers (and future daemon-internal detectors). Distinct channel from observations — observations are agent-voice self-witnessing that feeds BRAIN via dreams; kinks are system-voice "something is wrong right now" reports. Mixing them would pollute the observation stream with mechanical noise AND misdirect dream distillation. Dedup per-(source, subject) via `writeOrBumpKink` helper — matching active kinks bump `occurrenceCount` + refresh severity/title/body rather than creating duplicates. Auto-resolve via `resolveKink` (manual) or runner-driven (when a sweeper stops reporting a subject, prior kink closes with `resolution: 'auto-resolved'`). See 1.9.
 - `inbox-item` — **ephemeral by default**, tier-aware lifecycle (see 0.7 inbox system). Three tiers encoded as per-instance `fields.inbox-item.tier: 1 | 2 | 3`. Policy varies by tier via the per-instance destructionPolicy override:
   - **Tier 1 (ambient)** — `destructionPolicy: 'destroy-if-not-promoted'`, 24h TTL. Broadcast notifications, system events (Failsafe restarts, Herald digests). Genuinely fire-and-forget noise.
   - **Tier 2 (direct)** — `destructionPolicy: 'keep-forever'`, 7d TTL. Peer @mentions, inter-agent DMs, task handoffs from peers. Goes cold on TTL; preserves audit trail.
@@ -366,7 +367,7 @@ Multiple `--type`, `--status`, `--tag`, `--scope` flags are OR'd within the same
 
 ### 0.5.1 — TaskFields.complexity (premature, by design)
 
-**Problem.** The pre-chits `Task.estimate` was a free-form string (`"~2 hours"`, `"small"`). 0.3 migrated it onto `TaskFields.estimate` verbatim. Nothing in the corp ever read it — no scheduler, no UI, no prompt — so agents burned tokens writing values that went to /dev/null. At the same time, Project 1.9's bacteria split rule (queue-depth count > idle Employee count) implicitly assumes all tasks cost the same. They don't. `3 × trivial` and `3 × large` should route very differently.
+**Problem.** The pre-chits `Task.estimate` was a free-form string (`"~2 hours"`, `"small"`). 0.3 migrated it onto `TaskFields.estimate` verbatim. Nothing in the corp ever read it — no scheduler, no UI, no prompt — so agents burned tokens writing values that went to /dev/null. At the same time, Project 1.10's bacteria split rule (queue-depth count > idle Employee count) implicitly assumes all tasks cost the same. They don't. `3 × trivial` and `3 × large` should route very differently.
 
 **Scope.** Replace `TaskFields.estimate: string | null` with `TaskFields.complexity: 'trivial' | 'small' | 'medium' | 'large' | null`. The enum carries a structured signal that three decisions can key off:
 
@@ -374,7 +375,7 @@ Multiple `--type`, `--status`, `--tag`, `--scope` flags are OR'd within the same
 2. **Model routing** — trivial/small → Haiku-suitable; medium/large → Opus-worthy. Avoids burning Opus on var renames or asking Haiku to make architectural calls.
 3. **Bacteria weighting (consumed in 1.9)** — weighted queue depth replaces raw count. `3 × trivial` stays on one Employee. `3 × large` splits. Mixed workloads weight toward the heavier side.
 
-This is intentionally premature. 1.9 hasn't shipped; no consumer reads `complexity` yet. But putting the field in **now**, while Project 0 is still writing the schema, means every task created from 0.5.1 onward carries the signal. By the time 1.9 lands, the backfill already exists — bacteria reads populated data, not an empty column.
+This is intentionally premature. 1.10 hasn't shipped; no consumer reads `complexity` yet. But putting the field in **now**, while Project 0 is still writing the schema, means every task created from 0.5.1 onward carries the signal. By the time 1.10 lands, the backfill already exists — bacteria reads populated data, not an empty column.
 
 **File paths:**
 - `packages/shared/src/types/chit.ts` (TaskFields: estimate → complexity)
@@ -451,7 +452,7 @@ The scanner reads these; the policy per type is pinned in one place, with instan
 
 **Null-TTL ephemeral chits** (dispatch-contexts). `defaultTtlMs: null` means the chit has no time-based destruction. The scanner still visits it every tick but only the promotion signals can close it — never the TTL-aged path. Dispatch-contexts close when the work chit they narrate completes (a separate completion hook flips them, analogous to the contract-watcher pattern from 0.4). Expressed in scanner logic as: `if (ttl === null) skip TTL-aged branch; only run promotion checks`.
 
-**Non-ephemeral chit types.** The registry carries `destructionPolicy` on every type for uniformity, but the scanner only visits chits with `ephemeral: true`. Tasks, contracts, casket, step-log are created with `ephemeral: false` and are never seen by the scanner regardless of their registry policy. Their registry entries use `destructionPolicy: 'keep-forever'` + `defaultTtlMs: null` as sensible-default no-ops.
+**Non-ephemeral chit types.** The registry carries `destructionPolicy` on every type for uniformity, but the scanner only visits chits with `ephemeral: true`. Tasks, contracts, casket are created with `ephemeral: false` and are never seen by the scanner regardless of their registry policy. Their registry entries use `destructionPolicy: 'keep-forever'` + `defaultTtlMs: null` as sensible-default no-ops. (Note: step-log was reclassified as ephemeral in 1.6's step-log-bound spec — see 1.6 — so it no longer lives in this list.)
 
 **Definition of the "commented" signal (b).** Ambiguous in the original Gas Town spec — 0.6 pins it concretely: a chit is "commented on" when any other chit (any type, any scope) has the target chit's id in its `references` or `dependsOn` arrays, OR when any channel message has the target chit's id in its body (regex match on the chit-id format). Falls back to (a) "referenced" in most practical cases, but captures the weaker "someone mentioned it in chat" case the original spec was reaching for.
 
@@ -1148,29 +1149,49 @@ If you're reading this after a context compaction: you ARE the same Claude that 
 
 *Builds on Project 0. Every new primitive in this Project is a Chit of a specific type — Casket is `type: casket`, handoff via Dredge reads `type: handoff` Chits, dispatch-contexts for bacteria scaling are ephemeral Chits. The file-path specs below use the old bespoke-file language where reasonable, but at implementation time everything translates to Chit operations on the primitive from Project 0.*
 
-### 1.1 — Introduce Employee vs Partner distinction
+### 1.1 — Introduce Employee vs Partner distinction **[shipped PR #163]**
 
-Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee spawned with self-chosen name on first session). Promotion command `cc-cli agent promote --slug <x> --name <new-name>` changes kind.
+Data model change. Add `kind: "employee" | "partner"` to Member record. Update members.json schema. Hire flow asks for kind (Partner gets founder-chosen name, Employee spawned with founder-given name — self-naming deferred to 1.10's bacteria). Promotion-by-ceremony command `cc-cli tame --slug <x> --reason "..." [--name <new-name>]` changes kind from employee → partner, expands soul-file set, writes first BRAIN entry from the founder's reason, triggers the welcome ceremony via inbox chits.
 
-**Scope:** schema, hire wizard, cc-cli agent subcommands, role definitions.
+**Scope:** AgentKind type + Member.kind/role fields, role registry, hire --kind/--role branching, kind-aware workspace (Employees skip soul files), CORP.md "Your Role" dynamic section from the registry, cc-cli tame command (ceremony via inbox chits, no faked agent voice).
+
 **File paths:**
-- `packages/shared/src/types/member.ts` (add `kind` field to Member type)
-- `packages/shared/src/index.ts` (export any new types)
-- `packages/tui/src/views/hire-wizard.tsx` (branch on kind; Partner = named, Employee = pool-spawn)
-- `packages/cli/src/commands/hire.ts` (accept --kind flag)
-- `packages/cli/src/commands/agent-control.ts` (promote subcommand, or new `promote.ts`)
-- `packages/shared/src/templates/identity.ts` (kind-aware IDENTITY.md content — Employee is lighter, Partner is fuller)
-- `packages/shared/src/templates/role-*.md` (new: per-role definition files — Partner of role vs Employee of role)
+- `packages/shared/src/types/member.ts` (AgentKind + Member.kind + Member.role fields)
+- `packages/shared/src/roles.ts` (new — role registry with 12 entries across decree/role-lead/worker tiers)
+- `packages/shared/src/wtf-state.ts` (resolveKind helper alongside inferKind; WtfOutputOpts gains kind + roleId)
+- `packages/shared/src/templates/corp-md.ts` (CorpMdKind aliases AgentKind; CorpMdOpts gains roleId; new yourRoleSection rendering from registry)
+- `packages/shared/src/templates/claude-md.ts` (kind-aware @imports — Employees skip SOUL/USER/MEMORY)
+- `packages/shared/src/agent-setup.ts` (kind-aware brain/ dir + soul-file + BOOTSTRAP.md writes)
+- `packages/cli/src/commands/hire.ts` (--kind / --role validation against registry)
+- `packages/cli/src/commands/tame.ts` (new — the promotion ceremony)
+- `packages/daemon/src/fragments/types.ts`, `router.ts`, `api.ts`, `heartbeat.ts` (FragmentContext + producers pass agentKind/agentRole)
+
+**Ceremony** — inbox-chit based, matches the manifesto's "ceremony is witnessed":
+1. Founder writes `--reason` → becomes new Partner's first BRAIN entry (type='self-knowledge', source='founder-direct', confidence='high', tags=['taming','genesis','founder-recognition']).
+2. Data transition: kind flip + optional rename + soul-file expansion (SOUL, IDENTITY, USER, MEMORY, BRAIN/).
+3. Tier 3 inbox-item for new Partner from founder: "You've been tamed. Welcome to the Partner circle."
+4. Tier 2 inbox-item for every OTHER Partner from founder: "Welcome {name} — tamed for {reason-preview}." Each Partner picks it up on their next wtf/inbox check; responds via DM in their own voice on their own tempo. No faked agent speech; the walkarounds accrete organically across the next few turns.
 
 **Test strategy:**
-- Unit: Member type accepts `kind`, defaults sensibly, validates.
-- Integration: hire flow produces correct workspace layout for each kind.
-- Manual: hire a Partner, hire an Employee (bacteria-free spawn), verify both work.
+- Unit: AgentKind + Member.kind + Member.role round-trip through setupAgentWorkspace.
+- Unit: kind-aware workspace — Partner gets brain/ + SOUL/USER/MEMORY; Employee gets none.
+- Unit: role registry invariants (unique ids, defaultKind ↔ tier consistency).
+- Unit: thin CLAUDE.md kind branch (Partner @imports all four soul files; Employee @imports none).
+- Integration: tame flips kind, expands soul files, writes genesis.md, fires the Tier 2/3 welcome chits.
+- Manual: hire Partner, hire Employee, tame the Employee, verify welcome flow.
 
-**Depends on:** nothing
-**PRs:** 2-3
+**Naming.** Renamed from the original spec's `cc-cli agent promote`. "tame" is load-bearing — short, evocative, pairs with `hire`/`fire` as the three verbs of an agent lifecycle. "Promote" was a generic corporate-ladder verb; "tame" names the SPECIFIC relational act of bringing an ephemeral slot into the trusted named circle.
 
-### 1.2 — Casket: durable hook
+**Deferred to later sub-projects:**
+- Self-chosen Employee names on first dispatch → 1.10 (needs bacteria spawn machinery).
+- Role-level pre-BRAIN → 4.x (needs dream-distillation accumulation).
+- Per-step session cycling for Employees → 1.6.
+- Compaction for Partners → 1.7.
+
+**Depends on:** 0.7.4 (createInboxItem — the ceremony uses inbox chits), 0.7.3 (BRAIN + Casket already available).
+**PRs:** 1 (this one).
+
+### 1.2 — Casket: durable hook **[shipped alongside 0.7.3]**
 
 **Implemented as Chit of `type: casket`.** Per agent, exactly one Chit with `id: casket-<agent-slug>`, `ephemeral: false`. The only functional field is `fields.casket.current_step: chit-id | null` — the pointer to the agent's current Task Chit. Content body can carry a short "recent activity" log agents append to as they work, but the pointer is the substrate's load-bearing part.
 
@@ -1191,7 +1212,7 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit primitive), 1.1 (Employee/Partner kind — kind-specific Casket defaults may differ)
 **PRs:** 1-2 (simpler because Chit infrastructure already exists)
 
-### 1.3 — Chain semantics on Task Chits + explicit state machine + structured I/O
+### 1.3 — Chain semantics on Task Chits + explicit state machine + structured I/O **[shipped PR #167]**
 
 **Scope enriched (post-Gas Town dive):** chain-walker, PLUS an explicit Task lifecycle state machine (so `blocked` / `under-review` aren't inferred from field presence), PLUS a structured task-output field so step A's result flows into step B's input canonically. Without these, chains walk but agents don't know what to DO at each step — they re-grep the prior task's body for "what happened."
 
@@ -1243,7 +1264,7 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit), 1.2 (Casket)
 **PRs:** 3-4
 
-### 1.4 — Hand: full rewrite for durable chit forwarding
+### 1.4 — Hand: full rewrite for durable chit forwarding **[shipped PR #168]**
 
 **Hand is not a new primitive — it's the name we already have, for the mechanism that failed. The old Hand was chat delivery: a slightly nicer @mention, routed by the daemon but still just a channel message, with no durable target state, no guarantee the recipient ever saw it, no way to inspect the queue without scrolling. The name was right; the mechanism was wrong. This sub-project keeps the name and rewrites the mechanism from scratch on top of Chits + Casket. The old Hand code path dies when this ships — no parallel paths.**
 
@@ -1283,7 +1304,7 @@ When agent dispatches: `cc-cli chit read casket-<slug>`, sees `current_step`, re
 **Depends on:** 0.1 (Chit), 1.2 (Casket), 1.3 (chain)
 **PRs:** 3-4
 
-### 1.4.1 — Dynamic blocker injection (`cc-cli block`)
+### 1.4.1 — Dynamic blocker injection (`cc-cli block`) **[shipped PR #168]**
 
 **Problem.** Today an agent mid-task realizing "I can't finish X because Y isn't done" has three bad options: (a) escalate to their supervisor and interrupt their work, (b) work around the gap and ship half-done, (c) rationalize the problem away. All three are failure modes the autonomy dream explicitly rejects. Gas Town solves this with gate-bead sub-task filing: the reviewer files a blocker chit, links it as a dependency of the current task, and exits cleanly. The daemon auto-re-dispatches the reviewer once the blocker closes.
 
@@ -1334,7 +1355,7 @@ When the blocker chit closes (completed / rejected), 1.3's chain walker:
 
 If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. The work that was here has been absorbed — do not implement 1.5 as originally written (it would directly conflict with 0.7's architecture).
 
-### 1.6 — Per-step session cycling for Employees (activate Dredge, Chit-ify handoffs)
+### 1.6 — Per-step session cycling for Employees (activate Dredge, Chit-ify handoffs) **[shipped PR #169]**
 
 **Handoffs become Chits of `type: handoff` (ephemeral, always).** Each handoff is a Chit written by the dying session that gets read and burned by the successor session via Dredge. No free-prose WORKLOG.md appending — handoff content is structured Chit frontmatter (from the XML schema in Decisions Made).
 
@@ -1344,9 +1365,16 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 - On injection, Dredge updates the handoff Chit's status to `closed` (consumed). Ephemeral expiry cleans it up shortly after (0.6 lifecycle scanner — but since it's already closed, it falls out of working-set queries immediately).
 - Legacy `## Session Summary` in WORKLOG.md becomes deprecated, deleted in 6.1.
 
-**Session-exit protocol.** Employee calls `cc-cli handoff --current-step <chit-id> --completed "..." --next-action "..." --open-question "..." --sandbox-state "..." --notes "..."`. This creates the handoff Chit as `type: handoff`, `ephemeral: true`, scope=`agent:<slug>`, `references: [<current-step-chit-id>]`. Then signals session exit cleanly.
+**Session-exit protocol.** Employee calls `cc-cli done --completed "..." --next-action "..." --open-question "..." --sandbox-state "..." --notes "..."`. This writes a pending-handoff payload to `<workspace>/.pending-handoff.json`. The Stop hook fires `cc-cli audit`; on audit approve, the audit gate PROMOTES the pending file into a `type: handoff` Chit at scope=`agent:<slug>`, `ephemeral: true`, `references: [<current-step-chit-id>]`, and closes the current Task chit. On audit block, the pending file is preserved and the agent retries. (The original 1.6 spec said `cc-cli handoff` as a standalone producer command — during 0.7.3 implementation, the producer path was absorbed into the `cc-cli done` + audit-gate-promotes-pending pattern. Same semantics, different surface.)
 
-**Scope:** handoff command, Dredge evolution, session-exit protocol, handoff Chit type registration.
+**Silent-exit recovery via step-logs.** Handoff chits cover the clean-exit path. Silent exits (mid-turn crash, timeout, turn-complete-without-`cc-cli-done`) produce no handoff — the respawned Employee would otherwise boot into their Casket task with no memory of what the dead session did. The fix: step-log chits, harness-emitted, not agent-written.
+
+- **Emission.** The dispatch harness buffers significant tool events over the turn — edits, bash invocations, reads of load-bearing files, test output summaries — and emits one `step-log` chit at turn end OR on abnormal exit via the child process's exit handler. Fields: `{ sessionId, taskChitId, toolEvents: [{ kind, argSummary, ts }], partialOutput?, exitReason: 'clean' | 'crashed' | 'timeout' | 'silent-no-done' }`. Scope: `agent:<slug>`. Ephemeral by registry with 7d TTL (see bound + lifecycle below) — a post-mortem window rather than a forever-audit-trail.
+- **Consumption.** When 1.9.5's `silentexit` sweeper respawns a dead slot, it queries the latest step-log scoped to that slot's current Casket task and threads the `toolEvents` summary into the respawn dispatch (same injection path Dredge uses for handoff chits, but with step-log framing: "your predecessor died mid-work; here's what they touched before exiting"). The respawned Employee reconciles with git status before starting new work so partial edits don't get duplicated.
+- **No agent discipline required.** The discipline lives in the harness — agents don't call `cc-cli checkpoint` mid-turn, they don't decide when to snapshot. Claude-code-harness and openclaw-harness both implement the buffer. An agent that crashes in the first tool call still produces a step-log with whatever fired before the crash (even if that's zero events — the exitReason alone tells the respawn "this was a silent exit, distrust the workspace state").
+- **Bound + lifecycle.** Per-event: `argSummary` caps at 256 chars (longer args truncate with a `…[N more]` marker); per-chit: `toolEvents` caps at 100 entries (oldest dropped first once full, so the crash-proximate events are always preserved); `partialOutput` caps at 4KB. Step-logs are registry-ephemeral with `defaultTTL: 7d` and `destructionPolicy: 'destroy-if-not-promoted'` — the lifecycle scanner destroys them at TTL unless a post-mortem chit references them (normal 0.6 4-signal promotion). Typical case: task closes cleanly → dependents advance → step-log sits unreferenced → scanner destroys at 7d. Failure case: investigator writes an observation citing `chit-sl-abc123` → promotion signal fires → step-log survives.
+
+**Scope:** handoff command, Dredge evolution, session-exit protocol, step-log auto-emission (harness), handoff Chit type registration.
 
 **File paths:**
 - `packages/shared/src/chit-types.ts` (register `handoff` type with schema: current_step, completed, next_action, open_question, sandbox_state, notes)
@@ -1363,83 +1391,242 @@ If you're reading this looking for the CLAUDE.md migration scope, go to 0.7.2. T
 **Depends on:** 0.1 (Chit + handoff type registration), 1.2 (Casket Chit), 1.3 (chain), 1.5 (CLAUDE.md)
 **PRs:** 2-3
 
-### 1.7 — Compaction for Partner sessions
+### 1.7 — Compaction for Partner sessions **[shipped PR #170]**
 
-Partner sessions don't handoff per-step. They run `/compact` at a threshold (~70% of context). Integration: daemon detects session size, triggers compaction via claude-code's native command. Fallback to handoff only when compaction fails (e.g. org-level 1M context overage rejected).
+**As shipped (PR #170).** Partner sessions don't handoff per-step. They ride Claude Code's native `/compact` at Claude Code's own autocompact threshold (`effectiveWindow - AUTOCOMPACT_BUFFER_TOKENS` per the leaked `services/compact/autoCompact.ts`). Claude Corp does NOT trigger compaction — Claude Code does — we layer two complementary mechanisms around the boundary:
 
-**Scope:** size-threshold monitor, compact-trigger via claude-code, fallback path to Dredge handoff.
-**File paths:**
-- `packages/daemon/src/harness/claude-code-harness.ts` (extend existing session-size warning from v2.5.3; on threshold, send compaction command rather than only warning)
-- `packages/daemon/src/compact-trigger.ts` (new: interface to claude-code's `/compact` command; detect success vs rejection)
-- `packages/daemon/src/harness/claude-code-stream.ts` (handle compaction events in the stream parser if they emit)
-- Fallback: on compact rejection, tear down session and fall into Dredge-handoff path (1.6 infrastructure)
+**Mechanism 1 — proactive nudge (the 17k-token runway).** We fire our own pre-compact signal at `effectiveWindow - PRE_COMPACT_SIGNAL_BUFFER_TOKENS` (30k), 17k tokens EARLIER than Claude Code's autocompact (13k). The gap is deliberate: that's the runway a Partner gets to externalize soul material (observation chits, BRAIN/ files) BEFORE the summarizer flattens raw context. The fragment renders inline in the agent's next dispatch with concrete crystallization guidance (`cc-cli observe --category CHECKPOINT`, BRAIN/ edits, casket already durable).
 
-**Test strategy:**
-- Unit: size monitor triggers at 70% threshold exactly once per session.
-- Integration (mock claude): send mock session-big event; compact-trigger emits the right command; session resumes.
-- Integration (real, cautiously): use a test corp with an artificially-lowered threshold to exercise the path.
-- Regression: Employee sessions (not Partner) do NOT trigger compaction; they still use per-step cycling from 1.6.
+**Mechanism 2 — PreCompact hook does both summary-shaping AND auto-checkpoint.** When Claude Code fires its PreCompact hook, `cc-cli audit` branches on `hook_event_name === 'PreCompact'` and does two things in order:
+  1. **Auto-writes a CHECKPOINT observation chit** at `agent:<slug>` scope, non-ephemeral, capturing: trigger (auto vs manual), founder's `/compact <arg>` verbatim, Casket `current_step` + title, last ~3 assistant-text excerpts from the transcript, and the token snapshot at boundary (pulled from the transcript's latest `message_start`/`message_delta` usage block via `extractLatestUsageFromTranscript`). Self-witnessing that survives regardless of whether the Partner noticed the fragment nudge.
+  2. **Emits summary-shaping text on stdout.** Claude Code's `mergeHookInstructions` merges our stdout into the summarization prompt itself, biasing what survives the compact boundary: Casket pointer verbatim, in-flight reasoning, open questions, chit ids and file paths. Founder's `/compact <arg>` (if any) echoes FIRST with "Honor this above all else" so manual asks dominate defaults.
 
-**Depends on:** 1.1, 1.6 (for fallback path)
-**PRs:** 2
+**Architectural note — PreCompact does NOT gate compaction.** An earlier design iteration (pre-1.7 commit `8d61291`) wired PreCompact to the Stop-style `{decision: block}` JSON envelope on the assumption that audit gating would work symmetrically. During 1.7 implementation, the leaked `services/compact/autoCompact.ts` showed PreCompact's output protocol is `mergeHookInstructions` (raw text merged into the summary prompt), not a decision envelope — Claude Code's Stop hook accepts block decisions; PreCompact does not. Commit 4 revised: the branch emits raw text only, skipping the gate logic. Net effect: Partners compact freely even with unresolved Tier 3 inbox items. This is acceptable because Tier 3 inbox items survive across compact independently (`fields.inbox-item.carriedForward` pattern; the inbox is its own substrate, not raw context). If real blocking is ever wanted, it belongs in a pre-`/compact` CLI wrapper the agent invokes explicitly — not in PreCompact.
 
-### 1.8 — Three-tier watchdog: Witness / Failsafe / Dogs
-
-**Scope enriched (post-GT dive).** What was a flat Pulse-replacement is now a hierarchical watchdog modeled on Gas Town's rig/town/crew pattern — but using our existing Failsafe role as the town-level layer instead of coining a new name. One layer isn't enough for the "runs on its own" dream — you need rig-level detection (per-agent health), town-level coordination (cross-agent escalation), and crew-level maintenance (the housekeeping nobody else is watching).
-
-**Tier 1 — Witness (per-agent, lowest latency).** Watches a specific agent's health. Detects:
-  - Silent exit (session died, Casket still points at active task).
-  - Stall (in_progress for > N minutes with no tool-use).
-  - Looping (same tool-call pattern repeating N times in a row without state change).
-  - GUPP violation (agent has Casket work but hasn't dispatched in >5 min, and Failsafe already nudged).
-
-Witness actions (in order of escalation):
-  1. Nudge (post reminder in agent's DM channel).
-  2. Respawn (if silent-exit) — kill process, let process-manager restart.
-  3. Escalate to Failsafe (if Witness has tried the above and agent still bad).
-
-**Tier 2 — Failsafe (town-wide, coordination layer).** Above individual agents. Does:
-  - Dispatch work-aware nudges (agents with Casket work that haven't dispatched in >N min).
-  - Enforces 15-second blocking budget per tick (from research gems).
-  - Routes Witness escalations: "agent X is stuck, fix them" → Failsafe decides whether to respawn, hand the work to a sibling Employee in the same role, or escalate further.
-  - Coordinates cross-agent state: "chain walker says B should have dispatched 10 min ago, but B is silent" → Failsafe reconciles.
-
-Failsafe actions:
-  - Redistribute (take work from a stuck agent's Casket, hand it to a sibling in the same role via 1.4's role-resolver).
-  - Circuit-break (if an agent has been respawned N times in M minutes, pause dispatches to that slot and escalate to founder — this is the 1.10 governor integration).
-  - Page founder (tier-3 inbox-item: "I couldn't resolve X, need you").
-
-**Tier 3 — Dogs (maintenance crew).** Below Failsafe. Handle the stuff no one else is watching:
-  - Session GC (kill long-dead tmux / subprocess leftovers).
-  - Phantom cleanup (members.json entries pointing at missing workspaces, workspaces pointing at missing members).
-  - Chit store hygiene (orphan chits nothing references, malformed frontmatter, corruption).
-  - Log rotation + debug file pruning.
-  - Boot the Dog: a meta-watchdog that verifies Failsafe itself is alive every 5 min (so "who watches the watchdog" has an answer).
-
-**Scope:** daemon/src/watchdog/witness.ts + deacon.ts + dogs.ts + boot-the-dog.ts; role-aware redistribution in Failsafe; per-agent health polling in Witness; maintenance tick in Dogs.
+**Pure primitives shipped (all in shared, all tested):**
+- `calculateCompactionThreshold` — threshold math primitive (frozen-result, 200k and 1M windows, exact-boundary semantics)
+- `ClaudeCodeStreamParser.getLastUsage()` — parser-side extraction of usage from `message_start`/`message_delta`
+- `preCompactSignalFragment` — Partner+claude-code-only fragment gate
+- `buildPreCompactInstructions` — summary-shaping template builder
+- `buildCheckpointObservation` — auto-checkpoint chit body + field builder
+- `extractLatestUsageFromTranscript` — walk the transcript JSONL for the latest usage block
 
 **File paths:**
-- `packages/daemon/src/watchdog/witness.ts` (new — per-agent health loop)
-- `packages/daemon/src/watchdog/deacon.ts` (new — town-wide coordination; Pulse becomes a deprecation shim removed in 6.1)
-- `packages/daemon/src/watchdog/dogs.ts` (new — maintenance tasks)
-- `packages/daemon/src/watchdog/boot-the-dog.ts` (new — 5-min heartbeat on Failsafe itself)
-- `packages/daemon/src/tick-budget.ts` (new — shared 15-second budget helper)
-- `packages/daemon/src/fragments/inbox.ts` (update: inbox isn't coordination; point agents at Casket)
+- `packages/shared/src/compaction-threshold.ts` — threshold math
+- `packages/daemon/src/harness/claude-code-stream.ts` — usage extraction in stream parser
+- `packages/daemon/src/harness/types.ts` — `DispatchCallbacks.onUsage(usage, model)`
+- `packages/daemon/src/daemon.ts` — per-agent `lastAgentUsage` map + `recordAgentUsage` / `getLastAgentUsage`
+- `packages/daemon/src/fragments/pre-compact-signal.ts` — the Partner-facing nudge
+- `packages/daemon/src/fragments/types.ts` — `FragmentContext.sessionTokens` / `sessionModel`
+- `packages/shared/src/audit/pre-compact-instructions.ts` — summary-shaping builder
+- `packages/shared/src/audit/pre-compact-checkpoint.ts` — auto-checkpoint builder
+- `packages/shared/src/audit/transcript.ts` — `extractLatestUsageFromTranscript` helper
+- `packages/cli/src/commands/audit.ts` — PreCompact branch: writeAutoCheckpoint + stdout summary-shaping emission
+
+**Test coverage (6 files, 93 cases):**
+- `tests/compaction-threshold.test.ts` (15) — math primitive, both windows, every branch
+- `tests/claude-code-stream-usage.test.ts` (5) — parser usage extraction + defensive parsing
+- `tests/pre-compact-instructions.test.ts` (10) — summary-shaping builder (kind gate, founder-ask threading, substrate anchors)
+- `tests/pre-compact-fragment.test.ts` (17) — four-gate fragment predicate + render + regression guard against reintroducing dead `cc-cli handoff`
+- `tests/pre-compact-checkpoint.test.ts` (35) — checkpoint builder (kind, observation fields, tags, casket anchor, founder ask threading, assistant excerpts, token snapshot, timestamp)
+- `tests/extract-latest-usage-from-transcript.test.ts` (11) — extractor happy + fail-soft paths
+
+**Explicitly NOT shipped (deferred):**
+- Employee auto-checkpoint (Employees don't compact today; kind gate returns null)
+- Pre-compact gating (see architectural note above — would require a new invocation surface, not a PreCompact hook)
+- Live-probe integration test (like 0.7.3's Stop-hook probe) — valuable but out of scope for 1.7
+
+**Depends on:** 1.1, 1.2 (Casket read via `getCurrentStep`), 1.6 (handoff-chit infrastructure on the Employee-side; Partners don't produce handoff chits)
+**PRs:** 1 (PR #170, 15 commits across 3 rounds + polish)
+
+### 1.8 — Blueprint-as-molecule (absorbed from 2.1) **[shipped PRs #171-173]**
+
+**Problem.** Blueprints today are markdown runbooks-the-CEO-reads. They're prose for humans. They can't be executed mechanically, so chains of work rely on the CEO manually tracking position. When CEO's context drifts, the chain breaks. AND — Sexton's patrols (1.9) are blueprints by nature; shipping 1.9 without this substrate means writing patrol logic as throwaway prompt-text that gets rewritten the moment blueprints land. Absorbed into Project 1 here so 1.9 ships native-to-the-substrate.
+
+**Scope.**
+- Define Blueprint format: TOML-frontmatter markdown, with a `steps:` array. Each step: `{ id, title, description, depends_on, acceptance_criteria, assignee_role }`.
+- Blueprint parser in `packages/shared/src/blueprints/` — validates structure, checks DAG (no cycles).
+- Cooking logic: `cc-cli blueprint cook --blueprint <name> --project <id>` instantiates a blueprint into a real Contract with real Task chits. Variable substitution at cook time (`{feature}` → `fire-command`).
+- Existing blueprint files (`packages/shared/src/blueprints/onboard-agent.md` etc.) migrate to the new structured format.
+- CEO command: `cc-cli contract start --blueprint ship-feature --vars feature=fire` creates the Contract + Tasks and optionally hands to an assigned role.
+
+**Acceptance criteria.**
+- `cc-cli blueprint cook ship-feature --project test --vars feature=fire` produces a Contract with 5-10 Task chits in the DAG defined by the blueprint.
+- Tasks have `depends_on` and `acceptance_criteria` populated from the blueprint.
+- An Employee handed the Contract's first Task walks the chain via Casket without any human re-dispatching at boundaries.
+
+**Depends on:** 1.2 (Casket), 1.3 (chain semantics in Tasks).
+**PRs:** 4-5.
+
+### 1.9 — Watchdog chain: Pulse / Alarum / Sexton / helpers + patrol blueprint library (absorbs 2.2) **[shipped PRs #174-180]**
+
+**Shipping status (2026-04-24).** Most of 1.9 has shipped across a PR series:
+
+- **1.9.0** sweeper substrate (sweeper-run chit + BlueprintFields.kind + castSweeperFromBlueprint) — **shipped** (PR #174).
+- **1.9.2** Sexton registered as Partner-by-decree; failsafe retired — **shipped** (PR #175).
+- **1.9.3** Pulse reshape + Alarum (claude-code haiku subprocess) — **shipped** (PR #176).
+- **1.9.4** Sexton runtime (`dispatchSexton`) + voice-via-DM-channelId + archived-Sexton filter — **shipped** (PR #177).
+- **1.9.5** OS supervisor configs (`cc-cli daemon install-service`/`uninstall-service`) — **shipped** (PR #178).
+- **1.9.5** Sweeper execution + 6 code sweepers (silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation) + kink chit type + dedup/auto-resolve + wake-message wiring — **shipped** (PR #179).
+- **1.9.6** Patrol blueprint library (health-check, corp-health, chit-hygiene) — **shipped**. Seeded as built-in blueprint chits at corp-init via `seedBuiltinBlueprints` (mirrors `installDefaultSkills`). Sexton reads + walks them in-session; not cast to Contract. `cc-cli blueprint cast patrol/*` rejects with a teachable error.
+
+**1.9 is complete as a sub-project.** The unkillability floor — daemon restart via OS supervisor, Pulse → Alarum → Sexton continuity chain, 6 code sweepers + kink channel + dedup/auto-resolve, and 3 structured patrols Sexton walks on each wake — is all on project/1.
+
+**Deferred to 1.9 follow-ups (non-blocking for 1.10/1.11/1.12):**
+- `cc-cli sweeper new --prompt` (AI sweeper authoring) — ship when someone wants a custom sweeper.
+- `cc-cli sweeper cast <blueprint>` — blueprint-based sweeper invocation. Current shape is direct-invoke via `cc-cli sweeper run <name>`; cast matters iff AI sweepers exist.
+- The two dep-gated patrols: `patrol/cleanup-stale-sandboxes` (needs sandbox-ttl, itself deferred pending project metadata with TTLs) and `patrol/merge-queue-status` (needs Clearinghouse / 1.12). Land with their deps.
+- The three dep-gated sweepers: `conflict-triage` (AI, needs sweeper-new flow), `breaker-reset` + `budget-watch` (pend 1.11).
+- The three design-deferred sweepers: `session-gc` (nothing to GC in our substrate), `sandbox-ttl` (missing data dep), `shutdown-dances` (not sweeper-shaped).
+
+**Design turns taken during implementation:**
+
+1. **New `kink` chit type for sweeper output** (session 2026-04-24). Initial implementation had sweepers writing observation chits. Realized observations are agent-voice self-witnessing that feeds BRAIN via dreams — pollutng that channel with mechanical sweeper findings would misdirect dream distillation. Kinks are their own stream. See the `kink` entry in Project 0.6.
+
+2. **`cc-cli sweeper run <name>` instead of `cc-cli sweeper cast <blueprint-id>`** (session 2026-04-24). The blueprint-based path (sweeper-run chit cast from a blueprint) is the full form per original spec, but implementing it requires a blueprint-seeding flow + blueprint chits for every sweeper. The direct-invoke path is simpler, lives against the sweeper module registry, and lets us ship the operational capability without the blueprint-authoring overhead. The blueprint-based path stays spec'd for future AI-sweeper authoring via `cc-cli sweeper new`.
+
+3. **OS supervisor config as `cc-cli daemon install-service`, not baked into `cc-cli init`** (session 2026-04-24). REFACTOR.md originally said `cc-cli init` writes the supervisor config. But init is per-corp and supervisor is per-machine; wiring them would regenerate the config on every new corp. Moved to a standalone command, init prints a one-line hint pointing at it.
+
+4. **`continuity/` directory, not `watchdog/`** (session 2026-04-22). Renamed during 1.9.2 — "watchdog" has Gas Town flavor; "continuity" matches the Sexton-as-caretaker register. All file paths below use `continuity/`.
+
+5. **Sexton's voice path is DM-via-channelId, not Tier 3 inbox** (session 2026-04-24). Original design said Sexton "pages founder via Tier 3 inbox-item." Investigated: the router filters founder out of inbox-item creation (tier-3 inbox is founder→agent, not the reverse), and `cc-cli escalate` is Employee→Partner. The real path: dispatchSexton passes the Sexton↔founder DM channelId to /cc/say; her response posts to that DM automatically. She stays quiet by default (IDENTITY discipline); speaks when it matters.
+
+6. **Patrols are READ, not cast** (session 2026-04-24, 1.9.6). Original spec implied patrols would cast to Contract + Task chits via `castFromBlueprint`, treating each patrol as a walk-through-N-checks work contract. Rejected on grounds that Contract semantics (Warden sign-off, acceptance criteria per step, draft → active → review → completed lifecycle) don't fit a 5-minute repeating sweep. The real shape: Sexton runs `cc-cli blueprint show patrol/<name>`, reads the steps, executes each step's `description` in her session. Zero chit churn per patrol beyond what the sweepers themselves emit (kinks, dedup-handled). The blueprint remains a proper first-class chit — editable, listable, versionable — but the interpretation is read-and-walk, not cast. Guardrail: `cc-cli blueprint cast patrol/*` rejects with a teachable error pointing at the intended verb. Built-in patrol blueprints ship as bundled markdown files under `packages/shared/blueprints/patrol/` and seed into the corp's chit store at `cc-cli init` via `seedBuiltinBlueprints` (mirrors `installDefaultSkills`), with `origin: 'builtin'` so a future `cc-cli update --sync-builtins` can distinguish them from user-authored blueprints.
+
+**The unkillability thesis.** For the corp to survive everything short of running out of tokens or OS process-kill, every layer is watched by a smaller-scope layer beneath it. At the bottom, Pulse answers one question — "is the Alarum-tick firing?" — small enough to basically never die. If the daemon itself dies, an OS-level process supervisor (systemd / launchd / Task Scheduler) restarts it; Pulse ticks; Alarum spawns; Sexton resumes from her handoff chit via the 1.6 path. All ticks, loops, crons resume because they rehydrate from on-disk state (chits, caskets, tasks, inbox).
+
+```
+OS supervisor (systemd / launchd / Task Scheduler)
+    ↓ restarts daemon if killed — installed via `cc-cli daemon install-service` (PR #178)
+Daemon (Node.js, dumb transport)
+    ↓ Pulse tick every N min
+Pulse (code, tiny — just fires Alarum)
+    ↓ spawns Alarum each tick
+Alarum (AI agent, ephemeral — fresh each tick, makes one decision, exits)
+    ↓ decides: start / wake / nudge / nothing for Sexton
+Sexton (AI Partner-by-decree, persistent — continuous patrol cycles, handoff loop)
+    ↓ runs patrols (which ARE Blueprints cooked via 1.8)
+Helpers (mostly code; a few AI for judgment)
+    session-gc, phantom-cleanup, chit-hygiene, log-rotation,
+    shutdown-dances (code); conflict-triage (AI)
+```
+
+**Why these names.** Gas Town's architecture (Daemon → Boot → Deacon → Witnesses/Dogs) solves the same problem — the intelligence-at-the-reasoning-layer insight is real and converges. We keep our own voice:
+
+- **Pulse** — kept from the existing codebase. Its role reshapes: from "5-min heartbeat that nudges idle agents" (that work moves up to Sexton) to "the daemon-level meta-watchdog tick that ensures Alarum fires." Tiny, mechanical, unkillable in code.
+- **Alarum** — old-English "wake-up call / to arms." Ephemeral AI agent fresh each tick, no context debt. The Gas Town "Boot" pattern: put intelligence at the triage layer because distinguishing "stuck" from "thinking" requires reasoning the daemon can't do.
+- **Sexton** — classical church/office role: the one who minds the clocks, rings the bells, keeps the cycles going, maintains the grounds. Partner-by-decree with full SOUL + BRAIN + USER.md portrait of Mark. Her patrol accumulates observations over months and her escalations reflect accumulated judgment, not mechanical orthodoxy. Replaces the prior `failsafe` role in the registry (slot stays; name + shape change — see file paths below).
+
+**Why Sexton is not Deacon.** Gas Town's Deacon runs a 25-step patrol formula, with "Formula Compliance IS Your CV Entry" as the virtue — Gas Town's soul (throughput + Capability Ledger reputation + federation-grade provability). Claude Corp's Sexton is **judgment-driven**: her patrol-Blueprints define steps mechanically, but within each step she reasons. Her Tier 3 escalations come in her voice ("Mark, three agents stalled on migration tasks tonight; given your preference for conservative rollouts I've paused dispatch until morning"). Same skeleton as Deacon, different soul inside. This is the Claude-Corp differentiation the refactor thesis demands.
+
+**Sexton's patrol IS a Blueprint.** When Alarum wakes her, she cooks her next patrol Blueprint into a Contract, walks it, writes observations as she goes. Each step in a patrol Blueprint is a concrete check (`health-check/step-1-scan-caskets`, `health-check/step-2-check-stalls`, etc.). Step outputs are chits — later consumable by dreams (4.2) for pattern compounding over time.
+
+**Sexton's operational "manual" is distributed across mechanisms already shipping in 1.9.** She does NOT get a separate `MANUAL.md`, a pre-authored operating guide, or an `operatingGuide` field on RoleEntry. Her operational surface is:
+
+- Her patrol blueprints — the executable workflows she walks (listed below)
+- Her `IDENTITY.md` — voice, stance, permissions (Partner-only soul file)
+- Her entry in `roles.ts` — structural identity (description / purpose / communication)
+- `CORP.md` — rendered dynamically by `cc-cli wtf`, same as for any agent
+
+Authoring per-role operating manuals is 2.3 territory — the `hire-employee` blueprint there is the mechanism through which the CEO authors a new agent's `CLAUDE.md` based on corp context. Sexton is a Partner-by-decree, not hired through that flow; her work is codified as patrol blueprints, so she has no need for the separate manual mechanism. Nothing ships pre-written for any role — every role manual in a live corp is authored by the CEO (or the relevant Partner lead) through the 2.3 ceremony, when the corp actually hires into that role. See 2.3 for the shape of that ceremony.
+
+**Patrol blueprint library (absorbed from 2.2):**
+- `patrol/health-check` — per-agent status sweep (silent-exit, stall, loop, GUPP violation).
+- `patrol/corp-health` — cross-agent coordination checks (chain walker idle agents, orphan tasks).
+- `patrol/cleanup-stale-sandboxes` — sandbox TTL enforcement.
+- `patrol/merge-queue-status` — Clearinghouse (1.12) queue depth check.
+- `patrol/chit-hygiene` — review of the lifecycle scanner's cooling/destroying decisions.
+
+Each blueprint tested by cooking into a Contract and walking it end-to-end.
+
+**Sexton actions** (applied inside patrol steps, with soul + judgment):
+- Nudge an agent (post reminder in their DM channel).
+- Respawn via process-manager on silent-exit.
+- Redistribute via `cc-cli hand` + 1.4's role-resolver.
+- Circuit-break (pause dispatches to a crash-looping slot) — integrates with 1.11's budget governor.
+- Page founder via Tier 3 inbox-item — her voice, her judgment about when it matters.
+
+**Sweepers — Sexton's workers.** Single-purpose modules invoked by Sexton on her patrol cycle. Each reports findings via observation chits; Sexton reads the trail, judges, escalates when needed. Split: Sexton holds identity + judgment; sweepers do the mechanical work. The naming replaces Gas Town's "Dogs" — sexton-with-sweepers fits the caretaker register, sexton-with-dogs is incongruous.
+
+Sweeper list (code by default; `conflict-triage` is the sole AI-by-default). Shipping status in brackets:
+- `silentexit` — **[shipped 1.9.5 PR #179]** sessions that died without clean shutdown; respawn within retry budget. Only reinitializes EXISTING slots (same Member record, same name, same workspace, same Casket); never creates new Members. Spawning new Employees is bacteria's domain (1.10). The two are disjoint — silentexit operates on dead-existing-slots, bacteria on the new-slot set — so no coordination layer is needed between them. `processManager.spawnAgent(memberId)` is the shared primitive: idempotent for existing members, creates-new for novel memberIds; both sweepers call it, the argument distinguishes which path runs. Retry budget = at most one respawn attempt per patrol cycle per slot; silentexit does NOT maintain its own counter. Repeated failures naturally cross 1.11's circuit breaker threshold (3 silent-exits within 5 min — roughly 3 patrol cycles) which trips the breaker chit and pauses further respawn attempts until founder intervention. This keeps the "when to stop trying" logic in one place (the breaker) rather than duplicated in each sweeper.
+- `agentstuck` — **[shipped 1.9.5 PR #179]** Caskets whose currentStep hasn't advanced in N minutes (threshold: 30min, reads task chit's updatedAt not Casket's). Complement to silentexit — finds LIVE but NOT-PROGRESSING agents vs silentexit's DEAD processes. Report-only; Sexton decides whether to nudge via `cc-cli say`.
+- `orphantask` — **[shipped 1.9.5 PR #179]** task chits with `workflowStatus='queued'`, no assignee (or assignee archived/missing), no active blocker. Report-only; Sexton reassigns via `cc-cli hand`.
+- `phantom-cleanup` — **[shipped 1.9.5 PR #179]** reconcile members.json ↔ workspace directories. Two-way detection: phantom members (Member with missing agentDir → severity warn) + phantom workspaces (dir with no Member → severity info). Report-only; destructive cleanup needs founder consent.
+- `chit-hygiene` — **[shipped 1.9.5 PR #179]** malformed frontmatter, orphan references, orphan dependsOn. Uses an in-memory id-Set built once from the query result for O(1) lookups (not per-ref findChitById which was O(10k+ fs-walks) per patrol).
+- `log-rotation` — **[shipped 1.9.5 PR #179]** rotate past 10MB size threshold, keep up to 5 archived rotations. The one sweeper with fs side effects. Success case emits NO kink (a completed rotation is state-change not ongoing-wrongness); only the mid-rotation-failure case emits a kink, which auto-resolves on the next successful rotation.
+- `session-gc` — **[deferred]** original spec said "orphan processes, dead tmux panes, subprocess leftovers." Claude Corp doesn't use tmux; claude-code dispatches self-clean per turn; the gateway is daemon-managed. Nothing concrete to GC in the current substrate. Revisit when real orphan state accumulates in practice.
+- `sandbox-ttl` — **[deferred]** requires project metadata to carry a TTL field which doesn't exist yet. Building this against missing data would produce a sweeper that always returns noop. Defer until project metadata grows TTLs.
+- `shutdown-dances` — **[deferred, reshape]** original spec described "deterministic graceful-shutdown state machine for agents." That's not sweeper-shaped — a sweeper is a periodic scan, shutdown is an orchestrated flow triggered by stop. Belongs as a separate primitive, not a module in the sweeper registry.
+- `breaker-reset` — **[pending 1.11]** circuit breakers past cooldown; clear if cause resolved. Depends on 1.11's circuit-breaker chit type existing.
+- `budget-watch` — **[pending 1.11]** per-agent token spend; warn on daily-cap approach. Depends on 1.11's budget governor.
+- `conflict-triage` (AI) — **[pending 1.9.5+]** called by `chit-hygiene` on ambiguous chits. AI sweepers ship via `cc-cli sweeper new --prompt` which isn't wired yet.
+
+Code sweepers don't bacteria-scale (one module handling a queue is fine). AI sweepers do — under load, bacteria splits spawn additional instances, matching 1.10's semantics.
+
+**Sweepers are blueprints.** A sweeper IS a blueprint chit with `fields.blueprint.kind: sweeper` (vs the default `kind: contract` used by 1.8's Contract-casting). Code sweepers ship as blueprints whose steps carry a `moduleRef: <name>` — cast resolves to a native code invocation. AI sweepers carry regular prompt-based steps that cast into AI agent dispatches. Same blueprint primitive, same parse / validate / lookup pipeline shipped in 1.8; different output at the chit-write step.
+
+Contract-blueprints cast to Contract + Task chits via `castFromBlueprint` (shipped in 1.8, unchanged). Sweeper-blueprints cast to sweeper-run chits via a sibling `castSweeperFromBlueprint` — same parser, same var coercion, same role machinery — diverging at step 7 (chit write). A sweeper-run chit is ephemeral (auto-closes after TTL): carries blueprint id, trigger context, observations produced, final decision. Sexton's patrol loop scans open sweeper-runs to track in-flight work; closed ones feed dreams for pattern synthesis.
+
+**`cc-cli sweeper new --prompt "..."` — authoring AI sweepers on demand.** The capability that lets Sexton grow the corp's immune response instead of being fixed-function. Founder-invoked in v1.
+
+1. `cc-cli sweeper new --prompt "<describe what to sweep for and when>"`.
+2. Generator is one Claude call with blueprint schema + shipped sweeper library as reference. Output: draft blueprint chit, `kind: sweeper`.
+3. Validate via 1.8's existing `cc-cli blueprint validate` — structural errors fail; sound sweepers promote to active.
+4. First N runs surface observations to founder for review; after approval threshold the sweeper runs autonomously.
+5. `cc-cli sweeper list` + `cc-cli sweeper close <id>` for lifecycle — same as any chit.
+
+Sexton-invoke (she calls the same CLI from within her session once she's noticed a pattern no existing sweeper handles) lands in a second iteration. Per-corp cap (default 10 active auto-authored) prevents runaway; cap hit → Sexton escalates "I want a new sweeper but I'm at cap, which existing one should I retire?" Destructive actions (delete, archive, close) always require per-sweeper explicit founder approval on first trigger regardless of authoring path.
+
+Stability boundary sits at the destructive-action boundary and the first-N-runs boundary, NOT at generation. Generation is cheap and reversible — a bad blueprint fails validate and doesn't promote; any sweeper is a chit that can be closed.
+
+**Post-1.9 sweeper extensions.** Once the substrate lands, new sweeper types become additions-by-configuration rather than additions-by-engineering — `cc-cli sweeper new --prompt "..."` and you have one. Ideas for post-Project-1 additions (corp accountant patterns like model right-sizing and clock throttling, etc.) are not part of 1.9's scope; they are what the substrate enables. 1.9 ships the unkillability floor, nothing more.
+
+**File paths** (note: `watchdog/` directory renamed to `continuity/` during 1.9.2 — "continuity" matches the Sexton-as-caretaker register):
+- `packages/daemon/src/continuity/pulse.ts` — **[shipped 1.9.3]** reshape from `heartbeat.ts`; now just fires Alarum each tick.
+- `packages/daemon/src/continuity/alarum.ts` + `alarum-prompt.ts` + `alarum-state.ts` — **[shipped 1.9.3]** ephemeral triage subprocess (claude-code haiku) + its prompt builder + state-read primitives (sextonSessionAlive, sextonLastHandoff, agentStatusCounts, observationCountSince, buildAlarumContext).
+- `packages/daemon/src/continuity/sexton.ts` — **[shipped 1.9.2]** hireSexton + SEXTON_IDENTITY constant.
+- `packages/daemon/src/continuity/sexton-runtime.ts` + `sexton-wake-prompts.ts` — **[shipped 1.9.4]** dispatchSexton + three wake messages (start/wake/nudge) + resolver.
+- `packages/daemon/src/continuity/sweepers/types.ts` + `registry.ts` + `index.ts` — **[shipped 1.9.5 PR #179]** sweeper module contract, static registry, runSweeper runner with auto-resolve.
+- `packages/daemon/src/continuity/sweepers/*.ts` — one file per code sweeper. Shipped (6): silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation. Deferred (3, rationale above): session-gc, sandbox-ttl, shutdown-dances. Pending downstream-dep (3): breaker-reset, budget-watch (1.11), conflict-triage (AI-shape via cc-cli sweeper new).
+- `packages/shared/src/templates/supervisor/*.ts` — **[in flight PR #178]** per-platform renderers (systemd.ts, launchd.ts, task-scheduler.ts) + types.ts + dispatcher in index.ts. `ServiceArtifact` carries both activation + deactivation commands for symmetric install/uninstall.
+- `packages/cli/src/commands/daemon/install-service.ts` + `uninstall-service.ts` — **[shipped 1.9.5 PR #178]** the CLI surfaces. Use `cc-cli daemon install-service` / `uninstall-service`; not baked into `cc-cli init` (per design turn #3 above).
+- `packages/cli/src/commands/sweeper.ts` + `sweeper/run.ts` — **[shipped 1.9.5 PR #179]** `cc-cli sweeper run <name>` direct-invoke. `cc-cli sweeper new/cast/list/show/close` — **pending 1.9 follow-ups**.
+- `packages/shared/src/blueprints/sweeper/*.md` — **[pending 1.9 follow-ups]** shipped sweeper blueprints (for the blueprint-invocation path). Not needed for direct-invoke via `cc-cli sweeper run`.
+- `packages/shared/blueprints/patrol/*.md` — **[shipped 1.9.6]** 3 patrol blueprints (health-check, corp-health, chit-hygiene) as bundled markdown files. Seeded into fresh corps at `cc-cli init` via `seedBuiltinBlueprints` → become chits with `origin: 'builtin'`. Sexton reads + walks them in-session (`cc-cli blueprint show patrol/<name>`), never cast — the cast path rejects `patrol/*` with a teachable error.
+- `packages/shared/src/blueprint-seed.ts` — **[shipped 1.9.6]** `seedBuiltinBlueprints(corpRoot)` helper, mirrors `installDefaultSkills`. Walks the bundled blueprints dir at corp-init, reads each .md, calls `createChit` with `origin: 'builtin'`.
+- `packages/shared/src/blueprint-cast.ts` — **[shipped 1.9]** `castSweeperFromBlueprint` sibling primitive (used by future blueprint-based sweeper invocation; not exercised by the current direct-invoke CLI).
+- `packages/shared/src/types/chit.ts` — **[shipped]** `SweeperRunFields` + `kind: 'contract' | 'sweeper'` discriminator (1.9); `KinkFields` (1.9.5 PR #179).
+- `packages/shared/src/chit-types.ts` — **[shipped]** `sweeper-run` (1.9) + `kink` (1.9.5 PR #179) registered with validators + ephemeral lifecycle.
+- `packages/shared/src/kinks.ts` — **[shipped 1.9.5 PR #179]** `writeOrBumpKink` (dedup per source+subject) + `resolveKink` helpers.
+- `packages/shared/src/roles.ts` — **[shipped 1.9.2]** `failsafe` retired; `sexton` added (tier=decree, defaultKind=partner).
+- `packages/shared/src/templates/soul-sexton.ts` — **[not shipped, design turn]** SEXTON_IDENTITY lives inline in `continuity/sexton.ts` instead. Per the 2.3 decision, no operating content ships pre-written for any role.
+- `packages/daemon/src/tick-budget.ts` — **[pending 1.9.5+]** shared 15-second budget helper for Sexton's patrols.
+
+**Sweeper output channel — kinks, not observations.** Sweepers emit `SweeperFinding` values which the runner converts to kink chits via `writeOrBumpKink` (dedup per (source, subject); refreshes severity/title/body on bump). Kinks are their own chit type — distinct from observations (agent-voice soul material) — so mechanical sweeper findings don't pollute the observation stream or misdirect dream distillation. When a sweeper stops reporting a subject on a subsequent run, the runner auto-closes the prior kink with `resolution: 'auto-resolved'`. See the `kink` entry in Project 0.6.
 
 **Test strategy:**
-- Unit: Witness decision ladder — silent-exit → respawn; stall → nudge; looping → respawn + escalate.
-- Unit: Failsafe budget — 15s tick yields cleanly.
-- Integration: kill an agent's session mid-task. Within 1-2 min, Witness detects, respawns, agent resumes from Casket + dredged WORKLOG.
-- Integration: agent gets stuck on same tool-use for N minutes; Witness escalates to Failsafe; Failsafe redistributes to sibling Employee in same role.
-- Integration: Failsafe dies; Boot the Dog detects within 5 min; Failsafe restarted; log entry.
-- Observability: each tier's log shows "[witness:toast] nudge 1/3", "[deacon] redistribute chit-X from toast to copper", "[dogs] GC'd 3 orphan sessions".
+- Unit: Alarum decision ladder — session dead → start; heartbeat stale → nudge; fresh → nothing.
+- Unit: Sexton patrol blueprint casts cleanly via `castFromBlueprint` (patrol = Contract).
+- Unit: sweeper blueprint casts cleanly via `castSweeperFromBlueprint` — produces a sweeper-run chit with the right fields; reuses parse / var / role pipeline identically to contract-casting.
+- Unit: `cc-cli sweeper new --prompt "..."` generates a structurally-valid draft blueprint; validate passes; promotion to active lands.
+- Unit: destructive-action gate — sweeper attempting delete/archive/close on first trigger gates for founder approval; approval persists per-sweeper; subsequent triggers autonomous.
+- Unit: per-corp auto-authored cap — 11th sweeper authoring request returns cap-hit + "which to retire" escalation.
+- Integration: `kill -9` an agent mid-task. Within 1-2 min, Sexton's next patrol detects via `agentstuck` + `silentexit` sweepers, respawns via process-manager, agent resumes from their handoff chit.
+- Integration: `kill -9` the daemon. OS supervisor restarts it. Pulse ticks. Alarum spawns. Sexton's handoff chit is consumed; she resumes patrols.
+- Integration: Sexton session dies mid-patrol. On next Pulse tick, Alarum detects her session is dead, spawns a fresh Sexton. She reads her handoff chit + resumes.
+- Integration: `conflict-triage` AI sweeper called on an ambiguous orphan chit — resolves to archive or escalates to founder with reasoning.
+- Integration: founder authors a sweeper via `cc-cli sweeper new --prompt`. First 3 runs surface findings for review; on 3rd approval the sweeper flips autonomous.
+- Observability: each layer logs clearly — `[pulse] tick #42`, `[alarum] decision: wake sexton`, `[sexton] dispatched sweeper chit-hygiene`, `[sweeper:chit-hygiene] flagged 2 orphan chits`, `[sexton] authored sweeper stale-review-timeout from founder prompt`.
 
-**Depends on:** 0.1, 1.2, 1.4 (role-resolver for redistribution)
-**PRs:** 3-4
+**Depends on:** 0.1 (Chit), 1.2 (Casket), 1.4 (role-resolver for Sexton's redistribute action), 1.6 (handoff chit for Sexton's continuity across sessions), 1.8 (Blueprint-as-molecule — Sexton's patrols + sweepers ARE blueprints).
+**PRs:** 6-7 (bumped from 5-6 to accommodate sweeper substrate + `cc-cli sweeper new` authoring flow).
 
-### 1.9 — Auto-scaling Employee pool (bacteria)
+### 1.10 — Auto-scaling Employee pool (bacteria) **[shipped PRs #182-186]**
 
-Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Full Witness role arrives in Project 3.
+Self-organizing. An Employee's Casket Chit showing a queue of multiple Chits (either one Casket with stacked references, or the role's active Task Chits exceeding Employee count) triggers a bacteria split. Collapse: multiple idle Employees of same role → decommission extras. Sexton (1.9) can also trigger wakes on idle-with-work agents during her patrol.
+
+**Bacteria only spawns NEW slots; it never reinitializes existing ones.** A dead-but-present slot (silent-exit, crashed mid-turn) is silentexit's domain (1.9). Bacteria's trigger is weighted-queue-depth vs idle-Employee count — measured AFTER silentexit has had a chance to restore any recoverable slots in its current patrol cycle. The two sweepers operate on disjoint sets (existing-dead vs new) and don't race. When an entire role's pool dies simultaneously, the normal sequence is: silentexit respawns each dead slot in place on the next patrol tick; bacteria reassesses depth-vs-idle AFTER that restoration; if the queue is still heavier than the restored pool can absorb, bacteria splits on top of the restored slots.
 
 **Queue depth via Chit queries.** Instead of maintaining a separate in-memory queue data structure, bacteria reads Chit state: `cc-cli chit list --type task --status active --assignee-role backend-engineer` returns active Task Chits for a role; `cc-cli chit list --type casket --scope 'agent:backend-engineer/*' --field-has current_step` tells us how many Employees of that role are busy. Split when **weighted** active Chit count > idle Employee count by threshold, where weights come from `fields.task.complexity` (landed in 0.5.1): `trivial=0.25, small=0.5, medium=1.0, large=2.0`. A queue of 3 trivials weighs 0.75 and doesn't split; a queue of 3 larges weighs 6.0 and triggers multiple splits. Null complexity defaults to `medium` weight so pre-backfill tasks still trigger sensibly. Collapse when idle Employees > 1 and all idle for > N minutes.
 
@@ -1462,76 +1649,878 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 - Integration: after work completes, verify one of two idle Employees decommissions after idle-timeout.
 - Edge cases: race-condition test — two hands arrive near-simultaneously; one Employee handles both or split happens cleanly, no Chit assigned to two Caskets.
 
-**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.8 (Failsafe for wake)
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.2 (Casket Chit), 1.4 (role hand), 1.9 (Sexton for wake)
 **PRs:** 3
 
-### 1.10 — Budget governor + circuit breaker
+### 1.11 — Crash-loop circuit breaker **[shipped PR #187]**
 
-**Problem.** Runaway agents burn tokens. An agent stuck in a loop — same tool-call pattern every turn, no state change — can spend hours of API credit before Mark notices. And silent-exit loops (agent spawns, dies, spawns, dies) are worse: the failure mode is invisible in the TUI but shows up in the billing dashboard next month. Moved up from Project 3.3 because it's prerequisite for the "walk away overnight" dream — without it, one bad agent can blow the corp's budget while Mark sleeps.
+> **Design turn (2026-04-25):** The original 1.11 spec had two governors: per-hour dispatch budget + crash-loop circuit breaker. The dispatch-budget half got cut. Reasoning: claude-code's underlying constraint is a **5-hour rolling % window** of account budget (not per-hour token quotas), and the platform already enforces it. Reimplementing a parallel meter at the daemon layer would create two sources of truth that drift, and would be solving a problem the platform already handles. Token-cost observability also got cut for the same reason — `cc-cli costs` can come back as a follow-up if the founder wants visibility, but it doesn't gate dispatches. What remained worth shipping: the **crash-loop circuit breaker** — qualitatively different because it's not a usage cap, it's "this slot has silent-exited N times in M min, stop respawning it." Claude-code's 5h window catches the burn eventually, but in the meantime silentexit sweeper keeps respawning the broken slot every patrol tick, each spawn paying context-load tokens for nothing. The breaker stops that loop early. (Memory: `reference_claude_code_budget_window.md`.)
 
-**Two governors, both mandatory:**
+**Problem.** Silent-exit loops (agent spawns, dies, spawns, dies — sweeper keeps respawning every patrol tick) waste context-load tokens indefinitely. The failure mode is invisible in the TUI; it shows up later in claude-code's 5h window throttling. The breaker stops the loop before that.
 
-**1. Per-agent, per-hour dispatch budget.** Role-level quota: Backend Engineer Employees get N dispatches per hour; CEO Partner gets M; configurable per role in the registry. When an agent hits the cap, Failsafe pauses dispatches to that slot for the rest of the hour, posts a Tier 3 inbox-item to the founder ("agent X hit their hour budget, paused until :00"), and releases on the hour boundary. No loss of work — the agent's Casket pointer is preserved; they resume on next tick.
+#### Substrate — `breaker-trip` chit type
 
-**2. Crash-loop circuit breaker.** If an agent's session silent-exits N times within M minutes (default: 3 in 5), Failsafe pauses spawns to that slot, posts Tier 3 to the founder ("agent X has crash-looped 3× in 5 min, paused"), and does NOT auto-retry. Breaking out of the loop requires founder intervention — either `cc-cli fire --remove` if the slot is broken, or `cc-cli agent set-harness` / other recovery to restart the slot. Circuit breaker stays tripped across daemon restarts (persists as a chit — `breaker-trip-<slug>` at corp scope with `tripped_at`, `reason`, `spawn_history`).
+A new chit type registered in `packages/shared/src/chit-types.ts`:
 
-**Token cost tracking (optional v1 extension).** Per-agent per-day token spend, persisted as a chit or daemon-internal metric. Founder can `cc-cli costs` to see "who's spending what." Not governor-level — just observability — but falls naturally out of the dispatch budget work. Gas Town has this as `internal/quota`; we can mirror the design.
+```ts
+export interface BreakerTripFields {
+  /** The slot's Member.id this trip is for. Combined with chit.status='active' is the lookup key. */
+  slug: string;
+  /** ISO timestamp the trip fired. */
+  trippedAt: string;
+  /** Number of silent-exits that triggered this trip. Records the actual count, not the threshold. */
+  triggerCount: number;
+  /** Window the trigger was counted in, in ms. Records the role's effective window at trip time. */
+  triggerWindowMs: number;
+  /** Configured threshold at trip time (so audit reads cleanly even if the role's threshold changes later). */
+  triggerThreshold: number;
+  /** Chit ids of the silent-exit kinks that triggered the trip. `cc-cli chit list --depends-on <trip-id>` returns the failure history in one query. */
+  recentSilentexitKinks: string[];
+  /**
+   * Forensic context — was this a cold loop, or a slot that worked
+   * then started failing? processManager doesn't currently track
+   * per-slug spawn timestamps; for v1, populate this from the
+   * triggering silentexit kinks' `createdAt` fields (each kink is
+   * recorded when the sweeper detected the crash, ≈ within seconds
+   * of the actual exit). Future enhancement: process-manager keeps
+   * a small ring buffer of per-slug spawn events that feeds this
+   * field directly.
+   */
+  spawnHistory: string[];
+  /** Free-form prose. The detector writes a default summary; founder reset adds context. */
+  reason: string;
+  /** Set when chit.status flips to 'cleared' — who reset, when, why. */
+  clearedAt?: string;
+  clearedBy?: string;
+  clearReason?: string;
+}
+```
 
-**File paths:**
-- `packages/daemon/src/watchdog/budget.ts` (new — per-role rate limiter + tracker)
-- `packages/daemon/src/watchdog/circuit-breaker.ts` (new — crash-loop detection + breaker chit)
-- `packages/shared/src/roles.ts` (extend RoleEntry with optional `dispatchBudgetPerHour?`)
-- `packages/cli/src/commands/costs.ts` (new — observability view, optional)
+Lifecycle: `active` (just tripped, refusing spawns) → `cleared` (founder reset) → terminal. Non-ephemeral; never ages out — a stale trip surviving for weeks is a feature (the founder needs to see it), not a bug. Stored at corp scope (`<corpRoot>/chits/breaker-trip/breaker-t-<hex>.md`). One active trip per slug at a time; `tripBreaker` is idempotent and bumps `triggerCount` + appends to `recentSilentexitKinks` on re-trigger.
 
-**Test strategy:**
-- Unit: budget tracker accepts N dispatches, rejects N+1, resets on hour boundary.
-- Unit: circuit breaker trips after 3 silent-exits in 5 min, stays tripped across simulated daemon restart.
-- Integration: simulate a crash-loop in a test corp; verify Failsafe pauses the slot within 2 cycles and posts Tier 3 to founder.
-- Regression: non-crashing agents don't trip the breaker.
+#### Detection — pull-based on silentexit sweeper
 
-**Depends on:** 1.1 (Employee kind for role scoping), 1.8 (Failsafe tier-2 dispatches the pause + escalation)
-**PRs:** 2-3
+The breaker detector runs as a hook inside the silentexit sweeper's run, NOT as a separate sweeper. Reasoning: the silentexit sweeper is the canonical source of "this slot just died" findings; running detection inline keeps the trigger and the data source coupled. Detection logic:
 
-### 1.11 — Shipping: the merge lane + janitor Employees
+1. After silentexit sweeper finishes its pass, for each slug it observed dying this round:
+   - Query `cc-cli chit list --type kink --status active --created-by sweeper:silentexit --subject <slug>` filtered to the last `triggerWindowMs`.
+   - If count ≥ threshold: call `tripBreaker(corpRoot, { slug, kinks, ... })`.
+2. Threshold + window resolved per-role:
+   - `RoleEntry.crashLoopThreshold?: number` — default 3.
+   - `RoleEntry.crashLoopWindowMs?: number` — default 5 * 60 * 1000.
+   - Worker-tier roles can tune; partners-by-decree typically inherit defaults but can also override.
 
-**Problem.** Agents write to git freely today. At 3 agents, this is fine. At 20+ it's chaos — concurrent PRs collide on rebase, step on each other's changes, leave main in a broken state. The "walk away overnight" dream breaks when agents fight over main. Moved up from Project 3.2 (was "Refinery") because it's prerequisite for parallel work — without serialized merges, multi-Employee Contracts can't actually land.
+Pull-based means the daemon-restart edge case is automatic — kink chits persist on disk, on next sweeper run the detector recomputes the count, trips appropriately. No in-memory counter to lose.
 
-**The architecture Mark named:** there's a merge-lane system called **Shipping** (placeholder name — rename when it feels right), staffed by a pool of **janitor Employees** (bacteria-scaled). No Partner-by-decree needed — merging worktrees is mechanical, no identity, no relationship. The existing Janitor Partner gets removed from the role registry; `janitor` becomes an Employee role (`defaultKind: employee`, `tier: worker`).
+**Scope: silentexit kinks ONLY.** The detector reads `--type kink --created-by sweeper:silentexit` exclusively. It does NOT consume agentstuck kinks (live agent stuck mid-task), chit-hygiene kinks (data integrity), orphantask kinks (queue oddities), or any other sweeper output. Reasoning: those are different failure modes with different remediation. A stuck agent escalates via 1.4.1 blocker chits; a chit-hygiene anomaly gets human investigation. Crash-looping is its own category (session dies before clean exit, sweeper respawns, repeat) and the breaker is its specialized response. Future versions could add a "stuck-loop" breaker with its own logic, but conflating the two would mean refusing spawns for problems spawning doesn't fix.
 
-**Mechanism:**
-- Agents open PRs via their normal git push; then run `cc-cli ship --branch <name> --contract <chit-id>`, which creates a `merge-submission` chit (new chit type — non-ephemeral, audit trail).
-- merge-submission frontmatter: `branch`, `contract` reference, `submitter`, `priority`, `retry_count`, `status: queued | processing | merged | conflict | rejected | failed`.
-- Priority scoring (Gas Town's formula, adapted): `1000 + convoy_age×10/hr + (4-priority)×100 - min(retries×50, 300) + mr_age×1/hr`. Anti-thrashing via the retry-penalty cap.
-- Shipping lock: a corp-scope `shipping-lock` chit with `held_by: <janitor-slug> | null`. Only the lock-holder processes the queue at any moment. Release happens on merge complete or on janitor session exit.
-- Janitor Employees pull from the lane (pull-based, unlike Hand's push): each janitor's Casket is the shipping-lock. When they have the lock, they take the highest-scored queued submission, rebase, run tests, merge or conflict-route, close the submission, release the lock, next janitor picks up.
-- Real conflict → janitor files a blocker chit via 1.4.1 back at the original PR author; submission goes to `conflict` state; janitor releases lock + takes next.
-- Clean merge → submission `merged`, contract referenced by the submission gets its workflow-state advanced (typically `under_review → completed`).
+**No migration needed.** Existing corps see the new chit type registered on first daemon boot post-upgrade. Their chit store has zero `breaker-trip` instances; queries return empty; spawn checks pass through to existing behavior. Pre-1.11 silent-exits accumulated in old kink chits don't false-positive trip — the window filter (last 5min default) only matches recent ones.
 
-**Bacteria scaling (from 1.9):** when `merge-submission` queue depth exceeds 1 and only 1 idle janitor exists, bacteria spawns another. Collapses to 1 idle when queue drains.
+#### Refusal — layered at every spawn site
+
+Three call sites need the check:
+
+1. **`ProcessManager.spawnAgent(memberId)`** — pre-spawn check. Reads `findActiveBreaker(corpRoot, memberId)`; if present, throws a typed `BreakerTrippedError` with the trip chit id in the message. Caller (silentexit sweeper / bacteria executor) catches and skips cleanly without crashing the patrol cycle.
+2. **silentexit sweeper's respawn path** — pre-respawn check inside the sweeper. If breaker is tripped, log `[silentexit] breaker tripped for <slug>, skipping respawn` and don't increment retry. The slot stays in members.json (the sweeper doesn't fire it), but no spawn is attempted.
+3. **Bacteria's `pickFreshSlug`** — when generating a fresh 2-letter suffix for a new mitose, the candidate must NOT collide with any active breaker's slug. Add tripped slugs to the avoid-set alongside the existing taken-slug set. Rare collision case (recycled name happens to land on a tripped slug) but real.
+
+Bacteria's apoptose path doesn't need the check — apoptose is removing a slot, not spawning one. The breaker-trip chit gets auto-cleaned (see "Auto-cleanup" below) when the slot is fully removed.
+
+**In-flight work fate when a trip fires.** A slot can trip with `casket.currentStep` set — the chit it was working on when the loop took it down. The breaker explicitly does NOT touch the casket: the trip's job is "stop the spawn loop," not "re-route the orphaned chit." Consequence: the chit is stranded (no slot will pick it up while the breaker holds, and bacteria's pickFreshSlug avoids the tripped slug). The founder has two paths:
+
+  1. **`cc-cli breaker reset --slug <slug>`** — clears the trip, slot resumes its current casket on next dispatch. Use when the underlying cause is fixed (harness regression patched, bad task chit deleted, etc.).
+  2. **`cc-cli fire --remove --slug <slug>`** — removes the slot entirely. Existing fire logic handles the orphaned casket chit (sets workflowStatus back to queued, clears assignee — the founder can then re-hand it). The auto-cleanup hook closes the breaker chit too.
+
+This is a deliberate scoping choice: chit re-routing is a richer state machine (dispatched → queued, assignee rewrite, blocker handling) that already lives in fire. The breaker doesn't reinvent it.
+
+#### Surfacing — three layers
+
+1. **Tier-3 inbox-item** to founder on every fresh trip:
+   ```
+   Subject: Crash-loop breaker tripped: <slug>
+   Body: Agent <slug> silent-exited <count>× in <window> min — paused.
+         Reset with `cc-cli breaker reset --slug <slug>`
+         or fire the slot with `cc-cli fire --remove --slug <slug>`.
+         Forensic context: cc-cli chit read <trip-id>
+   ```
+
+2. **Sexton wake prompts** (start + wake, not nudge) gain a "Active breaker trips" section that lists currently-active trips with their `triggerCount` and `trippedAt`. Sexton compounds these into prose for the founder during her patrol — *"backend-engineer-toast and qa-engineer-shadow are tripped. Toast started looping after task chit-t-abc; shadow's loop pattern looks like a flaky harness."* Bacteria stays mute; Sexton gives the trips a voice.
+
+3. **TUI sidebar** — tripped slots get a distinct `broken` status icon (lookup added to `STATUS` in theme.ts). Per-role rollup includes a tripped count: *"Backend Engineer: 3 active, 1 tripped, gens 0-4."*
+
+#### Founder controls — `cc-cli breaker`
+
+New CLI command group at `packages/cli/src/commands/breaker.ts` mirroring the bacteria/sweeper subcommand pattern:
+
+- **`cc-cli breaker list [--role <id>] [--include-cleared] [--json]`**
+  Lists active trips by default; `--include-cleared` includes historical ones for audit. Shows: slug, role, trippedAt, triggerCount, recent kink refs.
+
+- **`cc-cli breaker reset --slug <slug> [--reason "..."] [--json]`**
+  Closes the active trip chit. Subsequent `processManager.spawnAgent` calls go through normally. Bacteria's slug-collision avoidance stops blocking the slug. Records `clearedBy=founder`, `clearedAt=now`, `clearReason=opts.reason`.
+
+- **`cc-cli breaker show <slug-or-trip-id> [--json]`**
+  Detailed view of one trip — full forensic context, all referenced silent-exit kinks, spawn history.
+
+#### Auto-cleanup — orphan trip on slot removal
+
+When a slot is removed via `cc-cli fire --remove` or `cc-cli bacteria evict`, any active breaker-trip for that slug should also close. Otherwise an orphaned trip blocks the slug from being reused by bacteria's recycle pool, and clutters `cc-cli breaker list`. The fire and evict paths both need a one-line `closeBreakerForSlug(corpRoot, slug, 'slot removed')` call after the Member is removed.
+
+#### Robustness — the over-engineering pass
+
+Beyond the spec basics, the v1 robustness fence:
+
+- **Cross-restart trip persistence.** Trips are chits on disk; daemon restart re-reads them on next spawn-time check. No in-memory state to lose.
+- **Corrupted breaker chit fails open.** If the trip chit is malformed (parser fail), the spawn-time check returns "no active trip" rather than throwing. Rationale: a bad chit shouldn't permanently brick a slot — chit-hygiene sweeper will surface the corruption separately. Better to risk a missed trip than a silent permanent block.
+- **Concurrency.** Reactor mutex serializes bacteria's spawn path; CLI fire/evict and bacteria don't run concurrently because the daemon is single-process. Cross-process (e.g., founder runs `cc-cli breaker reset` while daemon is mid-tick) is fine — the reset commits to disk, the next spawn-time check reads the cleared state.
+- **Idempotency of trip writes.** `tripBreaker` looks up active trip for slug; if found, bumps `triggerCount` and appends to `recentSilentexitKinks` instead of creating a duplicate. No race even if multiple sweeper runs converge.
+- **Per-role threshold respects override at trip time, not check time.** The trip chit records the threshold + window AT TIME OF TRIP, so audit reads stay coherent even if the role's config changes mid-life.
+- **Sexton's wake summary mentions cleared-today trips, not just active.** Audit trail across the day; the founder sees both the active queue and what got resolved.
+- **Bacteria slug avoidance.** `pickFreshSlug` adds active-breaker slugs to its taken-set. The retry budget (100 attempts, then 4-letter fallback) absorbs the case where a recycled suffix collides; in practice, impact is invisible (one extra random retry).
+- **Hire path against a tripped slug.** `cc-cli hire --slug <tripped>` hits `processManager.spawnAgent` and gets `BreakerTrippedError`. The hire command catches this specifically and surfaces a clean message: *"slot <slug> has an active breaker trip — reset with `cc-cli breaker reset --slug <slug>` or pick a different slug."* Don't let the raw error bubble; the founder needs the path forward, not a stack trace.
+- **Tier-3 inbox dedup.** First trip writes a fresh inbox-item. Subsequent trip BUMPS (idempotent `tripBreaker` increments `triggerCount`) MUST NOT spam additional inbox-items. The trip writer checks `chit.action === 'created'` from the underlying `createOrBumpChit`-style result and only fires the inbox-item on first creation. Mirrors how `writeOrBumpKink` separates created vs bumped for downstream callers.
+- **Whole-pool-tripped scenario.** Harness regression takes down 3+ fresh mitoses in succession. Each trips individually (per-slug, by design). Bacteria keeps spawning fresh suffixes (slug-avoid only excludes the tripped ones, not new candidates) and they all immediately trip too. The pool effectively shuts down — queue grows unbounded, everyone trips, breaker chits pile up. The breaker doesn't escalate this pattern itself (cross-role correlation is Project 3.1 territory). What v1 SHOULD do: Sexton's wake prompt's "Active breaker trips" section should be loud when ≥3 trips exist for the same role today, prompting the founder to look at the underlying cause (harness, recent task chits) instead of resetting trips one-by-one. One sentence in the wake summary; not a separate alert.
+
+#### File paths
+
+- `packages/shared/src/types/chit.ts` — `BreakerTripFields` interface.
+- `packages/shared/src/chit-types.ts` — registry entry: type id `breaker-trip`, idPrefix `bt`, scope `corp`, ephemeral=false, lifecycle `active → cleared → terminal`.
+- `packages/shared/src/bacteria-breaker.ts` — read/write helpers: `tripBreaker`, `findActiveBreaker`, `closeBreakerForSlug`, `listActiveBreakers`. Pure file-first; no daemon dependency.
+- `packages/daemon/src/continuity/sweepers/silentexit.ts` — detection hook (compute count, trip on threshold) + respawn refusal (skip when breaker active).
+- `packages/daemon/src/process-manager.ts` — `BreakerTrippedError` class + pre-spawn check in `spawnAgent`.
+- `packages/daemon/src/bacteria/executor.ts` — `pickFreshSlug` adds tripped slugs to the avoid-set.
+- `packages/daemon/src/api.ts` — fire endpoint calls `closeBreakerForSlug` post-removal (auto-cleanup).
+- `packages/cli/src/commands/bacteria/evict.ts` — also calls `closeBreakerForSlug` post-removal.
+- `packages/cli/src/commands/breaker.ts` — top-level CLI group: list / reset / show.
+- `packages/cli/src/commands/breaker/list.ts`, `reset.ts`, `show.ts` — subcommand handlers.
+- `packages/cli/src/index.ts` — dispatch + help text entry.
+- `packages/daemon/src/continuity/sexton-wake-prompts.ts` — "Active breaker trips" section in `composePoolActivitySection` (or a parallel composer).
+- `packages/tui/src/components/member-sidebar.tsx` — tripped status icon + per-role rollup includes tripped count.
+- `packages/shared/src/themes.ts` — add `broken` STATUS entry if not already present.
+- `packages/shared/src/roles.ts` — `RoleEntry.crashLoopThreshold?` + `crashLoopWindowMs?` optional fields.
+
+#### Test strategy
+
+> **Pattern note.** Both PR 1.10.3 (rename eligibility) and PR 1.10.4 (status / lineage helpers) earned coverage by extracting load-bearing logic into pure functions called from the I/O wrapper. Apply the same pattern here: the silentexit-sweeper's detection step lives in a pure helper `evaluateBreakerTrigger(silentexitKinks, threshold, windowMs, now): TriggerDecision` (in `bacteria-breaker.ts`), and the sweeper just composes it with the kink query + `tripBreaker` write. Keeps the math testable without spinning up the full sweeper or mocking the patrol cycle. Same shape as `decideBacteriaActions` / `checkRenameEligibility` / `computeRoleStats`.
+
+- Unit (`bacteria-breaker.ts`): trip writes a chit with the right shape; second trip on same slug bumps existing instead of creating duplicate; close flips status to cleared with timestamps; list returns only active by default.
+- Unit (`evaluateBreakerTrigger` pure helper): 3 silent-exit kinks in 5min trip; 3 in 6min don't; per-role threshold override honored; threshold respects role config snapshot at trip time, not check time.
+- Integration (process-manager): spawn refuses with `BreakerTrippedError` when active trip exists for the slug.
+- Integration (silentexit respawn): when breaker active, sweeper logs + skips, doesn't call spawnAgent.
+- Integration (bacteria slug avoidance): `pickFreshSlug` retries past tripped slug.
+- Integration (cross-restart): write a trip chit, simulate restart by re-reading from fresh process — spawn still refused.
+- Integration (auto-cleanup): fire-remove + evict both close orphan trips.
+- Edge: corrupted breaker chit at the trip path → fail-open, slot can spawn (chit-hygiene flags the corruption separately).
+- Regression: non-crashing agents don't trip; agents whose silent-exits are spread > 5min apart don't trip.
+- CLI: `breaker list` filters by --role; `breaker reset` requires --slug; `breaker show` returns full forensic context.
+
+#### Commit plan (~12 commits, ~700-900 LOC incl. tests)
+
+Substrate first, consumers second, tests at end:
+
+1. `feat(1.11): breaker-trip chit type + BreakerTripFields` (shared)
+2. `feat(1.11): bacteria-breaker helpers — trip / find / close / list` (shared)
+3. `feat(1.11): RoleEntry crashLoopThreshold + crashLoopWindowMs` (shared, schema-only)
+4. `feat(1.11): silentexit sweeper hooks the detector` (daemon)
+5. `feat(1.11): processManager.spawnAgent refuses on active breaker` (daemon)
+6. `feat(1.11): silentexit sweeper skips respawn when breaker active` (daemon)
+7. `feat(1.11): bacteria pickFreshSlug avoids tripped slugs` (daemon)
+8. `feat(1.11): Tier-3 inbox emission on trip` (daemon)
+9. `feat(1.11): cc-cli breaker list / reset / show` (cli)
+10. `feat(1.11): Sexton wake prompt — active breaker trips section` (daemon)
+11. `feat(1.11): TUI sidebar tripped-status icon + per-role rollup` (tui)
+12. `feat(1.11): auto-cleanup on fire/evict` (daemon api + cli evict)
+13. `test(1.11): substrate + helpers` (shared tests)
+14. `test(1.11): detection + refusal + cross-restart` (daemon tests)
+15. `test(1.11): CLI breaker commands` (cli tests)
+
+Codex round expected. Pattern same as PRs #182-186.
+
+**Depends on:** 1.1 (Employee kind for role scoping), 1.9 (silentexit sweeper as the detector source), 1.10 (bacteria slug-avoidance integration).
+**PRs:** 1 (single beefy PR matching 1.10's shape).
+
+### 1.12 — Clearinghouse: pre-push review + merge lane **[shipped PRs #191, #192]**
+
+> **Naming locked (2026-04-26):** Mark renamed the primitive from the placeholder "Shipping" to **Clearinghouse** — the place, the phase, AND the team name. The status field that contracts/tasks/sandboxes carry while inside the clearinghouse phase is **`clearance`**. Two Employee roles staff the phase: **Editor** (pre-push code review) and **Pressman** (post-push git mechanics + merge). Secondary names (CLI verb, chit type id, lock chit name, daemon module paths) below are best-guess; confirm with Mark at implementation start. (Memory: `project_clearinghouse_naming.md`.)
+
+**Problem.** Two related failures break "walk away overnight":
+1. Agents push to main freely. At 20+ agents, concurrent PRs collide on rebase, step on each other's changes, leave main broken.
+2. No internal review. Bugs that an internal Codex-equivalent would catch reach external review (or worse, main) — wasting external-reviewer attention and growing main's debt.
+
+The Clearinghouse phase fixes both. Internal review (Editor) catches issues *before* the branch is pushed; merge automation (Pressman) serializes the actual landing on main.
+
+**The two-role architecture.** Both are Employee roles — bacteria-scaled, real sessions, real judgment. Code provides primitives; agents orchestrate. The split between them is independent-gate: an Editor that also did the merging would collapse two cognitive modes into one and lose what made the split useful.
+
+- **Editor** (role id `editor`, worker tier, defaultKind: employee). Pre-push code review. Reads the local diff before the branch ever leaves the author's sandbox. Writes pedagogical Codex-style comments — *issue + why + suggested patch* — so any role-substitute can act on them cold. Never fixes themselves; comments route back to the author's role via 1.4.1. Iterates with the author up to a configurable cap.
+- **Pressman** (role id `pressman`, worker tier, defaultKind: employee). Post-push git mechanics. Holds the clearinghouse-lock, claims the top submission, rebases against main, runs tests, merges cleanly or files a conflict-blocker. Real judgment moments — "is this test failure flaky or real?", "is this conflict trivial enough to resolve here or do I punt to the author?" — so not a sweeper, not a cron job; an Employee with a session and a CLAUDE.md. "Going to press" metaphor: they're the last hands on the work before main.
+
+The existing Janitor Partner gets removed from the role registry; both Pressman and Editor land as Employee roles.
+
+**The `clearance` workflow status.** New value in the task and contract state machines, slotting between review and completion:
+
+- `TaskWorkflowStatus`: `under_review → clearance → completed | rejected | failed | cancelled`. A task that passed audit AND passed Editor review (or hit the review-round cap) but hasn't landed on main yet is in `clearance` — its clearance-submission is queued or processing in Pressman's lane.
+- `ContractStatus`: `review → clearance → completed | rejected | failed | closed`. Contract enters `clearance` when its last task does; transitions to `completed` when all clearance-submissions for its tasks merge.
+- Sandbox: open question, likely no-op for v1. Sandboxes are filesystem dirs without a state field today; introducing one is non-trivial and the task chit's clearance status carries the same information.
+
+#### Phase 1 — Editor: pre-push internal review
+
+Triggered by the author at task-completion time (after `cc-cli done` audit passes), before any `git push`. Best-guess CLI: author runs `cc-cli review-request --task <chit-id>` from inside their sandbox; system dispatches an Editor agent against the local diff.
+
+**What the Editor reads:**
+- The diff (staged commits in the author's sandbox).
+- The task chit's `acceptanceCriteria` (does the diff satisfy them?).
+- The contract chit (does the diff fit the contract's stated goal?).
+- `CLAUDE.md` and any visible feedback memories — until `CULTURE.md` exists (Project 5.2), this is the corp-conventions surface.
+
+**What the Editor judges (v1 scope):**
+- Contract-goal mismatch — diff doesn't actually do what was contracted.
+- Missing tests for new code paths.
+- Banned patterns — security holes, secrets in diffs, raw shell, etc.
+- Test regressions — the diff breaks something already-tested.
+- File scope explosion — PR claims to fix X, also rewrites unrelated Y.
+- Acceptance-criteria gaps — task said "must do A, B, C" and the diff only does A.
+
+Style nits explicitly out of scope at v1 (too noisy). When `CULTURE.md` lands later, the Editor reads from it.
+
+**Comment shape (Codex-style, pedagogical).** Every review-comment chit carries: file path + line range + issue summary + *why this matters* + *suggested patch or approach*. Pedagogical because the author who fixes the issue may not be the one who wrote the code (substitute via role-resolver). Bonus: pedagogical comments are the substrate that compounds into `CULTURE.md` later.
+
+**The review loop:**
+1. Editor reads diff + context, writes review-comment chits attached to the in-flight clearance-submission (or its predecessor — see "submission lifecycle" below).
+2. If no issues: Editor approves, submission proceeds to Phase 2.
+3. If issues: comments route via 1.4.1 to the author's role (e.g. `backend-engineer`). Role-resolver picks original-author-if-alive, else any Employee of the role, else bacteria spawns one. The substitute reads the comments cold and patches the code in the same sandbox (or a fresh one — TBD whether sandbox stays put or transfers).
+4. Author re-requests review. `reviewRound` counter on the submission increments.
+5. Loop until approval OR cap.
+
+**`reviewRound` cap (failsafe, not gate).** Default 3 rounds. Configurable per-role via `RoleEntry.editorReviewRoundCap?: number` — a security-sensitive role might cap at 1, a docs-heavy role at 5. *Most PRs pass round 1*; the cap is not a forced floor. When the cap is hit, the system *skips review and proceeds to Phase 2 directly*. This is deliberately not an escalation: blocking a merge forever because reviewer + author can't converge is worse than letting it through with the corp's existing ambient audit-tier-3 surface catching anything genuinely alarming.
+
+**`reviewBypassed` flag.** If a submission reaches Phase 2 via cap-hit rather than approval, the submission carries `reviewBypassed: true` (and `reviewRound === cap`). This is for retrospective audit and CULTURE.md compounding — "we keep capping out review on backend-engineer work" is a pattern worth investigating, even if no individual PR was blocked.
+
+#### Phase 2 — Pressman: post-push merge mechanics
+
+Triggered automatically after Editor approves (or cap hits) — the author never types `cc-cli clear`. Audit's approve path (the same Stop-hook path that promotes pending handoffs today) gains a "is this a 1.12-aware corp?" check; when yes, it fires `enterClearance` via a daemon HTTP endpoint that pushes the branch to origin, creates the `clearance-submission` chit, and advances the task workflow `under_review → clearance` atomically. From the outside world, the public PR that appears on GitHub has *already* been internally reviewed AND the merge queue has already accepted it.
+
+Author's mental model stays simple: *I run `cc-cli done`. The system handles the rest.* That collapses two manual ceremonies (done + clear) into one. The audit gate's existing approve path is the natural trigger because it's already where "this work is publishable" gets decided process-wise; layering "this work is queueable" on top is a small extension, not a new chain link.
+
+**clearance-submission frontmatter:** `branch`, `contract` reference, `submitter`, `priority`, `retryCount`, `reviewRound`, `reviewBypassed`, `status: queued | processing | merged | conflict | rejected | failed`.
+
+**Priority scoring** (Gas Town's formula, adapted): `1000 + queue_age×10/hr + (4-priority)×100 - min(retries×50, 300) + pr_age×1/hr`. Anti-thrashing via the retry-penalty cap. Note: `retryCount` is for *Phase-2 mechanical failures* (failed merges, flaky tests requiring a retry), not for `reviewRound`. Review iterations are a success path; mechanical retries are a failure path. Different counters, different penalty treatments.
+
+**Clearinghouse lock.** A corp-scope `clearinghouse-lock` chit with `held_by: <pressman-slug> | null`. Only the lock-holder processes the queue at any moment. Release happens on merge complete, conflict-routing, or pressman session exit. Each Pressman's Casket points at the lock when held.
+
+**The Pressman flow** (pull-based, unlike Hand's push):
+1. Idle Pressman with no Casket polls the queue. If non-empty AND lock is null, claim the lock (atomic chit update with `held_by` set) and take the top-priority submission.
+2. Rebase the branch against main. If rebase produces nonsense (200 files touched on a 2-line PR), re-pull main, retry once, then if still nonsense file a conflict-blocker — the rebase looks broken and a human-context judgment is needed.
+3. Run tests. If tests fail: re-run once to rule out flakiness (judgment call: did the same test fail in the same way? Then it's real). On real failure → file a blocker via 1.4.1 to the author's role.
+4. Attempt merge. Trivial conflicts (whitespace, comment-only) — Pressman attempts to resolve in-place. Substantive conflicts (semantic, function-body) — file a blocker via 1.4.1 to the author's role; submission flips to `conflict` state.
+5. On clean merge: submission → `merged`; task and contract advance from `clearance → completed`; release lock.
+6. Next Pressman picks up.
+
+**Conflict routing.** When Pressman files a blocker, it's role-scoped (e.g. `backend-engineer`), not slot-scoped. Role-resolver finds an active Employee via normal precedence (idle-first, else any Employee of the role, else `no-candidates` triggers bacteria via 1.10). The blocker chit carries `originatingAuthor: <slug>` so the assignee sees "this was Toast's PR" as context even when Toast is gone. After resolution, the substitute Employee runs `cc-cli done` on the same chain step — audit's approve path re-fires `enterClearance` automatically. Back through Phase 1 if the fix was non-trivial (Editor decides on re-review); trivial conflict-fixes can skip review via the cap-bypass mechanism if the diff is small.
+
+**Bacteria scaling (from 1.10).** Both pools scale independently:
+- Editor pool: when in-flight review tasks exceed Editor capacity, bacteria spawns another. Editor work is bursty (a contract's worth of PRs all hit review around the same time), so the pool needs to grow fast and shrink slow.
+- Pressman pool: when `clearance-submission` queue depth exceeds 1 and only 1 idle Pressman exists, bacteria spawns another. Pressman work is steadier; pool typically holds at 1-2.
 
 **Role registry changes:**
 - Remove `janitor` Partner-by-decree entry.
-- Add `janitor` Employee role (worker tier, defaultKind: employee). Purpose: "Process the Shipping queue — rebase, test, merge or conflict-route."
-- Corp-sacred Partners drop from 6 to 5 (CEO, Herald, HR, Adviser, Failsafe).
+- Add `editor` Employee role (worker tier, defaultKind: employee). Purpose: *"Pre-push code review. Reads diffs, writes pedagogical comments, never fixes."*
+- Add `pressman` Employee role (worker tier, defaultKind: employee). Purpose: *"Post-push git mechanics. Rebase, test, merge or conflict-route."*
+- Corp-sacred Partners drop from 6 to 5 (CEO, Herald, HR, Adviser, Sexton). (The prior `failsafe` slot is renamed to `sexton` in 1.9; this bullet reflects the post-1.9 registry.)
 
-**File paths:**
-- `packages/shared/src/chit-types.ts` (register `merge-submission` type with validator)
-- `packages/shared/src/types/chit.ts` (MergeSubmissionFields shape)
-- `packages/shared/src/roles.ts` (remove janitor Partner, add janitor Employee)
-- `packages/daemon/src/shipping.ts` (new — queue processor, lock management, bacteria trigger)
-- `packages/cli/src/commands/ship.ts` (new — `cc-cli ship --branch <name> --contract <chit-id>`)
+**File paths (best-guess):**
+- `packages/shared/src/chit-types.ts` — register `clearance-submission` and `review-comment` types with validators.
+- `packages/shared/src/types/chit.ts` — `ClearanceSubmissionFields` and `ReviewCommentFields` shapes; extend `TaskWorkflowStatus` + `ContractStatus` with `clearance`.
+- `packages/shared/src/roles.ts` — remove janitor Partner; add `editor` and `pressman` Employee roles. Add `RoleEntry.editorReviewRoundCap?: number` for per-role override; constant `EDITOR_REVIEW_ROUND_CAP_DEFAULT = 3` in shared.
+- `packages/daemon/src/clearinghouse/` (PR 2 + PR 3 territory) — code primitives: `git-ops.ts`, `worktree-pool.ts`, `rebase-flow.ts`, `merge-flow.ts`, `tests-runner.ts`, `test-attribution.ts`, `conflict-classifier.ts`, `editor-diff.ts`, `failure-taxonomy.ts`. Pattern same as `sexton-runtime.ts`: infrastructure, not the active loop.
+- `packages/daemon/src/clearinghouse/pressman-runtime.ts` — Pressman session orchestration: dispatcher that picks top of queue, claims lock, walks rebase → test → merge → cascade. The active loop, mirrors `sexton-runtime.ts`.
+- `packages/daemon/src/clearinghouse/editor-runtime.ts` — Editor session orchestration (PR 4).
+- `packages/daemon/src/clearinghouse/enter-clearance.ts` — `enterClearance(corpRoot, taskId, ...)`: pushes branch, creates clearance-submission, advances task state. Called by audit's approve path via daemon HTTP endpoint.
+- `packages/daemon/src/api.ts` — new `/clearinghouse/submit` endpoint (calls `enterClearance`). New endpoint to dispatch Editor against a local diff (PR 4).
+- `packages/cli/src/commands/audit.ts` — extend approve path to fire `enterClearance` via the daemon endpoint when the corp is 1.12-aware (presence of pressman/editor roles).
+- `packages/cli/src/commands/clearinghouse.ts` — admin/manual fallback: `cc-cli clearinghouse submit --task <id>` for the rare case a task needs to enter the lane outside the normal audit flow. NOT the canonical author path.
 
 **Test strategy:**
 - Unit: priority scoring formula produces expected orderings.
-- Integration: two concurrent submissions with different files → both merge serially, main is clean.
-- Integration: two submissions with real conflict → first merges, second flips to `conflict`, blocker chit filed at second's submitter, retry-on-submitter-fix flow works.
-- Integration: queue depth > idle-janitor count → bacteria spawns a second janitor.
-- Regression: solo-corp (one janitor) processes submissions serially without deadlock.
+- Unit: workflow-status transitions accept `clearance` only from `under_review` (task) / `review` (contract); reject illegal entries.
+- Unit: `reviewRound` cap defaults to 3; per-role override honored; cap-hit flips `reviewBypassed: true` and proceeds to Phase 2.
+- Integration: Editor approves → submission proceeds; Editor rejects → comments route to author's role via 1.4.1; loop until approval.
+- Integration: two concurrent Pressman submissions with different files → both merge serially, main is clean.
+- Integration: two Pressman submissions with real conflict → first merges, second flips to `conflict`, blocker filed at second's submitter's role, retry-on-fix flow works.
+- Integration: Pressman test re-run distinguishes flake from real failure (mock test that fails once then passes).
+- Integration: Pressman trivial-conflict resolution (whitespace-only conflict → resolved in-place; semantic conflict → routed).
+- Integration: Editor pool depth grows on bursty review load; Pressman pool grows on queue depth.
+- Regression: solo-corp (one Editor, one Pressman) processes a contract end-to-end without deadlock.
+- Regression: original-author-decommissioned mid-review → substitute Employee picks up review comments cold and patches.
 
-**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing conflicts), 1.4.1 (blocker injection), 1.9 (bacteria for pool scaling)
-**PRs:** 3-4
+**Depends on:** 0.1 (Chit), 1.1 (Employee kind), 1.4 (Hand for routing), 1.4.1 (blocker injection), 1.10 (bacteria for pool scaling).
+**PRs:** 4-5 (substrate + Pressman + Editor + integration + tests).
 
-**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves, Casket advances to next chain step. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; other Employee picks up the blocker; original Employee resumes on blocker-close. When any Employee silent-exits or stalls, Witness/Failsafe detects + respawns (1.8). When any agent tries to push to main, they route through `cc-cli ship` → Shipping queue (1.11) → janitor Employee merges. Mark walks away; when he comes back, 4 out of 5 Tasks have landed on main via serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. No human-in-the-loop needed between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path.
+**Project 1 ship criterion:** hand a Contract with 5 Tasks to Engineering Lead. Lead decomposes + hands Tasks to backend Employees. Each Employee walks their Task, runs `cc-cli done`, audit approves. Audit's approve path: promotes the pending handoff to a chit, advances Casket, AND (for 1.12-aware corps) fires `enterClearance` — which dispatches an Editor against the local diff, on Editor approval pushes the branch + creates a clearance-submission, advances the task to `clearance`. A Pressman picks the submission up, rebases, tests, merges. When a Task hits a real dependency on another role, the Employee files a blocker chit (1.4.1) and exits cleanly; another Employee picks up the blocker; original resumes on close. When any Employee silent-exits, Sexton's patrol (1.9) respawns them; daemon dies → OS supervisor restarts; corp keeps going. Mark walks away; when he comes back, 4 of 5 Tasks have landed on main via internally-reviewed serialized merges, the 5th is blocked on a real ambiguity the agents couldn't resolve + surfaces as Tier 3 in his inbox. The agent's mental model: *I run `cc-cli done`. The system handles the rest.* No human-in-the-loop between hand and merge for the happy path; human-in-the-loop at the exact moments it IS needed for the ambiguous path. Corp is unkillable short of token exhaustion or OS process-kill without a supervisor.
+
+---
+
+### 1.12.1 — Pressman session rebuild **[shipped PR #194]**
+
+> **Compaction handoff (2026-04-26):** Previous Claude shipped PR 3 of 1.12 (#193) with a daemon-`setInterval` Pressman scheduler instead of a real Employee session. The spec (above, line 1854) says *"not a sweeper, not a cron job; an Employee with a session and a CLAUDE.md."* Mark caught the deviation; this section is the rebuild plan. Memory `feedback_no_v1_v2_postponing.md` captures the underlying failure mode (rationalizing scope reduction as "v1 ships X, v2 evolves to Y") so the next Claude doesn't recreate it. Read that memory + this section before touching any code.
+
+#### Why this exists as a separate sub-project
+
+PR 3 (#193) is mostly correct — `enterClearance`, the audit hook, `deferTaskClose`, the patrol blueprints, and all PR 1+2 substrate are right. The single load-bearing wrong piece is `pressman-runtime.ts`'s `PressmanScheduler` class — a `setInterval`-driven daemon loop that calls primitives directly. The spec's mental model is the inverse: agent-orchestrated, code-as-tools, judgment moments live in the agent. 1.12.1 is the surgery.
+
+#### What stays from PR #193 (DO NOT TOUCH)
+
+- `packages/daemon/src/clearinghouse/enter-clearance.ts` — bridge from audit-approve to lane.
+- `packages/cli/src/commands/audit.ts` — `fireEnterClearance` + `deferTaskClose` flow.
+- `packages/shared/src/audit/handoff-promotion.ts` — `deferTaskClose` option.
+- All PR 2 primitives (git-ops, rebase-flow, merge-flow, test-attribution, conflict-classifier, editor-diff, worktree-pool, failure-taxonomy, tests-runner).
+- `packages/shared/blueprints/patrol/clearing.md` — becomes the *actually walked* blueprint.
+- `packages/shared/blueprints/patrol/conflict-resolution.md` — substitute-author flow.
+- `tests/clearinghouse-primitives.test.ts` (PR 2 tests).
+- `tests/clearinghouse-substrate.test.ts` (PR 1 tests).
+- enterClearance + handoff-promotion + isClearinghouseAwareCorp tests in `tests/pressman-runtime.test.ts` — extract to `tests/enter-clearance.test.ts` so the file name matches what's tested.
+- The escalation-chit blocker shape, lock cascade semantics, role registry entries.
+
+#### What gets surgically removed
+
+- `packages/daemon/src/clearinghouse/pressman-runtime.ts` — the entire `PressmanScheduler` class, its `setInterval`, the in-flight guard, the start/stop/tick methods.
+- `daemon.ts` wiring — import, `pressman` field, instantiation, `start()`, `stop()`.
+- `clearinghouse/index.ts` — `PressmanScheduler` export and its types.
+- The PressmanScheduler-specific tests in `tests/pressman-runtime.test.ts` (drop the "happy path" + "needs-author" + "no-op" tick tests; the workflow logic they exercise lives in step-level tests in 1.12.1).
+
+#### What gets added (the rebuild)
+
+##### A. Workflow primitives module
+
+**File:** `packages/daemon/src/clearinghouse/workflow.ts` (NEW)
+
+Stateless functions extracted from the old `processSubmission` body. Each returns a `Result<T>` discriminated union. No class, no interval, no daemon state. Each function is a single coherent step the agent invokes via a CLI subcommand.
+
+```ts
+// Find queued submission + claim lock for the named pressman.
+// Returns null inside Result.value when queue empty (success-noop case).
+export function pickNext(opts: { corpRoot, pressmanSlug }): Result<PickedSubmission | null>;
+
+// Acquire isolated worktree for the branch.
+export async function acquireWorktree(opts: { corpRoot, branch, slug, gitOps? }): Result<{ path }>;
+
+// Fetch + rebase. Wraps attemptRebase + classifies outcome.
+export async function rebaseStep(opts: { corpRoot, submissionId, worktreePath, gitOps? }): Result<RebaseAttemptResult>;
+
+// runWithFlakeRetry against the worktree.
+export async function testStep(opts: { corpRoot, submissionId, worktreePath, testCommand?, testProgram?, testArgs? }): Result<RunWithFlakeRetryResult>;
+
+// attemptMerge.
+export async function mergeStep(opts: { corpRoot, submissionId, worktreePath, gitOps? }): Result<MergeAttemptResult>;
+
+// Cascade success: markSubmissionMerged + release lock + release worktree.
+export async function finalizeMerged(opts: { corpRoot, submissionId, mergeCommitSha?, slug, worktreePath?, gitOps? }): Result<void>;
+
+// File escalation chit (severity=blocker, scoped to author's role) +
+// markSubmissionFailed + release lock + release worktree.
+export async function fileBlocker(opts: { corpRoot, submissionId, kind: 'rebase-conflict' | 'test-fail' | 'hook-reject', summary, detail, slug, worktreePath?, gitOps? }): Result<{ escalationId }>;
+
+// Mark failed without filing a blocker (e.g., race retry, sanity-failed).
+// Caller decides whether to re-queue or terminal-fail via opts.
+export async function markFailedAndRelease(opts: { corpRoot, submissionId, reason, slug, requeue?: boolean, worktreePath?, gitOps? }): Result<void>;
+
+// Standalone release for cleanup paths.
+export async function releaseAll(opts: { corpRoot, slug, worktreePath?, gitOps? }): Result<void>;
+```
+
+Reuses (do not reimplement) PR 1 + PR 2 primitives: `claimClearinghouseLock`, `releaseClearinghouseLock`, `rankQueue`, `attemptRebase`, `attemptMerge`, `runWithFlakeRetry`, `markSubmissionMerged`, `markSubmissionFailed`, `WorktreePool`, the conflict classifier, etc.
+
+##### B. CLI subcommand surface
+
+**File:** `packages/cli/src/commands/clearinghouse.ts` (extend existing admin-fallback file)
+
+Each subcommand parses args, calls the matching workflow function, prints structured JSON the agent reads. Identity-checked via `--from <slug>` (matches existing CLI convention; lock claim verifies).
+
+```
+cc-cli clearinghouse pick --from <pressman-slug> [--json]
+  → pickNext. Output: { ok, submissionId, branch, taskId, contractId, submitter, priority, score } or { ok, empty: true }
+
+cc-cli clearinghouse acquire-worktree --from <slug> --branch <name> [--json]
+  → acquireWorktree. Output: { ok, path }
+
+cc-cli clearinghouse rebase --from <slug> --submission <id> --worktree <path> [--json]
+  → rebaseStep. Output: { ok, outcome, conflictedFiles?, conflictSummaries?, autoResolvedFiles?, preStats?, postStats?, failureRecord? }
+
+cc-cli clearinghouse test --from <slug> --submission <id> --worktree <path> [--command <str>] [--json]
+  → testStep. Output: { ok, classifiedAs, finalRun: { outcome, durationMs, failures }, allRunsCount }
+
+cc-cli clearinghouse merge --from <slug> --submission <id> --worktree <path> [--json]
+  → mergeStep. Output: { ok, outcome, mergeCommitSha?, hookOutput? }
+
+cc-cli clearinghouse finalize --from <slug> --submission <id> [--merge-sha <sha>] [--worktree <path>] [--json]
+  → finalizeMerged. Output: { ok }
+
+cc-cli clearinghouse file-blocker --from <slug> --submission <id> --kind <rebase-conflict|test-fail|hook-reject> --summary "..." --detail "..." [--worktree <path>] [--json]
+  → fileBlocker. Output: { ok, escalationId }
+
+cc-cli clearinghouse mark-failed --from <slug> --submission <id> --reason "..." [--requeue] [--worktree <path>] [--json]
+  → markFailedAndRelease. Output: { ok, requeued? }
+
+cc-cli clearinghouse release --from <slug> [--worktree <path>] [--json]
+  → releaseAll. Output: { ok }
+
+cc-cli clearinghouse status [--json]
+  → Admin/debug. Lock holder + queue depth + recent submissions.
+```
+
+The existing admin fallback `cc-cli clearinghouse submit --task <id>` stays as-is for the rare manual-dispatch case.
+
+##### C. Pressman role prompt + bootstrap
+
+**Files:**
+- `packages/shared/src/templates/pressman-bootstrap.ts` (NEW) — CLAUDE.md template, AGENTS.md template, role-specific instructions.
+- `packages/daemon/src/clearinghouse/pressman.ts` (NEW) — `hirePressman(daemon)` + `buildPressmanRules(harness)`. Mirrors `packages/daemon/src/continuity/sexton.ts` exactly.
+
+The CLAUDE.md tells Pressman:
+- Their job is git mechanics on already-Editor-approved code (until PR 4 lands Editor, every submission has `reviewBypassed: true`).
+- On wake: read `cc-cli blueprint show patrol/clearing`, walk the steps, call subcommands in order.
+- Branch points where judgment matters: substantive conflict (file blocker vs attempt small fix), test consistent-fail (file blocker vs check if it's a one-line snapshot fix), hook rejection (route to author vs address inline).
+- DM founder when judgment runs out — their session response auto-posts to founder DM (existing pattern).
+- Exit cleanly when: queue drained, OR one submission processed and the lane should round-robin to next Pressman, OR a blocker filed (the work belongs to the author's role now).
+
+NOT auto-hired on daemon boot. Founder runs `cc-cli hire --role pressman` once. PR 5 adds bacteria-spawn-on-queue-depth.
+
+##### D. Wake mechanism (reactive + Pulse fallback)
+
+**Files:** modify `packages/daemon/src/contract-watcher.ts` pattern OR add new `clearinghouse-watcher.ts`.
+
+Two complementary triggers:
+
+1. **Reactive watcher** — `ClearanceSubmissionWatcher` watches `<corpRoot>/chits/clearance-submission/` for new files. On new submission with `submissionStatus: 'queued'`, dispatches a Pressman wake. Mirrors `task-watcher.ts` shape.
+
+2. **Pulse fallback** — every Pulse tick (5min default), if there's a hired Pressman + non-empty queue + no agent currently processing, dispatch a wake. Catches stale-queue cases where the watcher missed an event.
+
+Wake dispatches go through `processManager.spawnAgent(pressman.id)` + a wake message via the existing `dispatch.ts` flow. Wake message body: a short prose pointer like *"Queue has work. Walk patrol/clearing. Process one submission then exit."*
+
+The Pressman session walks the blueprint, exits on completion, the next wake (reactive or Pulse) triggers them again for the next submission.
+
+##### E. Per-walk self-heal (replaces per-tick scheduler self-heal)
+
+The old scheduler called `resumeClearinghouse` per tick. In the rebuild, the agent calls `cc-cli clearinghouse pick` first thing — `pickNext` runs `resumeClearinghouse` internally before reading the lock and queue. That moves the self-heal into the workflow primitive, where it belongs (any pick attempt benefits from clean state).
+
+Boot-time `resumeClearinghouse` stays — daemon's startup path calls it once, before the watcher starts dispatching.
+
+#### Implementation strategy: force-push #193
+
+Recommend force-push #193 rather than a fresh branch. Reasoning:
+- 70% of PR 3 is correct (the 4 commits listed under "What stays" above are reviewed and worth keeping).
+- Only `pressman-runtime.ts` + its daemon wiring + its scheduler-specific tests need to go.
+- Force-push on a feature branch (not main) is acceptable per `feedback_no_squash_no_rebase.md` (the rule covers merge methods, not feature-branch force-pushes).
+- Re-reviewing the same enterClearance code in a fresh branch wastes Codex review budget.
+
+If Mark prefers a fresh branch (clean history): cut `feat/1.12.1-pressman-session` off project/1, cherry-pick the 4 keeper commits, build the rebuild on top.
+
+#### Commit plan for the rebuild (~7-8 commits)
+
+After the surgical removal commit, add:
+
+1. `revert+remove(1.12): drop PressmanScheduler class + daemon wiring` — surgical removal. Files: `pressman-runtime.ts` deleted, `daemon.ts` reverted, `clearinghouse/index.ts` exports trimmed, scheduler tests dropped.
+2. `feat(1.12.1): workflow primitives — stateless steps over PR 2` — new `workflow.ts` extracting and reshaping the old `processSubmission` body into typed step functions.
+3. `feat(1.12.1): cc-cli clearinghouse subcommands — pick/rebase/test/merge/finalize/file-blocker/mark-failed/release/status` — CLI handlers wrapping `workflow.ts`.
+4. `feat(1.12.1): Pressman role prompt + hire bootstrap` — `pressman-bootstrap.ts` template + `clearinghouse/pressman.ts` (`hirePressman` + `buildPressmanRules`). Mirrors Sexton.
+5. `feat(1.12.1): clearance-submission watcher + Pulse fallback wake` — reactive + periodic dispatch.
+6. `test(1.12.1): workflow primitives` — each step in isolation with mock GitOps.
+7. `test(1.12.1): cc-cli clearinghouse subcommands` — args parsing + JSON output shape.
+8. `test(1.12.1): Pressman hire + dispatch end-to-end` — fixture corp with hired Pressman + queued submission, dispatch wake, walk blueprint, verify merge cascade.
+
+Plus a Codex review round expected (1.10/1.11/1.12 pattern); regression tests bundled with fixes per established practice.
+
+#### Reading order for next-Claude on resume
+
+Before any code:
+1. `~\.claude\projects\C--Users-psyhik1769-agentcorp\memory\feedback_no_v1_v2_postponing.md` — the rule that was broken.
+2. `~\.claude\projects\C--Users-psyhik1769-agentcorp\memory\feedback_redirects_arent_corrections.md` — tone guidance; don't perform apology theater while rebuilding.
+3. This section (1.12.1).
+4. The 1.12 spec sections above (1.12 main, lines 1854 + 1907-1915 especially).
+5. `packages/daemon/src/continuity/sexton.ts` — the `hirePressman` template comes from this shape.
+6. `packages/daemon/src/continuity/sexton-runtime.ts` — wake dispatch pattern source.
+7. `packages/daemon/src/continuity/sexton-wake-prompts.ts` — prompt template pattern.
+8. `packages/daemon/src/clearinghouse/pressman-runtime.ts` (the wrong-shape file) — to understand which `processSubmission` body fragments map to which workflow step.
+9. `packages/shared/blueprints/patrol/clearing.md` — the blueprint the agent will walk.
+10. `packages/cli/src/commands/clearinghouse.ts` (existing admin file) — extend, don't rewrite.
+
+#### Key principle restated (so next-Claude doesn't drift)
+
+**Agent walks the blueprint, code provides the steps.** The judgment moments the spec named become real because the agent reads each subcommand's structured output and decides what to do next based on the patrol blueprint's instructions. Code's job is to make each step reliable and return structured data; the agent's job is to compose those steps and decide at branches.
+
+Concrete branch points where the agent decides (not the code):
+- After `rebase`: outcome=needs-author. File blocker now? Look at the conflicted files for a one-line fix? DM founder about a structural mess? Patrol gives guidance; agent makes the call.
+- After `test`: classifiedAs=consistent-fail. File blocker (default)? Or recognize a snapshot-update can fix it and do that? Agent's call.
+- After `merge`: outcome=hook-rejected. Read the hook output, decide if you understand it enough to address yourself, otherwise route to author with prose.
+- DM-founder triggers: encoded by the agent's judgment, not by code. Blueprint suggests "DM founder when X looks structurally wrong" — agent sees X, agent posts.
+
+#### Non-goals for 1.12.1 (do NOT expand scope)
+
+- LLM-driven Editor — that's PR 4 (1.12.2 in this doc's flow if Mark wants to rename).
+- Bacteria scaling for Pressman pool — PR 5 (1.12.5 in flow).
+- Contract-aware merge ordering — never specced; do NOT add.
+- Mergify-style speculative parallel batches — research-noted as defer-forever; do NOT add.
+- `runTestsOnRef` impl with `gitOps.checkoutRef` — defer until PR 4's attribution flow needs it.
+- Multi-Pressman concurrent processing — single Pressman is enough for ship criterion; multi is PR 5 territory.
+
+---
+
+### 1.12.2 — Editor session (PR 4 of 1.12) **[shipped PR #195]**
+
+Adds the pre-push code review phase. By the time PR #193 + 1.12.1 land, the corp can already merge — every submission flows with `reviewBypassed: true` because Editor doesn't exist yet. 1.12.2 inserts Editor between audit-approve and `enterClearance`, so the public PR that appears on GitHub has actually been internally reviewed.
+
+**Same shape as Pressman.** Editor is an Employee with a session + CLAUDE.md (do NOT repeat the 1.12.1 mistake — `feedback_no_v1_v2_postponing.md` applies here too). Mirrors `hireSexton`/`hirePressman` pattern. Walks `patrol/code-review` blueprint. Calls `cc-cli editor <verb>` subcommands that wrap workflow primitives.
+
+#### What stays from 1.12.1 (DO NOT TOUCH)
+
+- All Pressman code (workflow.ts + cc-cli clearinghouse subcommands + role prompt + watcher).
+- All PR 1+2 substrate.
+- The `clearance-submission` chit type and `review-comment` chit type (both already shipped in PR 1).
+- The `editor` role registry entry (already there).
+
+#### What's new
+
+##### A. TaskFields gains `editorReviewRound` + `editorReviewCapHit`
+
+Counter lives on the task chit — survives across audit cycles even when no submission exists yet. Resets to 0 on task creation; increments each time Editor rejects; persists across audit re-fires. When the counter hits the role's `editorReviewRoundCap` (default 3 from 1.12 substrate), `editorReviewCapHit` flips true and the next audit-approve fires `enterClearance` with `reviewBypassed: true`.
+
+Schema-only change in `packages/shared/src/types/chit.ts` + the validator + the invariant test (per `chit-types.ts` step-5 rule). Follow the breaker-trip / clearance-submission addition pattern.
+
+##### B. Audit hook extension
+
+Modify `cc-cli audit`'s approve path (the post-1.12.1 version, after the Pressman surgery):
+
+```
+on approve + 1.12-aware corp:
+  if (taskChit.editorReviewCapHit OR no Editor hired):
+    fire enterClearance(reviewBypassed=true, reviewRound=task.editorReviewRound)
+  else:
+    dispatch Editor session against this task (event-driven wake)
+    Editor walks patrol/code-review
+    Editor returns: approve | reject(comments) | cap-bypass
+    if approve:
+      fire enterClearance(reviewBypassed=false, reviewRound=task.editorReviewRound)
+    if reject:
+      route comments via 1.4.1 to author's role
+      task.editorReviewRound++ (mark capHit if reaches cap)
+      audit emits decision='block' so the agent's session re-runs and produces a fix
+    if cap-bypass:
+      task.editorReviewCapHit=true
+      fire enterClearance(reviewBypassed=true, ...)
+```
+
+The "is editor hired" gate mirrors `isClearinghouseAwareCorp` — `isEditorAwareCorp(corpRoot)` checks `members.json` for `role==='editor'`. Without Editor hired, audit falls through to the 1.12.1 flow (reviewBypassed=true automatically).
+
+##### C. Editor workflow primitives
+
+**File:** `packages/daemon/src/clearinghouse/editor-workflow.ts`
+
+Stateless Result-returning functions for each Editor step:
+
+```ts
+// Pick the next pending review request. Returns task + diff metadata.
+export function pickNextReview(opts: { corpRoot, editorSlug }): Result<PendingReview | null>;
+
+// Compute reviewable diff metadata via PR 2's computeReviewableDiff.
+export async function loadReviewContext(opts: { corpRoot, taskId, gitOps? }): Result<ReviewContext>;
+// ReviewContext = { taskFields, contractFields, diff: ReviewableDiff, branch }
+
+// File a review-comment chit (severity-tagged).
+export function fileReviewComment(opts: {
+  corpRoot, taskId, reviewerSlug, filePath, lineStart, lineEnd,
+  severity: 'blocker'|'suggestion'|'nit', issue, why, suggestedPatch?, reviewRound
+}): Result<{ commentId }>;
+
+// Approve the task — caller fires enterClearance next.
+export function approveReview(opts: { corpRoot, taskId, editorSlug }): Result<void>;
+
+// Reject — increments task.editorReviewRound, returns whether cap was hit.
+export function rejectReview(opts: { corpRoot, taskId, editorSlug, reason }): Result<{ newRound, capHit }>;
+
+// Cap-bypass shortcut for callers that want to surface "Editor capped out, proceeding."
+export function bypassReview(opts: { corpRoot, taskId, editorSlug, reason }): Result<void>;
+```
+
+Reuses (do not reimplement): `computeReviewableDiff`, `validateCommentPosition`, `shouldFilterFile`, `EDITOR_REVIEW_ROUND_CAP_DEFAULT`, the `review-comment` chit type from PR 1.
+
+##### D. CLI subcommand surface
+
+**File:** `packages/cli/src/commands/editor.ts`
+
+```
+cc-cli editor pick --from <editor-slug>
+  → pickNextReview. Output: { ok, taskId, branch, contractId, submitter } or { ok, empty: true }
+
+cc-cli editor diff --from <slug> --task <id>
+  → loadReviewContext. Output: { ok, files: [{ path, status, additions, deletions }], filteredFiles, oversized, oversizedReason? }
+
+cc-cli editor file-comment --from <slug> --task <id> --file <path> --line-start <n> [--line-end <n>] --severity <blocker|suggestion|nit> --issue "..." --why "..." [--suggested-patch "..."]
+  → fileReviewComment. Output: { ok, commentId }
+
+cc-cli editor approve --from <slug> --task <id>
+  → approveReview. Output: { ok }
+
+cc-cli editor reject --from <slug> --task <id> --reason "..."
+  → rejectReview. Output: { ok, newRound, capHit }
+```
+
+Editor session walks `patrol/code-review` blueprint:
+1. `cc-cli editor pick` → next task to review.
+2. `cc-cli editor diff` → file list + filtered list + oversized check.
+3. For each reviewable file: agent uses native tools (Read, Grep, Bash with `git diff <file>`) to read the actual diff content. Code provides metadata; agent reads the substance.
+4. For each issue found: `cc-cli editor file-comment` with severity.
+5. End: `cc-cli editor approve` (no blockers) OR `cc-cli editor reject` (any blocker-severity comment exists).
+
+Blueprint guidance (what to look for): contract-goal mismatch, missing tests for new code paths, banned patterns (security holes, secrets), test regressions, file scope explosion, acceptance-criteria gaps. Style nits: out of scope until CULTURE.md exists (Project 5.2).
+
+##### E. Wake mechanism (event-driven, per-task)
+
+Editor wakes are NOT periodic. They fire when audit's approve path decides to dispatch a review. Pattern: audit calls `processManager.spawnAgent(editor.id)` + a wake message via existing `dispatch.ts` flow. Wake message carries the task id explicitly.
+
+Multiple Editors (when bacteria scales the pool in 1.12.3) round-robin via per-task claim — a `reviewerSlug` + `claimedAt` field on the task chit prevents two Editors from reviewing the same task. Claim before reading diff, release on approve/reject.
+
+##### F. Patrol blueprints
+
+- `packages/shared/blueprints/patrol/code-review.md` — canonical walk + judgment guidelines. Pedagogical comment shape required (issue + why + suggested patch).
+- `packages/shared/blueprints/patrol/audit.md` — formalize the existing audit gate as a blueprint (refactor; can defer to 1.12.3 if 1.12.2 is already heavy).
+
+##### G. PR commit plan (~7-9 commits)
+
+1. `feat(1.12.2): TaskFields editorReviewRound + editorReviewCapHit` (shared, schema-only)
+2. `feat(1.12.2): editor-workflow.ts — stateless review primitives`
+3. `feat(1.12.2): cc-cli editor subcommands — pick/diff/file-comment/approve/reject`
+4. `feat(1.12.2): Editor role prompt + hire bootstrap (mirrors Pressman 1.12.1)`
+5. `feat(1.12.2): audit approve-path dispatches Editor before enterClearance`
+6. `feat(1.12.2): enterClearance signature accepts reviewRound + reviewBypassed from caller`
+7. `feat(1.12.2): patrol/code-review blueprint + walked-flow docstring`
+8. `test(1.12.2): editor-workflow primitives + audit dispatch + reviewRound state machine`
+9. (Optional) `feat(1.12.2): patrol/audit blueprint — formalize existing gate`
+
+#### Non-goals for 1.12.2
+
+- Test-attribution main-vs-PR comparison (`runTestsOnRef`) — Editor doesn't run tests; it reads diffs. Pressman runs tests and could use attribution. Defer to 1.12.3 if helpful.
+- Style-nit auto-detection / auto-comment — Editor authors comments via judgment; no auto-linter integration. CULTURE.md compounding (Project 5.2) is what eventually drives style.
+- Multi-Editor concurrent review of the same task — one Editor per task; bacteria scaling for the pool comes in 1.12.3.
+
+---
+
+### 1.12.3 — Integration + ship-criterion demo (PR 5 of 1.12) **[shipped PR #196]**
+
+The "walk away overnight" PR. By 1.12.3 end, the Project 1 ship criterion is real — hand 5 tasks, walk away, come back to 4 merged + 1 blocker in inbox.
+
+**What actually shipped (mid-PR additions agreed with Mark beyond the original plan):**
+
+The original plan covered A-G below. During building, Mark and I agreed on three additions that gave the lane memory, judgment that compounds, and a voice — the substrate-level features that turn the lane from mechanism into something the corp actually feels alive in:
+
+- **Lane-event chit type.** Every Pressman + Editor state transition writes an immutable chit (claim / rebase outcome / test outcome / attribution / merge / approve / reject / etc — 28 kinds total). Chronological stream is the corp's diary. Optional `narrative` field carries the agent's 1-line voice ("first-try clean, no conflicts" / "rebase from hell — 4 substantive routed"). Daemon-emitted events (resume sweeps, watcher fallbacks) leave it null.
+- **Pattern-observation chit type.** Editor's compounding-judgment substrate. At session end Editor optionally files observations subject-scoped to a role / codebase-area / corp-wide. Future review sessions read relevant patterns via `loadReviewContext.relevantPatterns` as priors for the drift pass — corp's review taste tightens monotonically. Proto-CULTURE.md material before Project 5 formalizes it.
+- **`cc-cli clearinghouse log` — the diary reader.** Walks lane-events chronologically; default shows terminal events only; `--verbose` for the firehose; `--replay <id>` for one PR's full journey. After the corp runs for a week the diary becomes its actual readable history.
+
+**E2E test (F below) — Mark is doing manually as a user.** Not in this PR per his decision; the substrate is here, the executable test stays his to run.
+
+#### What's new (final shape)
+
+#### What's new
+
+##### A. Bacteria scaling for Pressman + Editor pools
+
+Both roles register with sensible `bacteriaTarget` values. Per 1.10's RoleEntry shape:
+- Pressman: target ~1 idle (queue work is steady; one Pressman keeps up).
+- Editor: target ~2 idle (review work is bursty; a contract's worth of approvals can hit at once).
+
+`packages/daemon/src/bacteria/decision.ts` already handles per-role targets. Config-only.
+
+##### B. Founder observability
+
+- `cc-cli clearinghouse status` — admin/debug. Lock holder, queue depth, in-flight, recent submissions (configurable window).
+- `cc-cli clearinghouse list [--status <state>] [--role <id>] [--include-merged]` — submission browser, mirrors `cc-cli breaker list`.
+- `cc-cli clearinghouse show <submission-id>` — full forensic view: branch, all review-comment chits, blocker chain, merge sha if landed.
+- TUI sidebar enrichment — clearance queue depth + recent merge count visible alongside the bacteria role rollups (built in 1.10.4).
+
+##### C. Channel/DM notification on terminal state
+
+Per the research-borrowed Atlantis pattern: when a submission flips to a terminal state (merged / failed / conflict-routed), Pressman posts a brief message in the relevant channel:
+- Merged → `#general`: "Merged Toast's PR for task chit-t-abc (sha def123)."
+- Conflict-routed → DM with author's role: "Your PR for task chit-t-abc hit a substantive conflict; see escalation chit-e-xyz."
+- Hook-rejected → DM with author: hook output included.
+
+Reuses existing `post()` primitive. Editor does the same on approval/rejection (less verbose).
+
+##### D. Sexton wake digest integration
+
+Sexton's wake prompt (existing `composePoolActivitySection` + `composeActiveBreakersSection` pattern) gains an "Active clearinghouse" section: queue depth, in-flight submission, recent merges in the last hour, currently-routed blockers.
+
+`packages/daemon/src/continuity/sexton-wake-prompts.ts` — add `composeClearinghouseSection(corpRoot)`. Skip on nudge (consistent with existing pattern).
+
+##### E. `runTestsOnRef` real impl
+
+Land the deferred attribution path: extend `GitOps` with `checkoutRef(worktreePath, ref): Promise<Result<void>>`. `runTestsOnRef` switches to the named ref, runs tests, restores. Pressman's runtime gains an "if test failed, run on main and call `attributeFailure`" flow before deciding blocker routing — pr-introduced fires blocker to author; main-regression fires to engineering-lead.
+
+##### F. End-to-end demo + ship-criterion test
+
+`tests/clearinghouse-end-to-end.test.ts` — fixture corp, hire 1 backend-engineer + 1 editor + 1 pressman, dispatch a contract with 5 tasks (3 trivial + 1 with a substantive conflict + 1 with a real test failure). Expected outcomes:
+- 3 trivial → merged via clean Pressman flow.
+- Conflict task → blocker filed to backend-engineer's role; substitute Employee resolves; re-merges.
+- Test-fail task → blocker filed to author; founder's tier-3 inbox surfaces it.
+
+This test IS the live executable form of the Project 1 ship criterion.
+
+##### G. Forward-compat schema markers (per research)
+
+Add fields without implementing yet:
+- `ClearanceSubmissionFields.scopeKeys?: string[]` — for parallel lane isolation when multi-Pressman lands.
+- Lock path templating: `getClearinghouseLockPath(corpRoot, laneId='default')` returns `clearinghouse-lock-{laneId}.json`. v1 always passes 'default'; future lane-aware Pressmen pass real lane ids. Schema change is non-breaking.
+- `flake-suspected` as a `submissionStatus` alternative — reserved value, no consumer yet.
+
+These are documentation-shape additions. No behavior change in 1.12.3, but the substrate is ready when queue depth justifies parallel lanes.
+
+#### PR commit plan (~6-8 commits)
+
+1. `feat(1.12.3): bacteria targets for pressman + editor + per-role config`
+2. `feat(1.12.3): cc-cli clearinghouse status / list / show`
+3. `feat(1.12.3): channel + DM notifications on submission terminal state`
+4. `feat(1.12.3): Sexton wake digest — clearinghouse section`
+5. `feat(1.12.3): runTestsOnRef impl + Pressman attribution flow`
+6. `feat(1.12.3): forward-compat schema markers (scopeKeys, lane-aware lock path)`
+7. `test(1.12.3): end-to-end fixture — Project 1 ship criterion executable`
+8. `feat(1.12.3): TUI sidebar — clearance queue + recent merges rollup`
+
+#### Project 1 closes when 1.12.3 lands + 1.13 wraps **[shipped — 1.13 added as the actual closer; PR #197]**
+
+Project 1 is done. 1.12.3 (PR #196) shipped the substrate the "walk away overnight" criterion runs against — clearinghouse, lane-events, pattern-observations, log diary, attribution flow. 1.13 (PR #197) was added mid-build as the founding-flow closer: refreshed BOOTSTRAP.md with calibration phase, fixed the stale onboarding kickoff, plus a stabilization stack (PRs #198-203) that scoped the daemon log per corp, auto-hired Pressman + Editor, fixed CORP.md @import truncation, and patched bacteria's destructive-apoptose + missing-floor bugs. What 1.12.3 + 1.13 make real:
+
+- Bacteria scaling for Pressman + Editor pools (auto-scaling under burst).
+- Founder observability: `cc-cli clearinghouse status / list / show / log`, `cc-cli editor list / show` (file-pattern, file-comment, etc).
+- Channel + DM notifications: daemon-side `LaneEventWatcher` guarantees terminal-state posts even when an agent's session dies before sending its own.
+- Sexton wake digest: `composeClearinghouseSection` surfaces lane health as part of the daily corp pulse.
+- Test attribution: `GitOps.checkoutRef` + `runTestsOnRef` + `attributeStep` + `--route-to engineering-lead` route main-regressions away from innocent PR authors. The lead-the-field piece — none of bors-ng / Mergify / GitHub Merge Queue / Atlantis / Gas Town does this.
+- Forward-compat schema markers: `scopeKeys`, lane-aware lock path, `flake-suspected`. No behavior change in 1.12.3; the substrate is ready when queue depth justifies parallel lanes.
+- TUI sidebar lane rollup: queue depth, in-flight, recent merges, open blockers visible alongside bacteria role rollups.
+
+Plus the three substrate-level additions named at the top of this section (lane-events, pattern-observations, `cc-cli clearinghouse log`) that compound across time — the corp now has memory + voice + a self-tightening review taste.
+
+Move on to Project 2 (Workflow Substrate) per the existing roadmap.
+
+---
+
+## Live bugs surfaced by the Project 1 finale (2026-04-29)
+
+The substrate ships clean (PRs merged, types pass, unit tests green) but the
+finale e2e on `claude-test-corp` exposed a stack of integration / runtime /
+prompt-layer bugs that prevent end-to-end "5 tasks → 4 merged + 1 blocker"
+from running unattended. Filed here so they don't get forgotten as Project 2
+begins.
+
+**Fixed during the finale run itself (PR #203):**
+
+- ✅ `bacteria.executeApoptose` was destructive — `members.filter` removed
+  the entry entirely. Now archives via `status: 'archived'`. (`5bb45fa`)
+- ✅ No apoptose floor — bacteria could cull a role to zero. Per-role
+  `bacteriaFloor` (default 1) added; pool size never drops past floor.
+  (`ebd17b2`)
+
+Remaining live bugs (none block ship, but block running end-to-end):
+
+### Platform / Windows-specific
+
+- **`cc-cli init` hangs at git step.** Creates corp dir + `members.json` with
+  founder, then awaits `git.init()` / `git.commitAll()` indefinitely. Never
+  returns, never registers in `corps/index.json`, never runs `setupCeo`.
+  Subsequent boot finds an orphan corp dir without a CEO. Workaround: use the
+  TUI onboarding flow.
+- **`killStaleProcesses` hangs on Windows in non-TTY contexts.** The execa
+  call to `cmd /c "netstat -ano | findstr :PORT | findstr LISTENING"` blocks
+  past its 5s timeout when daemon is launched from a Bash subprocess or
+  `Start-Process -NoNewWindow`. Daemon initialization gets stuck at
+  `Cleaning up stale processes — N PIDs, M ports`. Workaround: launch daemon
+  from a real TTY (sometimes intermittent — retry often works). Proper fix:
+  hard `Promise.race` deadline around the whole cleanup, fall through to
+  log+continue on timeout.
+
+### Lifecycle / race
+
+- **`members.json` write race — entries appear and disappear.** `cc-cli hire`
+  writes (and possibly bacteria executor writes) get clobbered by overlapping
+  writes from elsewhere. Most clearly observed: hire Pressman, immediately
+  query — pressman absent from `members.json`, then returns minutes later.
+  Suspected: an in-memory caching layer somewhere flushes stale snapshots over
+  fresh writes. Hardest of these to debug; needs a writer-audit pass.
+- **Mitose-spawn vs dream-manager race.** `bacteria.executeMitose` calls
+  `processManager.spawnAgent(slug)` to start the slot's process but doesn't
+  immediately dispatch a work session for the casket-pre-loaded chit. The
+  dream manager's idle-timer races ahead, fires a dream session against an
+  empty observation set, times out at 5 min. The mitose-assigned chit never
+  gets a work dispatch. Fix shape: spawn followed by an immediate work
+  dispatch on the assigned chit, OR dream-manager skips slots whose
+  `casket.current_step` is non-null.
+- **Daemon restart wipes orphan agent dirs.** Backend Engineer's workspace
+  was deleted on restart because no `members.json` entry existed for it
+  (member lost in the race above). Cleanup logic should archive (rename to
+  `.archived-<slug>-<timestamp>/`) rather than delete — same shape the
+  bacteria apoptose path already uses.
+- **`cc-cli status` shows phantom agents.** Output reported 8 idle agents
+  while `members.json` had only 7 entries. In-memory process-manager list
+  out of sync with disk. Display bug only — no behavioral impact.
+
+### Workflow / agent prompts (mostly Project 2 scope)
+
+- **`cc-cli hand` doesn't promote chit `status: draft → active`.** Tasks
+  created by CEO via `cc-cli task create` sit at `status: draft` after
+  `cc-cli hand --to <role>`. Bacteria's `queryChits({statuses: ['active']})`
+  filter excludes them — invisible to the queue-driven mitose path until
+  manually flipped. Fix: `hand` should promote draft → active atomically
+  on handoff.
+- **Engineers don't submit clearance after completing work.** Backend Engineer
+  created the right branch + committed `notes/welcome.md`, then went idle
+  without creating a `clearance-submission` chit. Gap between "I did the
+  work" and "I trigger the clearinghouse." The engineer's BOOTSTRAP /
+  CORP.md doesn't make the submit step load-bearing enough.
+- **Engineers work on the corp's main worktree directly.** Clearinghouse
+  pattern uses `<corpRoot>/wt/<task-id>/` worktrees, but the engineer never
+  invoked `acquire-worktree` — checked out the feature branch on the corp's
+  primary checkout. Pollutes the corp's git state across runs. Fix: the
+  engineer's prompt must drive `clearinghouse acquire-worktree` before any
+  code edits.
+
+### Substrate / chits
+
+- **Inbox-item chit creation fails for DM @mention references.** Router
+  emits `ERROR [router] inbox-item chit creation failed for ceo: references
+  contains invalid chit id: "dm-ceo-mark:m-19326e"`. The router passes
+  `<channel-id>:<message-id>` as a chit reference, but chit IDs follow
+  `chit-<type-prefix>-<hex>` shape — validator rejects. Either router mints
+  a real chit-id reference, or validator accepts message-id references for
+  inbox-item type only.
+
+- ✅ **Audit-approve transition bypasses the state machine on the
+  clearinghouse path** *(filed Codex round 4, fixed Codex round 7,
+  PR #204)*. `enterClearance` wrote `workflowStatus: 'clearance'`
+  directly; Project 1.3's mechanical-enforcement guarantee was silently
+  bypassed on the one path through the Pressman lane. Resolved via
+  fix shape #2 from the original plan: new `submit-for-clearance`
+  trigger (`under_review → clearance`) added to `TRANSITION_RULES`;
+  `enterClearance` now routes through `validateTransition`. The
+  existing `audit-approve → completed` rule is preserved for
+  non-clearinghouse corps. Closes the last known state-machine
+  bypass; every workflowStatus mutation now flows through the table.
+
+### Auto-hire reliability
+
+- **Pressman + Editor auto-hire (PR #201) is unreliable on TUI-driven
+  onboarding.** Initial `claude-test-corp` was created via TUI; the first
+  ResumeView's daemon hired them, but entries didn't persist in
+  `members.json` until a much-later restart. Probably the same race as
+  the lifecycle bug above — TUI uses a temporary daemon for scaffolding
+  (separate from ResumeView's permanent one), and writes from one
+  daemon clobber the other.
+
+### Where these likely land
+
+- Workflow / prompt bugs (`hand` doesn't promote, engineers don't submit,
+  worktree isolation) plausibly dissolve as Project 2's workflow substrate
+  matures — that IS what Project 2 lands.
+- Race / lifecycle bugs (members.json drift, mitose-vs-dream, restart
+  cleanup) and Windows hangs are orthogonal to refactor scope. They need
+  targeted fixes regardless of where the plan sits — track as live parallel
+  work alongside Project 2, not deferred opener material.
 
 ---
 
@@ -1539,42 +2528,17 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 
 *Chains become real. Work propagates without the founder pushing it. Self-witnessing meta-layer arrives.*
 
-### 2.1 — Blueprint as molecule
+### 2.1 — [ABSORBED INTO 1.8 — Blueprint-as-molecule]
 
-**Problem.** Blueprints today are markdown runbooks-the-CEO-reads. They're prose for humans. They can't be executed mechanically, so chains of work rely on the CEO manually tracking position. When CEO's context drifts, the chain breaks.
+**This sub-project became 1.8.** Blueprint-as-molecule is prerequisite for 1.9's watchdog chain — Sexton's patrols ARE Blueprints, so the substrate had to land in Project 1. The original 2.1 scope (TOML-frontmatter format, parser + DAG validation, cook command, migration of existing blueprints) moves verbatim to 1.8; rationale is documented there. Shipping 1.9 without 1.8 would have meant throwaway prompt-text patrol logic rewritten the moment Blueprints landed — the exact anti-pattern the refactor thesis forbids.
 
-**Scope.**
-- Define Blueprint format: TOML-frontmatter markdown, with a `steps:` array. Each step: `{ id, title, description, depends_on, acceptance_criteria, assignee_role }`.
-- Blueprint parser in `packages/shared/src/blueprints/` — validates structure, checks DAG (no cycles).
-- "Cooking" logic: `cc-cli blueprint cook --blueprint <name> --project <id>` instantiates a blueprint into a real Contract with real Task records. Variable substitution at cook time (template `{feature}` → "fire-command").
-- Existing blueprint files (`packages/shared/src/blueprints/onboard-agent.md` and co.) get migrated to the new structured format.
-- CEO command: `cc-cli contract start --blueprint ship-feature --vars feature=fire` creates the Contract + Tasks and optionally hands to an assigned role.
+If you're reading this looking for Blueprint-as-molecule, go to **1.8**.
 
-**Acceptance criteria.**
-- Run `cc-cli blueprint cook ship-feature --project test --vars feature=fire` → produces a Contract with 5-10 Tasks in the DAG defined by the blueprint.
-- Tasks have `depends_on` and `acceptance_criteria` populated from the blueprint.
-- An Employee slung the Contract's first Task can walk the chain via Casket without any human re-dispatching at boundaries.
+### 2.2 — [ABSORBED INTO 1.9 — Watchdog chain]
 
-**Depends on:** 1.2 (Casket), 1.3 (chain semantics in tasks)
-**PRs:** 4-5
+**This sub-project became part of 1.9.** Patrol blueprints (`patrol/health-check`, `patrol/corp-health`, `patrol/cleanup-stale-sandboxes`, `patrol/merge-queue-status`, `patrol/chit-hygiene`) ship with the 1.9 watchdog chain because they are what Sexton consumes — meaningless without her, and she doesn't work without them. Bundling them into 1.9 means the pair lands as a working whole rather than two PRs each missing the other half.
 
-### 2.2 — Failsafe patrol mechanism
-
-**Problem.** The Failsafe (from 1.8) wakes agents on-demand via Casket. But the Failsafe also needs to run its own workflows — check corp health, detect stuck work, clean up — and these are themselves chains that benefit from the same molecule mechanism.
-
-**Scope.**
-- Patrol definitions: small Blueprints meant for Failsafe, not agent-workers. Examples: `patrol/health-check`, `patrol/cleanup-stale-sandboxes`, `patrol/merge-queue-status`.
-- Patrol scheduler: the Failsafe runs a patrol on a cadence (configurable per-patrol). Patrol completion triggers the next cycle.
-- Patrol primitives (small step implementations): check-agent-health, check-stuck-tasks, check-merge-queue-depth, cleanup-stale-branches, report-metrics.
-- Patrol outputs: observations written to `daemon/observations/` for later dream compounding.
-
-**Acceptance criteria.**
-- Failsafe runs `patrol/health-check` every 5 minutes.
-- When an Employee silent-exits, health-check detects it within one cycle, writes an observation, and creates a recovery Task (picked up later by Witness from 3.1).
-- When a sandbox is idle > 24h, cleanup patrol removes its branch.
-
-**Depends on:** 2.1
-**PRs:** 3
+If you're reading this looking for patrol blueprints, go to **1.9** (Watchdog chain).
 
 ### 2.3 — Built-in blueprint library
 
@@ -1584,7 +2548,8 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 - `ship-feature` — design → plan → implement → test → PR → review
 - `fix-bug` — repro → root-cause → fix → verify → PR
 - `refactor-module` — define-scope → plan → implement-small-steps → tests → PR
-- `hire-employee` — define-role → allocate-slot → first-dispatch-self-naming → onboard
+- `hire-employee` — define-role → **author-operating-manual** → allocate-slot → first-dispatch-self-naming → onboard
+- `create-role` — define-identity → **author-operating-manual** → register-in-roles → first-hire
 - `promote-employee` — founder-reason → data-transition → ceremony-welcomes → first-dispatch
 - `release` — version-bump → changelog → tag → publish → announce
 - `sprint-review` — collect-activity → synthesize → present-to-founder
@@ -1592,11 +2557,15 @@ Self-organizing, no Witness in Project 1. An Employee's Casket Chit showing a qu
 
 Each blueprint tested against a real use case before landing.
 
+**The `author-operating-manual` step is load-bearing.** It's the mechanism through which per-role and per-Partner CLAUDE.md files get written. Nothing ships pre-written with Claude Corp — no role manuals, no agent runbooks, no `operatingGuide` field on RoleEntry. When the CEO (or a Partner with hire authority) runs `hire-employee` or `create-role`, the ceremony REFUSES TO COMPLETE until the new agent's or new role's `CLAUDE.md` is authored based on corp context. This is the "earn the operational knowledge, don't install it" thesis applied to hiring — the corp's specific conventions, codebase standards, review bar, and escalation preferences get written down by an agent who actually knows them, at the moment they're needed.
+
+Employees inherit their role's `CLAUDE.md` template when spawned (the CEO wrote it once when creating the role; every Employee of that role gets it). Partners get individually-authored `CLAUDE.md` files at hire (they're individuals, not pool members). Partners-by-decree (CEO / Herald / HR / Adviser / Sexton) operate from their `IDENTITY.md` + role identity + shipped patrol blueprints (for Sexton) without needing the hire ceremony — they're product-universal roles whose work is codified in shipped mechanisms, not corp-specific.
+
 **Acceptance criteria.**
 - Each blueprint can be cooked without error.
 - For each, an Employee walks the resulting Contract end-to-end on a test project without human intervention.
 
-**Depends on:** 2.1
+**Depends on:** 1.8 (Blueprint-as-molecule substrate)
 **PRs:** 2-3 (one per batch)
 
 ### 2.4 — Self-witnessing meta-layer (the "trippy idea")
@@ -1617,7 +2586,7 @@ Each blueprint tested against a real use case before landing.
 - A review-session detects an obviously wrong Task output (e.g. Task said "write test" but output has no test) and flags `redo`.
 - Self-reviewed Contract has measurably fewer Warden rejections than a flat-walked one.
 
-**Depends on:** 2.1 (molecules are the Tasks within a Contract)
+**Depends on:** 1.8 (Blueprint-as-molecule — the Tasks within a Contract)
 **PRs:** 4-5
 
 **Project 2 ship criterion:** CEO can say "ship feature X using the ship-feature blueprint" → blueprint cooks into a multi-Task Contract → Employee gets slung the Contract → walks it with self-review between Tasks → PR lands. Zero human intervention in the middle.
@@ -1628,52 +2597,53 @@ Each blueprint tested against a real use case before landing.
 
 *Corp heals itself. Mark can sleep and wake to a working corp.*
 
-### 3.1 — Advanced Witness patrols (cross-agent anomaly detection)
+### 3.1 — Cross-agent anomaly detection (Sexton's deeper patrols)
 
-**Note.** The per-agent Witness loop + Failsafe town-level coordination + Dogs maintenance crew all ship in 1.8. What remains here is the cross-agent anomaly pattern detection that needs more state than a single agent's watchdog carries.
+**Note.** Sexton's per-agent patrols (silent-exit, stall, loop, GUPP violation) ship in 1.9 alongside the patrol blueprint library. What remains here is the cross-agent anomaly pattern detection that needs more state than a single patrol cycle carries.
 
-**Problem.** 1.8's watchdog catches per-agent failures: silent-exit, stall, loop, GUPP violation. It doesn't catch cross-agent patterns: "Backend Engineer pool keeps producing PRs the QA Engineer pool rejects — there's a skill gap" or "Engineering Lead has been handing impossible Tasks to Employees for 3 days." These aren't per-agent bugs; they're coordination bugs that only surface when you aggregate across roles.
+**Problem.** 1.9's patrols catch per-agent failures. They don't catch cross-agent patterns: "Backend Engineer pool keeps producing PRs the QA Engineer pool rejects — there's a skill gap" or "Engineering Lead has been handing impossible Tasks to Employees for 3 days." These aren't per-agent bugs; they're coordination bugs that only surface when you aggregate across roles.
 
 **Scope.**
-- Cross-agent pattern detectors that consume chit store + observation stream: reject-rate per role-pair, task-escalation frequency, blocker-file-rate per role, merge-submission retry-rate.
+- Cross-agent pattern detectors that consume chit store + observation stream: reject-rate per role-pair, task-escalation frequency, blocker-file-rate per role, clearance-submission retry-rate.
 - Threshold-based alerting (not ML — explicit rules): `backend→qa reject rate > 0.5 sustained for 24h → observation + Tier 2 inbox to CEO`.
-- Orphan-task reaper: Chits that should have dispatched but didn't — route via Failsafe to an idle Employee.
+- Orphan-task reaper: Chits that should have dispatched but didn't — route via Sexton's redistribute action to an idle Employee.
 - Intervention audit trail: every anomaly + intervention writes an observation so dreams can compound patterns across time.
+- Implemented as additional patrol blueprints Sexton consumes (`patrol/cross-agent-reject-rates`, etc.) — no new daemon layer needed; just a richer patrol library.
 
-**Depends on:** 1.8 (base watchdog), 1.9 (bacteria), 4.1 (observations), 4.2 (dreams)
+**Depends on:** 1.9 (Sexton + patrol blueprint library), 1.10 (bacteria), 4.1 (observations), 4.2 (dreams)
 **PRs:** 2-3
 
-### 3.2 — [ABSORBED INTO 1.11 — Shipping]
+### 3.2 — [ABSORBED INTO 1.12 — Clearinghouse]
 
-The Refinery merge-coordinator work moved up into Project 1 (now 1.11 — Shipping). Rationale: merge discipline is prerequisite for multi-agent work, not a polish layer on top. Without serialized merges, parallel Employees stomp on each other from day one of Project 1's autonomous-loop test. Also: the whole thing is Employee-shape work (mechanical merging, no identity), which fits Project 1's "foundation + scaffolding" better than Project 3's "self-heal meta-layer."
+The Refinery merge-coordinator work moved up into Project 1 (now 1.12 — Clearinghouse). Rationale: merge discipline is prerequisite for multi-agent work, not a polish layer on top. Without serialized merges, parallel Employees stomp on each other from day one of Project 1's autonomous-loop test. Also: the whole thing is Employee-shape work (mechanical merging, no identity), which fits Project 1's "foundation + scaffolding" better than Project 3's "self-heal meta-layer."
 
-If you're looking for the merge-queue + janitor-pool design, go to 1.11.
+If you're looking for the merge-queue + clearinghouse-worker-pool design, go to 1.12.
 
-### 3.3 — [ABSORBED INTO 1.8 + 1.10]
+### 3.3 — [ABSORBED INTO 1.9 + 1.11]
 
 The auto-recovery machinery split across two earlier sub-projects:
-- Silent-exit detection + respawn → **1.8** (Witness tier-1).
-- Crash-loop circuit breaker + per-hour dispatch budget → **1.10** (Budget governor + circuit breaker).
-- Daemon-restart survival (reload Casket state on boot, resume patrols) → left here — the genuinely daemon-lifecycle piece that neither 1.8 nor 1.10 covers.
+- Silent-exit detection + respawn → **1.9** (Sexton's patrol via the health-check Blueprint).
+- Crash-loop circuit breaker + per-hour dispatch budget → **1.11** (Budget governor + circuit breaker).
+- Daemon-restart survival (reload state on boot, resume patrols) → left here — the genuinely daemon-lifecycle piece that neither 1.9 nor 1.11 covers.
 
 ### 3.3' — Daemon-restart survival (the remnant)
 
-**Problem.** When the daemon process itself dies + restarts, in-flight Contracts shouldn't lose their place. Chit state is file-first so the substrate survives, but the watchdog + bacteria + shipping queue processors all need to pick up mid-cycle cleanly.
+**Problem.** When the daemon process itself dies + restarts, in-flight Contracts shouldn't lose their place. Chit state is file-first so the substrate survives, but the watchdog + bacteria + shipping queue processors all need to pick up mid-cycle cleanly. 1.9 covers the watchdog-chain-level unkillability (OS supervisor → daemon → Pulse → Alarum → Sexton resuming from handoff chit); this sub-project covers the corp-wide state-rehydration on daemon boot.
 
 **Scope.**
-- Daemon boot walks members.json + Casket chits + merge-submission queue + pending breaker-trip chits, reconstructs in-memory state from disk.
-- Witness patrol resumes (re-registers observers for every agent that has an active Casket).
-- Shipping queue picks up where it left off — checks `shipping-lock` chit's `held_by`; if that janitor's session is gone, release the lock and let the next queued janitor take over.
+- Daemon boot walks members.json + Casket chits + clearance-submission queue + pending breaker-trip chits, reconstructs in-memory state from disk.
+- Pulse starts ticking immediately post-boot; Alarum's first tick sees Sexton's existing handoff chit and continues her patrols.
+- Clearinghouse queue picks up where it left off — checks `clearinghouse-lock` chit's `held_by`; if that worker's session is gone, release the lock and let the next queued clearinghouse worker take over.
 - Circuit-breaker chits respected across restart (breaker trips persist).
 
 **Acceptance criteria.**
-- Kill daemon mid-Contract. Restart. Agents dispatch on next hand / Witness tick without human action.
+- Kill daemon mid-Contract. Restart. Agents dispatch on next hand / Sexton tick without human action.
 - Breaker tripped before restart stays tripped after restart.
 
-**Depends on:** 1.8, 1.10, 1.11
+**Depends on:** 1.9, 1.11, 1.12
 **PRs:** 1-2
 
-**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Witness respawns them from 1.8). A merge conflict happens (Shipping janitor routes it to the author via a blocker chit from 1.11). A role's Employee keeps crashing (circuit breaker trips from 1.10). The daemon process restarts at 3am from a memory leak (3.3' resumes state cleanly). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
+**Project 3 ship criterion:** Mark goes to sleep with 3 parallel Contracts running. Employees silent-exit twice (Sexton's patrol from 1.9 respawns them). A merge conflict happens (Clearinghouse worker from 1.12 routes it to the author's role via a blocker chit). A role's Employee keeps crashing (circuit breaker from 1.11 trips). The daemon process restarts at 3am from a memory leak (3.3' resumes state cleanly; OS supervisor + 1.9's watchdog chain carry the corp across the restart). Mark wakes to 3 opened PRs, zero manual intervention mid-night. Corp kept itself alive.
 
 ---
 
@@ -1730,34 +2700,20 @@ The auto-recovery machinery split across two earlier sub-projects:
 **Depends on:** 4.1
 **PRs:** 3-4
 
-### 4.3 — Promotion mechanism (Employee → Partner, with ceremony)
+### 4.3 — [ABSORBED INTO 1.1]
 
-**Problem.** Promotion is defined (see Decisions Made section — it's a ceremony) but not built. Today there's no way for Mark to say "this Employee becomes a Partner" and have the corp ceremony run.
+The core taming command + ceremony shipped in 1.1 — see 1.1's "Ceremony" subsection for the shipped shape:
 
-**Scope.**
-- Command: `cc-cli agent promote <employee-slug> --name <new-partner-name> --reason "..."`
-- Data transition:
-  - `Member.kind` changes from `employee` to `partner`
-  - Slot made persistent (excluded from bacteria-collapse)
-  - New Partner's workspace expanded: SOUL.md + IDENTITY.md + BRAIN/ + MEMORY.md created from role's pre-BRAIN as seed
-  - Name in members.json gets updated to new Partner name
-- Ceremony sequence (orchestrated by daemon or CEO):
-  1. Founder's `--reason` note written as the first BRAIN/ entry: `BRAIN/01-origin.md`
-  2. CEO receives prompt to welcome the new Partner by name, reference the reason
-  3. Relevant Partners (Engineering Lead if a dev Employee is promoted, etc.) also prompted to welcome briefly
-  4. Messages posted in corp-wide channel (maybe `#announcements` or `#general`)
-  5. New Partner's first dispatch includes those welcomes in context + their seeded BRAIN + an instruction: "acknowledge your own becoming, thank those who welcomed you."
-  6. The new Partner's first reply is written to their BRAIN as `BRAIN/02-arrival.md`.
-- Role adjustment: Employee pool for the role loses this slot; role pre-BRAIN continues accumulating from other Employees.
+- Command is `cc-cli tame` (not `cc-cli agent promote` — renamed because "tame" is the load-bearing verb; it pairs with hire/fire as the three verbs of an agent lifecycle, and captures the specific relational act of bringing an ephemeral slot into the trusted named circle).
+- Ceremony is inbox-chit based: Tier 3 welcome for new Partner from founder; Tier 2 walkaround-requests for every other Partner. No faked agent voice; each Partner engages in their own voice on their own tempo. The accretion IS the witnessing.
+- Genesis BRAIN entry: `BRAIN/genesis.md` (not `01-origin.md`) carries the founder's reason with `source='founder-direct'`, `confidence='high'`, `type='self-knowledge'`.
 
-**Acceptance criteria.**
-- Promote an Employee named "toast" to Partner "Joe" with reason "shipped 12 clean PRs over 3 weeks."
-- Next dispatch: Joe has `IDENTITY.md` (role = Partner, name = Joe), `BRAIN/01-origin.md` (the reason), `BRAIN/02-arrival.md` (their arrival response), seeded MEMORY.md pointing at both.
-- Joe references the promotion reason in a later dispatch when making a judgment call aligned with it.
-- Joe is listed as a Partner in `cc-cli agents`, not an Employee in a pool.
+What remains deferred to this project (4.3) once role-level pre-BRAIN lands (4.x):
 
-**Depends on:** 1.1, 4.1
-**PRs:** 3
+- **Role pre-BRAIN seeding.** On tame, the new Partner's BRAIN should inherit the accumulated pre-BRAIN of their role (observations other Employees in that role produced over time, distilled into rules). Requires 4.x's pre-BRAIN distillation mechanism to exist. The 1.1-shipped tame creates an empty BRAIN/ dir + genesis.md; 4.3 extends it to pre-BRAIN inheritance.
+- **Second BRAIN arrival entry** (`BRAIN/02-arrival.md`): the new Partner's first reply to the ceremony, written back as BRAIN. Requires a dispatch hook to capture their response. 1.1-shipped tame doesn't do this; the welcomes arrive, the new Partner responds via normal channels, no automated capture.
+
+Both are meaningful additions but not blockers — 1.1's shipped tame already feels like a real moment with the inbox ceremony + genesis.md. 4.3 is the accumulating upgrade when pre-BRAIN + dreams are live.
 
 **Project 4 ship criterion:** an Employee that's been shipping backend work for 2 weeks gets promoted via a witnessing ceremony. Next session Joe reads BRAIN with accumulated insights (role pre-BRAIN seed + origin reason + arrival memory). Behavior changes — references past incidents, shows personality, makes founder-aligned judgment calls. Promotion feels like a real moment, not a flag flip.
 
@@ -1841,8 +2797,8 @@ The auto-recovery machinery split across two earlier sub-projects:
 **Problem.** After projects 1-5, many old concepts are replaced by new ones. Leaving them in the codebase as parallel paths is exactly the "vocabulary without capacity" sin the refactor exists to fix. They must go, on purpose, deliberately.
 
 **Scope.** Walk the codebase and delete:
-- Old Pulse implementation (replaced by Failsafe in 1.8)
-- Old Blueprint runbook reader / `cc-cli blueprints run` (replaced by blueprint-as-molecule cooking in 2.1)
+- Old Pulse heartbeat behavior — the 5-min idle-agent nudging (superseded in 1.9 when Sexton absorbed that work; Pulse's NAME persists but its scope shrank to "tick the Alarum")
+- Old Blueprint runbook reader / `cc-cli blueprints run` (replaced by blueprint-as-molecule cooking in 1.8)
 - Fragment injection call for claude-code agents (removed in 1.5); keep fragments for OpenClaw
 - Old Casket-as-four-files structure if migrated to single-pointer hook
 - Old Hand-as-chat-announcement (the legacy chat-delivery path; replaced by durable chit-based Hand in 1.4)
@@ -1947,17 +2903,29 @@ Hold these throughout:
 
 ---
 
-## Where We Are Right Now (conversation state at time of writing)
+## Where We Are Right Now (updated 2026-04-24)
 
 Decided: everything in the "Decisions Made" section above.
 
 Still being discussed: the two remaining open questions (Partner demotion, voice-preservation invasiveness).
 
 **Implementation-detail depth:**
-- Project 1 sub-projects (1.1 through 1.9) have concrete file paths, test strategy, and dependencies spelled out. Ready to pick up and execute.
+- Project 1 sub-projects (1.1 through 1.13) have concrete file paths, test strategy, and dependencies spelled out, all shipped — see per-section [shipped] markers. The "Live bugs surfaced by the Project 1 finale" section above documents the integration-time gaps that surfaced during the closing e2e run; some dissolve as Project 2's workflow substrate matures, others are orthogonal parallel work.
 - Projects 2 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
 
-**Immediate next step:** start Project 0.1 (Chit core — schema, type registry, read/write primitives, atomic-write helper). Project 0 ships before any of Project 1's sub-projects begin, because Casket, Chain semantics, Hand, Dredge handoff, pre-BRAIN accumulation all become Chit types rather than bespoke file formats. Project 1's scope shrinks somewhat because much of what it would have built (new file shapes, new read/write code paths) disappears into "add a type to the Chit registry."
+**Shipped as of 2026-04-29:**
+- **Project 0** — Chits, lifecycle, wtf + CORP.md + audit gate + inbox — complete.
+- **Project 1** — Complete. 1.1 (Employee/Partner), 1.2 (Casket), 1.3 (chain + state machine), 1.4 (Hand rewrite) + 1.4.1 (block), 1.6 (Dredge-via-handoff-chits), 1.7 (Partner compaction), 1.8 (Blueprint-as-molecule), 1.9 (sweeper substrate + Sexton role + Pulse/Alarum + Sexton runtime + patrol blueprints), 1.10 (bacteria + cc-cli whoami + observability), 1.11 (crash-loop circuit breaker), 1.12 + 1.12.1-1.12.3 (clearinghouse: substrate + Pressman + Editor + walk-away-overnight closer), 1.13 (founding-flow refresh + stabilization stack PRs #198-203).
+
+**In flight (open PRs, 1.9.5 phase):**
+- PR #178 — OS supervisor configs (systemd/launchd/Task Scheduler install + uninstall).
+- PR #179 — Sweeper execution + 6 code sweepers (silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation) + `kink` chit type + dedup/auto-resolve + wake-message wiring.
+
+**Immediate next steps** (after 1.9.5 PRs land):
+1. Remaining 1.9 follow-ups: `cc-cli sweeper new --prompt` generator, patrol blueprint library (the contract-shaped blueprints Sexton cooks + walks), + `conflict-triage` AI sweeper.
+2. **Project 1.10** — Bacteria (auto-scaling Employee pool via weighted queue depth from TaskFields.complexity, role-resolver spawn integration, self-naming flow). Prerequisite for 1.12. Spec pinned earlier today: silentexit reinitializes existing slots; bacteria only creates new ones; disjoint domains.
+3. **Project 1.11** — Budget governor + crash-loop circuit breaker. Pinned integration point: silentexit retry-budget goes through 1.11's breaker, not a per-sweeper counter. Enables the `breaker-reset` + `budget-watch` sweepers.
+4. **Project 1.12** — Clearinghouse (merge lane + clearinghouse Employees). Renamed 2026-04-26 from placeholder "Shipping"; status value `clearance`. Pinned spec update earlier: conflict blockers are role-scoped, not slot-scoped, so no PR gets stranded when its author decommissions.
 
 Claude (not the corp) drives the build — the corp hasn't earned that trust yet. Eventually, once the corp works well on this new substrate, future refactors can be corp-driven. But not this one.
 

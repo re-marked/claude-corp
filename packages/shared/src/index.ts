@@ -6,6 +6,7 @@ export type {
   MemberType,
   MemberScope,
   AgentWorkStatus,
+  AgentKind,
   Channel,
   ChannelKind,
   ChannelScope,
@@ -18,6 +19,7 @@ export type {
   Team,
   TeamStatus,
   Corporation,
+  CorpPreferences,
   Project,
   ProjectType,
   AgentConfig,
@@ -49,6 +51,20 @@ export type {
   InboxItemFields,
   InboxItemTier,
   InboxItemSource,
+  EscalationFields,
+  BlueprintFields,
+  BlueprintStep,
+  BlueprintVar,
+  SweeperRunFields,
+  KinkFields,
+  BreakerTripFields,
+  ClearanceSubmissionFields,
+  ReviewCommentFields,
+  LaneEventFields,
+  LaneEventKind,
+  LaneEventPayload,
+  PatternObservationFields,
+  PatternSubject,
 } from './types/index.js';
 
 // Parsers
@@ -144,6 +160,86 @@ export type {
   MalformedChit,
 } from './chits.js';
 
+// Task state machine — Project 1.3 mechanical enforcement of the 10-state
+// workflow lifecycle. See task-state-machine.ts module docstring for the
+// transition table + design rationale.
+export {
+  validateTransition,
+  resolveTransition,
+  legalTriggersFrom,
+  initialState,
+  isTerminal,
+  isTerminalSuccess,
+  isTerminalFailure,
+  TaskTransitionError,
+  TRANSITION_RULES,
+  TERMINAL_STATES,
+  TERMINAL_SUCCESS_STATES,
+  TERMINAL_FAILURE_STATES,
+  ALL_STATES,
+} from './task-state-machine.js';
+export type { TaskTransitionTrigger } from './task-state-machine.js';
+
+// Chain walker — pure readiness / propagation primitives over the
+// dependsOn DAG. Task events (daemon) invoke advanceChain on close
+// and apply the returned DependentDeltas via the state machine.
+export {
+  isReady,
+  analyzeReadiness,
+  nextReadyTask,
+  advanceChain,
+  applyDependentDelta,
+  applyDependentDeltas,
+  applyChainAdvance,
+  ChainCycleError,
+} from './chain.js';
+export type {
+  ReadinessReason,
+  ReadinessResult,
+  AdvanceChainResult,
+  DependentDelta,
+  ApplyDeltaOpts,
+  ApplyDeltaResult,
+  ApplyChainAdvanceOpts,
+  ChainAdvanceApplyResult,
+  ChainAdvanceRedispatchResult,
+  ChainAdvanceCascadeNotification,
+} from './chain.js';
+
+// Role resolver — Project 1.4. Picks an Employee slot for a role-mode
+// hand / block / escalate. Pure; callers apply the resolved target.
+export { resolveRoleToEmployee, resolveSlotOrRole } from './role-resolver.js';
+export type {
+  RoleResolveResult,
+  RoleResolvedResult,
+  RolePartnerOnlyResult,
+  RoleNoCandidatesResult,
+  RoleUnknownResult,
+  SlotOrRoleResolution,
+} from './role-resolver.js';
+
+// Hand core — the shared mechanics for Casket-pointer writes + state
+// machine transitions + announcement. CLI cmdHand and daemon cron
+// task-spawn both use this; the daemon no longer has its own
+// /tasks/:id/hand endpoint.
+export { handChitToSlot, handChitToRoleQueue, HandNotAllowedError } from './hand-core.js';
+export type {
+  HandChitToSlotOpts,
+  HandChitToSlotResult,
+  HandChitToRoleQueueOpts,
+  HandChitToRoleQueueResult,
+} from './hand-core.js';
+
+// Project 1.7: pre-compact threshold math. Pure; mirrors Claude Code's
+// autocompact formula + adds our wider signal-window buffer so the
+// pre-compact-signal fragment can fire before autocompact destroys
+// raw context.
+export {
+  calculateCompactionThreshold,
+  formatThresholdSummary,
+} from './compaction-threshold.js';
+export type { CompactionThresholdState } from './compaction-threshold.js';
+
 // Casket lifecycle primitives — the durable work-pointer surface that
 // 0.7.3's audit gate reads and that 1.3's chain walker will eventually
 // write. Module docstring explains the "was 1% built, this is the
@@ -161,6 +257,160 @@ export {
 // emitters). Tier-specific TTL + destructionPolicy rules centralized.
 export { createInboxItem, TIER_TTL } from './inbox.js';
 export type { CreateInboxItemOpts } from './inbox.js';
+
+// Kink helpers — dedup-aware write + auto-resolve for the kink chit
+// type. Sweepers use these instead of raw createChit; future daemon-
+// internal detectors (boot-time misconfig, harness anomalies) can too.
+export { writeOrBumpKink, resolveKink } from './kinks.js';
+export type {
+  WriteOrBumpKinkOpts,
+  WriteOrBumpKinkResult,
+  ResolveKinkOpts,
+  KinkResolution,
+} from './kinks.js';
+
+// Project 1.10.4: bacteria observability substrate. Events log shape +
+// read/write helpers consumed by status command, lineage view, Sexton's
+// wake prompts, TUI sidebar aggregation. Append-only JSONL — bacteria
+// executor writes; everyone else reads.
+export { appendBacteriaEvent, readBacteriaEvents } from './bacteria-events.js';
+export type {
+  BacteriaEvent,
+  MitoseEvent,
+  ApoptoseEvent,
+  ReadBacteriaEventsOpts,
+} from './bacteria-events.js';
+
+// Project 1.10.4: founder-controlled bacteria pause registry. Decision
+// module skips paused roles. Tiny JSON at <corpRoot>/bacteria-paused.json.
+export { readPausedRoles, pauseRole, resumeRole } from './bacteria-paused.js';
+
+// Shared formatting helpers — single source for human-facing strings
+// (durations etc) so behavior stays consistent across CLI surfaces +
+// Sexton's wake prose.
+export { formatDuration } from './format.js';
+
+// Project 1.11: crash-loop circuit breaker. Pure detection helper +
+// idempotent trip/close lifecycle + read surface for the spawn-refusal
+// path, founder controls, Sexton wake summary, TUI sidebar.
+export {
+  evaluateBreakerTrigger,
+  tripBreaker,
+  closeBreakerForSlug,
+  findActiveBreaker,
+  listActiveBreakers,
+  CRASH_LOOP_THRESHOLD_DEFAULT,
+  CRASH_LOOP_WINDOW_MS_DEFAULT,
+} from './bacteria-breaker.js';
+
+// Project 1.12: clearinghouse helpers — pure priority scoring, queue
+// ordering, lock lifecycle (singleton JSON), and submission state
+// cascade (submission → task → contract). The Pressman/Editor agents
+// and CLI commands compose against these.
+export {
+  scoreSubmission,
+  rankQueue,
+  readClearinghouseLock,
+  getClearinghouseLockPath,
+  claimClearinghouseLock,
+  releaseClearinghouseLock,
+  forceReleaseClearinghouseLock,
+  markSubmissionMerged,
+  markSubmissionFailed,
+  detectStaleLock,
+  findOrphanedProcessingSubmissions,
+  resetOrphanedSubmission,
+  resumeClearinghouse,
+  EDITOR_REVIEW_ROUND_CAP_DEFAULT,
+} from './clearinghouse.js';
+export type {
+  ScorableSubmission,
+  QueueEntry,
+  ClearinghouseLockState,
+  ClaimLockOpts,
+  ReleaseLockOpts,
+  MarkSubmissionMergedOpts,
+  MarkSubmissionFailedOpts,
+  StaleLockInfo,
+  OrphanedSubmission,
+  ResumeClearinghouseResult,
+} from './clearinghouse.js';
+export type {
+  BreakerTriggerKink,
+  BreakerTriggerDecision,
+  TripBreakerOpts,
+  TripBreakerResult,
+  CloseBreakerOpts,
+  ListActiveBreakersOpts,
+} from './bacteria-breaker.js';
+
+// Project 1.9.6: seed bundled built-in blueprint markdown files
+// into a fresh corp's chit store at init. Mirrors installDefaultSkills —
+// the bundled `blueprints/` dir ships with the package, seeded once
+// at scaffoldCorp time. User-authored blueprints (via cc-cli blueprint
+// new) stay distinct via origin='authored'; seeded ones are 'builtin'.
+export { seedBuiltinBlueprints } from './blueprint-seed.js';
+
+// Blueprint var merge + coerce — Project 1.8 PR 2. Bridges CLI-shaped
+// string inputs to the typed Handlebars context the parser needs.
+// Pure; no Handlebars dependency (that lives in blueprint-parser.ts).
+export { coerceVarValue, mergeBlueprintVars, BlueprintVarError } from './blueprint-vars.js';
+export type { BlueprintVarValue } from './blueprint-vars.js';
+
+// Blueprint parser — Handlebars expansion layer on top of the vars
+// merge. Strict-mode catches undeclared references; the cast primitive
+// (next commit) consumes ParsedBlueprint directly and has no Handlebars
+// awareness. Pure.
+export { parseBlueprint, BlueprintParseError } from './blueprint-parser.js';
+export type { ParsedBlueprint, ParsedBlueprintStep } from './blueprint-parser.js';
+
+// Blueprint cast — Project 1.8 PR 2. Validation-first primitive that
+// composes parser + chit CRUD into Contract + Task chits. All failure
+// modes that CAN be caught before any chit write ARE caught (var coercion,
+// template syntax, strict-mode refs, status check, role resolution,
+// registry existence). CLI in PR 3 wraps this.
+export { castFromBlueprint, BlueprintCastError } from './blueprint-cast.js';
+export type {
+  CastFromBlueprintOpts,
+  CastFromBlueprintResult,
+} from './blueprint-cast.js';
+
+// Sweeper cast — Project 1.9. Sibling to castFromBlueprint for
+// kind=sweeper blueprints. Produces one sweeper-run chit (vs Contract
+// + Tasks). Shares the parse / status pipeline; diverges at chit
+// write. See blueprint-cast.ts module docstring for the rationale.
+export { castSweeperFromBlueprint } from './blueprint-cast.js';
+export type {
+  CastSweeperFromBlueprintOpts,
+  CastSweeperFromBlueprintResult,
+} from './blueprint-cast.js';
+
+// Blueprint lookup — Project 1.8 PR 3. Centralizes name → chit resolution
+// with scope precedence, so every CLI command + Sexton's patrol cooking
+// uses one consistent lookup path.
+export {
+  findBlueprintByName,
+  resolveBlueprint,
+  listBlueprintChits,
+} from './blueprint-lookup.js';
+export type {
+  BlueprintLookupOpts,
+  BlueprintListOpts,
+} from './blueprint-lookup.js';
+
+// Role registry — canonical role metadata for Project 1.1's Employee/
+// Partner split. CORP.md renders role-specific sections from these
+// entries; `cc-cli hire --role` validates against them; `cc-cli tame`
+// reads defaultKind as the promotion sanity check.
+export {
+  ROLES,
+  getRole,
+  isKnownRole,
+  roleIds,
+  partnerRoles,
+  employeeRoles,
+} from './roles.js';
+export type { RoleEntry, RoleTier } from './roles.js';
 // Re-export computeTTL now that it's public (inbox.ts consumes it; other
 // inbox-like helpers may too).
 export { computeTTL } from './chits.js';
@@ -174,7 +424,15 @@ export {
   buildAuditPrompt,
   scanEvidence,
   parseTranscript,
+  parseTranscriptBeforeCompact,
   promotePendingHandoff,
+  completeDeferredTaskClose,
+  revertTaskFromUnderReview,
+  peekLatestHandoffChit,
+  consumeHandoffChit,
+  buildPreCompactInstructions,
+  buildCheckpointObservation,
+  extractLatestUsageFromTranscript,
 } from './audit/index.js';
 export type {
   HookEventName,
@@ -188,6 +446,14 @@ export type {
   EvidenceScanResult,
   HandoffPromotionResult,
   PendingHandoffPayload,
+  RevertUnderReviewResult,
+  CompleteDeferredCloseResult,
+  PreCompactInstructionsInput,
+  CheckpointBuilderInput,
+  CheckpointCasketRef,
+  CheckpointChitSpec,
+  CheckpointRecentActivity,
+  TranscriptUsageSnapshot,
 } from './audit/index.js';
 
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
@@ -238,6 +504,10 @@ export {
   migrateAgentWorkspaceFilenames,
   type WorkspaceMigrationResult,
 } from './migrate-workspace-filenames.js';
+export {
+  migrateClaudeMdForCorpImport,
+  type ClaudeMdCorpImportResult,
+} from './migrate-claude-md-corp-import.js';
 export {
   reconcileAgentWorkspace,
   type ReconcileAgentWorkspaceOpts,
@@ -360,11 +630,22 @@ export { MEMORY_TEMPLATE } from './templates/memory.js';
 export { USER_TEMPLATE } from './templates/user.js';
 export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarness } from './templates/environment.js';
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
+export { pressmanRules, type PressmanRulesOpts } from './templates/pressman-bootstrap.js';
+export { editorRules, type EditorRulesOpts } from './templates/editor-bootstrap.js';
+export { roleSpecificAgentsContent, type RoleSpecificRulesOpts } from './templates/role-rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
 export {
-  buildClaudeMd,
+  renderServiceForPlatform,
+  renderSystemdService,
+  renderLaunchdPlist,
+  renderTaskSchedulerXml,
+  UnsupportedPlatformError,
+  type SupervisorPlatform,
+  type ServiceOpts,
+  type ServiceArtifact,
+} from './templates/supervisor/index.js';
+export {
   buildThinClaudeMd,
-  type ClaudeMdTemplateOpts,
   type ThinClaudeMdOpts,
 } from './templates/claude-md.js';
 export {
@@ -388,6 +669,7 @@ export {
   resolveInboxSummary,
   formatAge,
   inferKind,
+  resolveKind,
   type WtfOutputOpts,
   type WtfOutput,
 } from './wtf-state.js';
@@ -403,8 +685,12 @@ export type { HierarchyNode } from './hierarchy.js';
 export { createProject, listProjects, getProject, getProjectByName } from './projects.js';
 export { createContract, readContract, updateContract, listContracts, listAllContracts, contractPath, getContractProgress, findContractById } from './contracts.js';
 export type { CreateContractOpts, ContractFilter, ContractWithBody } from './contracts.js';
-export { listBlueprints, getBlueprint, installDefaultBlueprints } from './blueprints.js';
-export type { BlueprintMeta, Blueprint } from './blueprints.js';
+// Legacy prose-blueprint API (listBlueprints / getBlueprint /
+// installDefaultBlueprints + BlueprintMeta / Blueprint) was removed
+// in Project 1.8 alongside the four prose .md files in
+// packages/shared/src/blueprints/. Blueprints are now chits — see
+// blueprint-chit-type.ts, blueprint-parser.ts, blueprint-cast.ts,
+// and blueprint-lookup.ts for the replacement surface.
 export type { CreateProjectOpts } from './projects.js';
 
 // Teams

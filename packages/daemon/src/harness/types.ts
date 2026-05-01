@@ -18,6 +18,7 @@
 
 import type { GlobalConfig } from '@claudecorp/shared';
 import type { FragmentContext } from '../fragments/index.js';
+import type { ClaudeCodeUsage } from './claude-code-stream.js';
 
 /** The harness contract every implementation must honor. */
 export interface AgentHarness {
@@ -154,6 +155,19 @@ export interface DispatchCallbacks {
   onToolEnd?: (tool: ToolCallInfo & { result?: string }) => void;
   /** Fires on lifecycle phase transitions (e.g., "slow", "thinking", "end"). */
   onLifecycle?: (phase: string) => void;
+  /**
+   * Fires when the underlying harness observes a usage snapshot (input /
+   * output / cache tokens). Claude Code emits this on every
+   * `message_start` (early — input_tokens known, output_tokens 0) and
+   * `message_delta` (final — output_tokens populated). OpenClaw does not
+   * currently surface usage; this callback is unused for that harness.
+   *
+   * Used by the daemon to track per-agent context size for Project 1.7's
+   * pre-compact signal window — the fragment reads the latest usage +
+   * model and decides whether to inject the "crystallize your memories"
+   * nudge before Claude Code's autocompact fires.
+   */
+  onUsage?: (usage: ClaudeCodeUsage, model: string) => void;
 }
 
 /** Describes a single tool invocation observed during a dispatch. */

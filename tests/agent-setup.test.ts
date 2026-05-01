@@ -242,8 +242,77 @@ describe('setupAgentWorkspace', () => {
       const content = readFileSync(join(agentAbs, 'CLAUDE.md'), 'utf-8');
       // Thin shell: bare "# <displayName>" (was "# I am X" under the fat template)
       expect(content).toContain('# Herald');
-      // Identity line carries kind inferred from rank (worker → employee)
-      expect(content).toContain('You are Herald, a worker (employee)');
+      // Kind omitted → effectiveKind defaults to 'partner' (pre-1.1 compat:
+      // every existing agent is a persistent-named partner). This also
+      // matches the workspace layout (brain/, SOUL.md, etc.) that the
+      // same default produces above.
+      expect(content).toContain('You are Herald, a worker (partner)');
+    });
+
+    it('explicit kind=employee on master rank produces Employee CLAUDE.md + Employee hook set (kind ≠ rank-inferred)', () => {
+      // Guards against the Codex-flagged bug where the claude-code
+      // branch inferred kind from rank instead of using opts.kind. A
+      // master-rank Employee is a pathological combo callers can hit
+      // via `cc-cli hire --kind employee --rank master` or similar;
+      // the workspace must be provisioned and the prompt/hook wiring
+      // must agree on kind=employee.
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          harness: 'claude-code',
+          kind: 'employee' as const,
+          role: 'backend-engineer',
+          rank: 'master' as const,
+          agentName: 'ghost',
+          displayName: 'Ghost',
+        }),
+      );
+      const agentAbs = join(corpRoot, agentDir);
+
+      const claudeMd = readFileSync(join(agentAbs, 'CLAUDE.md'), 'utf-8');
+      expect(claudeMd).toContain('(employee)');
+      expect(claudeMd).not.toContain('(partner)');
+
+      const settings = JSON.parse(
+        readFileSync(join(agentAbs, '.claude', 'settings.json'), 'utf-8'),
+      );
+      // Employees: no PreCompact, no UserPromptSubmit.
+      expect(settings.hooks.PreCompact).toBeUndefined();
+      expect(settings.hooks.UserPromptSubmit).toBeUndefined();
+      // But SessionStart + Stop are universal.
+      expect(settings.hooks.SessionStart).toBeDefined();
+      expect(settings.hooks.Stop).toBeDefined();
+    });
+
+    it('explicit kind=partner on worker rank produces Partner CLAUDE.md + Partner hook set (kind ≠ rank-inferred)', () => {
+      // Mirror case: a worker-rank Partner (common for role-lead Partners
+      // like Engineering Lead). Pre-fix, inferKind(rank='worker') would
+      // have emitted kind=employee, silently disabling PreCompact /
+      // UserPromptSubmit even though the workspace shipped full soul
+      // files. Assert both sides agree on kind=partner.
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          harness: 'claude-code',
+          kind: 'partner' as const,
+          role: 'engineering-lead',
+          rank: 'worker' as const,
+          agentName: 'ada',
+          displayName: 'Ada',
+        }),
+      );
+      const agentAbs = join(corpRoot, agentDir);
+
+      const claudeMd = readFileSync(join(agentAbs, 'CLAUDE.md'), 'utf-8');
+      expect(claudeMd).toContain('(partner)');
+      expect(claudeMd).not.toContain('(employee)');
+
+      const settings = JSON.parse(
+        readFileSync(join(agentAbs, '.claude', 'settings.json'), 'utf-8'),
+      );
+      // Partner hook set: SessionStart + PreCompact + Stop + UserPromptSubmit.
+      expect(settings.hooks.SessionStart).toBeDefined();
+      expect(settings.hooks.PreCompact).toBeDefined();
+      expect(settings.hooks.Stop).toBeDefined();
+      expect(settings.hooks.UserPromptSubmit).toBeDefined();
     });
   });
 
@@ -306,6 +375,85 @@ describe('setupAgentWorkspace', () => {
       const { member } = setupAgentWorkspace(makeOpts(corpRoot, { harness: 'claude-code' }));
 
       expect(member.harness).toBe('claude-code');
+    });
+  });
+
+  describe('Project 1.1 kind-aware workspace (Employee vs Partner DNA split)', () => {
+    it('Partner hire writes SOUL/IDENTITY/USER/MEMORY + creates brain/ dir + BOOTSTRAP.md', () => {
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, { kind: 'partner' as const, role: 'ceo' }),
+      );
+      const abs = join(corpRoot, agentDir);
+
+      expect(existsSync(join(abs, 'SOUL.md'))).toBe(true);
+      expect(existsSync(join(abs, 'IDENTITY.md'))).toBe(true);
+      expect(existsSync(join(abs, 'USER.md'))).toBe(true);
+      expect(existsSync(join(abs, 'MEMORY.md'))).toBe(true);
+      expect(existsSync(join(abs, 'brain'))).toBe(true);
+      expect(existsSync(join(abs, 'BOOTSTRAP.md'))).toBe(true);
+    });
+
+    it('Employee hire skips SOUL/USER/MEMORY/BOOTSTRAP/brain — the DNA split on disk', () => {
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          kind: 'employee' as const,
+          role: 'backend-engineer',
+          rank: 'worker' as const,
+          agentName: 'toast',
+          displayName: 'Toast',
+        }),
+      );
+      const abs = join(corpRoot, agentDir);
+
+      expect(existsSync(join(abs, 'SOUL.md'))).toBe(false);
+      expect(existsSync(join(abs, 'USER.md'))).toBe(false);
+      expect(existsSync(join(abs, 'MEMORY.md'))).toBe(false);
+      expect(existsSync(join(abs, 'IDENTITY.md'))).toBe(false);
+      expect(existsSync(join(abs, 'BOOTSTRAP.md'))).toBe(false);
+      expect(existsSync(join(abs, 'brain'))).toBe(false);
+    });
+
+    it('Employee hire still writes operational files (AGENTS.md, TOOLS.md, STATUS.md, TASKS.md, skills/)', () => {
+      const { agentDir } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          kind: 'employee' as const,
+          role: 'backend-engineer',
+          rank: 'worker' as const,
+          agentName: 'toast',
+          displayName: 'Toast',
+        }),
+      );
+      const abs = join(corpRoot, agentDir);
+
+      expect(existsSync(join(abs, 'AGENTS.md'))).toBe(true);
+      expect(existsSync(join(abs, 'TOOLS.md'))).toBe(true);
+      expect(existsSync(join(abs, 'STATUS.md'))).toBe(true);
+      expect(existsSync(join(abs, 'TASKS.md'))).toBe(true);
+      expect(existsSync(join(abs, 'skills'))).toBe(true);
+    });
+
+    it('omitted kind falls back to partner (pre-1.1 compat)', () => {
+      // Legacy call sites don't pass kind; default must preserve the
+      // pre-1.1 full-soul-stack workspace shape.
+      const { agentDir } = setupAgentWorkspace(makeOpts(corpRoot));
+      const abs = join(corpRoot, agentDir);
+
+      expect(existsSync(join(abs, 'SOUL.md'))).toBe(true);
+      expect(existsSync(join(abs, 'brain'))).toBe(true);
+    });
+
+    it('kind + role are written into the returned Member record', () => {
+      const { member } = setupAgentWorkspace(
+        makeOpts(corpRoot, {
+          kind: 'employee' as const,
+          role: 'backend-engineer',
+          rank: 'worker' as const,
+          agentName: 'toast',
+          displayName: 'Toast',
+        }),
+      );
+      expect(member.kind).toBe('employee');
+      expect(member.role).toBe('backend-engineer');
     });
   });
 });

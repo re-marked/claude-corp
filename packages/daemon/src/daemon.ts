@@ -27,23 +27,40 @@ import { TaskWatcher } from './task-watcher.js';
 import { HireWatcher } from './hire-watcher.js';
 import { EventBus, type DaemonEvent } from './events.js';
 import { InboxManager } from './inbox.js';
-import { Pulse } from './pulse.js';
-import { hireFailsafe } from './failsafe.js';
+import { Pulse } from './continuity/pulse.js';
+import { hireSexton } from './continuity/sexton.js';
 import { hireJanitor } from './janitor.js';
 import { hireWarden } from './warden.js';
 import { hireHerald } from './herald.js';
 import { hirePlanner } from './planner.js';
+import { hirePressman } from './clearinghouse/pressman.js';
+import { hireEditor } from './clearinghouse/editor.js';
 import { ContractWatcher } from './contract-watcher.js';
+import {
+  ClearanceSubmissionWatcher,
+  clearinghouseBootRecover,
+  clearinghouseSweep,
+  CLEARINGHOUSE_SWEEP_INTERVAL_MS,
+} from './clearinghouse/pressman-runtime.js';
+import {
+  EditorReviewWatcher,
+  editorBootRecover,
+  editorSweep,
+  EDITOR_SWEEP_INTERVAL_MS,
+} from './clearinghouse/editor-runtime.js';
+import { LaneEventWatcher } from './clearinghouse/lane-event-watcher.js';
 import { ClockManager } from './clock-manager.js';
 import { LoopManager } from './loops.js';
 import { CronManager } from './crons.js';
 import { DreamManager } from './dreams.js';
 import { AutoemonManager } from './autoemon.js';
+import { BacteriaReactor } from './bacteria/index.js';
 import { AnalyticsEngine } from './analytics.js';
 import { OpenClawWS } from './openclaw-ws.js';
 import { InflightRegistry } from './inflight-registry.js';
 import {
   type AgentHarness,
+  type ClaudeCodeUsage,
   ClaudeCodeHarness,
   HarnessRouter,
   OpenClawHarness,
@@ -54,7 +71,8 @@ import { recoverCrashedAgents, recoverCeoGateway, recoverCorpGateway } from './d
 import { scanChitLifecycle } from './chit-lifecycle.js';
 import { corpHasOpenClawAgent } from './harness-resolve.js';
 import { killStaleProcesses } from './stale-cleanup.js';
-import { log, logError } from './logger.js';
+import { dispatchTaskToDm } from './task-events.js';
+import { log, logError, setLogPath } from './logger.js';
 
 export class Daemon {
   corpRoot: string;
@@ -67,12 +85,16 @@ export class Daemon {
   hireWatcher: HireWatcher;
   pulse: Pulse;
   contractWatcher: ContractWatcher;
+  clearanceSubmissionWatcher: ClearanceSubmissionWatcher;
+  editorReviewWatcher: EditorReviewWatcher;
+  laneEventWatcher: LaneEventWatcher;
   clocks: ClockManager;
   loops: LoopManager;
   crons: CronManager;
   dreams: DreamManager;
   autoemon: AutoemonManager;
   analytics: AnalyticsEngine;
+  bacteria: BacteriaReactor;
   readonly startedAt: number = Date.now();
   /** Per-agent partial streaming content — updated as SSE tokens arrive. */
   streaming = new Map<string, { agentName: string; content: string; channelId: string }>();
@@ -112,6 +134,35 @@ export class Daemon {
   harness: HarnessRouter;
   /** Track consecutive overloaded errors per agent for gateway restart logic */
   overloadCounts = new Map<string, number>();
+  /**
+   * Per-session latest usage snapshot from the Claude Code stream.
+   * Populated via recordAgentUsage on every `message_start` /
+   * `message_delta` the harness emits. Consumed by Project 1.7's
+   * pre-compact signal fragment (through FragmentContext.sessionTokens
+   * + sessionModel) to decide whether the Partner has crossed into the
+   * "crystallize memories" window before Claude Code's autocompact
+   * fires.
+   *
+   * Keyed on `${memberId}|${sessionKey}` (composite). Keying ONLY on
+   * memberId would overwrite across concurrent session flows — an
+   * agent can legitimately have multiple simultaneous sessions (the
+   * jack DM loop + a cc-say-invoked side turn), each with its own
+   * session key and its own token budget. Overwrite-by-memberId would
+   * let one session's token count clobber another's and the fragment
+   * gate would fire (or fail to fire) in the wrong conversation
+   * (Codex P2 reviewer catch, PR #170).
+   *
+   * `at` is the wall-clock ms of the snapshot — kept for diagnostics
+   * ("signal fired on stale usage from 20 min ago") rather than
+   * staleness gating; even old usage approximates context size well
+   * enough to justify the signal.
+   */
+  private lastAgentUsage = new Map<string, { usage: ClaudeCodeUsage; model: string; at: number }>();
+
+  /** Compose the composite key used by lastAgentUsage. */
+  private usageKey(memberId: string, sessionKey: string): string {
+    return `${memberId}|${sessionKey}`;
+  }
   /** Founder presence tracking for autoemon — when was the last user interaction? */
   lastFounderInteractionAt = 0;
   private server: Server | null = null;
@@ -120,6 +171,11 @@ export class Daemon {
   constructor(corpRoot: string, globalConfig: GlobalConfig) {
     this.corpRoot = corpRoot;
     this.globalConfig = globalConfig;
+    // Point the logger at THIS corp's .daemon.log before any
+    // sub-component (process manager, watchers, autoemon, …)
+    // gets a chance to log. Without this, fixture daemons in
+    // tests bleed into a real corp's log file.
+    setLogPath(corpRoot);
     this.processManager = new ProcessManager(corpRoot, globalConfig);
     this.router = new MessageRouter(this);
     this.gitManager = new GitManager(corpRoot);
@@ -128,12 +184,27 @@ export class Daemon {
     this.hireWatcher = new HireWatcher(this);
     this.pulse = new Pulse(this);
     this.contractWatcher = new ContractWatcher(this);
+    this.clearanceSubmissionWatcher = new ClearanceSubmissionWatcher(this);
+    this.editorReviewWatcher = new EditorReviewWatcher(this);
+    this.laneEventWatcher = new LaneEventWatcher(this);
     this.clocks = new ClockManager(this.events);
     this.loops = new LoopManager(this);
     this.crons = new CronManager(this);
     this.dreams = new DreamManager(this);
     this.autoemon = new AutoemonManager(this);
     this.analytics = new AnalyticsEngine(this);
+    this.bacteria = new BacteriaReactor({
+      corpRoot: this.corpRoot,
+      globalConfig: this.globalConfig,
+      processManager: this.processManager,
+      // Codex P1 on PR #204: route post-mitose wake dispatches
+      // through dispatchTaskToDm so the freshly-spawned slot's
+      // first session is a work session against its casket
+      // pointer, not a race-loss to the dream manager.
+      dispatchAfterMitose: (slug, chitId, chitTitle) => {
+        dispatchTaskToDm(this, slug, chitTitle, chitId);
+      },
+    });
     this.inbox.setCorpRoot(corpRoot); // Enable inbox persistence
 
     // Harness abstraction — every dispatch flows through this.
@@ -232,6 +303,39 @@ export class Daemon {
     return this.inflightRegistry.list();
   }
 
+  /**
+   * Record a usage snapshot observed by the Claude Code harness for a
+   * given (agent, session) pair. Keeps the latest — message_delta
+   * overwrites the early message_start snapshot once output tokens are
+   * known. Called by the harness callback wiring on each dispatch.
+   *
+   * The sessionKey argument scopes the snapshot so concurrent sessions
+   * against the same agent (jack DM + cc-say side turn) don't clobber
+   * each other's token/model state — essential for the pre-compact
+   * signal to fire in the right conversation. See the lastAgentUsage
+   * docstring for the full rationale.
+   */
+  recordAgentUsage(
+    memberId: string,
+    sessionKey: string,
+    usage: ClaudeCodeUsage,
+    model: string,
+  ): void {
+    this.lastAgentUsage.set(this.usageKey(memberId, sessionKey), { usage, model, at: Date.now() });
+  }
+
+  /**
+   * Latest observed usage for an (agent, session) pair, or null when
+   * no dispatch on that session has produced a usage event yet (first
+   * turn of a session, or OpenClaw agent that doesn't emit usage).
+   */
+  getLastAgentUsage(
+    memberId: string,
+    sessionKey: string,
+  ): { usage: ClaudeCodeUsage; model: string; at: number } | null {
+    return this.lastAgentUsage.get(this.usageKey(memberId, sessionKey)) ?? null;
+  }
+
   /** Update agent work status + broadcast event + fire transition callbacks + analytics */
   setAgentWorkStatus(memberId: string, displayName: string, status: AgentWorkStatus): void {
     const prev = this.agentWorkStatus.get(memberId);
@@ -301,6 +405,32 @@ export class Daemon {
       }
     } catch (err) {
       logError(`[daemon] Workspace filename migration threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // Project 1.13: backfill `@./CORP.md` import in claude-code agents'
+    // CLAUDE.md. Pre-1.13 templates didn't include the import, and the
+    // wtf stdout trim means CORP.md no longer reaches them via hook
+    // injection — without this surgical insert, those agents lose
+    // CORP.md entirely on next dispatch. Idempotent: agents whose
+    // CLAUDE.md already contains the import are skipped. Surgical
+    // (NOT regenerative) — preserves any role-specific instructions
+    // the CEO or founder added to CLAUDE.md over time.
+    try {
+      const { migrateClaudeMdForCorpImport } = await import('@claudecorp/shared');
+      const claudeMigration = migrateClaudeMdForCorpImport(this.corpRoot);
+      if (claudeMigration.upgraded.length > 0) {
+        log(`[daemon] Inserted @./CORP.md into CLAUDE.md for ${claudeMigration.upgraded.length} agent(s)`);
+        for (const u of claudeMigration.upgraded) {
+          log(`[daemon]   ${u.agentSlug} (${u.insertedAt === 'anchor' ? 'at anchor' : 'appended'}): ${u.agentDir}`);
+        }
+      }
+      if (claudeMigration.errors.length > 0) {
+        for (const e of claudeMigration.errors) {
+          logError(`[daemon] CLAUDE.md insert failed for ${e.agentSlug} (${e.agentDir}): ${e.reason}`);
+        }
+      }
+    } catch (err) {
+      logError(`[daemon] CLAUDE.md @./CORP.md migration threw: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Sync corp-level skills to all agent workspaces
@@ -390,18 +520,50 @@ export class Daemon {
     this.hireWatcher.start();
     this.pulse.start();
     this.contractWatcher.start();
+    // Project 1.12.1: Pressman runtime — boot recovery + reactive
+    // watcher + Pulse-fallback sweep. No-ops on corps without a
+    // hired Pressman. Boot recovery is fire-and-forget — its eager
+    // dispatch awaits a /cc/say roundtrip we don't want to block
+    // start() on.
+    void clearinghouseBootRecover(this);
+    this.clearanceSubmissionWatcher.start();
+    this.clocks.register({
+      id: 'clearinghouse-sweep',
+      name: 'Clearinghouse Sweep',
+      type: 'heartbeat',
+      intervalMs: CLEARINGHOUSE_SWEEP_INTERVAL_MS,
+      target: 'pressman',
+      description: 'Recovers stale lock state + dispatches Pressman wake when queue is non-empty and no live holder.',
+      callback: () => clearinghouseSweep(this),
+    });
+    // Project 1.12.2: Editor runtime — boot recovery + reactive
+    // watcher (corp-scope task chits) + Pulse-fallback sweep. No-ops
+    // on corps without a hired Editor.
+    void editorBootRecover(this);
+    this.editorReviewWatcher.start();
+    // Project 1.12.3: lane-event notification watcher — daemon-side
+    // fallback for terminal-state DM/channel posts. Mirrors the
+    // existing watcher pattern; subscribes lazily on the lane-event
+    // chits dir.
+    this.laneEventWatcher.start();
+    this.clocks.register({
+      id: 'editor-sweep',
+      name: 'Editor Sweep',
+      type: 'heartbeat',
+      intervalMs: EDITOR_SWEEP_INTERVAL_MS,
+      target: 'editor',
+      description: 'Reaps stale reviewer claims + dispatches Editor wake when review-eligible work is present and no live reviewer holds a claim.',
+      callback: () => editorSweep(this),
+    });
 
     this.analytics.start();
-
-    // NOTE: Failsafe heartbeat removed — Pulse now handles ALL agent heartbeats
-    // directly (two-state: idle → check casket, busy → quick ping).
 
     // Register Herald narration as a Clock
     this.clocks.register({
       id: 'herald-narration',
       name: 'Herald Narration',
       type: 'heartbeat',
-      intervalMs: 5 * 60 * 1000,
+      intervalMs: 30 * 60 * 1000,
       target: 'Herald',
       description: 'Herald summarizes corp activity → writes NARRATION.md',
       callback: () => this.dispatchHeraldNarration(),
@@ -518,63 +680,6 @@ export class Daemon {
   // Recovery methods extracted to daemon-recovery.ts
   // Stale process cleanup extracted to stale-cleanup.ts
 
-  /**
-   * Dispatch monitoring protocol to Failsafe via say() — the proven Jack path.
-   * Calls the daemon's own /cc/say endpoint internally.
-   * This is more reliable than direct dispatchToAgent() because say() handles
-   * session management, status tracking, and inbox logging automatically.
-   */
-  private async dispatchFailsafeHeartbeat(): Promise<void> {
-    try {
-      // Quick checks before making the HTTP call
-      const members = readConfig<Member[]>(join(this.corpRoot, MEMBERS_JSON));
-      const failsafe = members.find(m => m.displayName === 'Failsafe' && m.type === 'agent');
-      if (!failsafe) return;
-      if (this.getAgentWorkStatus(failsafe.id) === 'busy') return;
-
-      const agentProc = this.processManager.getAgent(failsafe.id);
-      if (!agentProc || agentProc.status !== 'ready') return;
-
-      // Call our own /cc/say endpoint — same path that Jack uses, proven reliable
-      const resp = await fetch(`http://127.0.0.1:${this.port}/cc/say`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          target: 'failsafe',
-          message: 'Run your monitoring protocol. Check all agent statuses via cc-cli status and report.',
-          sessionKey: agentSessionKey('failsafe'),
-        }),
-        signal: AbortSignal.timeout(90_000), // 90s timeout
-      });
-
-      const data = await resp.json() as any;
-      if (data.ok) {
-        log(`[daemon] Failsafe heartbeat response: ${data.response?.slice(0, 80) ?? 'ok'}`);
-
-        // Write response to Failsafe's DM for TUI visibility
-        const channels = readConfig<Channel[]>(join(this.corpRoot, CHANNELS_JSON));
-        const founder = members.find(m => m.rank === 'owner');
-        const dmChannel = channels.find(
-          c => c.kind === 'direct' &&
-          c.memberIds.includes(failsafe.id) &&
-          (founder ? c.memberIds.includes(founder.id) : true),
-        );
-        if (dmChannel && data.response?.trim()) {
-          post(dmChannel.id, join(this.corpRoot, dmChannel.path, MESSAGES_JSONL), {
-            senderId: failsafe.id,
-            content: data.response,
-            source: 'system',
-            metadata: { heartbeat: 'failsafe' },
-          });
-        }
-      } else {
-        logError(`[daemon] Failsafe say() failed: ${data.error ?? 'unknown'}`);
-      }
-    } catch (err) {
-      logError(`[daemon] Failsafe heartbeat failed: ${err}`);
-    }
-  }
-
   /** Connect WebSocket to OpenClaw gateways for tool events. Best-effort, non-blocking. */
   private async connectOpenClawWS(): Promise<void> {
     // User's personal OpenClaw (for tool events on agents dispatched
@@ -646,17 +751,28 @@ export class Daemon {
     // Initialize work status for all agents
     this.initAgentWorkStatuses();
 
-    // Bootstrap system agents (Failsafe) if missing
+    // Bootstrap system agents (Sexton, Janitor, Warden, Herald, Planner) if missing
     await this.bootstrapSystemAgents();
+
+    // Bacteria reactor — starts polling once the corp's substrate is
+    // alive. Boots after agent spawn so the first tick reads a fully-
+    // populated members.json + caskets rather than mid-init state.
+    // Idempotent — safe across re-init paths.
+    this.bacteria.start();
   }
 
-  /** Ensure system agents (Failsafe, Janitor) exist — auto-hire if missing. */
+  /** Ensure system agents (Sexton, Janitor, Warden, Herald, Planner) exist — auto-hire if missing. */
   private async bootstrapSystemAgents(): Promise<void> {
     try {
-      await hireFailsafe(this);
-      this.pulse.refreshFailsafe();
+      // Project 1.9: Sexton replaces the retired Failsafe slot — see
+      // REFACTOR.md §1.9 for why the shape changed from "watchdog
+      // pinged every 3min by Pulse" to "caretaker orchestrating
+      // sweepers via patrol blueprints, woken by Alarum." The
+      // bootstrap invocation point stays the same; only the spawn
+      // target changed.
+      await hireSexton(this);
     } catch (err) {
-      logError(`[daemon] Failed to bootstrap Failsafe agent: ${err}`);
+      logError(`[daemon] Failed to bootstrap Sexton agent: ${err}`);
     }
     try {
       await hireJanitor(this);
@@ -677,6 +793,22 @@ export class Daemon {
       await hirePlanner(this);
     } catch (err) {
       logError(`[daemon] Failed to bootstrap Planner agent: ${err}`);
+    }
+    // Project 1.12+: every corp ships with a clearinghouse (lock,
+    // queue, watchers, sweepers, lane-events). Pressman + Editor are
+    // the workers that consume that infrastructure — without them
+    // queued submissions sit forever and review-eligible tasks never
+    // get picked up. Both hire functions are idempotent: existing
+    // non-archived members short-circuit. Project 1 closer.
+    try {
+      await hirePressman(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Pressman agent: ${err}`);
+    }
+    try {
+      await hireEditor(this);
+    } catch (err) {
+      logError(`[daemon] Failed to bootstrap Editor agent: ${err}`);
     }
   }
 
@@ -770,11 +902,15 @@ export class Daemon {
   }
 
   async stop(): Promise<void> {
+    this.bacteria.stop(); // Stop reactor before processManager — pending mitose actions need spawn primitives alive
     this.heartbeat.stop();
     this.taskWatcher.stop();
     this.hireWatcher.stop();
     this.pulse.stop();
     this.contractWatcher.stop();
+    this.clearanceSubmissionWatcher.stop();
+    this.editorReviewWatcher.stop();
+    this.laneEventWatcher.stop();
     this.autoemon.stop(); // Persist autoemon state before shutdown
     this.crons.stopAll(); // Stop croner jobs before ClockManager
     this.loops.shutdown(); // Flush loop stats

@@ -68,11 +68,16 @@ export interface TaskMigrationOpts {
  * every value in the old enum.
  */
 function mapStatus(old: TaskStatus): { chitStatus: ChitStatus; workflowStatus: TaskWorkflowStatus } {
+  // Legacy TaskStatus (7 values) → 1.3 TaskWorkflowStatus (10 values).
+  // The new enum has strictly more distinctions, so the mapping is
+  // conservative: the legacy "assigned" becomes "queued" (not yet
+  // dispatched — the daemon's delivery cycle will flip to "dispatched"
+  // on the first real dispatch attempt for migrated tasks).
   switch (old) {
     case 'pending':
-      return { chitStatus: 'draft', workflowStatus: 'pending' };
+      return { chitStatus: 'draft', workflowStatus: 'draft' };
     case 'assigned':
-      return { chitStatus: 'draft', workflowStatus: 'assigned' };
+      return { chitStatus: 'draft', workflowStatus: 'queued' };
     case 'in_progress':
       return { chitStatus: 'active', workflowStatus: 'in_progress' };
     case 'blocked':
@@ -84,8 +89,8 @@ function mapStatus(old: TaskStatus): { chitStatus: ChitStatus; workflowStatus: T
     case 'cancelled':
       return { chitStatus: 'closed', workflowStatus: 'cancelled' };
     default:
-      // Unknown status — fallback to draft/pending to preserve the chit's validity.
-      return { chitStatus: 'draft', workflowStatus: 'pending' };
+      // Unknown status — fallback to draft to preserve chit validity.
+      return { chitStatus: 'draft', workflowStatus: 'draft' };
   }
 }
 

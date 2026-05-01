@@ -544,6 +544,7 @@ function ResumeView({ corpPath }: { corpPath: string }) {
         return (
           <LogViewer
             onBack={goBack}
+            corpRoot={corpPath}
           />
         );
       case 'feedback':

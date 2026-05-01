@@ -93,10 +93,13 @@ describe('buildThinClaudeMd — workspace discipline', () => {
 });
 
 describe('buildThinClaudeMd — the single critical rule', () => {
-  it('Employees see the hand-complete + Stop-hook rule', () => {
+  it('Employees see the done + Stop-hook rule', () => {
+    // `hand-complete` was the REFACTOR.md draft name; shipped as
+    // `cc-cli done` (simpler, matches the agent's natural verb).
+    // Template uses the shipped name; test catches up.
     const out = buildThinClaudeMd(employeeOpts());
     expect(out).toContain('## The single critical rule');
-    expect(out).toMatch(/cc-cli hand-complete/);
+    expect(out).toMatch(/cc-cli done/);
     expect(out).toMatch(/Stop hook will audit/);
   });
 
@@ -120,28 +123,62 @@ describe('buildThinClaudeMd — the single critical rule', () => {
     expect(criticalBlock).not.toMatch(/Never push to main directly/);
   });
 
-  it('Partners do NOT see the hand-complete rule (Employees use that)', () => {
+  it('Partners do NOT see the done rule (Employees use that)', () => {
+    // Shipped name is `cc-cli done` (was `hand-complete` in the
+    // REFACTOR.md draft). Partners use /compact + PreCompact gating;
+    // `done` is the Employee-only per-step handoff signal.
     const out = buildThinClaudeMd(partnerOpts());
     const criticalBlock = out
       .split('## The single critical rule')[1]!
       .split('## ')[0]!;
-    expect(criticalBlock).not.toMatch(/cc-cli hand-complete/);
+    expect(criticalBlock).not.toMatch(/cc-cli done/);
   });
 });
 
-describe('buildThinClaudeMd — @imports (agent-authored files only)', () => {
-  const requiredImports = [
+describe('buildThinClaudeMd — @imports (Project 1.1 kind-aware split)', () => {
+  // Partners get the full soul-file @import set. Employees don't have
+  // soul files at the slot level (1.1's DNA split) — their CLAUDE.md
+  // skips the soul-file @imports entirely and points at CORP.md for
+  // role context instead. Operational-state @imports (STATUS, TASKS)
+  // are universal.
+  const partnerOnlyImports = [
     '@./SOUL.md',
     '@./IDENTITY.md',
     '@./USER.md',
     '@./MEMORY.md',
-    '@./STATUS.md',
-    '@./TASKS.md',
   ] as const;
+  const universalImports = ['@./STATUS.md', '@./TASKS.md'] as const;
 
-  it.each(requiredImports)('imports %s', (path) => {
+  it.each(partnerOnlyImports)('Partner imports %s', (path) => {
+    expect(buildThinClaudeMd(partnerOpts())).toContain(path);
+  });
+
+  it.each(partnerOnlyImports)('Employee does NOT import %s (no soul at the slot level)', (path) => {
+    expect(buildThinClaudeMd(employeeOpts())).not.toContain(path);
+  });
+
+  it.each(universalImports)('both kinds import %s (operational state is universal)', (path) => {
     expect(buildThinClaudeMd(partnerOpts())).toContain(path);
     expect(buildThinClaudeMd(employeeOpts())).toContain(path);
+  });
+
+  it('both kinds import @./CORP.md (manual delivered via @import not hook stdout)', () => {
+    // The hook-stdout path caps at ~2KB but CORP.md is ~50KB; before
+    // this @import every Partner read only a 4% preview of the manual.
+    // Both kinds get CORP.md because both run through cc-cli wtf.
+    expect(buildThinClaudeMd(partnerOpts())).toContain('@./CORP.md');
+    expect(buildThinClaudeMd(employeeOpts())).toContain('@./CORP.md');
+  });
+
+  it("Employee CLAUDE.md explains why they have no soul files + points at CORP.md", () => {
+    const out = buildThinClaudeMd(employeeOpts());
+    // Template wraps the phrase across a line break: "ephemeral\nrole-slots".
+    // Allow optional whitespace / newline between the two words and tolerate
+    // pluralization so minor copy edits don't re-break the assertion.
+    expect(out).toMatch(/ephemeral\s+role-slots?/);
+    expect(out).toMatch(/CORP\.md/);
+    // The upgrade path must be named so Employees know tame elevates them.
+    expect(out).toMatch(/cc-cli tame/);
   });
 
   it('does NOT import AGENTS.md (content moved to CORP.md)', () => {

@@ -14,6 +14,9 @@ const { values, positionals } = parseArgs({
     message: { type: 'string' },
     from: { type: 'string' },
     rank: { type: 'string' },
+    kind: { type: 'string' },
+    role: { type: 'string' },
+    slug: { type: 'string' },
     model: { type: 'string' },
     agent: { type: 'string' },
     chain: { type: 'string' },
@@ -69,6 +72,9 @@ const { values, positionals } = parseArgs({
     pending: { type: 'boolean', default: false },
     culture: { type: 'boolean', default: false },
     hook: { type: 'boolean', default: false },
+    // Project 1.6: `cc-cli wtf --peek` reads without consuming the
+    // handoff chit (diagnostic inspection path; default consumes).
+    peek: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
   },
   allowPositionals: true,
@@ -84,9 +90,11 @@ Usage: cc-cli <command> [options]
 
 Commands:
   wtf        "Where tf am I, what tf do I do" — emits CORP.md + your situational context
+  whoami     "Who am I" — slug, role, kind, lineage, current casket. Read-only introspection.
   audit      Session-end audit gate (Stop / PreCompact hook invokes this). --override --reason "..." for founder bypass.
   done       Employee "I'm done with this task" signal. Writes pending handoff; audit promotes on approve.
   inbox      Tiered inbox management. cc-cli inbox <list|respond|dismiss|carry-forward|check>.
+  tame       Promote an Employee to Partner. --slug <id> --reason "..." [--name <new-name>].
   init       Create a new corporation
   start      Start the daemon (foreground)
   stop       Stop the running daemon
@@ -117,6 +125,9 @@ Commands:
   chit       Unified work-record primitive (create/read/update/close/list/promote/archive)
   observe    Capture an observation — alias for 'chit create --type observation'
   migrate    Corp data migrations (migrate tasks: pre-chits Tasks → Chits)
+  daemon     Daemon-level ops (daemon install-service: OS supervisor setup)
+  sweeper    Code sweepers — Sexton's workers (sweeper run <name>)
+  bacteria   Auto-scaling Employee pool: status / lineage / pause / resume / evict
 
 Feedback pipeline:
   feedback                              Corp overview — pending, BRAIN, CULTURE candidates
@@ -226,6 +237,63 @@ async function run() {
       await cmdInbox(process.argv.slice(3));
       break;
     }
+    case 'daemon': {
+      // Daemon-level operations (install-service today; uninstall /
+      // status / logs as they land). Pass-through same as chit/inbox.
+      const { cmdDaemon } = await import('./commands/daemon.js');
+      await cmdDaemon(process.argv.slice(3));
+      break;
+    }
+    case 'sweeper': {
+      // Code sweepers (Sexton's workers). Pass-through same as
+      // chit/inbox — each subcommand owns its flags.
+      const { cmdSweeper } = await import('./commands/sweeper.js');
+      await cmdSweeper(process.argv.slice(3));
+      break;
+    }
+    case 'bacteria': {
+      // Project 1.10.4: auto-scaling Employee pool observability +
+      // control. Pass-through pattern same as sweeper/chit/inbox.
+      const { cmdBacteria } = await import('./commands/bacteria.js');
+      await cmdBacteria(process.argv.slice(3));
+      break;
+    }
+    case 'breaker': {
+      // Project 1.11: crash-loop circuit breaker founder controls.
+      const { cmdBreaker } = await import('./commands/breaker.js');
+      await cmdBreaker(process.argv.slice(3));
+      break;
+    }
+    case 'clearinghouse': {
+      // Project 1.12.1: Pressman's primitives surface — pick / acquire-
+      // worktree / rebase / test / merge / finalize / file-blocker /
+      // mark-failed / release / status. Walked by the Pressman Employee
+      // session per the patrol/clearing blueprint.
+      const { cmdClearinghouse } = await import('./commands/clearinghouse.js');
+      await cmdClearinghouse(process.argv.slice(3));
+      break;
+    }
+    case 'editor': {
+      // Project 1.12.2: Editor's primitives surface — pick / acquire-
+      // worktree / diff / file-comment / approve / reject / bypass /
+      // release / status. Walked by the Editor Employee session per
+      // the patrol/code-review blueprint (bug pass + drift pass).
+      const { cmdEditor } = await import('./commands/editor.js');
+      await cmdEditor(process.argv.slice(3));
+      break;
+    }
+    case 'tame': {
+      const { cmdTame } = await import('./commands/tame.js');
+      await cmdTame({
+        slug: values.slug as string | undefined,
+        reason: values.reason as string | undefined,
+        name: values.name as string | undefined,
+        from: values.from as string | undefined,
+        corp: values.corp as string | undefined,
+        json: !!values.json,
+      });
+      break;
+    }
     case 'observe': {
       // Thin alias for `cc-cli chit create --type observation`. Same
       // pass-through pattern as the chit dispatcher: raw args after
@@ -292,6 +360,8 @@ async function run() {
         project: values.project as string | undefined,
         harness: values.harness as string | undefined,
         supervisor: values.supervisor as string | undefined,
+        kind: values.kind as string | undefined,
+        role: values.role as string | undefined,
         json: !!values.json,
       });
       break;
@@ -320,11 +390,6 @@ async function run() {
     case 'version': {
       const { cmdVersion } = await import('./commands/version.js');
       await cmdVersion({ json: !!values.json });
-      break;
-    }
-    case 'failsafe': {
-      const { cmdFailsafe } = await import('./commands/failsafe.js');
-      await cmdFailsafe({ action: positionals[1] as string | undefined, json: !!values.json });
       break;
     }
     case 'tm':
@@ -366,7 +431,10 @@ async function run() {
     }
     case 'logs': {
       const { cmdLogs } = await import('./commands/logs.js');
-      await cmdLogs({ last: parseInt(values.last as string) || 50 });
+      await cmdLogs({
+        last: parseInt(values.last as string) || 50,
+        corp: values.corp as string | undefined,
+      });
       break;
     }
     case 'activity':
@@ -556,12 +624,33 @@ async function run() {
       break;
     }
     case 'hand': {
+      // Project 1.4 rewrite: hand takes --chit (preferred) or --task
+      // (back-compat alias), resolves slot OR role, writes Casket
+      // directly. process.argv.slice(3) = everything after
+      // `cc-cli hand`, including raw flags — matches the pattern used
+      // by cmdChit / cmdInbox / cmdObserve so hand.ts's parseArgs can
+      // own its flag surface without this dispatcher growing per-flag.
       const { cmdHand } = await import('./commands/hand.js');
-      await cmdHand({
-        task: values.task as string | undefined,
-        to: values.to as string | undefined,
-        json: !!values.json,
-      });
+      await cmdHand(process.argv.slice(3));
+      break;
+    }
+    case 'escalate': {
+      // Project 1.4: Employee-to-Partner judgment request. Creates
+      // escalation chit + writes Partner's Casket + fires inbox at
+      // severity-matched tier (blocker → Tier 3, question/review →
+      // Tier 2). Same raw-argv pattern as hand.
+      const { cmdEscalate } = await import('./commands/escalate.js');
+      await cmdEscalate(process.argv.slice(3));
+      break;
+    }
+    case 'block': {
+      // Project 1.4.1: dynamic blocker injection. Files a sub-task,
+      // adds to caller's dependsOn, transitions caller to blocked via
+      // state machine, hands blocker chit to assignee, fires inbox
+      // on caller so wtf surfaces the BLOCKED state. Same raw-argv
+      // pattern as hand / escalate.
+      const { cmdBlock } = await import('./commands/block.js');
+      await cmdBlock(process.argv.slice(3));
       break;
     }
     case 'wtf': {
@@ -570,8 +659,18 @@ async function run() {
         agent: values.agent as string | undefined,
         corp: values.corp as string | undefined,
         hook: !!values.hook,
+        peek: !!values.peek,
         json: !!values.json,
       });
+      break;
+    }
+    case 'whoami': {
+      const { cmdWhoami } = await import('./commands/whoami.js');
+      // Route through the rawArgs overload so the command's own
+      // `strict: true` parseOpts runs (typo rejection, value validation).
+      // The top-level parseArgs is strict:false; passing pre-parsed values
+      // bypasses whoami's own validator.
+      await cmdWhoami(process.argv.slice(3));
       break;
     }
     case 'audit': {
@@ -639,18 +738,18 @@ async function run() {
         blueprint: values.blueprint as string | undefined,
         status: values.status as string | undefined,
         id: values.id as string | undefined,
+        from: values.from as string | undefined,
         json: !!values.json,
       });
       break;
     }
-    case 'blueprint':
-    case 'blueprints': {
+    case 'blueprint': {
+      // Project 1.8: blueprint became a chit-type + a subcommand group
+      // (new / list / show / validate / cast). The dispatcher parses
+      // its own flags from raw argv — the top-level cli stays thin,
+      // same pattern as hand / escalate / chit / inbox.
       const { cmdBlueprint } = await import('./commands/blueprint.js');
-      await cmdBlueprint({
-        action: positionals[1] as string | undefined,
-        name: values.name as string | undefined,
-        json: !!values.json,
-      });
+      await cmdBlueprint(process.argv.slice(3));
       break;
     }
     case 'projects': {

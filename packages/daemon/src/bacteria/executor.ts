@@ -1,0 +1,664 @@
+/**
+ * Bacteria — executor module.
+ *
+ * Applies the side effects of `BacteriaAction[]` returned by the
+ * decision module:
+ *
+ *   Mitose    — generate a unique slug, build the Employee workspace
+ *               via setupAgentWorkspace, add the Member record,
+ *               create the casket, claim the assigned chit (assignee
+ *               rewrite + workflow → 'dispatched'), call
+ *               processManager.spawnAgent.
+ *
+ *   Apoptose  — read the slot's Member for obituary fields, stop any
+ *               running session, write the obituary observation chit,
+ *               strip the slug from channel memberIds, archive the
+ *               sandbox dir, remove the Member from members.json.
+ *
+ * Failures are logged and skipped per-action — one bad mitose
+ * shouldn't abort apoptoses queued in the same batch. The next
+ * decision tick will re-evaluate and retry whatever didn't land.
+ *
+ * Concurrency: the reactor serializes executor calls behind a single
+ * mutex per daemon instance, so this module can read-then-write
+ * members.json without optimistic-concurrency boilerplate. If we ever
+ * shard bacteria across processes, that contract changes — but until
+ * then, "single in-flight executor call at a time" is enough.
+ */
+
+import { rmSync, renameSync, existsSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
+import {
+  readConfig,
+  writeConfig,
+  setupAgentWorkspace,
+  addMemberToRegistry,
+  addChannelToRegistry,
+  addMemberToChannel,
+  createDmChannel,
+  advanceCurrentStep,
+  appendBacteriaEvent,
+  createChit,
+  updateChit,
+  findChitById,
+  chitScopeFromPath,
+  getTheme,
+  queryChits,
+  UNIVERSAL_SOUL,
+  defaultRules,
+  defaultHeartbeat,
+  listActiveBreakers,
+  MEMBERS_JSON,
+  CHANNELS_JSON,
+  CORP_JSON,
+  type Member,
+  type Channel,
+  type GlobalConfig,
+  type Corporation,
+  type ThemeId,
+  type TaskFields,
+} from '@claudecorp/shared';
+import type { ProcessManager } from '../process-manager.js';
+import { log, logError } from '../logger.js';
+import type {
+  BacteriaAction,
+  MitoseAction,
+  ApoptoseAction,
+} from './types.js';
+
+export interface ExecutorContext {
+  readonly corpRoot: string;
+  readonly globalConfig: GlobalConfig;
+  readonly processManager: ProcessManager;
+  /**
+   * Codex P1 on PR #204: post-mitose wake dispatcher. Called after
+   * spawnAgent succeeds so the freshly-spawned slot gets a work
+   * session for its pre-loaded chit. Without this, the slot has
+   * `casket.currentStep` set but no first dispatch — the dream
+   * manager's idle-timer races ahead, fires a dream session against
+   * an empty observation set, times out at 5 min, and the assigned
+   * task never gets touched. We hit this live during the Project 1
+   * finale on `claude-test-corp` and traced it to the missing call
+   * here. Optional so tests can construct ExecutorContext without
+   * a full daemon; production wires this in daemon.ts to call
+   * `dispatchTaskToDm` from task-events.
+   */
+  readonly dispatchAfterMitose?: (
+    slug: string,
+    chitId: string,
+    chitTitle: string,
+  ) => void;
+}
+
+/**
+ * Apply a list of actions in order. Each action is awaited; failures
+ * are logged + skipped so a single broken slot doesn't poison the
+ * batch. Returns a count of {applied, failed} for reactor-level
+ * observability.
+ */
+export async function executeBacteriaActions(
+  ctx: ExecutorContext,
+  actions: readonly BacteriaAction[],
+): Promise<{ applied: number; failed: number }> {
+  let applied = 0;
+  let failed = 0;
+  for (const action of actions) {
+    try {
+      if (action.kind === 'mitose') {
+        await executeMitose(ctx, action);
+      } else {
+        await executeApoptose(ctx, action);
+      }
+      applied++;
+    } catch (err) {
+      failed++;
+      logError(`[bacteria] ${action.kind} failed: ${(err as Error).message}`);
+    }
+  }
+  return { applied, failed };
+}
+
+// ─── Mitose ─────────────────────────────────────────────────────────
+
+async function executeMitose(
+  ctx: ExecutorContext,
+  action: MitoseAction,
+): Promise<void> {
+  const { corpRoot, globalConfig, processManager } = ctx;
+
+  // Codex P2 round 5 on PR #204: validate the assigned chit exists
+  // AND is a task BEFORE any side-effecting writes (workspace,
+  // member registry, channels, casket pointer). Without this guard,
+  // advanceCurrentStep would write the new slot's `current_step` to
+  // a non-existent or wrong-type chit; the slot would then appear
+  // BUSY to bacteria's decision module (currentStep != null) but
+  // never get real work — phantom-busy, contributing zero capacity
+  // until manual repair. Validating up-front fails fast: log the
+  // race / corruption, skip the mitose entirely, let the next
+  // bacteria tick re-decide against a fresh corp state.
+  const preflight = findChitById(corpRoot, action.assignedChit);
+  if (!preflight || preflight.chit.type !== 'task') {
+    logError(
+      `[bacteria] mitose: assigned chit ${action.assignedChit} ${
+        preflight ? `is type '${preflight.chit.type}' (expected 'task')` : 'does not exist'
+      } — aborting mitose for role ${action.role} (no slot created, no workspace touched).`,
+    );
+    return;
+  }
+
+  const slug = pickFreshSlug(corpRoot, action.role);
+  const corpHarness = readCorpHarness(corpRoot);
+
+  // Build the Employee workspace. setupAgentWorkspace writes the
+  // sandbox directory + workspace files (AGENTS.md / TOOLS.md /
+  // HEARTBEAT.md / STATUS.md / TASKS.md), creates an empty Casket,
+  // and constructs the Member record. Employees skip soul files
+  // (SOUL/MEMORY/IDENTITY/USER) per 1.1's kind-aware routing.
+  //
+  // displayName starts as the slug — the "needs naming" signal that
+  // PR 3's first-dispatch fragment keys off (`displayName === id`).
+  // Once the agent runs `cc-cli whoami rename Toast`, the equality
+  // breaks and the prompt fragment stops firing.
+  const setup = setupAgentWorkspace({
+    corpRoot,
+    agentName: slug,
+    displayName: slug,
+    rank: 'worker',
+    scope: 'corp',
+    scopeId: '',
+    spawnedBy: action.parentSlug ?? 'bacteria',
+    model: globalConfig.defaults.model,
+    provider: globalConfig.defaults.provider,
+    soulContent: UNIVERSAL_SOUL,
+    agentsContent: defaultRules({
+      rank: 'worker',
+      harness: corpHarness === 'claude-code' ? 'claude-code' : 'openclaw',
+    }),
+    heartbeatContent: defaultHeartbeat('worker'),
+    globalConfig,
+    harness: corpHarness,
+    kind: 'employee',
+    role: action.role,
+  });
+
+  // Apply bacteria-specific fields the standard hire path doesn't
+  // populate. setupAgentWorkspace builds a Member but doesn't carry
+  // the lineage edge — write it in before we register.
+  const member: Member = {
+    ...setup.member,
+    parentSlot: action.parentSlug,
+    generation: action.generation,
+  };
+  addMemberToRegistry(corpRoot, member);
+
+  // Channel registration. Without this, dispatchTaskToDm has no DM
+  // channel to deliver the wakeup message into and the new slot
+  // sits busy-but-never-woken. Mirror hire.ts's flow: founder DM +
+  // pool channels (#general, #tasks, #logs themed). The founder DM
+  // is the dispatch path's hard requirement; the pool channels are
+  // for visibility (Sexton + founder can see the new slot in
+  // membership lists).
+  registerSlotChannels(corpRoot, member);
+
+  // Casket already exists (setupAgentWorkspace created it idle).
+  // Claim the assigned chit: advance casket pointer + rewrite the
+  // chit's assignee from role-id to slot-id + bump workflowStatus
+  // to 'dispatched' so the next decision tick correctly excludes it
+  // from the "unprocessed" queue (assignee != role.id) AND treats
+  // the slot as busy (currentStep != null).
+  advanceCurrentStep(corpRoot, slug, action.assignedChit, slug);
+  claimAssignedChit(corpRoot, action.assignedChit, slug);
+
+  log(
+    `[bacteria] mitose: ${slug} (role=${action.role}, gen=${action.generation}, parent=${action.parentSlug ?? 'none'}, chit=${action.assignedChit})`,
+  );
+
+  // Spawn the session. processManager.spawnAgent reads the now-
+  // committed Member record. Errors propagate so executor's outer
+  // try/catch can log them.
+  await processManager.spawnAgent(slug);
+
+  // Codex P1 on PR #204: trigger the wake dispatch for the assigned
+  // chit so the new slot's FIRST session is a work session against
+  // its casket pointer, not a race-loss to the dream manager.
+  // Without this, the slot has currentStep set + workspace ready,
+  // but no dispatch path fires — and after a few minutes idle, the
+  // dream manager kicks in (no observations to dream from → 5-min
+  // timeout → wasted dispatch). We saw this exact failure live in
+  // the Project 1 finale. Optional — tests construct ExecutorContext
+  // without dispatchAfterMitose, which is fine; production wires it.
+  if (ctx.dispatchAfterMitose) {
+    try {
+      const chitHit = findChitById(corpRoot, action.assignedChit);
+      // ChitWithBody returns the parsed chit; pull the task title
+      // for the DM message body. Fall back to chit id if the chit
+      // is missing or the type narrowing fails — rare, but the
+      // dispatch should still fire so the slot wakes.
+      const title =
+        chitHit?.chit.type === 'task'
+          ? (chitHit.chit.fields.task as TaskFields).title
+          : action.assignedChit;
+      ctx.dispatchAfterMitose(slug, action.assignedChit, title);
+    } catch (err) {
+      logError(
+        `[bacteria] post-mitose dispatch failed for ${slug} (chit=${action.assignedChit}): ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Witness the birth in the bacteria-events log. Best-effort — if
+  // the append fails, the slot is alive but unwitnessed; downstream
+  // status / lineage views won't see it. Member record + obituary-
+  // pair (when it eventually apoptoses) is the load-bearing record;
+  // this is the cheap-query stream on top.
+  try {
+    appendBacteriaEvent(corpRoot, {
+      kind: 'mitose',
+      ts: new Date().toISOString(),
+      role: action.role,
+      slug,
+      generation: action.generation,
+      parentSlug: action.parentSlug,
+      assignedChit: action.assignedChit,
+    });
+  } catch (err) {
+    logError(
+      `[bacteria] mitose event log failed for ${slug} (slot alive): ${(err as Error).message}`,
+    );
+  }
+}
+
+// ─── Apoptose ───────────────────────────────────────────────────────
+
+async function executeApoptose(
+  ctx: ExecutorContext,
+  action: ApoptoseAction,
+): Promise<void> {
+  const { corpRoot, processManager } = ctx;
+
+  // Snapshot Member state BEFORE we mutate anything — obituary needs
+  // it.
+  const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  const member = members.find((m) => m.id === action.slug);
+  if (!member) {
+    // Already gone — earlier action removed it, or external mutation.
+    // Not a failure; idempotent no-op.
+    return;
+  }
+
+  // Stop any running session first. Best-effort — a stopAgent failure
+  // shouldn't block the rest of the apoptosis.
+  try {
+    await processManager.stopAgent(action.slug);
+  } catch (err) {
+    logError(
+      `[bacteria] stopAgent failed during apoptosis of ${action.slug}: ${(err as Error).message}`,
+    );
+  }
+
+  // Write the obituary observation chit BEFORE removing the Member —
+  // if creation fails, the Member stays alive and next tick retries.
+  // Apoptose-then-fail-to-write would orphan the lineage record.
+  writeObituary(corpRoot, member, action);
+
+  // Strip slug from any channel memberIds so dispatch doesn't try
+  // routing to a dead slot.
+  stripFromChannels(corpRoot, action.slug);
+
+  // Archive the sandbox dir. Apoptosis is graceful death — artifacts
+  // (worklogs, partial drafts, Dredge handoffs) might inform later
+  // pattern detection (Project 4 conjugation) or just debugging.
+  // Archive matches `cc-cli fire`'s "fire" mode, not "remove".
+  archiveSandbox(corpRoot, member);
+
+  // Compute lifetime metrics BEFORE removing the Member — the event
+  // record snapshots the slot's complete lived state. tasksCompleted
+  // is one chit-store scan; rare enough cost (apoptoses fire every
+  // few minutes per slot at most) to be acceptable.
+  const apoptoseTs = new Date();
+  const lifetimeMs = Math.max(
+    0,
+    apoptoseTs.getTime() - new Date(member.createdAt).getTime(),
+  );
+  const tasksCompleted = countCompletedTasksFor(corpRoot, member.id);
+  // chosenName: displayName at apoptose time. When equal to slug,
+  // the slot apoptosed before naming itself (rare; record null so
+  // dreams can distinguish "lived but never named" from "lived as X").
+  const chosenName = member.displayName !== member.id ? member.displayName : null;
+
+  // Finally archive the Member record. The decision module already
+  // filters out `status === 'archived'` from its pool view, so an
+  // archived slot is invisible to bacteria's count-and-target math
+  // — same effect as removal for the live decision, but the record
+  // stays for auditability + lineage continuity.
+  //
+  // Project 1.13.x: previously this was a destructive `members.filter`
+  // that wiped the entry entirely. That worked for transient pool
+  // slots (whose names are pool-tracked + recyclable) but was
+  // catastrophic against role-name singletons (Pressman, Editor —
+  // auto-hired with the role's literal slug, no upstream re-create
+  // path). Archiving lets all callers — including future "reactivate
+  // this slot" flows — see the slot's history. Re-mitose still gets
+  // a fresh suffix via pickFreshSlug; archived ids stay in the
+  // taken-set so they don't collide with newly-spawned siblings.
+  //
+  // Codex P1 on PR #204: re-read members.json immediately before
+  // writing instead of mutating the early `members` snapshot from
+  // line 215. Steps 2-6 above (stopAgent, writeObituary,
+  // stripFromChannels, archiveSandbox, countCompletedTasksFor) are
+  // async or run on the order of seconds; if a hire/mitose path
+  // adds a new entry to members.json during that window, writing
+  // back the stale snapshot would clobber it — exactly the
+  // "members appear/disappear" lost-write behavior we documented
+  // from the Project 1 finale. Fresh-read-then-map keeps every
+  // newly-added entry intact and only flips the apoptose target's
+  // status. If the slug is already gone (someone else handled
+  // archive concurrently), this is an idempotent no-op.
+  const fresh = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  const updated = fresh.map((m) =>
+    m.id === action.slug ? { ...m, status: 'archived' as const } : m,
+  );
+  writeConfig(join(corpRoot, MEMBERS_JSON), updated);
+
+  // Witness the death in the bacteria-events log. Order: AFTER the
+  // members.json write so the event reflects committed state. If the
+  // append fails, the slot is still correctly removed; we lose a
+  // witness but the obituary observation chit (written above) carries
+  // the same lifecycle fact.
+  try {
+    appendBacteriaEvent(corpRoot, {
+      kind: 'apoptose',
+      ts: apoptoseTs.toISOString(),
+      role: member.role ?? 'unknown',
+      slug: member.id,
+      generation: member.generation ?? 0,
+      parentSlug: member.parentSlot ?? null,
+      chosenName,
+      reason: action.reason,
+      idleSince: action.idleSince,
+      lifetimeMs,
+      tasksCompleted,
+    });
+  } catch (err) {
+    logError(
+      `[bacteria] apoptose event log failed for ${action.slug} (slot already removed): ${(err as Error).message}`,
+    );
+  }
+
+  log(
+    `[bacteria] apoptose: ${action.slug} (${action.reason}, idle since ${action.idleSince}, gen ${member.generation ?? 0}, lifetime ${lifetimeMs}ms, tasks ${tasksCompleted})`,
+  );
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────
+
+/**
+ * Generate a fresh `<role>-<2 lowercase letters>` slug that doesn't
+ * collide with any current Member id. 676 combinations per role; with
+ * recycling on apoptosis, only the active pool size matters for
+ * collision probability. Retries up to 100 times before falling back
+ * to a longer suffix — at which point the corp has > 200 active slots
+ * of the same role and we're well outside v1's design space anyway.
+ */
+function pickFreshSlug(corpRoot: string, role: string): string {
+  const members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  const taken = new Set(members.map((m) => m.id));
+  // Project 1.11: tripped slugs are reserved — even if their Member
+  // was removed (rare race), bacteria must not recycle the slug
+  // while the breaker is active or a fresh mitose would immediately
+  // get refused by spawnAgent. listActiveBreakers fails open ([])
+  // on corruption — better to risk a rare collision than to brick
+  // bacteria via a malformed trip chit.
+  for (const trip of listActiveBreakers(corpRoot)) {
+    taken.add(trip.fields['breaker-trip'].slug);
+  }
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const suffix = randomTwoLetters();
+    const slug = `${role}-${suffix}`;
+    if (!taken.has(slug)) return slug;
+  }
+  // Fallback: 4-letter suffix. Vanishingly unlikely to land here.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const suffix = randomTwoLetters() + randomTwoLetters();
+    const slug = `${role}-${suffix}`;
+    if (!taken.has(slug)) return slug;
+  }
+  throw new Error(
+    `bacteria: could not allocate unique slug for role '${role}' after 200 attempts — pool is improbably large`,
+  );
+}
+
+function randomTwoLetters(): string {
+  const a = 97; // 'a'
+  const c1 = String.fromCharCode(a + Math.floor(Math.random() * 26));
+  const c2 = String.fromCharCode(a + Math.floor(Math.random() * 26));
+  return c1 + c2;
+}
+
+function readCorpHarness(corpRoot: string): string | undefined {
+  try {
+    return readConfig<Corporation>(join(corpRoot, CORP_JSON)).harness;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Count task chits the slot completed during its lifetime — used in
+ * the apoptose event for lifetime metrics ("backend pool: mean 3.2
+ * tasks per slot"). One chit-store scan per apoptose; rare enough
+ * that the cost doesn't matter at v1 corp scale.
+ *
+ * Filters: type=task AND assignee=slug AND workflowStatus=completed.
+ * Defensive against malformed chits (queryChits already routes those
+ * to the malformed audit log) — we ignore parse failures.
+ */
+function countCompletedTasksFor(corpRoot: string, slug: string): number {
+  try {
+    const result = queryChits<'task'>(corpRoot, {
+      types: ['task'],
+      limit: 0,
+    });
+    let count = 0;
+    for (const cwb of result.chits) {
+      const fields = cwb.chit.fields.task as TaskFields;
+      if (fields.assignee !== slug) continue;
+      if (fields.workflowStatus !== 'completed') continue;
+      count++;
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Register the new slot in the founder DM (required — `dispatchTaskToDm`
+ * looks up a direct channel containing the assignee and bails when none
+ * exists; without this the spawned slot is busy-but-never-woken) plus
+ * the corp-themed pool channels (#general / #tasks / #logs).
+ *
+ * Mirrors hire.ts's channel flow. Founder is required for the DM —
+ * Employees never get founder-direct interaction in normal corp
+ * operation (Model A: founder DMs Partners, Partners DM Employees),
+ * but the channel needs to EXIST for the dispatch wakeup path. Quiet
+ * channel; founder doesn't have to use it.
+ */
+function registerSlotChannels(corpRoot: string, member: Member): void {
+  let members: Member[];
+  try {
+    members = readConfig<Member[]>(join(corpRoot, MEMBERS_JSON));
+  } catch {
+    return;
+  }
+  const founder = members.find((m) => m.rank === 'owner');
+  if (founder) {
+    try {
+      const dm = createDmChannel(
+        corpRoot,
+        founder.id,
+        member.id,
+        founder.displayName.toLowerCase(),
+        member.id,
+      );
+      addChannelToRegistry(corpRoot, dm);
+    } catch (err) {
+      logError(
+        `[bacteria] failed to create founder DM for ${member.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  // Pool channels — best-effort. Missing #general/#tasks/#logs would
+  // be unusual but isn't worth aborting the spawn over.
+  try {
+    const channels = readConfig<Channel[]>(join(corpRoot, CHANNELS_JSON));
+    const corp = readConfig<Corporation>(join(corpRoot, CORP_JSON));
+    const theme = getTheme((corp.theme || 'corporate') as ThemeId);
+    const general = channels.find((c) => c.name === theme.channels.general);
+    if (general) addMemberToChannel(corpRoot, general.id, member.id);
+    const tasksChannel = channels.find((c) => c.name === theme.channels.tasks);
+    if (tasksChannel) addMemberToChannel(corpRoot, tasksChannel.id, member.id);
+    const logsChannel = channels.find((c) => c.name === theme.channels.logs);
+    if (logsChannel) addMemberToChannel(corpRoot, logsChannel.id, member.id);
+  } catch (err) {
+    logError(
+      `[bacteria] failed to register pool channels for ${member.id}: ${(err as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Rewrite the assigned chit's assignee field from `role.id` to the
+ * spawned slot's id, and bump workflowStatus to 'dispatched' so the
+ * next bacteria decision tick correctly excludes the chit from
+ * unprocessed-queue counting.
+ */
+function claimAssignedChit(
+  corpRoot: string,
+  chitId: string,
+  slug: string,
+): void {
+  const hit = findChitById(corpRoot, chitId);
+  if (!hit) {
+    // Chit went missing between the decision and execution — log and
+    // proceed. The slot is still spawned; it'll go idle on first
+    // dispatch and the role-resolver will land another chit on it.
+    logError(`[bacteria] mitose: assigned chit ${chitId} not found at execute time`);
+    return;
+  }
+  if (hit.chit.type !== 'task') {
+    logError(`[bacteria] mitose: assigned chit ${chitId} is not a task (${hit.chit.type})`);
+    return;
+  }
+  const fields = hit.chit.fields.task as TaskFields;
+  const scope = chitScopeFromPath(corpRoot, hit.path);
+  updateChit(corpRoot, scope, 'task', chitId, {
+    updatedBy: 'bacteria',
+    fields: {
+      task: {
+        ...fields,
+        assignee: slug,
+        workflowStatus: 'dispatched',
+      },
+    },
+  });
+}
+
+function stripFromChannels(corpRoot: string, slug: string): void {
+  // Wrapped: a corrupted channels.json or transient fs error here
+  // shouldn't abort apoptose AFTER the obituary was written. The
+  // worst case from a swallow is a stale memberId entry — a future
+  // chit-hygiene sweeper pass cleans it up.
+  try {
+    const path = join(corpRoot, CHANNELS_JSON);
+    if (!existsSync(path)) return;
+    const channels = readConfig<Channel[]>(path);
+    let touched = false;
+    for (const ch of channels) {
+      const idx = ch.memberIds.indexOf(slug);
+      if (idx >= 0) {
+        ch.memberIds.splice(idx, 1);
+        touched = true;
+      }
+    }
+    if (touched) writeConfig(path, channels);
+  } catch (err) {
+    logError(
+      `[bacteria] stripFromChannels failed for ${slug} (apoptose continuing): ${(err as Error).message}`,
+    );
+  }
+}
+
+function archiveSandbox(corpRoot: string, member: Member): void {
+  if (!member.agentDir) return;
+  const abs = isAbsolute(member.agentDir)
+    ? member.agentDir
+    : join(corpRoot, member.agentDir);
+  if (!existsSync(abs)) return;
+  // Full ISO timestamp (with `:` and `.` replaced — invalid on Windows
+  // paths) so a recycled-then-re-apoptosed slug on the same day doesn't
+  // collide with its prior archive. Without uniqueness the rename
+  // fails, and the catch-block falls through to rmSync of the LIVE
+  // workspace — silently dropping the new lifecycle's artifacts.
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const parent = abs.replace(/[\\/][^\\/]+[\\/]?$/, '');
+  const archiveName = `.archived-${member.id}-${stamp}`;
+  try {
+    renameSync(abs, join(parent, archiveName));
+  } catch (err) {
+    // Fall back to delete if rename fails (Windows quirks, in-use
+    // file handles, etc.). Apoptosis must not leave a Member-removed
+    // / sandbox-still-present split that confuses the next tick.
+    try {
+      rmSync(abs, { recursive: true, force: true });
+    } catch (err2) {
+      logError(
+        `[bacteria] could not archive or remove sandbox ${abs}: ${(err2 as Error).message}`,
+      );
+    }
+  }
+}
+
+/**
+ * Write the obituary observation chit. NOTICE category, low importance
+ * (1) — these are mechanical lifetime records, not interventions.
+ * Subject = the slug so dreams (Project 4) can compound observations
+ * by slot lifetime. Title carries the headline for `cc-cli observe
+ * list`-style scans; body carries the full record.
+ */
+function writeObituary(
+  corpRoot: string,
+  member: Member,
+  action: ApoptoseAction,
+): void {
+  const generation = member.generation ?? 0;
+  const parentLine = member.parentSlot
+    ? `parent: ${member.parentSlot}`
+    : 'parent: none (first of lineage)';
+
+  const body =
+    `Slot lifetime record.\n\n` +
+    `- born:        ${member.createdAt}\n` +
+    `- apoptosed:   ${new Date().toISOString()}\n` +
+    `- idle since:  ${action.idleSince}\n` +
+    `- ${parentLine}\n` +
+    `- generation:  ${generation}\n` +
+    `- role:        ${member.role ?? 'unknown'}\n` +
+    `- reason:      ${action.reason}\n`;
+
+  createChit(corpRoot, {
+    type: 'observation',
+    scope: 'corp',
+    createdBy: 'bacteria',
+    fields: {
+      observation: {
+        category: 'NOTICE',
+        subject: member.id,
+        importance: 1,
+        title: `${member.id}: apoptosed (${action.reason}, gen ${generation})`,
+      },
+    },
+    body,
+  });
+}

@@ -20,6 +20,7 @@ import {
   CORP_JSON,
   UNIVERSAL_SOUL,
   defaultRules,
+  roleSpecificAgentsContent,
   defaultHeartbeat,
 } from '@claudecorp/shared';
 import type { Daemon } from './daemon.js';
@@ -35,6 +36,15 @@ export interface HireOpts {
   soulContent?: string;
   agentsContent?: string;
   heartbeatContent?: string;
+  /**
+   * Custom IDENTITY.md content for this agent. When omitted,
+   * setupAgentWorkspace falls back to the generic defaultIdentity
+   * template. Partners-by-decree that carry a specific role shape
+   * (Sexton's caretaker-of-continuity frame, etc.) pass their own
+   * content so the voice is shaped right at hire time rather than
+   * requiring a subsequent edit.
+   */
+  identityContent?: string;
   model?: string;
   provider?: string;
   /**
@@ -44,6 +54,10 @@ export interface HireOpts {
    */
   harness?: string;
   supervisorId?: string | null;
+  /** Structural agent kind (Project 1.1). Optional; inferred from rank when omitted. */
+  kind?: 'employee' | 'partner';
+  /** Role slot id (Project 1.1) — references packages/shared/src/roles.ts. Optional. */
+  role?: string;
 }
 
 export interface HireResult {
@@ -109,7 +123,19 @@ export async function hireAgent(
 
   // 2. Create workspace (remote: true — no .openclaw/ dir, gateway handles state)
   const soulContent = opts.soulContent ?? UNIVERSAL_SOUL;
-  const agentsContent = opts.agentsContent ?? defaultRules(opts.rank);
+  // Role-aware AGENTS.md dispatch: when --role names a role with a
+  // pre-written operational manual (Pressman; Editor in 1.12.2),
+  // those rules ship by default. Falls through to plain defaultRules
+  // when the caller supplies no role OR the role has no manual.
+  const templateHarness = harness === 'claude-code' ? 'claude-code' : 'openclaw';
+  const agentsContent =
+    opts.agentsContent
+    ?? roleSpecificAgentsContent({
+      ...(opts.role ? { role: opts.role } : {}),
+      rank: opts.rank,
+      harness: templateHarness,
+    })
+    ?? defaultRules({ rank: opts.rank, harness: templateHarness });
   const heartbeatContent = opts.heartbeatContent ?? defaultHeartbeat(opts.rank);
 
   const { member } = setupAgentWorkspace({
@@ -126,10 +152,13 @@ export async function hireAgent(
     soulContent,
     agentsContent,
     heartbeatContent,
+    identityContent: opts.identityContent,
     globalConfig,
     remote: true,
     projectName,
     harness,
+    kind: opts.kind,
+    role: opts.role,
   });
 
   // FIXME(v0.10.1): Per-agent worktrees disabled — needs project-scoped repos first.
@@ -195,10 +224,11 @@ export async function hireAgent(
   // OpenClaw corp gateway — they dispatch through HarnessRouter
   // directly (no gateway slot, no listening port). Mirrors the same
   // branching `spawnAgent` does for daemon-startup paths; without it,
-  // hired-post-startup agents (Failsafe, Janitor, Warden, Herald,
+  // hired-post-startup agents (Sexton, Janitor, Warden, Herald,
   // Planner) in a claude-code corp got mode='gateway' status='starting'
-  // and the next dispatch errored "Agent X is not online" — which is
-  // exactly what Mark hit on Failsafe at 15:06 today.
+  // and the next dispatch errored "Agent X is not online" — an
+  // observed regression from a prior debugging session that's
+  // now well-understood.
   if (harness === 'openclaw') {
     const gw = daemon.processManager.corpGateway;
     if (gw) {

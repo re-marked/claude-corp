@@ -20,6 +20,7 @@ import {
   writeGlobalConfig,
   readGlobalConfig,
   agentSessionKey,
+  closeBreakerForSlug,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -31,6 +32,8 @@ import type { Daemon } from './daemon.js';
 import { hireAgent } from './hire.js';
 import { writeTaskEvent, logTaskAssignment, dispatchTaskToDm } from './task-events.js';
 import { log, logError } from './logger.js';
+import { runSweeper, UnknownSweeperError, SWEEPER_NAMES } from './continuity/sweepers/index.js';
+import { BreakerTrippedError } from './process-manager.js';
 
 /** Format tool call into a human-readable description for chat history. */
 import { formatToolMessage as formatToolMsg } from './format-tool.js';
@@ -184,6 +187,8 @@ export function createApi(daemon: Daemon): Server {
           provider: (body.provider as string) ?? undefined,
           harness: (body.harness as string) ?? undefined,
           supervisorId: (body.supervisorId as string) ?? undefined,
+          kind: (body.kind as 'employee' | 'partner' | undefined) ?? undefined,
+          role: (body.role as string) ?? undefined,
         });
         json(res, { ok: true, member: result.member, dmChannel: result.dmChannel });
         return;
@@ -300,6 +305,22 @@ export function createApi(daemon: Daemon): Server {
             }
           }
 
+          // 6. Project 1.11: close any active crash-loop breaker for this
+          // slug. Without this, an orphan trip would block the slug from
+          // being reused by bacteria (pickFreshSlug avoid-set) and clutter
+          // `cc-cli breaker list`. Best-effort — fire's success doesn't
+          // hinge on the breaker close.
+          try {
+            closeBreakerForSlug({
+              corpRoot: daemon.corpRoot,
+              slug: agent.id,
+              reason: `slot ${action === 'fire' ? 'archived' : 'removed'} via cc-cli agent ${action}`,
+              clearedBy: `cli:${action}`,
+            });
+          } catch {
+            // swallow — chit-hygiene will surface any anomaly
+          }
+
           firedIds.push(agent.id);
         }
 
@@ -398,64 +419,19 @@ export function createApi(daemon: Daemon): Server {
         return;
       }
 
-      // POST /tasks/:id/hand — hand a task to an agent (assign + dispatch + refresh)
-      const taskHandMatch = path.match(/^\/tasks\/([^/]+)\/hand$/);
-      if (method === 'POST' && taskHandMatch) {
-        const taskId = decodeURIComponent(taskHandMatch[1]!);
-        const body = await readBody(req) as Record<string, unknown>;
-        const toSlug = body.to as string;
-        if (!toSlug) {
-          json(res, { error: '"to" (agent slug) is required' }, 400);
-          return;
-        }
-
-        try {
-          // Resolve agent by slug or ID
-          const members = readConfig<any[]>(join(daemon.corpRoot, MEMBERS_JSON));
-          const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, '-');
-          const target = members.find((m: any) =>
-            m.type === 'agent' && (normalize(m.displayName) === normalize(toSlug) || m.id === toSlug),
-          );
-          if (!target) {
-            json(res, { error: `Agent "${toSlug}" not found` }, 404);
-            return;
-          }
-
-          // Resolve who is handing (explicit handedBy, or detect from members)
-          const founder = members.find((m: any) => m.rank === 'owner');
-          const handedBy = (body.handedBy as string) ?? founder?.id ?? null;
-          const hander = members.find((m: any) => m.id === handedBy);
-          const handerName = hander?.displayName ?? 'system';
-
-          // Update task: assign + record hander + timestamp
-          const filePath = taskPath(daemon.corpRoot, taskId);
-          const updated = updateTask(filePath, {
-            assignedTo: target.id,
-            handedBy,
-            handedAt: new Date().toISOString(),
-          } as any);
-
-          // Log to #tasks (read-only event) + dispatch to agent's DM
-          logTaskAssignment(daemon.corpRoot, target.id, updated.title);
-          dispatchTaskToDm(daemon, target.id, updated.title, taskId);
-
-          // Wake sleeping autoemon agent if task is urgent (critical/high priority)
-          if (daemon.autoemon.isSleeping(target.id)) {
-            const priority = updated.priority ?? 'normal';
-            if (priority === 'critical' || priority === 'high') {
-              daemon.autoemon.wakeAgent(target.id, 'urgent_task', `Task "${updated.title}" (${priority})`);
-            }
-          }
-
-          // Refresh all agents' TASKS.md + casket files
-          daemon.heartbeat.refreshAll();
-
-          json(res, { ok: true, task: updated, handedTo: target.displayName, handedBy: handerName });
-        } catch {
-          json(res, { error: 'Task not found' }, 404);
-        }
-        return;
-      }
+      // Legacy POST /tasks/:id/hand endpoint deleted in Project 1.4.
+      // The old path ran through the legacy Task API (updateTask
+      // assignedTo + dispatchTaskToDm + heartbeat.refreshAll) — a
+      // "slightly nicer @mention" per REFACTOR.md's diagnosis.
+      //
+      // Post-1.4 hand writes directly to the Casket chit via the
+      // shared `handChitToSlot` helper (shared/src/hand-core.ts).
+      // CLI cmdHand calls it directly; daemon cron task-spawn (the
+      // only other consumer) now imports + calls the helper in-
+      // process instead of self-HTTP'ing this endpoint.
+      //
+      // If any caller hits /tasks/:id/hand now, they get 404 —
+      // honest signal to migrate, not silent coexistence.
 
       // POST /projects/create
       if (method === 'POST' && path === '/projects/create') {
@@ -742,6 +718,13 @@ export function createApi(daemon: Daemon): Server {
           supervisorName = sup?.displayName ?? null;
         }
 
+        // Pre-resolve sessionKey so the fragment context below reads
+        // the usage snapshot scoped to THIS session (not an unrelated
+        // concurrent dispatch against the same agent). Same key used
+        // below for registerInflight + dispatch — Codex P2 (PR #170).
+        const targetSlugNormEarly = normalize(target.displayName);
+        const sessionKey = (body.sessionKey as string) ?? agentSessionKey(targetSlugNormEarly);
+        const lastUsage = daemon.getLastAgentUsage(target.id, sessionKey);
         const context = {
           agentDir,
           corpRoot,
@@ -752,11 +735,15 @@ export function createApi(daemon: Daemon): Server {
           daemonPort: daemon.getPort(),
           agentMemberId: target.id,
           agentRank: target.rank,
+          agentKind: target.kind,
+          agentRole: target.role,
           agentDisplayName: target.displayName,
           channelKind: 'direct' as const,
           supervisorName,
           autoemonEnrolled: daemon.autoemon.isEnrolled(target.id),
           harness: (agentProc.mode === 'harness' ? 'claude-code' : 'openclaw') as 'openclaw' | 'claude-code',
+          sessionTokens: lastUsage?.usage.inputTokens,
+          sessionModel: lastUsage?.model,
         };
 
         // Set target busy
@@ -775,14 +762,11 @@ export function createApi(daemon: Daemon): Server {
         // Cache tool args from start events — end events often lack them
         const toolArgsCache = new Map<string, Record<string, unknown>>();
 
-        // Resolve sessionKey + build an AbortController OUTSIDE the try
-        // so the catch block can reference them (interrupt bookkeeping
-        // needs both, and the catch runs if abort fires).
+        // sessionKey was resolved earlier (during fragment-context
+        // assembly) so the pre-compact usage lookup is scoped to this
+        // session. Reuse it here for inflight bookkeeping + dispatch.
         const saySenderId = (body.senderId as string) ?? 'founder';
         const senderSlug = members.find((m: any) => m.id === saySenderId)?.displayName?.toLowerCase().replace(/\s+/g, '-') ?? 'system';
-        const targetSlugNorm = normalize(target.displayName);
-        const sessionKey = (body.sessionKey as string)
-          ?? agentSessionKey(targetSlugNorm);
         const abortController = new AbortController();
         daemon.registerInflight(sessionKey, abortController);
 
@@ -914,6 +898,14 @@ export function createApi(daemon: Daemon): Server {
                   });
                 }
               } : undefined,
+              onUsage: (usage, model) => {
+                // Project 1.7 pre-compact signal bookkeeping — stash the
+                // latest per-(agent,session) usage snapshot so the next
+                // dispatch's FragmentContext can decide whether to inject
+                // the nudge. sessionKey scope prevents concurrent flows
+                // (say/jack) from clobbering each other's token state.
+                daemon.recordAgentUsage(target.id, sessionKey, usage, model);
+              },
             },
           });
 
@@ -1035,6 +1027,40 @@ export function createApi(daemon: Daemon): Server {
         }
         const result = await daemon.sendMessage(channelId, content, senderId);
         json(res, result);
+        return;
+      }
+
+      // POST /sweeper/run — invoke a code sweeper by name.
+      //
+      // Body: { name: string } — must be one of SWEEPER_NAMES.
+      // Response shape: SweeperResult { status, observations, summary }.
+      //
+      // runSweeper handles its own error containment — a buggy
+      // sweeper returns status='failed' instead of throwing. The
+      // only path that throws out of runSweeper is UnknownSweeperError
+      // (bad name from caller), which maps to 400 here. Anything
+      // else escaping runSweeper is genuinely unexpected and lands
+      // as 500 — Pulse's tick loop is wrapped separately so a 500
+      // here doesn't propagate into continuity-chain failures.
+      if (method === 'POST' && path === '/sweeper/run') {
+        const body = await readBody(req) as Record<string, unknown>;
+        const rawName = body.name;
+        if (typeof rawName !== 'string' || rawName.length === 0) {
+          json(res, { error: `name is required (known sweepers: ${SWEEPER_NAMES.join(', ')})` }, 400);
+          return;
+        }
+        try {
+          const result = await runSweeper(daemon, rawName);
+          json(res, result);
+        } catch (err) {
+          if (err instanceof UnknownSweeperError) {
+            json(res, { error: err.message }, 400);
+            return;
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          logError(`[api] /sweeper/run unexpected error: ${message}`);
+          json(res, { error: `sweeper dispatch failed: ${message}` }, 500);
+        }
         return;
       }
 
@@ -1609,6 +1635,24 @@ export function createApi(daemon: Daemon): Server {
 
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
+      // Project 1.11: BreakerTrippedError is a client-actionable
+      // refusal, not a server fault. Return 409 Conflict with a
+      // structured payload so CLI surfaces (cc-cli agent start /
+      // restart, etc.) can show the founder the path forward
+      // instead of a generic 500.
+      if (err instanceof BreakerTrippedError) {
+        json(
+          res,
+          {
+            error: err.message,
+            breakerTripped: true,
+            slug: err.slug,
+            tripChitId: err.tripChitId,
+          },
+          409,
+        );
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       logError(`[daemon] API error: ${message}`);
       json(res, { error: message }, 500);

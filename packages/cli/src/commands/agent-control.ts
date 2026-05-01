@@ -44,7 +44,20 @@ export async function cmdAgentControl(opts: {
   }
 
   if (opts.action === 'start') {
-    const result = await client.startAgent(member.id);
+    const result = await client.startAgent(member.id) as Record<string, unknown>;
+    if (result.error) {
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else if (result.breakerTripped) {
+        // Project 1.11: clean surface for crash-loop refusal — the
+        // founder needs the path forward, not a confused "port
+        // undefined" message.
+        console.error(`Cannot start ${member.displayName}: ${result.error}`);
+      } else {
+        console.error(`Failed to start ${member.displayName}: ${result.error}`);
+      }
+      process.exit(1);
+    }
     if (opts.json) {
       console.log(JSON.stringify(result, null, 2));
     } else {

@@ -189,7 +189,7 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
   // Clear thinkingAgents too — otherwise the indicator at the bottom
   // of the channel keeps showing the original send target's name even
   // after their reply lands. Concrete failure mode: Mark @CEO, ceo
-  // responds with "@Failsafe ...", router dispatches Failsafe, but
+  // responds with "@Sexton ...", router dispatches Sexton, but
   // the spinner still says "CEO is mulling..." because thinkingAgents
   // outranks dispatchingAgents in the render predicate.
   //
@@ -476,7 +476,10 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       return; // Consume all input when question is active
     }
 
-    if (key.ctrl && input === 'm') {
+    // Ctrl+S — toggle member sidebar. Was Ctrl+M originally, which
+    // collides with Enter (Ctrl+M sends the same byte as carriage
+    // return in terminals); 'S' for Sidebar avoids the collision.
+    if (key.ctrl && input === 's') {
       setShowMemberSidebar(prev => !prev);
     }
     // Ctrl+Y — open/close thread view (Ctrl+T is task board)
@@ -759,18 +762,28 @@ export function ChatView({ channel, messagesPath, streamData, dispatchingAgents 
       const agentInfo = (agentStatus as any)?.agents?.find((a: any) => a.memberId === targetAgent.id);
       const busyWarning = agentInfo?.workStatus === 'busy' ? ' (agent is busy — task will queue in their inbox)' : '';
 
+      // Project 1.4: /hand uses the shared handChitToSlot helper
+      // directly (file-first, no daemon round-trip). Previously went
+      // through daemonClient.handTask → /tasks/:id/hand, both of
+      // which were deleted in 1.4.
+      const founderMember = members.find((m) => m.rank === 'owner');
       try {
-        const result = await daemonClient.handTask(handTaskId, agentSlug);
-        if ((result as any).ok) {
-          const task = (result as any).task;
-          const title = task?.title ?? handTaskId;
-          const priority = task?.priority ?? 'normal';
-          writeSystemMessage(`Handed "${title}" [${priority}] → @${targetAgent.displayName}${busyWarning}. Work begins.`);
-        } else {
-          writeSystemMessage(`Failed to hand: ${(result as any).error ?? 'unknown error'}`);
-        }
+        const { handChitToSlot } = await import('@claudecorp/shared');
+        const result = handChitToSlot({
+          corpRoot,
+          targetSlug: targetAgent.id,
+          chitId: handTaskId,
+          handerId: founderMember?.id ?? 'founder',
+          announce: true,
+        });
+        writeSystemMessage(
+          `Handed ${handTaskId} → @${targetAgent.displayName}${busyWarning}` +
+            (result.finalWorkflowStatus ? ` [${result.finalWorkflowStatus}]` : '') +
+            `. Work begins.`,
+        );
       } catch (err) {
-        writeSystemMessage(`Failed to hand task: ${err instanceof Error ? err.message : String(err)}`);
+        const msg = err instanceof Error ? err.message : String(err);
+        writeSystemMessage(`Failed to hand: ${msg}`);
       }
       return;
     }
@@ -2139,10 +2152,15 @@ Always consider what happens when things go wrong.`,
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Messages — ScrollBox with sticky scroll replaces Ink's broken Static */}
-      <ScrollBox stickyScroll flexGrow={1} flexDirection="column">
-        {messages.slice(-100).map((msg, idx, arr) => renderMsg(msg, idx > 0 ? arr[idx - 1] ?? null : null))}
-      </ScrollBox>
+      {/* Messages-area + member sidebar live in a row so the sidebar
+          sits to the right of the chat. Input/status stay below this
+          row at full width. */}
+      <Box flexDirection="row" flexGrow={1}>
+        <Box flexDirection="column" flexGrow={1}>
+          {/* Messages — ScrollBox with sticky scroll replaces Ink's broken Static */}
+          <ScrollBox stickyScroll flexGrow={1} flexDirection="column">
+            {messages.slice(-100).map((msg, idx, arr) => renderMsg(msg, idx > 0 ? arr[idx - 1] ?? null : null))}
+          </ScrollBox>
       {/* Streaming messages — each renders inline like a real message in the chat */}
       {channelStreams.filter(s => s.content).map(stream => {
         const streamAgent = members.find(m => m.displayName === stream.agentName);
@@ -2193,6 +2211,16 @@ Always consider what happens when things go wrong.`,
           </Text>
         </Box>
       )}
+        </Box>
+        {/* Member sidebar — toggled with 'm'. Project 1.10.4 + 1.11. */}
+        <MemberSidebar
+          members={members}
+          channelMemberIds={channel.memberIds}
+          visible={showMemberSidebar}
+          daemonClient={daemonClient}
+          corpRoot={corpRoot}
+        />
+      </Box>
       {/* Plan review mode — replaces input with approve/edit/dismiss choice */}
       {planReview ? (
         <Box flexDirection="column">
@@ -2262,7 +2290,7 @@ Always consider what happens when things go wrong.`,
               : jackMode?.active ? `Jacked into ${jackMode.agentName} — live session` : 'Type a message... (/hire to add agents)'}
             agents={members.filter(m => m.type === 'agent').map(m => ({ slug: m.displayName.toLowerCase().replace(/\s+/g, '-'), displayName: m.displayName }))}
           />
-          <Text color={slumberActive ? '#a5b4fc' : jackMode?.active ? COLORS.warning : COLORS.muted}> {slumberActive ? 'SLUMBER active · /wake /brief  ' : ''}{jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  {(sending || thinking) && jackMode?.active ? 'Esc:interrupt' : 'Esc:back'}</Text>
+          <Text color={slumberActive ? '#a5b4fc' : jackMode?.active ? COLORS.warning : COLORS.muted}> {slumberActive ? 'SLUMBER active · /wake /brief  ' : ''}{jackMode?.active ? `JACKED:${jackMode.agentName}  /unjack to disconnect` : activeThread ? `Thread in #${channel.name}  C-Y:close` : `#${channel.name}`}  C-K:palette  C-H:home  C-T:tasks  C-S:members{(sending || thinking) && jackMode?.active ? 'Esc:interrupt' : 'Esc:back'}</Text>
         </>
       )}
     </Box>

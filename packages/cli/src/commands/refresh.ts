@@ -12,7 +12,6 @@ import {
   type AgentConfig,
 } from '@claudecorp/shared';
 import {
-  buildFailsafeRules,
   buildHeraldRules,
   buildJanitorRules,
   buildWardenRules,
@@ -97,18 +96,18 @@ async function refreshAgent(corpRoot: string, agent: Member, opts: RefreshOpts):
   const harness = resolveHarness(agentDir, agent);
   const rank = agent.rank ?? 'worker';
 
-  // System agents (Failsafe, Herald, Janitor, Warden, Planner) compose
-  // their AGENTS.md as `defaultRules + role-specific bullets` — same
-  // pattern as buildCeoAgents. Hand-hired workers/leaders get bare
-  // defaultRules. CEO gets buildCeoAgents (master rank + authority
-  // bullets). Refresh recognizes system agents by slug so it never
-  // strips their role section back to the bare template.
+  // System agents with role-specific bullets (Herald, Janitor, Warden,
+  // Planner) compose their AGENTS.md as `defaultRules + role-specific
+  // bullets` — same pattern as buildCeoAgents. Hand-hired workers /
+  // leaders get bare defaultRules. CEO gets buildCeoAgents (master
+  // rank + authority bullets). Sexton (Project 1.9) gets the bare
+  // defaultRules path — her role-specific operational content lives
+  // in patrol blueprints, not a pre-written rules block; see
+  // sexton.ts docstring for the rationale.
   const slug = (agent.agentDir ?? '').replace(/\/$/, '').split('/').pop() ?? '';
   let agentsContent: string;
   if (rank === 'master') {
     agentsContent = buildCeoAgents(harness);
-  } else if (slug === 'failsafe') {
-    agentsContent = buildFailsafeRules(harness);
   } else if (slug === 'herald') {
     agentsContent = buildHeraldRules(harness);
   } else if (slug === 'janitor') {

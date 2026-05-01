@@ -4,7 +4,7 @@ import type { Corporation } from './types/corp.js';
 import type { Member } from './types/member.js';
 import type { Channel } from './types/channel.js';
 import { installDefaultSkills } from './skills.js';
-import { installDefaultBlueprints } from './blueprints.js';
+import { seedBuiltinBlueprints } from './blueprint-seed.js';
 import { getTheme, type ThemeId } from './themes.js';
 import { memberId, channelId } from './id.js';
 import { writeConfig } from './parsers/config.js';
@@ -65,9 +65,24 @@ export async function scaffoldCorp(
     mkdirSync(dir, { recursive: true });
   }
 
-  // Install default skills from bundled package
+  // Install default skills from bundled package. Default prose
+  // blueprints (the old runbook shape) were removed in Project 1.8 —
+  // blueprints are now chits. 1.9.6 re-introduces a small built-in
+  // set (patrols Sexton walks) via seedBuiltinBlueprints below, but
+  // as chits with origin='builtin', not prose runbooks. Agents + founders
+  // continue to author their own blueprints via cc-cli blueprint new
+  // with origin='authored'.
   try { installDefaultSkills(corpRoot); } catch {}
-  try { installDefaultBlueprints(corpRoot); } catch {}
+
+  // Seed built-in blueprint chits (Project 1.9.6). Reads bundled
+  // markdown files under packages/shared/blueprints/ and writes
+  // them as blueprint chits with origin='builtin' into the corp's
+  // chit store. Fresh corps have patrol/health-check + patrol/corp-
+  // health + patrol/chit-hygiene available to Sexton from day one.
+  // Best-effort per blueprint; a seed failure is logged but doesn't
+  // abort corp init (a working corp > a blueprint-library-complete
+  // corp for the user's first-run story).
+  try { seedBuiltinBlueprints(corpRoot); } catch {}
 
   // IDs — member slug IS the ID
   const userId = memberId(userName);

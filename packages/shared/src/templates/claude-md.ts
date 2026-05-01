@@ -25,10 +25,6 @@
  * natively via workspace bootstrap.
  */
 
-export interface ClaudeMdTemplateOpts {
-  displayName: string;
-}
-
 // ─── Thin CLAUDE.md (Project 0.7 — the survival anchor shape) ─────
 
 import type { CorpMdKind } from './corp-md.js';
@@ -66,11 +62,34 @@ export interface ThinClaudeMdOpts {
  */
 export function buildThinClaudeMd(opts: ThinClaudeMdOpts): string {
   const criticalRule = opts.kind === 'employee'
-    ? `Your task ends with \`cc-cli hand-complete\`. The Stop hook will audit
+    ? `Your task ends with \`cc-cli done\`. The Stop hook will audit
 your work first — you cannot exit a session until audit passes.`
     : `Your context ends with \`/compact\`. The PreCompact hook audits first
 — you cannot compact until audit passes. Never push to main directly,
 ever. That's corp-breaking.`;
+
+  // Soul-file @imports are Partner-only. Project 1.1's DNA split says
+  // Employees don't have soul at the slot level — no SOUL, no USER, no
+  // MEMORY/BRAIN. Their identity is captured by role + displayName in
+  // members.json and rendered dynamically into CORP.md's Role section
+  // via the role registry. @importing files Employees don't have would
+  // log "import not found" warnings every dispatch; kind-conditional
+  // rendering keeps the prompt honest.
+  const soulFilesSection = opts.kind === 'partner'
+    ? `## Your soul files (agent-authored, persist across sessions)
+
+@./SOUL.md
+@./IDENTITY.md
+@./USER.md
+@./MEMORY.md`
+    : `## Your identity
+
+You don't have soul files at the slot level — Employees are ephemeral
+role-slots; identity lives at the role-registry level, not per-slot.
+Your role (\`${opts.role}\`) is rendered into CORP.md dynamically by
+\`cc-cli wtf\`, always current. When you earn promotion to Partner
+(\`cc-cli tame\`), soul files get created; until then, your role is
+your identity.`;
 
   return `# ${opts.displayName}
 
@@ -80,8 +99,10 @@ You are ${opts.displayName}, a ${opts.role} (${opts.kind}) in the ${opts.corpNam
 
 If your context has been compacted, this is a fresh session, or you're
 disoriented at any point: run \`cc-cli wtf\` in a Bash tool call. It
-regenerates CORP.md in your workspace + emits your situational context
-as a \`<system-reminder>\` block — the corp manual + who/where/what.
+regenerates CORP.md in your workspace and emits a small situational
+header as a \`<system-reminder>\`. The corp manual itself reaches you
+via \`@./CORP.md\` below — claude-code re-resolves the import every
+turn, so a fresh wtf is reflected immediately.
 
 ## Workspace discipline
 
@@ -93,12 +114,17 @@ chits) but never write outside your own sandbox.
 
 ${criticalRule}
 
-## Your soul files (agent-authored, persist across sessions)
+${soulFilesSection}
 
-@./SOUL.md
-@./IDENTITY.md
-@./USER.md
-@./MEMORY.md
+## The corp manual
+
+@./CORP.md
+
+This is the corp's full ops reference — chits, casket, audit, hand,
+patrols, commands, escalation, the works. Regenerated on every
+SessionStart by \`cc-cli wtf\`, so what you see here is current as
+of this turn. Re-run \`cc-cli wtf\` mid-session if state changed
+materially and you need a fresh snapshot.
 
 ## Your live operational state
 
@@ -114,59 +140,13 @@ audit hook — resolve them before trying to end your turn.
 
 ## What you'll get dynamically
 
-SessionStart auto-runs \`cc-cli wtf\` and injects CORP.md + your
-situation as a system-reminder. Don't \`@import\` AGENTS.md or TOOLS.md
-— those no longer exist as workspace files. Everything the corp tells
-you (rules, commands, architecture, chit vocabulary) comes through
-\`cc-cli wtf\`, always current, never stale.
+SessionStart auto-runs \`cc-cli wtf\`. wtf rewrites CORP.md on disk
+(picked up by the \`@./CORP.md\` import above) and emits a short
+situational header as a \`<system-reminder>\`. Two paths, one source
+of truth — wtf decides what's current, you read it via @import.
+Don't \`@import\` AGENTS.md or TOOLS.md;
+those no longer exist as workspace files (their content moved into
+CORP.md sections).
 `;
 }
 
-export function buildClaudeMd(opts: ClaudeMdTemplateOpts): string {
-  const { displayName } = opts;
-  return `# I am ${displayName}
-
-Embody SOUL.md's persona and tone. Avoid stiff, generic replies; follow its
-guidance unless higher-priority instructions override it. AGENTS.md describes
-non-negotiable constraints — they're rules, not guidelines. Check
-STATUS.md / INBOX.md / TASKS.md at the start of every turn so you know what's
-actually current in the corp before you reply.
-
-## Identity
-@./SOUL.md
-@./IDENTITY.md
-@./AGENTS.md
-
-## First-run onboarding (deleted after you complete it)
-@./BOOTSTRAP.md
-
-## Tools & founder
-@./TOOLS.md
-@./USER.md
-
-## Memory index
-@./MEMORY.md
-
-## Wake cycle
-@./HEARTBEAT.md
-
-## Current state
-@./STATUS.md
-@./INBOX.md
-@./TASKS.md
-
-## Read on demand
-These workspace files exist and matter contextually. Use the \`Read\` tool to
-pull them in when the conversation calls for it — don't try to read everything
-up front.
-
-- \`BRAIN/*.md\` — specific memories. Follow MEMORY.md's wikilinks into the
-  files that match the topic at hand.
-- \`chits/observation/*.md\` — your observations (chits of type=observation).
-  Each recorded via \`cc-cli observe\`. Your self-witnessing across time;
-  read via \`cc-cli chit list --type observation --scope agent:self\`
-  when reflecting on what you've done or noticed.
-- \`WORKLOG.md\` — historical work log. Read when you need to recall how
-  something was built or decided.
-`;
-}

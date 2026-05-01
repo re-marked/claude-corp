@@ -5,18 +5,24 @@ import { workspaceFragment } from './workspace.js';
 import { contextFragment } from './context.js';
 import { historyFragment } from './history.js';
 import { inboxFragment } from './inbox.js';
-import { dredgeFragment } from './dredge.js';
+// Project 1.6: Dredge fragment deleted. Its role (inject predecessor
+// handoff into every dispatch) is now wtf's, which runs once per
+// session boundary instead of once per turn — correct cadence for a
+// one-shot handoff signal, and avoids duplicate injection.
 import { autoemonFragment } from './autoemon.js';
 import { cultureFragment } from './culture.js';
+import { preCompactSignalFragment } from './pre-compact-signal.js';
+import { selfNamingFragment } from './self-naming.js';
 
 const FRAGMENTS: Fragment[] = [
   autoemonFragment,
   cultureFragment,
   workspaceFragment,
   inboxFragment,
-  dredgeFragment,
   contextFragment,
   historyFragment,
+  preCompactSignalFragment,
+  selfNamingFragment,
 ].sort((a, b) => a.order - b.order);
 
 /**
@@ -63,6 +69,19 @@ export function composeSystemMessage(ctx: FragmentContext): string {
         workspacePath: ctx.agentDir,
         generatedAt: now.toISOString(),
         now,
+        // Project 1.1 — explicit kind + role when the dispatch
+        // context resolver populates them from the Member record.
+        // Legacy contexts without these fields fall back to rank
+        // inference + the role-is-rank display stand-in.
+        ...(ctx.agentKind ? { kind: ctx.agentKind } : {}),
+        ...(ctx.agentRole ? { roleId: ctx.agentRole } : {}),
+        // Project 1.6: OpenClaw dispatch is the consumption point
+        // for the handoff chit on this substrate (Claude Code hits
+        // consumption via the SessionStart `cc-cli wtf` hook). First
+        // dispatch of a new session picks up the active handoff +
+        // closes it; subsequent dispatches find no active handoff
+        // and render the header without a handoff block.
+        consumeHandoff: true,
       });
 
       // Write CORP.md so the agent can re-read cheaply via Read tool.

@@ -60,6 +60,53 @@ describe('CHIT_TYPES registry invariants', () => {
     'pre-brain-entry',
     'step-log',
     'inbox-item',
+    // Project 1.4: Employee → Partner judgment request. Ephemeral
+    // 7d TTL, destroy-if-not-promoted, active → completed|rejected|closed.
+    'escalation',
+    // Project 1.8: Blueprint-as-molecule. Non-ephemeral template chit
+    // with origin=authored|builtin, steps DAG validated at write time,
+    // draft → active → closed lifecycle. Cast produces Contract + Task
+    // chits in 1.8 PR 2.
+    'blueprint',
+    // Project 1.9: sweeper-run records one dispatch of a sweeper
+    // blueprint (kind=sweeper). Ephemeral 7d TTL, destroy-if-not-
+    // promoted, active → closed|burning. Cast via
+    // castSweeperFromBlueprint produces one of these per dispatch.
+    'sweeper-run',
+    // Project 1.9.5: kink — operational finding emitted by sweepers
+    // (and future daemon-internal detectors). Distinct channel from
+    // observations so soul material stays soul material. Ephemeral
+    // 7d TTL, destroy-if-not-promoted; dedup per (source, subject).
+    'kink',
+    // Project 1.11: breaker-trip — crash-loop circuit breaker chit.
+    // Non-ephemeral, corp-scope, active → closed lifecycle. Refuses
+    // spawnAgent for the slug while active; founder resets via
+    // `cc-cli breaker reset`.
+    'breaker-trip',
+    // Project 1.12: clearance-submission — one PR's journey through
+    // the Clearinghouse phase (queue → Pressman → merge or conflict).
+    // Non-ephemeral; chit.status follows the rich submissionStatus
+    // field. Created by `cc-cli clear` after Editor approves or the
+    // review-round cap forces bypass.
+    'clearance-submission',
+    // Project 1.12: review-comment — one Editor-authored Codex-shape
+    // comment on a clearance-submission's diff. Non-ephemeral so
+    // recurring patterns can compound into CULTURE.md material.
+    // Severity 'blocker' rejects the round; 'suggestion'/'nit'
+    // advisory only.
+    'review-comment',
+    // Project 1.12.3: lane-event — immutable forensic record of a
+    // single state transition in the Clearinghouse merge lane.
+    // Pressman + Editor write these at every meaningful step;
+    // chronological stream is the corp's queryable lane diary.
+    // Non-ephemeral; durable corp memory.
+    'lane-event',
+    // Project 1.12.3: pattern-observation — Editor's compounding
+    // judgment substrate. Filed at session end when a recurring
+    // theme is worth recording; future sessions read relevant
+    // observations as priors for the drift pass. Proto-CULTURE.md
+    // material before Project 5.2 formalizes.
+    'pattern-observation',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {
@@ -179,10 +226,30 @@ describe('validator: task', () => {
   });
 
   it('accepts all workflow status enum values', () => {
-    for (const s of ['pending', 'assigned', 'in_progress', 'blocked', 'completed', 'failed', 'cancelled']) {
+    // Project 1.3 expanded this enum from 7 to 10 states. Legacy
+    // names (`pending`, `assigned`) are rejected at write-time now;
+    // read-time compat is handled by the tasks.ts bridge.
+    const validStates = [
+      'draft', 'queued', 'dispatched', 'in_progress',
+      'blocked', 'under_review',
+      'completed', 'rejected', 'failed', 'cancelled',
+    ];
+    for (const s of validStates) {
       expect(() =>
         entry.validate({ title: 'x', priority: 'normal', workflowStatus: s }),
       ).not.toThrow();
+    }
+  });
+
+  it('rejects legacy pending/assigned workflowStatus (1.3 rename)', () => {
+    // After 1.3's enum rename, attempts to write pre-1.3 names
+    // directly to the chit layer fail loudly. Existing pre-1.3
+    // chits on disk still load (read path absorbs via tasks.ts
+    // bridge); this guards against NEW writes with legacy names.
+    for (const legacy of ['pending', 'assigned']) {
+      expect(() =>
+        entry.validate({ title: 'x', priority: 'normal', workflowStatus: legacy }),
+      ).toThrow(/workflowStatus/);
     }
   });
 

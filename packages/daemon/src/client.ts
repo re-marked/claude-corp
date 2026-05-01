@@ -66,6 +66,10 @@ export class DaemonClient {
     model?: string;
     provider?: string;
     harness?: string;
+    /** Structural agent kind (1.1). Optional; daemon infers from rank when omitted. */
+    kind?: 'employee' | 'partner';
+    /** Role slot id (1.1) — references the role registry. Optional. */
+    role?: string;
   }): Promise<{ ok: boolean; member: unknown; dmChannel: unknown }> {
     const resp = await fetch(`${this.baseUrl}/agents/hire`, {
       method: 'POST',
@@ -327,16 +331,11 @@ export class DaemonClient {
     return resp.json() as Promise<any>;
   }
 
-  // --- Hand (task assignment) ---
-
-  async handTask(taskId: string, toSlug: string): Promise<{ ok: boolean; task: unknown; handedTo: string }> {
-    const resp = await fetch(`${this.baseUrl}/tasks/${encodeURIComponent(taskId)}/hand`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: toSlug }),
-    });
-    return resp.json() as Promise<any>;
-  }
+  // --- Hand ---
+  // `handTask` was deleted in Project 1.4. Callers route through
+  // `cc-cli hand` at the CLI boundary or import `handChitToSlot`
+  // from @claudecorp/shared for in-process use. The daemon no longer
+  // exposes a /tasks/:id/hand endpoint (see api.ts tombstone).
 
   // --- Loops & Crons ---
 

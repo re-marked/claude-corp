@@ -290,6 +290,17 @@ export class MessageRouter {
           const isDmChannel = channelMode === 'dm';
           const tier = isFounder && isDmChannel ? 3 : 2;
           const subject = (msg.content ?? '').split(/\r?\n/)[0]!.slice(0, 80) || '(no content)';
+          // Codex P1 round 3 on PR #204: chit `references` is
+          // validated as chit IDs (`chit-<type>-<hex>` shape).
+          // Channel messages live in JSONL files, not the chit
+          // store, so `<channel>:<msg-id>` was rejected by
+          // createChit's validator and the throw was swallowed by
+          // the local catch — every DM/@mention inbox-item write
+          // failed silently, dropping Tier 2/3 records that the
+          // audit gate + inbox CLI depend on. Fix: drop the
+          // `references` array (no chit to reference), fold the
+          // message id into `sourceRef` so the channel + message
+          // provenance still survives in a single string field.
           createInboxItem({
             corpRoot: this.daemon.corpRoot,
             recipient: targetId,
@@ -297,8 +308,7 @@ export class MessageRouter {
             from: senderOrSystem.id,
             subject,
             source: isDmChannel ? 'dm' : 'channel',
-            sourceRef: channel.name,
-            references: [`${channel.name}:${msg.id}`],
+            sourceRef: `${channel.name}:${msg.id}`,
           });
         } catch (err) {
           logError(
@@ -312,7 +322,7 @@ export class MessageRouter {
     // Previously agent→agent mentions were routed to the inbox to wait
     // for the next heartbeat (~3min latency), to prevent runaway loops
     // where A pings B, B pings A back, A pings B... User experience:
-    // Mark @mentions Failsafe in #general, Failsafe responds with
+    // Mark @mentions Sexton in #general, Sexton responds with
     // @Herald — and Herald just sits silent for 3 minutes. Felt broken.
     //
     // Loop protection moves from system enforcement to agent training:
@@ -395,8 +405,12 @@ export class MessageRouter {
       return `[${name} (${rank})] ${time}: ${m.content}`;
     });
 
+    // Resolve sessionKey upfront so buildContext can scope the usage
+    // snapshot lookup to THIS session (Codex P2, PR #170).
+    const routerSessionKey = agentSessionKey(target.displayName);
+
     // Build context with history
-    const context = this.buildContext(target, channel, members, recentHistory);
+    const context = this.buildContext(target, channel, members, recentHistory, routerSessionKey);
 
     // If message is just a bare @mention, use the previous message as content
     const strippedContent = msg.content.replace(/@"[^"]+"|@[A-Za-z0-9][\w-]*/g, '').trim();
@@ -449,7 +463,6 @@ export class MessageRouter {
       // crons, loops, dreams, and heartbeats. Collapsing scoping
       // surfaces the one-brain principle: same agent, same memory,
       // regardless of how the turn got triggered.
-      const routerSessionKey = agentSessionKey(target.displayName);
       log(`[router] DISPATCHING to ${target.displayName} for msg ${msg.id.slice(0,8)} from ${sender.displayName}`);
       const result = await this.daemon.harness.dispatch({
         agentId: agentProc.memberId,
@@ -531,6 +544,13 @@ export class MessageRouter {
               channelId: channel.id,
               toolName: tool.name,
             });
+          },
+          onUsage: (usage, model) => {
+            // Record per-(agent, session) token count for Project 1.7
+            // pre-compact signal. Fires on message_start (early) +
+            // message_delta (final); latest wins. sessionKey scope keeps
+            // concurrent flows from clobbering each other's token state.
+            this.daemon.recordAgentUsage(targetId, routerSessionKey, usage, model);
           },
         },
       });
@@ -732,6 +752,7 @@ export class MessageRouter {
     channel: Channel,
     members: Member[],
     recentHistory: string[] = [],
+    sessionKey: string = agentSessionKey(targetAgent.displayName),
   ): DispatchContext {
     const corpRootDisplay = this.daemon.corpRoot.replace(/\\/g, '/');
     const agentDirDisplay = targetAgent.agentDir
@@ -757,6 +778,8 @@ export class MessageRouter {
       supervisorName = supervisor?.displayName ?? null;
     }
 
+    const lastUsage = this.daemon.getLastAgentUsage(targetAgent.id, sessionKey);
+
     return {
       agentDir: agentDirDisplay,
       corpRoot: corpRootDisplay,
@@ -767,11 +790,15 @@ export class MessageRouter {
       daemonPort: this.daemon.getPort(),
       agentMemberId: targetAgent.id,
       agentRank: targetAgent.rank,
+      agentKind: targetAgent.kind,
+      agentRole: targetAgent.role,
       agentDisplayName: targetAgent.displayName,
       channelKind: channel.kind,
       supervisorName,
       autoemonEnrolled: this.daemon.autoemon.isEnrolled(targetAgent.id),
       harness: this.resolveHarness(targetAgent),
+      sessionTokens: lastUsage?.usage.inputTokens,
+      sessionModel: lastUsage?.model,
     };
   }
 

@@ -43,7 +43,17 @@
 import { mkdirSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
 import { getCorpRoot, getMembers } from '../client.js';
-import { atomicWriteSync, type Member } from '@claudecorp/shared';
+import {
+  atomicWriteSync,
+  type Member,
+  getCurrentStep,
+  findChitById,
+  updateChit,
+  chitScopeFromPath,
+  validateTransition,
+  TaskTransitionError,
+  type Chit,
+} from '@claudecorp/shared';
 
 export interface DoneOpts {
   from?: string;
@@ -95,13 +105,35 @@ export async function cmdDone(opts: DoneOpts): Promise<void> {
     createdBy: opts.from,
   };
 
+  // Flip the Casket-current task from in_progress → under_review via the
+  // 1.3 state machine BEFORE writing the pending handoff. Rationale:
+  //   - The chit store becomes the canonical source of "this task is
+  //     awaiting audit." wtf output + task-list queries immediately
+  //     surface the under_review state without waiting for the Stop
+  //     hook to fire.
+  //   - If the state machine rejects the transition (e.g., task still
+  //     blocked, Casket points at a completed task), we fail CLEANLY
+  //     here — the agent can't accidentally ship a pending-handoff
+  //     file that promises work the task state contradicts.
+  //   - Fail-open on substrate gaps (missing Casket, missing task chit,
+  //     no workflowStatus): write the pending file anyway, let audit
+  //     surface the inconsistency. Pre-1.3 tasks didn't carry
+  //     workflowStatus; we don't want to lock out agents whose Casket
+  //     points at a migration straggler.
+  const transitionNote = tryTransitionToUnderReview(corpRoot, opts.from);
+
   const pendingPath = join(workspace, '.pending-handoff.json');
   atomicWriteSync(pendingPath, JSON.stringify(payload, null, 2) + '\n');
 
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, pendingPath, payload }, null, 2));
+    console.log(JSON.stringify({ ok: true, pendingPath, payload, transition: transitionNote }, null, 2));
   } else {
     console.log(`cc-cli done: pending handoff written to ${pendingPath}`);
+    if (transitionNote.applied) {
+      console.log(`  task ${transitionNote.taskId} → under_review`);
+    } else if (transitionNote.reason) {
+      console.log(`  (state transition skipped: ${transitionNote.reason})`);
+    }
     console.log(
       'The Stop hook will now fire `cc-cli audit`. If the gate approves, your',
     );
@@ -112,6 +144,76 @@ export async function cmdDone(opts: DoneOpts): Promise<void> {
       'the audit reason — address it and run `cc-cli done` again to retry.',
     );
   }
+}
+
+// ─── State transition (in_progress → under_review) ─────────────────
+
+interface TransitionNote {
+  applied: boolean;
+  taskId?: string;
+  fromState?: string;
+  toState?: string;
+  reason?: string;
+}
+
+/**
+ * Best-effort state-machine transition of the agent's Casket-current
+ * task to `under_review`. Fails loudly (throws) only on state machine
+ * violations — substrate gaps (missing Casket, stale id, pre-1.3 task
+ * without workflowStatus) degrade to "skipped" with a reason so the
+ * agent sees what happened in the done output.
+ */
+function tryTransitionToUnderReview(corpRoot: string, slug: string): TransitionNote {
+  // getCurrentStep returns string | null | undefined — three-way:
+  //   string   — Casket points at a specific chit
+  //   null     — Casket exists, explicitly "no current step"
+  //   undefined — Casket chit not present yet (substrate gap)
+  let currentStep: string | null | undefined;
+  try {
+    currentStep = getCurrentStep(corpRoot, slug);
+  } catch {
+    return { applied: false, reason: 'Casket not readable' };
+  }
+  if (currentStep === undefined) {
+    return { applied: false, reason: 'no Casket chit for this agent yet' };
+  }
+  if (currentStep === null) {
+    return { applied: false, reason: 'Casket has no current step' };
+  }
+
+  const hit = findChitById(corpRoot, currentStep);
+  if (!hit || hit.chit.type !== 'task') {
+    return { applied: false, reason: `Casket currentStep ${currentStep} did not resolve to a task chit` };
+  }
+  const chit = hit.chit as Chit<'task'>;
+  const workflowStatus = chit.fields.task.workflowStatus;
+  if (!workflowStatus) {
+    return { applied: false, reason: 'task has no workflowStatus (pre-1.3 chit — audit will surface)' };
+  }
+
+  // Validate + resolve. Throws TaskTransitionError on illegal trigger
+  // (e.g., task is in 'blocked' or 'completed'). Caller sees the error
+  // in the done command's exit path and addresses before retrying.
+  let nextState;
+  try {
+    nextState = validateTransition(workflowStatus, 'handoff', chit.id);
+  } catch (err) {
+    if (err instanceof TaskTransitionError) {
+      fail(
+        `cannot mark task ${chit.id} as done: ${err.message}. ` +
+          `Resolve the state issue (maybe the task is blocked or already under review) before retrying.`,
+      );
+    }
+    throw err;
+  }
+
+  const scope = chitScopeFromPath(corpRoot, hit.path);
+  updateChit(corpRoot, scope, 'task', chit.id, {
+    fields: { task: { workflowStatus: nextState } } as never,
+    updatedBy: slug,
+  });
+
+  return { applied: true, taskId: chit.id, fromState: workflowStatus, toState: nextState };
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────

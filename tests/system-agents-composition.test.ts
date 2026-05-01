@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { defaultRules } from '../packages/shared/src/templates/rules.js';
-import { buildFailsafeRules } from '../packages/daemon/src/failsafe.js';
 import { buildHeraldRules } from '../packages/daemon/src/herald.js';
 import { buildJanitorRules } from '../packages/daemon/src/janitor.js';
 import { buildWardenRules } from '../packages/daemon/src/warden.js';
@@ -40,7 +39,6 @@ interface AgentSpec {
 }
 
 const SYSTEM_AGENTS: AgentSpec[] = [
-  { name: 'Failsafe', rank: 'worker', build: buildFailsafeRules, rolePhrase: 'corp\'s watchdog', roleHeading: '## Failsafe Watchdog Role' },
   { name: 'Herald',   rank: 'worker', build: buildHeraldRules,   rolePhrase: 'corp\'s narrator', roleHeading: '## Herald Narrator Role' },
   { name: 'Janitor',  rank: 'worker', build: buildJanitorRules,  rolePhrase: 'corp\'s git specialist', roleHeading: '## Janitor Git-Merge Role' },
   { name: 'Warden',   rank: 'worker', build: buildWardenRules,   rolePhrase: 'corp\'s quality gate', roleHeading: '## Warden Quality-Gate Role' },

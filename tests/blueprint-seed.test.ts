@@ -1,0 +1,159 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  seedBuiltinBlueprints,
+  queryChits,
+  parseFrontmatter,
+} from '../packages/shared/src/index.js';
+
+const BUNDLED_BLUEPRINTS_DIR = join(
+  __dirname,
+  '..',
+  'packages',
+  'shared',
+  'blueprints',
+);
+
+function findMarkdownFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      out.push(...findMarkdownFiles(full));
+    } else if (entry.endsWith('.md')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/**
+ * seedBuiltinBlueprints is the load-bearing mechanism for 1.9.6 —
+ * fresh corps get the shipped patrol blueprints at init. If the
+ * shipped markdown files + parseFrontmatter + validateBlueprint +
+ * createChit pipeline disagree on any axis, a user's fresh `cc-cli
+ * init` silently lands with no patrols + Sexton hits "blueprint not
+ * found" on her first wake.
+ *
+ * One test, end-to-end against the REAL bundled files at
+ * `packages/shared/blueprints/patrol/`. The seed module resolves
+ * them via its own import.meta.url so we don't mock the bundle
+ * path — if the test passes here, the same resolution works for
+ * a user running `cc-cli init` against a real install.
+ */
+
+/**
+ * Per-file frontmatter parse check. The seedBuiltinBlueprints catch-and-skip
+ * loop is fail-safe at runtime (one bad file shouldn't abort corp init), but
+ * that means a corrupted bundled file fails SILENTLY in production — fresh
+ * corps just have one fewer patrol than they should. The "exactly 3 land"
+ * assertion below catches the count, but doesn't tell you WHICH file broke
+ * or why. This per-file loop names the failing file at exactly the layer
+ * the bug lives. Codex caught the tab-indentation regression in chit-hygiene.md
+ * on PR #180; this test prevents the next one from sneaking through.
+ */
+describe('bundled blueprint markdown files parse cleanly', () => {
+  const files = findMarkdownFiles(BUNDLED_BLUEPRINTS_DIR);
+
+  it.each(files)('%s parses with valid frontmatter', (filePath) => {
+    const raw = readFileSync(filePath, 'utf-8');
+    const { meta } = parseFrontmatter<{ name: string; steps: unknown[] }>(raw);
+    expect(meta, `frontmatter missing in ${filePath}`).toBeTruthy();
+    expect(typeof meta!.name, `name not a string in ${filePath}`).toBe('string');
+    expect(Array.isArray(meta!.steps), `steps not an array in ${filePath}`).toBe(true);
+    expect(meta!.steps.length, `steps empty in ${filePath}`).toBeGreaterThan(0);
+  });
+});
+
+describe('seedBuiltinBlueprints', () => {
+  let corpRoot: string;
+
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'seed-blueprints-'));
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(corpRoot, { recursive: true, force: true });
+    } catch {
+      // best-effort; Windows fs-handle races shouldn't fail the test
+    }
+  });
+
+  it('seeds the 6 shipped patrol blueprints as chits with origin=builtin', () => {
+    seedBuiltinBlueprints(corpRoot);
+
+    const result = queryChits<'blueprint'>(corpRoot, {
+      types: ['blueprint'],
+      scopes: ['corp'],
+    });
+
+    const names = result.chits.map((c) => c.chit.fields.blueprint.name).sort();
+    expect(names).toEqual([
+      'patrol/chit-hygiene',
+      'patrol/clearing',
+      'patrol/code-review',
+      'patrol/conflict-resolution',
+      'patrol/corp-health',
+      'patrol/health-check',
+    ]);
+  });
+
+  it('every seeded blueprint has origin=builtin (forced by the seeder regardless of file claim)', () => {
+    seedBuiltinBlueprints(corpRoot);
+
+    const result = queryChits<'blueprint'>(corpRoot, {
+      types: ['blueprint'],
+      scopes: ['corp'],
+    });
+
+    for (const item of result.chits) {
+      expect(item.chit.fields.blueprint.origin).toBe('builtin');
+    }
+  });
+
+  it('seeded blueprints have non-empty steps (validator would have rejected empty)', () => {
+    seedBuiltinBlueprints(corpRoot);
+
+    const result = queryChits<'blueprint'>(corpRoot, {
+      types: ['blueprint'],
+      scopes: ['corp'],
+    });
+
+    for (const item of result.chits) {
+      const steps = item.chit.fields.blueprint.steps;
+      expect(steps.length).toBeGreaterThan(0);
+      // Each step must carry at least id + title (BlueprintStep contract)
+      for (const step of steps) {
+        expect(step.id).toBeTruthy();
+        expect(step.title).toBeTruthy();
+      }
+    }
+  });
+
+  it('seeded blueprints land with status=active (ready to show/walk)', () => {
+    seedBuiltinBlueprints(corpRoot);
+
+    const result = queryChits<'blueprint'>(corpRoot, {
+      types: ['blueprint'],
+      scopes: ['corp'],
+      statuses: ['active'],
+    });
+
+    // All 6 should come back under status=active filter — if the
+    // seeder landed them as 'draft' (the default for authored
+    // blueprints), cc-cli blueprint show wouldn't find them.
+    expect(result.chits.length).toBe(6);
+  });
+
+  it('runs without throwing even when invoked twice (not idempotent, but non-fatal)', () => {
+    // The seeder is documented NOT idempotent — second call writes
+    // fresh duplicate chits with new auto-generated ids. But it
+    // shouldn't THROW; scaffoldCorp's try/catch around the call
+    // relies on this behavior.
+    seedBuiltinBlueprints(corpRoot);
+    expect(() => seedBuiltinBlueprints(corpRoot)).not.toThrow();
+  });
+});

@@ -23,7 +23,7 @@
 
 import { basename, dirname } from 'node:path';
 import type { Task, TaskStatus, TaskPriority, TaskComplexity } from './types/task.js';
-import type { Chit, ChitStatus, TaskFields } from './types/chit.js';
+import type { Chit, ChitStatus, TaskFields, TaskWorkflowStatus } from './types/chit.js';
 import {
   createChit,
   readChit,
@@ -75,13 +75,20 @@ export interface TaskWithBody {
  * Fine-grained workflowStatus (preserved through migration or set by
  * createTask) is the primary source for Task.status; falls back to
  * deriving from chit.status + assignee when workflowStatus is missing.
+ *
+ * The new 10-state TaskWorkflowStatus (1.3) is down-mapped to the
+ * legacy 7-state TaskStatus for caller compatibility. Legacy consumers
+ * lose some granularity (dispatched → assigned, under_review →
+ * in_progress, rejected → failed) — that's intentional; the coarse
+ * wrapper trades precision for stability while consumers migrate.
  */
 function chitToTask(chit: Chit<'task'>): Task {
   const fields = chit.fields.task;
+  const workflowStatus = fields.workflowStatus ?? deriveWorkflowStatus(chit.status, fields.assignee ?? null);
   return {
     id: chit.id,
     title: fields.title,
-    status: fields.workflowStatus ?? deriveTaskStatus(chit.status, fields.assignee ?? null),
+    status: workflowToLegacyStatus(workflowStatus),
     priority: fields.priority,
     assignedTo: fields.assignee ?? null,
     createdBy: chit.createdBy,
@@ -100,10 +107,15 @@ function chitToTask(chit: Chit<'task'>): Task {
   };
 }
 
-function deriveTaskStatus(chitStatus: ChitStatus, assignee: string | null): TaskStatus {
+/**
+ * Fallback derivation for chits missing fields.task.workflowStatus
+ * (pre-0.5.1 tasks, malformed migrations). Produces a valid 1.3
+ * TaskWorkflowStatus from chit.status + assignee presence.
+ */
+function deriveWorkflowStatus(chitStatus: ChitStatus, assignee: string | null): TaskWorkflowStatus {
   switch (chitStatus) {
     case 'draft':
-      return assignee ? 'assigned' : 'pending';
+      return assignee ? 'queued' : 'draft';
     case 'active':
       return 'in_progress';
     case 'completed':
@@ -111,11 +123,46 @@ function deriveTaskStatus(chitStatus: ChitStatus, assignee: string | null): Task
     case 'failed':
       return 'failed';
     case 'rejected':
-      return 'failed';
+      return 'rejected';
     case 'closed':
       return 'cancelled';
     default:
-      return 'pending';
+      return 'draft';
+  }
+}
+
+/**
+ * Down-map the 10-state 1.3 TaskWorkflowStatus to the legacy 7-state
+ * TaskStatus shape callers of the Task wrapper see. Legacy callers
+ * don't need the finer distinctions (queued vs dispatched, plain
+ * in_progress vs under_review, failed vs rejected); the chit layer
+ * preserves them in fields.task.workflowStatus for code that does.
+ *
+ * Also absorbs pre-1.3 workflow values on disk ('pending', 'assigned')
+ * so round-trip reads of old chits stay valid without a migration
+ * sweep. Next write through the chit validator will rewrite them to
+ * the new names.
+ */
+function workflowToLegacyStatus(ws: TaskWorkflowStatus | 'pending' | 'assigned'): TaskStatus {
+  switch (ws) {
+    // Legacy names — tolerate on read, normalize to modern semantics.
+    case 'pending': return 'pending';
+    case 'assigned': return 'assigned';
+    // 1.3 states.
+    case 'draft': return 'pending';
+    case 'queued': return 'assigned';
+    case 'dispatched': return 'assigned';
+    case 'in_progress': return 'in_progress';
+    case 'blocked': return 'blocked';
+    case 'under_review': return 'in_progress';
+    // Project 1.12: clearance is "agent done working, clearance-
+    // submission queued/processing through the Pressman lane."
+    // Legacy callers see this as in_progress alongside under_review.
+    case 'clearance': return 'in_progress';
+    case 'completed': return 'completed';
+    case 'rejected': return 'failed';
+    case 'failed': return 'failed';
+    case 'cancelled': return 'cancelled';
   }
 }
 
@@ -187,6 +234,11 @@ export function findTaskById(
 export function createTask(corpRoot: string, opts: CreateTaskOpts): Task {
   const id = taskId();
   const now = new Date().toISOString();
+  // Initial legacy-wrapper status matches 1.3's draft/queued semantic
+  // split: no assignee → pending (= draft at chit layer); assignee
+  // present → assigned (= queued at chit layer, waiting for daemon
+  // dispatch). The chit layer's workflowStatus is set to the
+  // corresponding 1.3 state by mapStatus inside taskToChit below.
   const initialStatus: TaskStatus = opts.assignedTo ? 'assigned' : 'pending';
 
   // Build the Task as the caller-returned shape first, then convert via
