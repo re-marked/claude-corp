@@ -25,7 +25,7 @@ describe('task state machine — TRANSITION_RULES shape', () => {
   it('every state appears in ALL_STATES', () => {
     const expected: TaskWorkflowStatus[] = [
       'draft', 'queued', 'dispatched', 'in_progress', 'blocked',
-      'under_review', 'completed', 'rejected', 'failed', 'cancelled',
+      'under_review', 'clearance', 'completed', 'rejected', 'failed', 'cancelled',
     ];
     expect([...ALL_STATES]).toEqual(expected);
   });
@@ -207,6 +207,15 @@ describe('task state machine — legalTriggersFrom', () => {
     expect(legalTriggersFrom('completed')).toEqual([]);
     expect(legalTriggersFrom('failed')).toEqual([]);
     expect(legalTriggersFrom('cancelled')).toEqual([]);
+  });
+
+  it('returns [merge, block, fail, cancel] for clearance (Codex P1 round 4 PR #204)', () => {
+    // Pre-fix: clearance had no row in TRANSITION_RULES, so any
+    // validateTransition call against a clearance-state task threw —
+    // fail/cancel/recovery flows from the Pressman lane couldn't
+    // complete. Pin the legal-trigger set so the row stays present.
+    const triggers = legalTriggersFrom('clearance');
+    expect([...triggers].sort()).toEqual(['block', 'cancel', 'fail', 'merge']);
   });
 
   it('returns [reopen] for rejected (the only legal exit)', () => {

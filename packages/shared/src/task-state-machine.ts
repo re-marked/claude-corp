@@ -1,6 +1,7 @@
 /**
  * Task state machine — the mechanical enforcement layer for the
- * 10-state TaskWorkflowStatus enum (REFACTOR.md Project 1.3).
+ * 11-state TaskWorkflowStatus enum (REFACTOR.md Project 1.3, plus
+ * `clearance` added in Project 1.12 for the Pressman merge lane).
  *
  * BEFORE this layer, workflowStatus was advisory: a string field
  * callers set however they felt. If task-events.ts flipped
@@ -65,6 +66,14 @@ export type TaskTransitionTrigger =
   /** Rejected task re-opened for another pass (founder-initiated). */
   | 'reopen'
   /**
+   * Project 1.12 — Pressman finalized the merge: the clearance-
+   * submission landed on origin and the task lifecycle terminates
+   * successfully. Distinct from `audit-approve` (which is the
+   * agent-side gate that fires `enterClearance` in the first place);
+   * `merge` is the substrate-side completion stamp.
+   */
+  | 'merge'
+  /**
    * Circuit-breaker trip (1.10), repeated audit blocks, or explicit
    * failure. Terminal-failure — downstream tasks cascade to blocked.
    */
@@ -93,7 +102,7 @@ export const TERMINAL_FAILURE_STATES: readonly TaskWorkflowStatus[] = [
   'cancelled',
 ] as const;
 
-/** The 10-state universe. Derived from the type for single-source-of-truth. */
+/** The 11-state universe. Derived from the type for single-source-of-truth. */
 export const ALL_STATES: readonly TaskWorkflowStatus[] = [
   'draft',
   'queued',
@@ -101,6 +110,7 @@ export const ALL_STATES: readonly TaskWorkflowStatus[] = [
   'in_progress',
   'blocked',
   'under_review',
+  'clearance',
   'completed',
   'rejected',
   'failed',
@@ -179,6 +189,28 @@ export const TRANSITION_RULES: {
     'audit-block': 'in_progress',
     reject: 'rejected',
     fail: 'failed',
+    cancel: 'cancelled',
+  },
+  // Project 1.12 — once audit-approve fires `enterClearance`, the task
+  // sits in `clearance` until the Pressman lane resolves it. Codex P1
+  // round 4 on PR #204: this row was missing entirely, so any
+  // validateTransition call from a clearance-state task threw — fail/
+  // cancel/recovery flows from the clearinghouse couldn't complete.
+  clearance: {
+    // Pressman finalized merge → terminal success. Distinct trigger
+    // from audit-approve; merge is substrate-side, audit-approve is
+    // agent-side gate.
+    merge: 'completed',
+    // Clearinghouse blocker (rebase conflict, hook reject, test
+    // failure routed to author) → task returns to in_progress so
+    // the author can re-work + re-handoff. Mirrors under_review's
+    // audit-block transition shape.
+    block: 'blocked',
+    // Pressman terminal-fail (push race exhausted retries, fatal
+    // git/network error, attribution-routing to engineering-lead
+    // exhausted) → terminal failure; downstream tasks cascade.
+    fail: 'failed',
+    // Founder cancel — same escape hatch as every non-terminal state.
     cancel: 'cancelled',
   },
   // Terminal-success is truly terminal — no outgoing legal transitions.
