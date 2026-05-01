@@ -290,6 +290,17 @@ export class MessageRouter {
           const isDmChannel = channelMode === 'dm';
           const tier = isFounder && isDmChannel ? 3 : 2;
           const subject = (msg.content ?? '').split(/\r?\n/)[0]!.slice(0, 80) || '(no content)';
+          // Codex P1 round 3 on PR #204: chit `references` is
+          // validated as chit IDs (`chit-<type>-<hex>` shape).
+          // Channel messages live in JSONL files, not the chit
+          // store, so `<channel>:<msg-id>` was rejected by
+          // createChit's validator and the throw was swallowed by
+          // the local catch — every DM/@mention inbox-item write
+          // failed silently, dropping Tier 2/3 records that the
+          // audit gate + inbox CLI depend on. Fix: drop the
+          // `references` array (no chit to reference), fold the
+          // message id into `sourceRef` so the channel + message
+          // provenance still survives in a single string field.
           createInboxItem({
             corpRoot: this.daemon.corpRoot,
             recipient: targetId,
@@ -297,8 +308,7 @@ export class MessageRouter {
             from: senderOrSystem.id,
             subject,
             source: isDmChannel ? 'dm' : 'channel',
-            sourceRef: channel.name,
-            references: [`${channel.name}:${msg.id}`],
+            sourceRef: `${channel.name}:${msg.id}`,
           });
         } catch (err) {
           logError(
