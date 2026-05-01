@@ -39,6 +39,7 @@ import {
   updateChit,
   chitScopeFromPath,
   readConfig,
+  validateTransition,
   MEMBERS_JSON,
   type Chit,
   type ClearanceSubmissionFields,
@@ -201,19 +202,34 @@ export async function enterClearance(opts: EnterClearanceOpts): Promise<Result<E
     ));
   }
 
-  // 5. Cascade: advance task workflow under_review → clearance.
+  // 5. Cascade: advance task workflow under_review → clearance via
+  // the state machine. Codex P2 round 7 on PR #204: this previously
+  // wrote workflowStatus: 'clearance' directly, bypassing
+  // validateTransition entirely. Project 1.3's mechanical-enforcement
+  // guarantee held on every other lifecycle path; this one was a
+  // silent gap. Routing through `submit-for-clearance` closes it —
+  // the trigger is in the table (under_review → clearance), and a
+  // future audit on a non-under_review task would now throw
+  // TaskTransitionError instead of silently flipping to clearance.
+  //
   // Best-effort with surface — if this fails, the submission exists
   // but the task is still at under_review, which would cause the
   // submission to be ignored. Surface the failure so audit can
   // log + retry the cascade.
   const taskScope = chitScopeFromPath(opts.corpRoot, taskHit.path);
+  const currentWorkflowStatus = taskChit.fields.task.workflowStatus ?? 'under_review';
   try {
+    const nextWorkflowStatus = validateTransition(
+      currentWorkflowStatus,
+      'submit-for-clearance',
+      taskChit.id,
+    );
     updateChit<'task'>(opts.corpRoot, taskScope, 'task', taskChit.id, {
       updatedBy: opts.submitter,
       fields: {
         task: {
           ...taskChit.fields.task,
-          workflowStatus: 'clearance',
+          workflowStatus: nextWorkflowStatus,
         },
       },
     });

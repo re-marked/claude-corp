@@ -88,6 +88,19 @@ export type TaskTransitionTrigger =
    */
   | 'merge'
   /**
+   * Project 1.12 — agent passed the audit gate AND the corp is
+   * clearinghouse-aware (active Pressman exists). `enterClearance`
+   * fires this trigger to transition under_review → clearance,
+   * routing the task into Pressman's merge lane. Distinct from
+   * `audit-approve` (under_review → completed) which is the direct
+   * path for corps without a clearinghouse. Codex P2 round 7 on
+   * PR #204: previously enter-clearance wrote workflowStatus
+   * directly, bypassing the state machine — Project 1.3's
+   * mechanical-enforcement guarantee held everywhere except this
+   * one path. Routing via validateTransition closes the gap.
+   */
+  | 'submit-for-clearance'
+  /**
    * Circuit-breaker trip (1.10), repeated audit blocks, or explicit
    * failure. Terminal-failure — downstream tasks cascade to blocked.
    */
@@ -206,7 +219,12 @@ export const TRANSITION_RULES: {
     cancel: 'cancelled',
   },
   under_review: {
+    // audit-approve goes direct to completed for non-clearinghouse
+    // corps (no Pressman lane to route through). For clearinghouse-
+    // aware corps, audit fires `submit-for-clearance` instead, which
+    // routes through clearance → merge → completed.
     'audit-approve': 'completed',
+    'submit-for-clearance': 'clearance',
     'audit-block': 'in_progress',
     reject: 'rejected',
     fail: 'failed',

@@ -209,6 +209,17 @@ describe('task state machine — legalTriggersFrom', () => {
     expect(legalTriggersFrom('cancelled')).toEqual([]);
   });
 
+  it('under_review supports submit-for-clearance → clearance (Codex P2 round 7 PR #204)', () => {
+    // The clearinghouse-aware branch of audit-approve. Pre-fix,
+    // enterClearance wrote workflowStatus directly; Project 1.3's
+    // mechanical-enforcement guarantee silently bypassed on this
+    // path. New trigger fires through validateTransition, so the
+    // table is the single source of truth for under_review exits.
+    const triggers = legalTriggersFrom('under_review');
+    expect(triggers).toContain('submit-for-clearance');
+    expect(triggers).toContain('audit-approve'); // direct path still preserved
+  });
+
   it('returns [merge, block, fail, cancel] for clearance (Codex P1 round 4 PR #204)', () => {
     // Pre-fix: clearance had no row in TRANSITION_RULES, so any
     // validateTransition call against a clearance-state task threw —
