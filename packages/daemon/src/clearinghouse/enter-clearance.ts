@@ -38,10 +38,13 @@ import {
   findChitById,
   updateChit,
   chitScopeFromPath,
+  readConfig,
+  MEMBERS_JSON,
   type Chit,
   type ClearanceSubmissionFields,
   type TaskFields,
 } from '@claudecorp/shared';
+import { join } from 'node:path';
 import { failure, ok, err, type Result } from './failure-taxonomy.js';
 import { realGitOps, type GitOps } from './git-ops.js';
 
@@ -247,9 +250,13 @@ export async function enterClearance(opts: EnterClearanceOpts): Promise<Result<E
  * a new flow until the substrate is healthy again).
  */
 export function isClearinghouseAwareCorp(corpRoot: string): boolean {
+  // Codex P1 round 6 on PR #204: was a `require()` inside this
+  // try/catch, but the daemon package is type:module ESM —
+  // require() threw synchronously, catch swallowed it, every probe
+  // returned false. Clearinghouse-capable corps looked
+  // non-aware → audit skipped clearance lane routing entirely
+  // even when an active Pressman existed.
   try {
-    const { readConfig, MEMBERS_JSON } = require('@claudecorp/shared') as typeof import('@claudecorp/shared');
-    const { join } = require('node:path') as typeof import('node:path');
     const members = readConfig<Array<{ role?: string; type?: string; status?: string }>>(join(corpRoot, MEMBERS_JSON));
     return members.some(
       (m) => m.role === 'pressman' && m.type === 'agent' && m.status !== 'archived',

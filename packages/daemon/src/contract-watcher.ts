@@ -11,6 +11,7 @@ import {
   findTaskById,
   readConfig,
   post,
+  createTask,
   MEMBERS_JSON,
   CHANNELS_JSON,
   MESSAGES_JSONL,
@@ -206,8 +207,13 @@ export class ContractWatcher {
       return;
     }
 
-    // Create a review task
-    const { createTask } = require('@claudecorp/shared');
+    // Create a review task. Codex P1 round 6 on PR #204 audit
+    // sweep: same require()-in-ESM bug class as enter-clearance +
+    // audit's readCurrentBranch. The require threw synchronously,
+    // the catch above swallowed it (or it crashed earlier in the
+    // function), and every contract-completion review-task creation
+    // failed silently. Hoisted createTask to the top-level shared
+    // import.
     const reviewTask = createTask(this.daemon.corpRoot, {
       title: `Review contract: "${contract.title}"`,
       description: `Review all tasks in contract ${contract.id} (project: ${projectName}).\n\nContract goal: ${contract.goal}\n\nTask IDs to review: ${contract.taskIds.join(', ')}\n\nRead each task file, verify acceptance criteria, check deliverables exist. Approve or reject.`,

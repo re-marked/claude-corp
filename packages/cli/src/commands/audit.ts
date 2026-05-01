@@ -42,6 +42,7 @@
 
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, appendFileSync } from 'node:fs';
 import { join, dirname, isAbsolute } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import {
   MEMBERS_JSON,
   findChitById,
@@ -779,7 +780,12 @@ function readCurrentBranch(worktreePath: string): string | null {
   try {
     // Synchronous spawn via child_process.execFileSync. Bounded
     // 5s timeout so a hung git can't lock the audit hook.
-    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    // Codex P1 round 6 on PR #204: was a `require()` inside this
+    // try/catch, but the cli package is type:module ESM —
+    // require() throws synchronously, the catch swallowed it, and
+    // every readCurrentBranch call returned null. Audit then
+    // treated null as "couldn't read current branch" and reverted
+    // approved tasks to in_progress instead of entering clearance.
     const output = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
       encoding: 'utf-8',
