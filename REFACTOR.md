@@ -2401,25 +2401,83 @@ Move on to Project 2 (Workflow Substrate) per the existing roadmap.
 
 ---
 
-## Live bugs surfaced by the Project 1 finale (2026-04-29)
+## Live bugs surfaced by the Project 1 finale (2026-04-29) — most resolved via PR #204's Codex review
 
-The substrate ships clean (PRs merged, types pass, unit tests green) but the
-finale e2e on `claude-test-corp` exposed a stack of integration / runtime /
-prompt-layer bugs that prevent end-to-end "5 tasks → 4 merged + 1 blocker"
-from running unattended. Filed here so they don't get forgotten as Project 2
-begins.
+The finale e2e on `claude-test-corp` exposed a stack of integration / runtime /
+prompt-layer bugs that prevented unattended end-to-end execution. Filed here so
+they don't get forgotten. **Most got resolved through seven rounds of Codex
+review on PR #204 (project/1 → dev)** before the merge to dev landed
+(`df2e874`, 2026-05-01). The remaining open bugs are either platform-specific
+or workflow-prompt-layer (Project 2 scope).
 
-**Fixed during the finale run itself (PR #203):**
+### ✅ Resolved during the finale run (PR #203)
 
 - ✅ `bacteria.executeApoptose` was destructive — `members.filter` removed
-  the entry entirely. Now archives via `status: 'archived'`. (`5bb45fa`)
+  the entry entirely. Now archives via `status: 'archived'` (`5bb45fa`).
 - ✅ No apoptose floor — bacteria could cull a role to zero. Per-role
-  `bacteriaFloor` (default 1) added; pool size never drops past floor.
-  (`ebd17b2`)
+  `bacteriaFloor` (default 1) added; pool size never drops past floor
+  (`ebd17b2`).
 
-Remaining live bugs (none block ship, but block running end-to-end):
+### ✅ Resolved through Codex review on PR #204 (rounds 1-7, 2026-04-30 → 2026-05-01)
 
-### Platform / Windows-specific
+- ✅ **`cc-cli hand` doesn't promote chit `status: draft → active`.** Tasks
+  sat at `status: draft` after `cc-cli hand`; bacteria's `queryChits` filter
+  excluded them, so the queue-driven mitose path couldn't see them. Round 1
+  (PR #205, `c537dfc`) — `writeTaskUpdate` promotes draft → active idempotently.
+- ✅ **Mitose-spawn vs dream-manager race.** `bacteria.executeMitose` spawned
+  the slot but didn't dispatch a work session; dream manager's idle-timer
+  raced ahead and burned a 5-min dream timeout on an empty observation set.
+  Round 2 (PR #206, `432fed9`) — `dispatchAfterMitose` callback in
+  `ExecutorContext` routes a wake DM through `dispatchTaskToDm` immediately
+  after `spawnAgent`.
+- ✅ **`members.json` write race ("entries appear and disappear").**
+  `executeApoptose` read members early, did several async/slow steps
+  (stopAgent, archive, obituary), then wrote the stale snapshot back —
+  clobbering any concurrent hire/mitose writes. Round 2 (PR #206,
+  `432fed9`) — re-read members.json immediately before write so concurrent
+  writers' new entries survive. The Pressman + Editor auto-hire reliability
+  issue from `claude-test-corp` was the same root cause.
+- ✅ **Inbox-item chit creation fails for DM @mention references.** Router
+  passed `<channel-name>:<msg-id>` as a chit-id reference; validator
+  rejected, throw was swallowed by local catch, every Tier 2/3 inbox-item
+  write failed silently. Round 3 (`da7a321`) — drop `references` array,
+  fold the message id into `sourceRef`.
+- ✅ **Task state machine missing `clearance` row.** `TaskWorkflowStatus`
+  had `clearance` since Project 1.12 but `TRANSITION_RULES` had no row;
+  any `validateTransition` call from a clearance-state task threw,
+  silently breaking fail/cancel/recovery flows from the Pressman lane.
+  Round 4 (`e8b1f98`) — added `clearance: { merge, block, fail, cancel }`,
+  added `'merge'` trigger, added `'clearance'` to `ALL_STATES`.
+- ✅ **Role-queued tasks orphaned on unblock.** Chain walker fired
+  `unblock` (blocked → in_progress) on every dependent, but role-queued
+  tasks (assignee = role-id) needed `blocked → queued` so bacteria's
+  queue scanner could re-pick them. Round 5 (`22dd8a5`) — new
+  `unblock-to-queue` trigger; chain walker uses `isKnownRole(assignee)`
+  to pick the right transition.
+- ✅ **Mitose pre-validation race.** `advanceCurrentStep` wrote
+  `casket.currentStep` first, `claimAssignedChit` could later fail on
+  missing/wrong-type chit, leaving a phantom-busy slot. Round 5
+  (`22dd8a5`) — `findChitById` validation up-front; fail fast with no
+  side effects when the chit's gone.
+- ✅ **`require()` in ESM packages × 4 sites.** Dynamic `require()`s in
+  type:module ESM packages threw synchronously, surrounding `try/catch`
+  swallowed silently. Round 6 (`d59b964`) — hoisted to top-level imports:
+  `audit.ts:782` (readCurrentBranch / fireEnterClearance reverted approved
+  tasks back to in_progress), `enter-clearance.ts:251-252`
+  (isClearinghouseAwareCorp probe always returned false → audit skipped
+  clearance routing), `contract-watcher.ts:210` (createTask for
+  contract-completion review tasks failed silently — audit-sweep find).
+- ✅ **Audit-approve bypassed `validateTransition` on the clearinghouse
+  path.** `enterClearance` wrote `workflowStatus: 'clearance'` directly.
+  Project 1.3's mechanical-enforcement guarantee held everywhere except
+  this one path. Round 7 (`ea7bbd5`) — new `submit-for-clearance` trigger
+  (`under_review → clearance`); `enterClearance` routes through
+  `validateTransition`. Closes the last known state-machine bypass —
+  every `workflowStatus` mutation now flows through the table.
+
+### ⏳ Still open (Project 2 scope or platform-specific)
+
+#### Platform / Windows-specific
 
 - **`cc-cli init` hangs at git step.** Creates corp dir + `members.json` with
   founder, then awaits `git.init()` / `git.commitAll()` indefinitely. Never
@@ -2429,98 +2487,41 @@ Remaining live bugs (none block ship, but block running end-to-end):
 - **`killStaleProcesses` hangs on Windows in non-TTY contexts.** The execa
   call to `cmd /c "netstat -ano | findstr :PORT | findstr LISTENING"` blocks
   past its 5s timeout when daemon is launched from a Bash subprocess or
-  `Start-Process -NoNewWindow`. Daemon initialization gets stuck at
-  `Cleaning up stale processes — N PIDs, M ports`. Workaround: launch daemon
-  from a real TTY (sometimes intermittent — retry often works). Proper fix:
-  hard `Promise.race` deadline around the whole cleanup, fall through to
+  `Start-Process -NoNewWindow`. Daemon init stuck at `Cleaning up stale
+  processes — N PIDs, M ports`. Workaround: launch daemon from a real TTY
+  (sometimes intermittent — retry often works). Proper fix: hard
+  `Promise.race` deadline around the whole cleanup, fall through to
   log+continue on timeout.
 
-### Lifecycle / race
+#### Lifecycle / cleanup
 
-- **`members.json` write race — entries appear and disappear.** `cc-cli hire`
-  writes (and possibly bacteria executor writes) get clobbered by overlapping
-  writes from elsewhere. Most clearly observed: hire Pressman, immediately
-  query — pressman absent from `members.json`, then returns minutes later.
-  Suspected: an in-memory caching layer somewhere flushes stale snapshots over
-  fresh writes. Hardest of these to debug; needs a writer-audit pass.
-- **Mitose-spawn vs dream-manager race.** `bacteria.executeMitose` calls
-  `processManager.spawnAgent(slug)` to start the slot's process but doesn't
-  immediately dispatch a work session for the casket-pre-loaded chit. The
-  dream manager's idle-timer races ahead, fires a dream session against an
-  empty observation set, times out at 5 min. The mitose-assigned chit never
-  gets a work dispatch. Fix shape: spawn followed by an immediate work
-  dispatch on the assigned chit, OR dream-manager skips slots whose
-  `casket.current_step` is non-null.
 - **Daemon restart wipes orphan agent dirs.** Backend Engineer's workspace
-  was deleted on restart because no `members.json` entry existed for it
-  (member lost in the race above). Cleanup logic should archive (rename to
-  `.archived-<slug>-<timestamp>/`) rather than delete — same shape the
-  bacteria apoptose path already uses.
+  was deleted on restart because no `members.json` entry existed for it.
+  Cleanup logic should archive (rename to `.archived-<slug>-<timestamp>/`)
+  rather than delete — same shape the bacteria apoptose path already uses.
 - **`cc-cli status` shows phantom agents.** Output reported 8 idle agents
-  while `members.json` had only 7 entries. In-memory process-manager list
-  out of sync with disk. Display bug only — no behavioral impact.
+  while `members.json` had only 7. In-memory process-manager list out of
+  sync with disk. Display bug only — no behavioral impact.
 
-### Workflow / agent prompts (mostly Project 2 scope)
+#### Workflow / agent prompts (Project 2 substrate territory)
 
-- **`cc-cli hand` doesn't promote chit `status: draft → active`.** Tasks
-  created by CEO via `cc-cli task create` sit at `status: draft` after
-  `cc-cli hand --to <role>`. Bacteria's `queryChits({statuses: ['active']})`
-  filter excludes them — invisible to the queue-driven mitose path until
-  manually flipped. Fix: `hand` should promote draft → active atomically
-  on handoff.
-- **Engineers don't submit clearance after completing work.** Backend Engineer
-  created the right branch + committed `notes/welcome.md`, then went idle
-  without creating a `clearance-submission` chit. Gap between "I did the
-  work" and "I trigger the clearinghouse." The engineer's BOOTSTRAP /
-  CORP.md doesn't make the submit step load-bearing enough.
+- **Engineers don't submit clearance after completing work.** Backend
+  Engineer created the right branch + committed `notes/welcome.md`, then
+  went idle without creating a `clearance-submission` chit. The engineer's
+  BOOTSTRAP / CORP.md doesn't make the submit step load-bearing enough.
 - **Engineers work on the corp's main worktree directly.** Clearinghouse
   pattern uses `<corpRoot>/wt/<task-id>/` worktrees, but the engineer never
   invoked `acquire-worktree` — checked out the feature branch on the corp's
-  primary checkout. Pollutes the corp's git state across runs. Fix: the
-  engineer's prompt must drive `clearinghouse acquire-worktree` before any
-  code edits.
+  primary checkout. Fix: the engineer's prompt must drive `clearinghouse
+  acquire-worktree` before any code edits.
 
-### Substrate / chits
+### Where these land
 
-- **Inbox-item chit creation fails for DM @mention references.** Router
-  emits `ERROR [router] inbox-item chit creation failed for ceo: references
-  contains invalid chit id: "dm-ceo-mark:m-19326e"`. The router passes
-  `<channel-id>:<message-id>` as a chit reference, but chit IDs follow
-  `chit-<type-prefix>-<hex>` shape — validator rejects. Either router mints
-  a real chit-id reference, or validator accepts message-id references for
-  inbox-item type only.
-
-- ✅ **Audit-approve transition bypasses the state machine on the
-  clearinghouse path** *(filed Codex round 4, fixed Codex round 7,
-  PR #204)*. `enterClearance` wrote `workflowStatus: 'clearance'`
-  directly; Project 1.3's mechanical-enforcement guarantee was silently
-  bypassed on the one path through the Pressman lane. Resolved via
-  fix shape #2 from the original plan: new `submit-for-clearance`
-  trigger (`under_review → clearance`) added to `TRANSITION_RULES`;
-  `enterClearance` now routes through `validateTransition`. The
-  existing `audit-approve → completed` rule is preserved for
-  non-clearinghouse corps. Closes the last known state-machine
-  bypass; every workflowStatus mutation now flows through the table.
-
-### Auto-hire reliability
-
-- **Pressman + Editor auto-hire (PR #201) is unreliable on TUI-driven
-  onboarding.** Initial `claude-test-corp` was created via TUI; the first
-  ResumeView's daemon hired them, but entries didn't persist in
-  `members.json` until a much-later restart. Probably the same race as
-  the lifecycle bug above — TUI uses a temporary daemon for scaffolding
-  (separate from ResumeView's permanent one), and writes from one
-  daemon clobber the other.
-
-### Where these likely land
-
-- Workflow / prompt bugs (`hand` doesn't promote, engineers don't submit,
-  worktree isolation) plausibly dissolve as Project 2's workflow substrate
-  matures — that IS what Project 2 lands.
-- Race / lifecycle bugs (members.json drift, mitose-vs-dream, restart
-  cleanup) and Windows hangs are orthogonal to refactor scope. They need
-  targeted fixes regardless of where the plan sits — track as live parallel
-  work alongside Project 2, not deferred opener material.
+The two workflow-prompt bugs above plausibly dissolve as Project 2's
+workflow substrate matures — that IS what Project 2 lands. The Windows
+hangs and lifecycle cleanup bugs are orthogonal to refactor scope; they
+need targeted fixes regardless of where the plan sits, treated as live
+parallel work alongside Project 2, not deferred opener material.
 
 ---
 
@@ -2913,9 +2914,9 @@ Still being discussed: the two remaining open questions (Partner demotion, voice
 - Project 1 sub-projects (1.1 through 1.13) have concrete file paths, test strategy, and dependencies spelled out, all shipped — see per-section [shipped] markers. The "Live bugs surfaced by the Project 1 finale" section above documents the integration-time gaps that surfaced during the closing e2e run; some dissolve as Project 2's workflow substrate matures, others are orthogonal parallel work.
 - Projects 2 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
 
-**Shipped as of 2026-04-29:**
+**Shipped as of 2026-05-01 — Project 1 merged into `dev` (`df2e874`):**
 - **Project 0** — Chits, lifecycle, wtf + CORP.md + audit gate + inbox — complete.
-- **Project 1** — Complete. 1.1 (Employee/Partner), 1.2 (Casket), 1.3 (chain + state machine), 1.4 (Hand rewrite) + 1.4.1 (block), 1.6 (Dredge-via-handoff-chits), 1.7 (Partner compaction), 1.8 (Blueprint-as-molecule), 1.9 (sweeper substrate + Sexton role + Pulse/Alarum + Sexton runtime + patrol blueprints), 1.10 (bacteria + cc-cli whoami + observability), 1.11 (crash-loop circuit breaker), 1.12 + 1.12.1-1.12.3 (clearinghouse: substrate + Pressman + Editor + walk-away-overnight closer), 1.13 (founding-flow refresh + stabilization stack PRs #198-203).
+- **Project 1** — Complete. 1.1 (Employee/Partner), 1.2 (Casket), 1.3 (chain + state machine), 1.4 (Hand rewrite) + 1.4.1 (block), 1.6 (Dredge-via-handoff-chits), 1.7 (Partner compaction), 1.8 (Blueprint-as-molecule), 1.9 (sweeper substrate + Sexton role + Pulse/Alarum + Sexton runtime + patrol blueprints), 1.10 (bacteria + cc-cli whoami + observability), 1.11 (crash-loop circuit breaker), 1.12 + 1.12.1-1.12.3 (clearinghouse: substrate + Pressman + Editor + walk-away-overnight closer), 1.13 (founding-flow refresh + stabilization stack PRs #198-203). Plus seven rounds of Codex review on the project/1 → dev PR closed nine integration-time gaps that surfaced during the live finale; see "Live bugs" section above. Every `workflowStatus` mutation now flows through `validateTransition`; no remaining state-machine bypasses.
 
 **In flight (open PRs, 1.9.5 phase):**
 - PR #178 — OS supervisor configs (systemd/launchd/Task Scheduler install + uninstall).
