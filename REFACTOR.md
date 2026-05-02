@@ -2610,12 +2610,26 @@ Validator support in `chit-types.ts`'s `validateBlueprint`. Cast pipeline (`blue
 - `getWalkPosition(taskChit, corpRoot)` → `{ blueprintName, stepId, stepIndex, totalSteps, contractChit, blueprintChit, taskOutput, expectedOutput } | null` (null = ad-hoc no-walk task; `taskOutput` is the agent's prose summary from 1.3's `TaskFields.output`; `expectedOutput` is the resolved spec or null)
 - `getWalkProgress(contractChit, corpRoot)` → `{ completedSteps[], currentStep, nextSteps[], remainingSteps[] }` — each step entry includes its own `expectedOutput` so consumers don't re-walk the blueprint
 - `nextStep(contract, currentStepId, corpRoot)`, `previousSteps(contract, currentStepId, corpRoot)`
-- `checkExpectedOutput(step, taskChit, corpRoot)` → `{ met: boolean, missing?: string[], evidence?: unknown }` — pure check function used by 2.3's audit. Each `kind` has its own pure checker (chit query for `chit-of-type`, `git branch --list` shell-out for `branch-exists`, etc.).
+- `checkExpectedOutput(step, taskChit, corpRoot, opts?)` → `{ status: 'met' | 'unmet' | 'unable-to-check', missing?: string[], evidence?: unknown, reason?: string }` — pure check function used by 2.3's audit. Three-state outcome (not boolean) so environmental flakes never lock agents out of `done`:
+  - `met` — check fired, output present, audit can approve.
+  - `unmet` — check fired, output absent, audit blocks with the teaching message.
+  - `unable-to-check` — checker couldn't run (git not in PATH, gh CLI missing, network down for `pr-exists`, etc.). Audit logs the reason to `chits/_log/audit-checks.jsonl` and treats as met-with-warning so flaky infra doesn't gate `done`. Repeated unable-to-check on the same step surfaces as a kink via Sexton's patrol next cycle (operational visibility without blocking).
+  - `opts?.cwd` — explicit working directory for shell-outs. Defaults to corpRoot; audit passes the worktree path when called from Clearinghouse-shape work (which checks out feature branches in `<corpRoot>/wt/<task-id>/`). Without this, `branch-exists` and `commit-on-branch` would query the corp's primary checkout and miss branches living in worktrees — false-negatives across the entire Clearinghouse flow.
+
+  Per-kind checker behaviors:
+  - `chit-of-type` — `queryChits({ type, createdBy: taskChit.fields.task.assignee, since: taskChit.fields.task.claimedAt, withTags })`. The `createdBy` filter is critical: a `submit-clearance` step expects the AGENT WORKING THIS STEP to produce the clearance-submission chit, not "anyone in the corp at any point." Without the filter, a clearance-submission chit from a different agent or a different step on the same Contract would falsely satisfy the check.
+  - `branch-exists` — `git -C <opts.cwd> branch --list <expanded-pattern>` returns ≥1 line.
+  - `commit-on-branch` — `git -C <opts.cwd> log <branch> --since=<claimedAt> --format=%H` returns ≥1 line.
+  - `file-exists` — `fs.existsSync(join(opts.cwd, expandedPath))`.
+  - `tag-on-task` — `taskChit.tags.includes(tag)` (no shell-out, pure data check).
+  - `task-output-nonempty` — `(taskChit.fields.task.output ?? '').trim().length > 0`.
+  - `multi` — recursive; status is `met` only if ALL sub-specs return `met`; `unable-to-check` propagates if any sub-check fails to fire; `unmet` otherwise.
+
 - `isWalkTask(taskChit)`, `isAdHocTask(taskChit)` — explicit booleans for callers that need to branch.
 
-Pure functions, no side effects beyond the read calls + the `git` shell-out for `branch-exists`. No new chit type — Walk is composed from Task + Contract + Blueprint chits.
+Pure functions over read calls + scoped shell-outs (with explicit cwd) for the kinds that need git/fs evidence. No new chit type — Walk is composed from Task + Contract + Blueprint chits.
 
-**Test strategy.** Unit per function with synthetic blueprint + contract + task fixtures: linear walks, fan-out/fan-in DAGs, step at index 0, step at last index, ad-hoc tasks (no walk), pre-spec contracts (no expectedOutput on steps → checks return `met: true` graceful), missing data fallback (deleted blueprint, deleted contract). For `checkExpectedOutput`: per-kind unit tests with stubbed evidence (chit-of-type with present + absent chit; branch-exists with mocked git).
+**Test strategy.** Unit per function with synthetic blueprint + contract + task fixtures: linear walks, fan-out/fan-in DAGs, step at index 0, step at last index, ad-hoc tasks (no walk), pre-spec contracts (no expectedOutput on steps → checks return `status: 'met'` graceful), missing data fallback (deleted blueprint, deleted contract). For `checkExpectedOutput`: per-kind unit tests covering all three outcome states (`met` / `unmet` / `unable-to-check`) with stubbed evidence — `chit-of-type` with present-by-correct-agent / present-by-wrong-agent / absent / before-claimedAt; `branch-exists` with mocked git returning success / no-match / non-zero-exit (unable); `commit-on-branch` with claimedAt-boundary tests (commits before vs after claim); `multi` with mixed sub-results (one unmet → unmet; one unable + rest met → unable propagates). Worktree-awareness: pass `cwd` opts; assert shell-outs run in the right tree.
 
 **Depends on:** existing chit infrastructure (1.8 Blueprint primitive, 0.x Chit substrate), 1.3 chain semantics (and `TaskFields.output` field).
 **PRs:** 2-3 (one for schema + validator + cast pipeline support; one for read API + per-kind checkers; optionally one for cast-pipeline integration tests if the first PR doesn't cover them).
@@ -2666,16 +2680,17 @@ This distinction matters because (2) and (3) ARE different — pre-spec walks st
 
 **Scope.** Extend `cc-cli audit` (`packages/cli/src/commands/audit.ts`) with walk-progress checks:
 - Read current task's walk via `getWalkPosition`. If null (no walk / ad-hoc), audit unchanged — preserves no-walk behavior for trivial work.
-- If walk + step has `expectedOutput` spec (from 2.1's schema): call `checkExpectedOutput(step, taskChit, corpRoot)`. Per-kind dispatch:
-  - `chit-of-type` → `queryChits({ type, since: stepStartedAt, withTags })` returns ≥1 result?
-  - `branch-exists` → `git branch --list <pattern>` returns non-empty?
-  - `tag-on-task` → current Task chit has the tag?
-  - `task-output-nonempty` → `taskChit.fields.task.output` is non-empty string?
-  - `multi` → all sub-specs pass.
+- If walk + step has `expectedOutput` spec (from 2.1's schema): call `checkExpectedOutput(step, taskChit, corpRoot, { cwd })`. Three-state outcome (per 2.1's checker contract):
+  - `status: 'met'` → walk check passes; AC check still runs in parallel; both must pass to approve.
+  - `status: 'unmet'` → audit blocks with a teaching message that names the missed step + expected output shape + the cc-cli verb that produces it. Example: "Step `submit-clearance` expected a chit of type `clearance-submission` with tag `task:<id>` produced by you after step claim; none found. Did you run `cc-cli clearinghouse submit --task <id>` before `cc-cli done`?"
+  - `status: 'unable-to-check'` → checker couldn't fire (git not in PATH, gh CLI missing, network down). Audit logs `{ taskId, stepId, kind, reason }` to `chits/_log/audit-checks.jsonl` and treats as approved-with-warning. Repeat unable-to-check on the same step across multiple `done` attempts surfaces as a kink via Sexton's patrol next cycle (operational visibility without blocking the agent on transient infra). Founder seeing repeated unable-to-check kinks knows the corp's infra is degraded; agent doesn't get walled out of work.
+- **Worktree-awareness for shell-out checkers.** Audit determines `cwd` for the `checkExpectedOutput` call:
+  - If the task chit has a Clearinghouse worktree allocated (`fields.task.worktreePath` from 1.12 or via the clearance-submission chit's `worktree.path`), use that. `branch-exists` and `commit-on-branch` checks fire against the worktree's git tree — the actual location where the agent's work lives.
+  - Otherwise fall back to `corpRoot` (the corp's primary checkout).
+  - Without this, Clearinghouse-shape work (the dominant pattern for `ship-feature`) would always fail `branch-exists` checks because the feature branch lives in `<corpRoot>/wt/<task-id>/`, not in `<corpRoot>/`.
 - If walk + step has NO `expectedOutput` spec → audit doesn't run walk-progress checks for that step (graceful degradation per Decisions Made; AC checks still run as today).
-- If walk-progress check fails: block with a teaching message that names the missed step + expected output shape + the cc-cli verb that produces it. Example: "Step `submit-clearance` expected a chit of type `clearance-submission` with tag `task:<id>` produced after step start; none found. Did you run `cc-cli clearinghouse submit --task <id>` before `cc-cli done`?"
 - Audit-approve still fires through `validateTransition` (1.3's mechanical-enforcement guarantee held; this doesn't bypass the state machine).
-- Founder-override (`cc-cli audit --override --reason "..."`) preserved as escape valve, logged to `chits/_log/audit-overrides.jsonl`. Override on a walk-aware block is the safety net for cases where the agent legitimately needs to handoff mid-step.
+- Founder-override (`cc-cli audit --override --reason "..."`) preserved as escape valve, logged to `chits/_log/audit-overrides.jsonl`. Override on a walk-aware block is the safety net for cases where the agent legitimately needs to handoff mid-step (and `unable-to-check` is the safety net for transient infra — different escape valves for different problems).
 
 **Walk-aware audit is part of the clearance pipeline, not new infrastructure.** Today: `cc-cli done` → Stop hook → `cc-cli audit` → approve triggers `enterClearance` for clearance-eligible work / block returns the agent to work. Walk-checks live INSIDE audit; they extend its existing pre-clearance verification.
 
