@@ -2585,13 +2585,24 @@ Compounding the problem: `BlueprintStep` today carries `id, title, description, 
 
 **Scope.**
 
-**Schema work (ships first within 2.1).** Add `expectedOutput?: ExpectedOutputSpec | null` to `BlueprintStep` (`packages/shared/src/types/chit.ts`). Spec shape — a discriminated union of mechanical-checkable output kinds:
-- `{ kind: 'chit-of-type', chitType: ChitType, withTags?: string[] }` — step produces a chit of a given type with optional tag pattern (e.g. clearance-submission chit produced)
-- `{ kind: 'branch-exists', branchPattern: string }` — step produces a git branch matching a Handlebars-templatable pattern (e.g. `feat/{{feature}}`)
-- `{ kind: 'tag-on-task', tag: string }` — step adds a specific tag to its own Task chit (lightweight signal)
-- `{ kind: 'task-output-nonempty' }` — step requires `task.output` field (the prose summary from 1.3) to be non-empty — minimum bar
-- `{ kind: 'multi', specs: ExpectedOutputSpec[] }` — composed; all must hold
-- `null` / absent → step has no walk-aware output check; audit treats as no-walk for this step (graceful degradation for pre-spec Contracts; see Decisions Made above).
+**Schema work (ships first within 2.1).** Add `expectedOutput?: ExpectedOutputSpec | null` to `BlueprintStep` (`packages/shared/src/types/chit.ts`). Spec shape — a discriminated union of mechanical-checkable output kinds. **Extensible by design** — new kinds added per blueprint authoring needs cost one validator entry + one checker function each; the union is open for growth as 2.8 authors real blueprints.
+
+Anticipated kinds (ship in 2.1):
+- `{ kind: 'chit-of-type', chitType: ChitType, withTags?: string[] }` — step produces a chit of a given type with optional tag pattern (e.g. clearance-submission produced).
+- `{ kind: 'branch-exists', branchPattern: string }` — step produces a git branch matching a Handlebars-templatable pattern (e.g. `feat/{{feature}}`).
+- `{ kind: 'commit-on-branch', branchPattern: string, sinceClaim?: boolean }` — step produces ≥1 commit on the named branch (defaults to since-claim, i.e. since the agent transitioned the task `dispatched → in_progress`). The `implement` step in `ship-feature` is the canonical user.
+- `{ kind: 'file-exists', pathPattern: string }` — step produces a specific file at a Handlebars-templatable path (e.g. `notes/{{topic}}.md`). Not git-aware — checks the working tree.
+- `{ kind: 'tag-on-task', tag: string }` — step adds a specific tag to its own Task chit (lightweight signal for steps that don't produce external artifacts).
+- `{ kind: 'task-output-nonempty' }` — step requires `task.output` (the prose summary from 1.3) to be non-empty — minimum bar for any step where the agent must SAY what they did.
+- `{ kind: 'multi', specs: ExpectedOutputSpec[] }` — composed; all must hold.
+- `null` / absent → step has no walk-aware output check; audit treats as audit-degraded for this step (per Decisions Made — graceful degradation for pre-spec Contracts).
+
+Anticipated kinds for later (deferred to 2.8 if needed; one validator + one checker each):
+- `{ kind: 'tests-pass', cmd?: string }` — step expected to run a test command and have it exit 0. Default `pnpm test`; overridable.
+- `{ kind: 'pr-exists', branchPattern: string, state?: 'open' | 'merged' }` — step expected to create a GitHub PR (gh-shell-out check). Used by `ship-feature.react-to-blockers-or-merge`.
+- `{ kind: 'git-tag-exists', tagPattern: string }` — step expected to create a git tag (e.g. `release.tag` step's `v{{version}}`).
+
+Also add `claimedAt: string | null` (ISO 8601 timestamp) to `TaskFields`. Set by the 1.3 state-machine transition `dispatched → in_progress` — when an agent claims a task. This is the timestamp `commit-on-branch` and `chit-of-type` use as the `since` boundary so "produced after step start" actually means "during this agent's work on this step," not "ever." Field is nullable for backward-compat with pre-2.1 task chits.
 
 Validator support in `chit-types.ts`'s `validateBlueprint`. Cast pipeline (`blueprint-cast.ts`) carries `expectedOutput` through to Task chit metadata so the read API doesn't have to re-resolve from blueprint at audit time (cached on the Task chit's `blueprint-step:<id>` companion data).
 
@@ -2626,11 +2637,23 @@ Pure functions, no side effects beyond the read calls + the `git` shell-out for 
 
 **Fragment ordering — walk-position fragment fires FIRST.** Existing claude-code dispatch fragments today include dredge handoff, observation context, situational header, etc. The new `walk-position.ts` fragment runs BEFORE all of them so the agent's first orientation block is the walk; their handoff context, observations, and other fragments stack underneath. Rationale: the walk is the primary unit of work — it should be the agent's first read every dispatch.
 
-**Ad-hoc no-walk format.** When the dispatched task has no walk (`getWalkPosition` returns null), the fragment STILL emits a one-liner so silence isn't ambiguous:
-```
-Walk: ad-hoc (no blueprint) — single-step task, no walk-aware audit will fire on this work.
-```
-That distinguishes "your task is genuinely standalone" from "the walk metadata didn't load." Same for the `cc-cli wtf` header: ad-hoc tasks render the line above instead of a multi-line walk block.
+**Three rendering states, not two.** The visibility surface distinguishes between three task contexts so agents make correct inferences:
+
+1. **Walk-shaped task with full spec** — full multi-line walk block (name, step index, prev/next, expectedOutput summary).
+2. **Walk-shaped task with audit-degraded step** — a Task that IS in a walk but whose current step has no `expectedOutput` spec (pre-2.1 contracts, or blueprints authored without it). Renders:
+   ```
+   Walk: <blueprint-name>  (cast <when>, you joined at step <X>)
+   Current step: <step-id>  (step <X> of <N>) — audit-degraded (no expectedOutput on this step)
+     Previous: <prev-step-id> — <one-line outcome>
+     Next: <next-step-id>
+   ```
+   Critical: agent still sees they're on a walk; the "audit-degraded" tag warns them audit won't enforce mechanical output for this step. Other walk surfaces (sexton patrol, walk-position in handoff, walk show) still operate normally.
+3. **Genuinely ad-hoc task (no walk)** — Task has no Contract or no blueprint linkage at all. Renders one-liner:
+   ```
+   Walk: ad-hoc (no blueprint) — single-step task, no walk-aware audit will fire on this work.
+   ```
+
+This distinction matters because (2) and (3) ARE different — pre-spec walks still benefit from visibility/sexton/handoff surfaces; truly-ad-hoc tasks don't. Conflating them via the same "Walk: ad-hoc" line would have agents inferring wrong on pre-spec walks (skipping their walk's other surfaces because they think there's no walk). Same three-state distinction in the `cc-cli wtf` header.
 
 **Test strategy.** Unit per surface (fragment renders correctly; wtf header includes walk block; handoff chit roundtrips walk fields). Unit: ad-hoc rendering produces the no-walk one-liner, not silence. Unit: fragment ordering — walk-position appears before dredge in composed system message. Integration: hire an Employee, cast a synthetic test blueprint, dispatch first task, agent's wtf shows walk; `cc-cli done`, next session boots with walk visible in Dredge handoff.
 
@@ -2693,6 +2716,11 @@ That distinguishes "your task is genuinely standalone" from "the walk metadata d
   - `verdict: 'redo'` → emit `{decision: 'block', reason: <review-chit-summary>}` directly; audit is SKIPPED entirely (the agent re-enters work with the review-chit feedback in their next dispatch context, and there's no `cc-cli done` retry needed; the redo is the work-resumption signal).
   - `verdict: 'flag'` → fire `cc-cli audit` + write Tier 3 inbox-item to founder + transition the Contract's `walk-paused` state. Audit + flag are not mutually exclusive — the audit still validates AC + walk-progress for the work that DID happen; flag adds the founder-attention signal on top.
 - **Hook entrypoint, not audit binary, is the integration point.** 2.3's `cc-cli audit` binary stays the same; 2.5 just re-wires the Stop hook to fire review first then audit. This means 2.3 ships standalone (Stop → audit) and 2.5 layers on cleanly (Stop → review → maybe-audit). No retrofit on the audit binary itself.
+- **Ad-hoc tasks bypass review-session entirely.** Review-session is a multi-Task-Contract concept — it reads "the prior steps' outputs" to check coherence with the just-completed step. An ad-hoc task (`isWalkTask(taskChit)` returns false: no Contract or no blueprint linkage) has no prior steps to review against. The Stop-hook entrypoint checks `isWalkTask` BEFORE deciding which path to take:
+  - `isWalkTask = true` → fire review-session, then chain per verdict (accept → audit, redo → block, flag → audit + inbox).
+  - `isWalkTask = false` → skip review-session entirely, fire `cc-cli audit` directly (the 2.3 path; audit's walk-position check returns null, runs as no-walk).
+  This keeps the cost of self-witnessing scoped to the cases where it has signal — Contract walks. Ad-hoc trivial tasks don't pay the 2x session-spawn tax.
+- **Honest cost note.** Every multi-Task Contract walked under 2.5 has a ~2x session-spawn cost — one task-session + one review-session per step boundary. Acceptable for v1 because reliability gains outweigh cost; if cost becomes load-bearing later, mitigation is to batch reviews across multiple step completions at a longer cadence (e.g. one review per 3 task closes instead of one per 1). Defer until cost is observed in practice; don't optimize prematurely.
 
 **Test strategy.** Unit (review-session prompt builder; review-chit type schema; verdict-to-audit-decision mapping). Unit (Stop-hook chaining: accept → audit fires; redo → audit skipped; flag → audit + inbox both fire). Integration (multi-Task Contract: task-session writes output that contradicts a prior step's decision; review-session detects the mismatch; flips redo; agent re-enters; second task-session produces correct output; review approves; chain advances cleanly).
 
