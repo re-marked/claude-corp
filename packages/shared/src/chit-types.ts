@@ -45,6 +45,8 @@ import type {
   PatternObservationFields,
   PatternSubject,
 } from './types/chit.js';
+import type { ExpectedOutputSpec } from './types/expected-output.js';
+import { EXPECTED_OUTPUT_KINDS } from './types/expected-output.js';
 
 // ─── Error class ────────────────────────────────────────────────────
 
@@ -206,6 +208,12 @@ function validateTask(fields: unknown): void {
   }
   if (f.handedBy !== undefined) requireStringOrNull(f.handedBy, 'task.handedBy');
   optionalIsoTimestamp(f.handedAt, 'task.handedAt');
+  // Project 2.1 — set when the assigned worker first transitions
+  // dispatched → in_progress. Walk-aware audit reads it as the `since`
+  // boundary for commit-on-branch + chit-of-type checks. Distinct from
+  // reviewerClaim.claimedAt (Editor's review claim, Project 1.12.2);
+  // disambiguated in the TaskFields docstring.
+  optionalIsoTimestamp(f.claimedAt, 'task.claimedAt');
   optionalIsoTimestamp(f.dueAt, 'task.dueAt');
   if (f.loopId !== undefined) requireStringOrNull(f.loopId, 'task.loopId');
   if (f.workflowStatus !== undefined && f.workflowStatus !== null) {
@@ -375,6 +383,88 @@ function validateEscalation(fields: unknown): void {
 }
 
 /**
+ * Validate an ExpectedOutputSpec — Project 2.1's per-step output
+ * declaration. Runs at blueprint WRITE time so a malformed spec is
+ * caught before any cast (a malformed spec discovered at audit time
+ * would lock agents out of `done` with a confusing error). Recursive
+ * for the `multi` kind.
+ *
+ * Three-stage validation per kind:
+ *   1. Object shape — every spec is `{ kind: <string>, ... }`.
+ *   2. Kind enum — `kind` must be one of EXPECTED_OUTPUT_KINDS.
+ *   3. Per-kind required + optional fields.
+ *
+ * Templated string fields (branchPattern, pathPattern, withTags items)
+ * are NOT Handlebars-validated here — that check belongs in the
+ * blueprint parser at parse time, where the var context exists. This
+ * validator only enforces structural shape.
+ */
+function validateExpectedOutput(v: unknown, field: string): void {
+  const spec = requireObject(v, field) as Partial<ExpectedOutputSpec> & { kind?: unknown };
+  // Stage 1+2: kind discriminator must be present and one of the known kinds.
+  requireEnum(spec.kind, `${field}.kind`, EXPECTED_OUTPUT_KINDS);
+  // Stage 3: per-kind required + optional fields. Cast spec narrowing
+  // happens manually since the discriminated union check is at runtime.
+  switch (spec.kind) {
+    case 'chit-of-type': {
+      const s = spec as { kind: 'chit-of-type'; chitType?: unknown; withTags?: unknown };
+      requireNonEmptyString(s.chitType, `${field}.chitType`);
+      // withTags is optional; when present must be string[]. Empty
+      // array is legal (caller's choice — same as omitting).
+      if (s.withTags !== undefined && s.withTags !== null) {
+        requireStringArray(s.withTags, `${field}.withTags`);
+      }
+      break;
+    }
+    case 'branch-exists': {
+      const s = spec as { kind: 'branch-exists'; branchPattern?: unknown };
+      requireNonEmptyString(s.branchPattern, `${field}.branchPattern`);
+      break;
+    }
+    case 'commit-on-branch': {
+      const s = spec as { kind: 'commit-on-branch'; branchPattern?: unknown; sinceClaim?: unknown };
+      requireNonEmptyString(s.branchPattern, `${field}.branchPattern`);
+      // sinceClaim is optional; defaults to true at checker time. When
+      // present, must be a boolean — any other type is author error.
+      if (s.sinceClaim !== undefined && s.sinceClaim !== null) {
+        requireBoolean(s.sinceClaim, `${field}.sinceClaim`);
+      }
+      break;
+    }
+    case 'file-exists': {
+      const s = spec as { kind: 'file-exists'; pathPattern?: unknown };
+      requireNonEmptyString(s.pathPattern, `${field}.pathPattern`);
+      break;
+    }
+    case 'tag-on-task': {
+      const s = spec as { kind: 'tag-on-task'; tag?: unknown };
+      requireNonEmptyString(s.tag, `${field}.tag`);
+      break;
+    }
+    case 'task-output-nonempty': {
+      // No extra fields. The check itself is just `task.output` non-empty.
+      break;
+    }
+    case 'multi': {
+      const s = spec as { kind: 'multi'; specs?: unknown };
+      if (!Array.isArray(s.specs) || s.specs.length === 0) {
+        throw new ChitValidationError(
+          `${field}.specs must be a non-empty array of ExpectedOutputSpec`,
+          `${field}.specs`,
+        );
+      }
+      // Recursive validation. Authors composing multi-specs frequently
+      // get nesting wrong on the first try — a precise per-index path
+      // (`...specs[2].branchPattern`) makes the failure findable.
+      s.specs.forEach((sub, i) => {
+        validateExpectedOutput(sub, `${field}.specs[${i}]`);
+      });
+      break;
+    }
+  }
+}
+
+/**
  * Blueprint validator — checks the full Blueprint shape the Project 1.8
  * cast primitive depends on. This runs at chit WRITE time, so every
  * invariant cast later relies on (unique step ids, valid DAG, referenced
@@ -522,6 +612,16 @@ function validateBlueprint(fields: unknown): void {
           );
         }
       }
+    }
+
+    // Project 2.1 — per-step expected-output spec for walk-aware audit.
+    // Optional (null/absent means "no walk-aware enforcement on this
+    // step" — graceful degradation for pre-2.1 blueprints + steps where
+    // AC checks are sufficient). When present, dispatched to the
+    // recursive validateExpectedOutput helper which handles all seven
+    // kinds + the multi-composition case.
+    if (step.expectedOutput !== undefined && step.expectedOutput !== null) {
+      validateExpectedOutput(step.expectedOutput, `${stepPath}.expectedOutput`);
     }
   });
 
