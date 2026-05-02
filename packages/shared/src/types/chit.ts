@@ -11,6 +11,8 @@
  * live in chit-types.ts; CRUD lives in chits.ts.
  */
 
+import type { ExpectedOutputSpec } from './expected-output.js';
+
 // ─── Type registry (type names + per-type field shapes) ─────────────
 
 /**
@@ -652,6 +654,26 @@ export interface BlueprintStep {
    * primitives enforce kind-routing at dispatch. Absent by default.
    */
   moduleRef?: string | null;
+  /**
+   * Project 2.1 — what this step is expected to mechanically produce.
+   * Walk-aware audit (Project 2.3) calls a per-kind checker against this
+   * spec at `cc-cli done` time and blocks the handoff if the expected
+   * output isn't present. See ExpectedOutputSpec for the discriminated
+   * union of supported kinds (chit-of-type / branch-exists /
+   * commit-on-branch / file-exists / tag-on-task / task-output-nonempty
+   * / multi).
+   *
+   * Null / absent means walk-aware audit doesn't enforce mechanical
+   * output for this step — graceful degradation for pre-2.1 blueprints
+   * + steps where AC checks are sufficient. Other walk surfaces
+   * (visibility in 2.2, sexton patrol in 2.4) operate normally; only
+   * the audit-time mechanical-output check is skipped.
+   *
+   * Templated string fields inside the spec (branchPattern, pathPattern,
+   * withTags) are Handlebars-expanded against cast-time vars, matching
+   * the existing 1.8 template-expansion model.
+   */
+  expectedOutput?: ExpectedOutputSpec | null;
 }
 
 /**
