@@ -116,13 +116,13 @@ Ship this in Project 2 or 3, on top of basic Project 1 Employees. Project 1 ship
 |---|-------|----------|---------|----------------|
 | 0 | Chits | Unified record primitive; migrate Tasks/Contracts/Observations onto it | Stop inventing new file formats for every work-record type; build the substrate everything else sits on | 15-20 **[shipped]** |
 | 1 | Foundation | Employee/Partner split, Casket, Chain semantics, Hand, Dynamic blockers, Structured task I/O, Per-step cycling, Compaction, Blueprint-as-molecule, Watchdog chain (Pulse/Alarum/Sexton/helpers + patrol blueprint library), Bacteria scaling, Crash-loop breaker, Clearinghouse (merge lane) | The mechanical floor of Mark's "runs on its own" dream — work propagates, blockers are first-class, Sexton keeps the corp alive, merge lane holds. | 22-28 **[~92% shipped as of 2026-04-26: 1.1-1.4.1, 1.6-1.11 all landed; 1.12 Clearinghouse not yet started]** |
-| 2 | Workflow Substrate | Built-in blueprint library (domain workflows: ship-feature, fix-bug, etc.), self-witnessing meta-layer | Agents walk chains, work propagates automatically, Employees review themselves | 6-8 (slimmer — Blueprint substrate + patrol blueprints moved to Project 1 since the watchdog chain needs them on day one) |
+| 2 | Workflow Substrate | Walk read API, mechanical visibility (dispatch / wtf / handoff), walk-aware audit gate, Sexton stalled-walk patrol, self-witnessing meta-layer, CORP.md refactor (shrink + scaffolded lookup), discovery surface (suggest / list --for-role / walk show / propose), built-in blueprint library | Make walks load-bearing — agents see WORK AS WALKS, not WORK AS TASKS. The teaching layer that transitions the corp from "features exist, nobody uses them" to "corp is up to date with its capabilities." | 21-29 **[rewritten 2026-05-02 — see Project 2 section for the eight sequential sub-projects]** |
 | 3 | Autonomous Operations | Advanced Witness patrols (corp-wide anomaly detection), stall/escalation routing, daemon-level auto-recovery | What's left of corp healing after Project 1's mechanical watchdogs ship — cross-agent coordination + daemon-restart survival. | 6-8 (slimmer — Refinery + circuit-breaker moved to Project 1) |
 | 4 | Earned Philosophy | Structured observations, dreams-that-distill, promotion mechanism, sleep-time Memory Steward | Soul becomes load-bearing, not decorative | 10-12 |
 | 5 | Culture Transmission | Feedback-propagation, CULTURE.md made load-bearing | Culture actually shapes behavior | 5-7 |
 | 6 | Cleanup & UX | Delete dead concepts, rewrite docs, TUI updates, v3.0 release | Ship the peacock | 8-10 |
 
-Total: ~78-100 PRs across 7 projects. Rough estimate. Grew from 70-90 after the April 2026 Gas Town dive that surfaced dynamic-blocker + structured-I/O + three-tier-watchdog as genuine missing primitives rather than rebranded versions of things we already had.
+Total: ~93-121 PRs across 7 projects. Rough estimate. Grew from 70-90 after the April 2026 Gas Town dive that surfaced dynamic-blocker + structured-I/O + three-tier-watchdog as genuine missing primitives, then again on 2026-05-02 when Project 2 was rewritten from "ship a library" (6-8 PRs) to "make walks load-bearing — visibility + enforcement + library, in that order" (21-29 PRs).
 
 ---
 
@@ -2525,72 +2525,248 @@ parallel work alongside Project 2, not deferred opener material.
 
 ---
 
-## Project 2: Workflow Substrate
+## Project 2: Workflow Substrate (rewritten 2026-05-02)
 
-*Chains become real. Work propagates without the founder pushing it. Self-witnessing meta-layer arrives.*
+*Make walks load-bearing — visibility + enforcement + library, in that order. The mental model shift agents need: WORK AS WALKS, not WORK AS TASKS. Every Task is a step in a workflow with a shape, and the shape is consultable.*
 
-### 2.1 — [ABSORBED INTO 1.8 — Blueprint-as-molecule]
+### Sub-project numbering note
 
-**This sub-project became 1.8.** Blueprint-as-molecule is prerequisite for 1.9's watchdog chain — Sexton's patrols ARE Blueprints, so the substrate had to land in Project 1. The original 2.1 scope (TOML-frontmatter format, parser + DAG validation, cook command, migration of existing blueprints) moves verbatim to 1.8; rationale is documented there. Shipping 1.9 without 1.8 would have meant throwaway prompt-text patrol logic rewritten the moment Blueprints landed — the exact anti-pattern the refactor thesis forbids.
+The original Project 2 had four sub-projects: 2.1 (Blueprint-as-molecule) and 2.2 (Watchdog chain) absorbed up into 1.8 and 1.9 because Sexton's patrols needed the Blueprint primitive on day one; 2.3 (Built-in blueprint library) and 2.4 (Self-witnessing meta-layer) remained as Project 2 work. The 2026-05-02 rewrite expands Project 2 from 2 sub-projects to 8 — the original 2.3 (library) becomes the new **2.8**, the original 2.4 (self-witnessing) becomes the new **2.5**, and six new sub-projects fill in the substrate that has to exist before either of them can land cleanly. Numbering 2.1-2.8 below is the rewrite's canonical numbering; the old absorbed-into-Project-1 notes for 2.1+2.2 are preserved in 1.8 and 1.9 of Project 1.
 
-If you're reading this looking for Blueprint-as-molecule, go to **1.8**.
+### Context — what Project 1's finale exposed
 
-### 2.2 — [ABSORBED INTO 1.9 — Watchdog chain]
+The finale e2e on `claude-test-corp` showed agents don't know how to use corps. Backend Engineer received a task ("set up notes/welcome.md"), did the work content fine, then went idle without `acquire-worktree` first or `submit-clearance` after. **Trivial work content; load-bearing workflow shape; the workflow shape was invisible to the agent.** Same root as the engineer-doesn't-acquire-worktree bug — the work was simple, the WORKFLOW STEP that makes the work real was missing.
 
-**This sub-project became part of 1.9.** Patrol blueprints (`patrol/health-check`, `patrol/corp-health`, `patrol/cleanup-stale-sandboxes`, `patrol/merge-queue-status`, `patrol/chit-hygiene`) ship with the 1.9 watchdog chain because they are what Sexton consumes — meaningless without her, and she doesn't work without them. Bundling them into 1.9 means the pair lands as a working whole rather than two PRs each missing the other half.
+The 2026-05-02 audit of the Blueprint primitive found:
 
-If you're reading this looking for patrol blueprints, go to **1.9** (Watchdog chain).
+- **The Blueprint primitive itself is well-built.** Type + parser + cast (Contract + Tasks, with pre-allocated chit ids and dependsOn rewriting) + var coercion + role registry validation + patrol guardrail. All shipped, all tested. `castFromBlueprint` is validation-first with teachable error classes; `cc-cli contract start --blueprint` exists for the founder-shape flow.
+- **The library is empty for the agent-facing case.** Six patrol blueprints exist (`patrol/code-review`, `patrol/clearing`, `patrol/health-check`, etc., walked by Sexton/Editor/Pressman); ZERO non-patrol contract-shaped blueprints. No `ship-feature`, `fix-bug`, or any of the 9 named in old 2.3.
+- **The agent-facing teaching layer is missing.** CORP.md (1248 lines) has ONE blueprint mention — Sexton's role description. `cc-cli wtf` situational header has zero. Universal `bootstrap-agent.ts` has zero. Daemon fragments have zero. Only Editor + Pressman role bootstraps mention blueprints, and each hardcodes a single `patrol/*` by name. Generic Engineers receive NO signal that blueprints exist.
+- **Discoverability assumes the agent already knows blueprints exist.** No role filter on `blueprint list`, no `cc-cli blueprint suggest`, no shell completion, no agent-readable mapping of "blueprints relevant to your role."
 
-### 2.3 — Built-in blueprint library
+The diagnosis: blueprints exist as a CLI verb but not as a worldview. Adding a CORP.md section saying "use blueprints" would be the path-of-least-resistance fix and wouldn't move the failure mode — agents already aren't fully absorbing CORP.md.
 
-**Problem.** Blueprint-as-molecule is useless without tested blueprints for common work. CEO needs a library to compose from.
+### The reliability thesis
 
-**Scope.** Ship these blueprints as structured markdown in `packages/shared/src/blueprints/`:
-- `ship-feature` — design → plan → implement → test → PR → review
-- `fix-bug` — repro → root-cause → fix → verify → PR
-- `refactor-module` — define-scope → plan → implement-small-steps → tests → PR
-- `hire-employee` — define-role → **author-operating-manual** → allocate-slot → first-dispatch-self-naming → onboard
-- `create-role` — define-identity → **author-operating-manual** → register-in-roles → first-hire
-- `promote-employee` — founder-reason → data-transition → ceremony-welcomes → first-dispatch
-- `release` — version-bump → changelog → tag → publish → announce
-- `sprint-review` — collect-activity → synthesize → present-to-founder
-- `merge-conflict-resolve` — inspect → decide-strategy → resolve → verify
+Reliability comes from making the walk **mechanically visible** at every key moment, not from teaching agents to remember to check. Pedagogical moves (rules in CORP.md, "find a blueprint first") are weak — they depend on the agent reading and remembering. Mechanical moves are strong because they don't depend on the agent at all.
 
-Each blueprint tested against a real use case before landing.
+Five mechanical surfaces where the walk should appear unavoidably:
 
-**The `author-operating-manual` step is load-bearing.** It's the mechanism through which per-role and per-Partner CLAUDE.md files get written. Nothing ships pre-written with Claude Corp — no role manuals, no agent runbooks, no `operatingGuide` field on RoleEntry. When the CEO (or a Partner with hire authority) runs `hire-employee` or `create-role`, the ceremony REFUSES TO COMPLETE until the new agent's or new role's `CLAUDE.md` is authored based on corp context. This is the "earn the operational knowledge, don't install it" thesis applied to hiring — the corp's specific conventions, codebase standards, review bar, and escalation preferences get written down by an agent who actually knows them, at the moment they're needed.
+1. **Dispatch context** — every dispatch carries walk-position (step N of M of `<blueprint-name>`, predecessor outcomes, next step). Agent's prompt opens with the walk; the task is contextualized as a step.
+2. **`cc-cli wtf` situational header** — current step, prev, next, walk name. Every orientation moment, the walk is the answer to "where am I."
+3. **Walk-aware audit gate** — `cc-cli audit` extends with walk-progress checks. Step expected to produce output X; agent didn't produce it; audit blocks. Mechanical enforcement at the moment of attempted handoff. Mark's "audit is part of clearance" observation holds — this extends the existing gate, not new infrastructure.
+4. **Handoff chits carry walk-position** — successor session boots with "walking ship-feature, predecessor at step 4, here's what they did." Substitute pickup is clean.
+5. **Sexton stalled-walk patrol** — detects "task completed but walk has unstarted next steps with no live agent on them." Safety net behind the audit gate, for cases where audit was bypassed or failure happened in a different shape.
 
-Employees inherit their role's `CLAUDE.md` template when spawned (the CEO wrote it once when creating the role; every Employee of that role gets it). Partners get individually-authored `CLAUDE.md` files at hire (they're individuals, not pool members). Partners-by-decree (CEO / Herald / HR / Adviser / Sexton) operate from their `IDENTITY.md` + role identity + shipped patrol blueprints (for Sexton) without needing the hire ceremony — they're product-universal roles whose work is codified in shipped mechanisms, not corp-specific.
+A sixth mechanism catches a different failure mode (walks walked all the way through but step 2 ignored step 1's decision):
 
-**Acceptance criteria.**
-- Each blueprint can be cooked without error.
-- For each, an Employee walks the resulting Contract end-to-end on a test project without human intervention.
+6. **Self-witnessing meta-layer** — review-session ⇄ task-session alternation within an Employee working a multi-Task Contract. Review-sessions read Contract + just-completed Task output + prior Tasks + AC, decide accept-and-dispatch-next / redo / flag. Same agent identity (same Casket, same role-level pre-BRAIN), alternating session shapes. Catches walks-walked-but-incoherent before clearance does. Originally was 2.4 in the old plan; relocated as the third reliability layer of Project 2.
 
-**Depends on:** 1.8 (Blueprint-as-molecule substrate)
-**PRs:** 2-3 (one per batch)
+Push isn't an option vs. pull — push is the floor (mechanical visibility at every moment). Pull is an extension for uncertainty (`cc-cli blueprint suggest --task <id>` for the rare case where an agent's task isn't already in a walk). The strongest reliability isn't either: it's the **walk-aware audit gate**. An agent who genuinely improvises off a walk gets caught at `done`.
 
-### 2.4 — Self-witnessing meta-layer (the "trippy idea")
+### Decisions made (2026-05-02)
 
-**Problem.** Flat per-step cycling (from 1.6) gives Employees no cross-Task coherence. Step 2 might ignore decisions made in step 1. No one reviews the Contract as a whole until Warden at the very end — by then it's hard to unwind bad choices.
+- **Sequential, not parallel.** Project 1's rushed absorptions (1.8 + 1.9 absorbed under Sexton's pressure) left the Blueprint primitive half-built for the agent-facing case. Sequential lets each Project 2 piece land on a stable substrate; nothing depends on speculation about what ships next. Allows the substrate to evolve as we hit edge cases.
+- **Library LAST.** Substrate evolves through 2.1-2.7; blueprints don't. If the library shipped first, every substrate change would re-author every blueprint — the same half-built shape we're trying to avoid. Library lands once, on stable substrate, authored against the real audit-gate behavior, real visibility format, real CORP.md teaching.
+- **No premature `ship-feature`.** Earlier draft considered shipping `ship-feature` early as a "forcing function" for the substrate. Rejected — same path-of-least-resistance failure as Project 1's rushed absorptions. Build the substrate against synthetic test blueprints; library lands at the end. Either build the library as the very first thing or wait until the substrate is stable; nothing in between.
+- **CORP.md refactor: shrink + scaffolded lookup.** CORP.md was comprehensive injection — 1248 lines into every session's context, and the finale showed agents don't fully absorb it. The refactor pushes reference content to lookup commands (`cc-cli help <verb>`, `cc-cli blueprint suggest`, `cc-cli walk show`); CORP.md becomes a tight cheat sheet of decision rules. Posture shift, not just content edit.
+- **Self-witnessing belongs in Project 2, not 3.** Project 3.1 is CROSS-agent patterns (reject-rate per role-pair, role-pool imbalances); self-witnessing is WITHIN an agent across sessions of one Contract. Different scope. Same purpose as the rest of Project 2: walks getting walked correctly.
+- **Blueprint propose splits.** Active form (`cc-cli blueprint propose --from-task <id>`, manual command) lands in Project 2's discovery sub-project. Passive form (dream distillation surfacing pattern-derived candidate blueprints) needs Project 4.2's dream substrate.
+- **The teaching layer is the worldview, not the verb.** We are not teaching "blueprints exist as a CLI verb." We are teaching "work is walks; blueprints are how you find the shape of your walk." The second is harder to author but ten times more durable.
+
+### 2.1 — Walk read API
+
+**Problem.** Walks aren't a first-class concept in code. Every Task chit cast from a blueprint already carries `blueprint:<name>` + `blueprint-step:<id>` tags, and its Contract has `blueprintId`, but no shared module exposes "given a Task, what walk is it part of, what step are we at, what comes next, what does this step expect to produce?" Building visibility / audit / discovery against ad-hoc reads of these tags would scatter walk logic across the codebase.
+
+**Scope.** Pure shared module: `packages/shared/src/walk.ts`. Functions:
+- `getWalkPosition(taskChit, corpRoot)` → `{ blueprintName, stepId, stepIndex, totalSteps, contractChit, blueprintChit } | null` (null = ad-hoc no-walk task)
+- `getWalkProgress(contractChit, corpRoot)` → `{ completedSteps[], currentStep, nextSteps[], remainingSteps[] }`
+- `nextStep(contract, currentStepId, corpRoot)`, `previousSteps(contract, currentStepId, corpRoot)`
+- `expectedOutputForStep(blueprint, stepId)` → output spec (used by walk-aware audit in 2.3)
+- `isWalkTask(taskChit)`, `isAdHocTask(taskChit)` — explicit booleans for callers that need to branch
+
+Pure functions, no side effects, no new chit type. Composes existing chit reads.
+
+**Test strategy.** Unit tests for each function with synthetic blueprint + contract + task fixtures: linear walks, fan-out/fan-in DAGs, step at index 0, step at last index, ad-hoc tasks (no walk), missing data fallback (deleted blueprint, deleted contract).
+
+**Depends on:** existing chit infrastructure (1.8 Blueprint primitive, 0.x Chit substrate), 1.3 chain semantics.
+**PRs:** 1-2.
+
+### 2.2 — Mechanical visibility surfaces
+
+**Problem.** Walks exist in code (after 2.1) but agents have no surface that shows them the walk. Dispatch context shows "you have task X"; `cc-cli wtf` shows "current task: X." Neither reveals "X is step 4 of 7 of ship-feature, predecessor was Y, next is Z."
+
+**Scope.** Three coordinated changes:
+- **Walk-position fragment in dispatch context.** New `packages/daemon/src/fragments/walk-position.ts` — when dispatching to an agent, if their current task has a walk, prepend a structured block: walk name + cast time + step index + predecessor step ids with one-line outcomes + next step + ad-hoc flag if no walk. Keeps token cost bounded (current + immediate prev + immediate next; not the full walk).
+- **Walk-position section in `cc-cli wtf` header.** `packages/cli/src/commands/wtf.ts` extension. Situational header gains a "Walk:" section above current-task. Format:
+  ```
+  Walk: ship-feature  (cast 14 min ago by ceo, you joined at step 2)
+  Current step: acquire-worktree  (step 2 of 7)
+    Previous: pick-up-task — completed by you, 14 min ago
+    Next: implement → blocked on this step
+  ```
+- **Walk-position fields on handoff chits.** Extend HandoffFields with `walkBlueprintName`, `walkStepId`, `walkStepIndex`, `walkTotalSteps`, `walkCompletedSteps[]`. `cc-cli done` populates from walk read API; Dredge consumes on next session boot, prepends walk-position to the handoff context block.
+
+**Test strategy.** Unit per surface (fragment renders correctly; wtf header includes walk block; handoff chit roundtrips walk fields). Integration: hire an Employee, cast a synthetic test blueprint, dispatch first task, agent's wtf shows walk; `cc-cli done`, next session boots with walk visible in Dredge handoff.
+
+**Depends on:** 2.1.
+**PRs:** 3 (one per surface).
+
+### 2.3 — Walk-aware audit gate (clearance integration)
+
+**Problem.** The current audit gate checks acceptance criteria on the current task. It doesn't check whether the agent did the WALK steps that the workflow expects. Mark's finale failure mode: engineer wrote the file, didn't `submit-clearance`, audit approved, walk silently stalled. Audit needs to ask not just "did you fulfill THIS step's AC" but "did you produce the output the next step depends on."
+
+**Scope.** Extend `cc-cli audit` (`packages/cli/src/commands/audit.ts`) with walk-progress checks:
+- Read current task's walk via `getWalkPosition`. If null (no walk / ad-hoc), audit unchanged — preserves no-walk behavior for trivial work.
+- If walk: read `expectedOutputForStep(blueprint, currentStepId)`. The step's expected output spec (chit type that should be produced, tag pattern, branch existence, file existence — depends on step shape; specced per-blueprint as the step authors define).
+- Audit checks expected output exists. If missing: block with a teaching message that names the missed step, names the expected output shape, and points at the cc-cli verb that produces it.
+- Audit-approve fires through `validateTransition` (1.3's mechanical-enforcement guarantee held; this doesn't bypass the state machine).
+- Founder-override (`cc-cli audit --override --reason "..."`) preserved as escape valve, logged to `chits/_log/audit-overrides.jsonl`. Override on a walk-aware block is the safety net for cases where the agent legitimately needs to handoff mid-step.
+
+**Walk-aware audit is part of the clearance pipeline, not new infrastructure.** Today: `cc-cli done` → Stop hook → `cc-cli audit` → approve triggers `enterClearance` for clearance-eligible work / block returns the agent to work. Walk-checks live INSIDE audit; they extend its existing pre-clearance verification.
+
+**Test strategy.** Unit: walk-aware audit blocks when expected output missing; approves when present; preserves no-walk audit behavior unchanged. Integration: cast a multi-step synthetic blueprint, agent skips a terminal step, audit blocks at `done`; agent does the step, audit approves, clearance fires.
+
+**Depends on:** 2.1 (walk read API), 2.2 (visibility — agent has been seeing the walk in their context for a while before audit starts blocking, so the rollout has natural muscle-memory).
+**PRs:** 2-3.
+
+### 2.4 — Sexton stalled-walk patrol
+
+**Problem.** Walk-aware audit (2.3) catches agents at `done`. Some failure modes don't reach `done` — agent decommissions mid-walk, founder overrides audit, daemon crash mid-step. Walks can stall silently with completed task chits but unstarted next steps no one picks up.
 
 **Scope.**
-- Two session tiers per Employee working a multi-Task Contract:
-  - **task-session** — spawned per Task, executes the Task, writes output, exits
-  - **review-session** — spawned between Tasks, reads the Contract Chit + the just-completed Task Chit's output + prior Tasks, reviews, decides: accept & dispatch next, redo, flag-for-founder
-- Review prompts are distinct from execution prompts: "you are reviewing your own work against the Contract's goal and acceptance criteria."
-- **Review outputs are Chits of `type: review`** (ephemeral by default, promote to permanent if the Contract gets a Warden rejection and Warden needs to see what the Employee thought). Chit fields: `verdict: accept|redo|flag`, `reasoning`, `notes_for_next_task`, `references: [<task-chit-id>, <contract-chit-id>]`. Review Chits burn after the Contract closes cleanly; surface if Warden disagrees.
-- Alternative implementation option from the Claude Code research gems: use claude-code's blockable `Stop` hook — when the task-session signals completion, daemon intercepts via `PreStop` (returning exit 2), spawns the review-session, and only lets the original session truly stop after the review verdict is accept.
-- Integration with Warden: Warden still does final Contract-level review, but Employee-level self-review catches obvious issues early.
+- **New built-in patrol blueprint:** `packages/shared/blueprints/patrol/walk-health.md`. Sexton reads + walks per Pulse-wake cycle alongside `patrol/health-check`.
+- **New code sweeper:** `packages/daemon/src/sweepers/walk-stalled.ts`. Detects "Contract status=active, no live agent in any of its open Tasks' assignees, last task close > N minutes ago." Threshold tunable; default 30 min. Emits kink chit with: contract id, walk blueprint name, last-completed step, current next steps (the orphan ones), suggested action.
+- **Sexton's walk in the patrol decides:** nudge via Hand to a fresh role-pool member (existing 1.4 mechanism); escalate to founder via DM (the existing channel-based path); or stall acceptably (Contract paused on a known long-lead step that's documented as such — kink is auto-resolved).
 
-**Acceptance criteria.**
-- Multi-Task Contract slung to an Employee walks with review-sessions between each Task.
-- A review-session detects an obviously wrong Task output (e.g. Task said "write test" but output has no test) and flags `redo`.
-- Self-reviewed Contract has measurably fewer Warden rejections than a flat-walked one.
+**Test strategy.** Unit (sweeper detects stalls correctly across fixture corp states; respects threshold). Integration (run Sexton's `walk-health` patrol against a corp with a stalled walk, kink emitted with walk position).
 
-**Depends on:** 1.8 (Blueprint-as-molecule — the Tasks within a Contract)
-**PRs:** 4-5
+**Depends on:** 2.1, 2.3 (the safety-net layer behind audit).
+**PRs:** 1-2.
 
-**Project 2 ship criterion:** CEO can say "ship feature X using the ship-feature blueprint" → blueprint cooks into a multi-Task Contract → Employee gets slung the Contract → walks it with self-review between Tasks → PR lands. Zero human intervention in the middle.
+### 2.5 — Self-witnessing meta-layer
+
+**Problem.** Mechanical surfaces (2.2) + walk-aware audit (2.3) + stalled-walk patrol (2.4) catch failure modes where agents skip walks or skip terminal steps. They don't catch: agent walks all the steps mechanically, but the steps don't cohere — step 2 ignored a decision step 1 made; output of step 3 doesn't actually flow into step 4. These failures hit Warden/clearance and bounce; cost compounds across the bounce cycle.
+
+**Scope.** Two-tier session pattern within an Employee working a multi-Task Contract:
+- **Task-session** — spawned per Task, executes the Task, writes output to the Contract Task chit, exits. Walks on the existing 1.6 cycling pattern (Dredge handoff, etc.).
+- **Review-session** — spawned BETWEEN Tasks, reads Contract Chit + just-completed Task output + prior Task outputs + acceptance criteria + walk position (from 2.1). Decides: accept-and-dispatch-next, redo (transitions current task back to in_progress with feedback), flag-for-founder (Tier 3 inbox-item).
+- **Review-chit type** — `type: 'review'`, ephemeral by default. Fields: `verdict: 'accept' | 'redo' | 'flag'`, `reasoning`, `notes_for_next_task`, `references: [task-chit-id, contract-chit-id]`. Promotes to permanent via 0.6 4-signal rule if Contract gets Warden rejection (Warden needs to see what the Employee thought).
+- **Review prompt** — distinct from execution prompt. "You are reviewing your own work against the Contract's goal and acceptance criteria. The walk at this point expected X; the just-completed step produced Y; do they cohere with prior steps' decisions?"
+- **Same agent identity.** Review-session and task-session have the same Employee Casket, same role-level pre-BRAIN, same name. Different prompts, different session-id suffix (`toast-task-1`, `toast-review-1`). The "self" in self-witnessing is load-bearing — it's not a separate reviewer agent.
+- **Audit integration.** A task-session's `cc-cli done` triggers a review-session before audit-approve fires. Review verdict feeds audit: redo → audit blocks (agent re-enters work with review-chit feedback); accept → audit proceeds with walk-aware checks (2.3); flag → audit + Tier 3 inbox + walk paused. Implementation: claude-code's blockable Stop hook is the natural integration point — daemon intercepts Stop, spawns review, gates Stop on review verdict.
+
+**Test strategy.** Unit (review-session prompt builder; review-chit type schema; verdict-to-audit-decision mapping). Integration (multi-Task Contract: task-session writes output that contradicts a prior step's decision; review-session detects the mismatch; flips redo; agent re-enters; second task-session produces correct output; review approves; chain advances cleanly).
+
+**Depends on:** 2.1 (walk read API), 2.2 (review-session reads from same walk-aware substrate), 2.3 (review feeds into audit gate), 2.4 (stalled-walk patrol catches review-session itself stalling).
+**PRs:** 4-5.
+
+### 2.6 — CORP.md refactor (shrink + scaffolded lookup + "work is walks" frame)
+
+**Problem.** CORP.md is 1248 lines, comprehensive-injection model — every SessionStart, every dispatch, every PreCompact, the full manual lands in the agent's context. The finale showed agents don't fully absorb it. Adding teaching content by FATTENING CORP.md makes the load-bearing parts harder to find — agents skim. The honest move: shrink CORP.md to a tight cheat sheet, push reference content to lookup commands.
+
+**Scope.**
+- **Shrink CORP.md** to ~300-350 lines (down from 1248). Reference sections move out:
+  - Architecture tree → `cc-cli help architecture`
+  - Roles full bodies → `cc-cli help roles`
+  - Chit Lifecycle deep details → `cc-cli help chits`
+  - File Paths exhaustive list → `cc-cli help workspace`
+  - Communication tutorial → `cc-cli help communication`
+  - Common Mistakes long list → `cc-cli help mistakes`
+- **CORP.md retains:**
+  - Kind-specific identity block (Partner / Employee)
+  - **Three** Non-Negotiables: Casket Imperative, Audit Gate, **Work Is Walks** (new)
+  - Decision-tree-shaped quick rules
+  - Red Lines
+  - Ad-hoc no-walk task exception
+  - One-paragraph cross-references to lookup commands (so agents know what's lookupable)
+- **`cc-cli help <verb>` extension.** Currently sparse. Extends to per-verb deep help with text content ported from the moved CORP.md sections. New verb-help entries for: chits, observations, hand, escalate, inbox, blueprint, walk, audit, ceremony, lifecycle.
+- **"Work Is Walks" rule** added as the third Non-Negotiable. Teaches: every non-trivial work received is part of a walk; first move when receiving work is to confirm your walk-position (already pushed into your dispatch context); if ad-hoc no-walk, dispatch context says so explicitly; workflow shape is consultable via `cc-cli walk show <contract-id>` and `cc-cli blueprint suggest`; the audit gate enforces walk progress mechanically.
+- **Bootstrap files.** Universal `bootstrap-agent.ts` gains a step about walks ("on first work received, your dispatch context will tell you the walk shape; confirm you understand it"). Role-specific bootstraps (Editor, Pressman) update to point at the universal walks framing PLUS their canonical patrol. `commandReference()` section of CORP.md adds `cc-cli blueprint`, `cc-cli walk show`, `cc-cli help`.
+- **`cc-cli wtf` template** updates already happened in 2.2; this sub-project ensures CORP.md content rendered by wtf reflects the new structure.
+
+**Test strategy.** Unit: line-count budget asserted (CORP.md < 350 lines). `cc-cli help <verb>` for each canonical verb returns useful content (snapshot tests). Integration: fresh agent boots with new CORP.md + new `bootstrap-agent.ts`, sees walks framing at SessionStart, can resolve any reference question by running `cc-cli help <verb>`.
+
+**Depends on:** 2.1, 2.2, 2.3, 2.4, 2.5 (everything CORP.md teaches must exist as code first; the rule isn't aspirational).
+**PRs:** 4-5.
+
+### 2.7 — Discovery surface
+
+**Problem.** Even with walks visible everywhere, agents need ways to FIND blueprints when they don't already have one assigned. New work, ambiguous tasks, bug reports without a clear shape. They also need a way to PROPOSE a new blueprint when no existing one fits.
+
+**Scope.**
+- **`cc-cli blueprint suggest --task <id>` (push the candidate via pull).** Daemon reads the task's tags, AC language, depends-on shape; pattern-matches against the blueprint library; proposes 0-3 candidates with reasoning. ("This task says 'fix bug', has no contract — `fix-bug` blueprint matches.") Doesn't have to be smart; pattern-match on simple signals gets us 80%. Output is teachable: shows the matched signals, the matching blueprints, the reasoning.
+- **`cc-cli blueprint list --for-role <id>`.** Filter blueprint list by which roles the blueprint's steps assign to. An Engineer running `blueprint list --for-role backend-engineer` sees blueprints relevant to their work, not all blueprints (which currently mix patrol/* with library/*).
+- **`cc-cli walk show <contract-id>`.** New verb. Renders the walk: blueprint name, all steps with statuses (completed/current/pending), assignees per step, recent activity per step. Replaces "scroll through CORP.md / contract chit / task chits to reconstruct the walk" with one command. Used by agents for orientation, by founder for project tracking.
+- **`cc-cli blueprint propose --from-task <id>` (active form of growth).** Agent realizes their work is a workflow shape that should be a blueprint. Command writes a draft blueprint chit with the current task's title + AC as a skeleton, opens for editing or for founder review. Uses existing `cc-cli blueprint validate` to promote draft → active. **Passive form** (dream-distilled candidate blueprints from observed patterns) deferred to Project 4.2 where dream-distillation machinery lives.
+
+**Test strategy.** Unit (each suggester pattern; `walk show` renders correctly; `propose` writes a valid draft blueprint chit). Integration (cast a task with bug-flavored AC, run suggest, get fix-bug as candidate). Integration (propose from a task, inspect resulting draft blueprint chit, validate, see active blueprint).
+
+**Depends on:** 2.1 (walk read API for `walk show`), 2.6 (CORP.md refactored — discovery commands referenced in cheat sheet). Doesn't depend on 2.5 (review-session and discovery are independent).
+**PRs:** 2-3.
+
+### 2.8 — Built-in blueprint library
+
+**Problem.** With the substrate built (visibility + enforcement + self-witnessing + teaching + discovery), the library finally lands on stable foundation. Authoring depth matches the patrol blueprints' precedent (Editor's `patrol/code-review` is the depth target — 9 steps with judgment moments, command sequences, terminal paths, common-mistake annotations).
+
+**Scope.** Authored blueprints in `packages/shared/blueprints/` (non-patrol path):
+- **`ship-feature`** (canonical, deepest, ships first within this sub-project) — `pick-up-task → acquire-worktree → implement → run-tests → submit-clearance → react-to-blockers-or-merge`. Mechanically dissolves both finale workflow bugs (`acquire-worktree` and `submit-clearance` become explicit walk steps that walk-aware audit enforces).
+- **`fix-bug`** — `repro → root-cause → fix → verify → ship` (chains into `ship-feature` from `fix` step via blueprint composition or step-reuse).
+- **`refactor-module`** — `define-scope → plan → implement-small-steps → tests → ship` (chains into `ship-feature` from `ship` step).
+- **`release`** — `version-bump → changelog → tag → publish → announce`.
+- **`sprint-review`** — `collect-activity → synthesize → present-to-founder`.
+- **`merge-conflict-resolve`** — `inspect → decide-strategy → resolve → verify` (called from Pressman's blocker route).
+- **`hire-employee`, `create-role`, `promote-employee`** — these probably shrink because much is already `cc-cli hire` / `tame` ceremony. Decide per-blueprint at authoring time which parts stay command+ceremony and which are walk-shaped (e.g. `author-operating-manual` step is walk-shaped — REFUSES to complete until per-role CLAUDE.md is authored against corp context).
+
+Each blueprint tested against a real use case before landing — cast against a test corp, walked end-to-end by a test agent, audit gate exercised on every terminal-output expectation.
+
+**Test strategy.** Per blueprint: unit test for cast (correct Contract + Tasks produced from blueprint structure), integration test for end-to-end walk (cast, hand to first agent, agent walks chain, audit accepts terminal step, contract closes cleanly).
+
+**Depends on:** 2.1-2.7 (everything before).
+**PRs:** 4-6 (batched: 1 for `ship-feature`; 1 for `fix-bug` + `refactor-module`; 1 for `release` + `sprint-review` + `merge-conflict-resolve`; 1 for the hire/create/promote trio).
+
+### Project 2 ship criterion
+
+An agent receiving any non-trivial work:
+- gets the walk pushed into their dispatch context (knows step N of M of `<blueprint>`, predecessor outcomes, next step)
+- can run `cc-cli wtf` and see walk-position as the answer to "where am I"
+- can't bypass terminal walk steps mechanically — audit blocks at `done` if expected outputs missing
+- can hand off mid-walk cleanly — handoff chit carries walk-position, successor reads via Dredge
+- in multi-Task Contracts, gets a review-session between Tasks that catches incoherence before clearance
+- can find a blueprint when they need one (`cc-cli blueprint suggest`, `--for-role`, `cc-cli walk show`)
+- can propose a new blueprint when no existing one fits (`cc-cli blueprint propose`)
+
+Sexton catches stalled walks the audit gate missed. CORP.md teaches "Work Is Walks" as a load-bearing rule (one of three Non-Negotiables). The library has 9 well-tested canonical blueprints, depth-matched to `patrol/code-review`'s precedent.
+
+The two finale workflow bugs (no `submit-clearance`, no `acquire-worktree`) become impossible to repeat. Future agents reach for blueprints reflexively because the corp's substrate makes the alternative awkward.
+
+### Project 2 dependencies and PR count
+
+**Depends on:** Project 1 substrate (chits, casket, hand, audit gate, clearinghouse, bacteria, Sexton).
+
+| Sub-project | PRs |
+|---|---|
+| 2.1 Walk read API | 1-2 |
+| 2.2 Visibility surfaces | 3 |
+| 2.3 Walk-aware audit | 2-3 |
+| 2.4 Stalled-walk patrol | 1-2 |
+| 2.5 Self-witnessing meta-layer | 4-5 |
+| 2.6 CORP.md refactor | 4-5 |
+| 2.7 Discovery surface | 2-3 |
+| 2.8 Library (9 blueprints) | 4-6 |
+| **Total** | **21-29** |
+
+About half of Project 1's ~50 PRs. Larger than the original Project 2 (was 6-8 PRs), but everything is genuinely walk-reliability work — no filler.
+
+### What stays in Projects 3, 4, 5, 6 (unchanged from this rewrite)
+
+- **3.1** — Cross-agent anomaly detection (CROSS-agent patterns; distinct from 2.5's WITHIN-agent self-witnessing)
+- **3.3'** — Daemon-restart survival (genuine daemon-lifecycle remnant)
+- **4.1** — Observation weighting for dream distillation
+- **4.2** — Dreams that distill — *lands the passive form of `blueprint propose`* as part of pattern-detection across observations
+- **4.3 remnant** — Role pre-BRAIN seeding + arrival BRAIN entry
+- **5.x** — Culture transmission (feedback propagation, CULTURE.md, founder-voice)
+- **6.x** — Cleanup + UX + v3.0 release
 
 ---
 
@@ -2912,7 +3088,8 @@ Still being discussed: the two remaining open questions (Partner demotion, voice
 
 **Implementation-detail depth:**
 - Project 1 sub-projects (1.1 through 1.13) have concrete file paths, test strategy, and dependencies spelled out, all shipped — see per-section [shipped] markers. The "Live bugs surfaced by the Project 1 finale" section above documents the integration-time gaps that surfaced during the closing e2e run; some dissolve as Project 2's workflow substrate matures, others are orthogonal parallel work.
-- Projects 2 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
+- **Project 2 was rewritten 2026-05-02** from "ship a blueprint library + add self-witnessing" (6-8 PRs) to "make walks load-bearing — visibility + enforcement + library, in that order" (21-29 PRs). Eight sequential sub-projects now spelled out with concrete scope, file paths, test strategy, and dependencies. The rewrite was driven by the audit of the Blueprint primitive (well-built) + the agent-facing teaching layer (missing) + the Project 1 finale's "agents don't know how to use corps" diagnosis. See Project 2 section.
+- Projects 3 through 6 have design-level detail (problem, scope, acceptance criteria, dependencies) but NOT file paths or test strategy per sub-project. Implementation detail gets filled in when each project starts — at which point the implementer should walk the current codebase (since earlier projects will have changed the shape), propose paths, add test strategy, and update this doc before the first sub-project PR.
 
 **Shipped as of 2026-05-01 — Project 1 merged into `dev` (`df2e874`):**
 - **Project 0** — Chits, lifecycle, wtf + CORP.md + audit gate + inbox — complete.
