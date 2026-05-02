@@ -282,6 +282,30 @@ export interface TaskFields {
   handedBy?: string | null;
   /** ISO timestamp of the most recent hand. Null if never handed. */
   handedAt?: string | null;
+  /**
+   * Project 2.1 — ISO timestamp marking when the assigned worker first
+   * started executing this task (the `dispatched → in_progress`
+   * transition). Used by walk-aware audit (Project 2.3) as the `since`
+   * boundary for `commit-on-branch` and `chit-of-type` expected-output
+   * checks: "did the agent produce this output during their work on
+   * THIS step," not "did this output ever exist somewhere."
+   *
+   * Set by the caller that fires the `claim` trigger via the 1.3 state
+   * machine. As of 2026-05-02, no caller fires `claim` yet — the trigger
+   * is defined in TRANSITION_RULES but unwired in code. Will be set when
+   * a downstream sub-project (likely 2.3's audit-time fallback or an
+   * earlier dispatch-side wiring PR) calls `validateTransition('
+   * dispatched', 'claim')` on first agent activity. Pre-2.1 chits + any
+   * task that hasn't transitioned to in_progress yet are null.
+   *
+   * Distinct from `reviewerClaim.claimedAt` (Editor's review claim,
+   * Project 1.12.2) — that's when an Editor claims a task FOR REVIEW,
+   * not when the assigned worker starts executing the step. Different
+   * lifecycle event, different actor, different scope. The path
+   * disambiguates them in TypeScript; the doc disambiguates for human
+   * readers.
+   */
+  claimedAt?: string | null;
   /** ISO timestamp when the task should be done. Null for open-ended. */
   dueAt?: string | null;
   /** Chit id of the Loop driving this task (auto-advance tasks tied to recurring work). Null for standalone tasks. */
