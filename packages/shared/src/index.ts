@@ -395,6 +395,18 @@ export type {
   CastSweeperFromBlueprintResult,
 } from './blueprint-cast.js';
 
+// Safe git shell-out — Project 2.1 PR 2. Synchronous helper for
+// walk-aware audit's branch-exists / commit-on-branch checkers. One
+// purpose: spawn git with classified outcomes that map cleanly onto
+// CheckResult. Re-exported here for future consumers (Sexton patrols,
+// Clearinghouse health checks) — generic primitive, not walk-specific.
+export { safeGitExec } from './git-exec.js';
+export type {
+  GitExecOutcome,
+  SafeGitExecResult,
+  SafeGitExecOpts,
+} from './git-exec.js';
+
 // Walk read API — Project 2.1 PR 2. Pure functions over Task / Contract /
 // Blueprint chits + the new expectedOutput schema. Consumed by 2.2's
 // visibility surfaces, 2.3's walk-aware audit, 2.4's stalled-walk patrol,
