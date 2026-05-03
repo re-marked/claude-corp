@@ -387,6 +387,56 @@ describe('cast → Task chit roundtrip — pre-expanded expectedOutput lands on 
     }
   });
 
+  it('blueprint step with withTags: null casts cleanly (Codex P1 regression)', async () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // validateExpectedOutput accepts withTags: null on chit-of-type
+      // (`!== undefined && !== null` guard). Before the fix,
+      // expandExpectedOutput's `!== undefined` check let null through
+      // to `null.map(...)` → TypeError, breaking cast on otherwise-
+      // validator-accepted blueprints.
+      const { castFromBlueprint } = await import('../packages/shared/src/index.js');
+      const blueprint = createChit(corpRoot, {
+        type: 'blueprint',
+        scope: 'corp',
+        status: 'active',
+        createdBy: 'test',
+        body: '',
+        fields: {
+          blueprint: {
+            name: 'null-tags',
+            origin: 'authored',
+            steps: [
+              {
+                id: 's1',
+                title: 'Step',
+                assigneeRole: 'backend-engineer',
+                expectedOutput: {
+                  kind: 'chit-of-type',
+                  chitType: 'observation',
+                  withTags: null as unknown as readonly string[],
+                },
+              },
+            ],
+          },
+        },
+      });
+      // Cast should succeed without throwing.
+      const result = castFromBlueprint(corpRoot, blueprint as Chit<'blueprint'>, {}, {
+        scope: 'corp',
+        createdBy: 'test',
+      });
+      const t = result.tasks[0]!;
+      const expanded = t.fields.task.expectedOutput as { kind: string; withTags?: unknown };
+      expect(expanded.kind).toBe('chit-of-type');
+      // Field absent on the expanded result (null source dropped from
+      // the spread-conditional, same as undefined source).
+      expect(expanded.withTags).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
   it('blueprint step with no expectedOutput → cast Task chit has no expectedOutput field', async () => {
     const { corpRoot, cleanup } = makeCorp();
     try {

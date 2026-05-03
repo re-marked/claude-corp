@@ -241,7 +241,14 @@ function expandExpectedOutput(
       return {
         kind: 'chit-of-type',
         chitType: spec.chitType,
-        ...(spec.withTags !== undefined
+        // Codex P1: validateExpectedOutput accepts withTags as either
+        // undefined or null (`if (s.withTags !== undefined && s.withTags
+        // !== null)`), so a blueprint chit with `withTags: null` is
+        // valid and reaches expansion. Earlier `!== undefined` guard
+        // would have thrown TypeError on `null.map(...)` for any such
+        // step. Explicit null+undefined check keeps the parsed shape
+        // consistent with the validator's accepting set.
+        ...(spec.withTags !== undefined && spec.withTags !== null
           ? {
               withTags: spec.withTags.map((tag, i) =>
                 expand(tag, context, stepId, `${fieldPrefix}.withTags[${i}]`),
