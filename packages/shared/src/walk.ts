@@ -802,6 +802,26 @@ function checkBranchExists(
   opts: CheckExpectedOutputOpts,
 ): CheckResult {
   const cwd = opts.cwd ?? corpRoot;
+  // Pre-checks. Two distinct failure modes get distinct messages so
+  // operators can diagnose:
+  //   1. cwd doesn't exist at all → "cwd does not exist"
+  //   2. cwd exists but isn't a git tree → "cwd is not a git
+  //      repository". This second check is critical because git's
+  //      `branch --list` walks UP looking for a parent repo and
+  //      silently returns results from the wrong tree (e.g. a
+  //      tmpdir under the agentcorp checkout returns the agentcorp
+  //      branches). Both regular repos (`.git/` directory) and
+  //      worktrees (`.git` file pointing at the gitdir) satisfy
+  //      the .git-presence check.
+  if (!existsSync(cwd)) {
+    return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
+  }
+  if (!existsSync(join(cwd, '.git'))) {
+    return {
+      status: 'unable-to-check',
+      reason: `cwd is not a git repository: ${cwd}`,
+    };
+  }
   const result = safeGitExec(['branch', '--list', spec.branchPattern], {
     cwd,
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
@@ -870,6 +890,15 @@ function checkCommitOnBranch(
   opts: CheckExpectedOutputOpts,
 ): CheckResult {
   const cwd = opts.cwd ?? corpRoot;
+  // Same parent-repo pre-check as branch-exists. See that comment for
+  // the rationale (git walks UP without scoping; a non-repo cwd would
+  // silently return commits from a parent repo's branches).
+  if (!existsSync(join(cwd, '.git'))) {
+    return {
+      status: 'unable-to-check',
+      reason: `cwd is not a git repository: ${cwd}`,
+    };
+  }
   const useSinceClaim = spec.sinceClaim !== false; // default true
   const taskFields = taskChit.fields.task as TaskFields;
   const sinceTime = useSinceClaim
