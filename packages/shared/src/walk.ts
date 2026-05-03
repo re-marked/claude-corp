@@ -769,11 +769,36 @@ function checkChitOfType(
  * filesystem read; no caching (audit fires infrequently enough that
  * a per-call read is fine, and caching would risk staleness when
  * agents hire/fire mid-walk). Returns empty array on missing/empty
- * members.json (graceful — caller treats as "no candidates").
+ * members.json AND on malformed members.json — caller treats both
+ * as "no candidates" (graceful degradation).
+ *
+ * Codex P2 review on PR #208: readConfigOr's docstring is
+ * "missing-or-malformed → fallback," but its actual behavior is
+ * "missing → fallback, malformed JSON → throw." Catching here
+ * prevents the throw from propagating out of checkChitOfType into
+ * audit, which would crash the gate for role-assigned tasks
+ * whenever members.json gets corrupted (mid-write race, manual
+ * edit gone wrong, partial backup restore). With the catch, audit
+ * sees the role pool as empty and returns honest unmet — operator
+ * sees a clear "no role members" signal vs. a hard crash.
+ *
+ * The empty-pool fallback is the same path as "role with zero
+ * members" so the unmet diagnostic is consistent: agent reads
+ * "role 'backend-engineer' has no current members" and knows to
+ * check members.json regardless of whether it's missing, empty,
+ * or corrupted.
  */
 function readMembersWithRole(corpRoot: string, roleId: string): Member[] {
-  const all = readConfigOr<Member[]>(join(corpRoot, 'members.json'), []);
-  return all.filter((m) => m.role === roleId);
+  try {
+    const all = readConfigOr<Member[]>(join(corpRoot, 'members.json'), []);
+    return all.filter((m) => m.role === roleId);
+  } catch {
+    // Malformed JSON, permission error, or any other read-time
+    // exception. Treat as empty pool — caller surfaces as honest
+    // unmet rather than crashing audit. Operational visibility
+    // happens via the unmet evidence trail, not a stack trace.
+    return [];
+  }
 }
 
 /**

@@ -995,6 +995,35 @@ describe('chit-of-type checker', () => {
     }
   });
 
+  it('role expansion — malformed members.json → unmet, not crash (Codex P2 regression)', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // readConfigOr throws on malformed JSON (missing-only fallback,
+      // not malformed-fallback). Before the fix, the throw propagated
+      // out of checkChitOfType into audit, crashing the gate for
+      // role-assigned tasks whenever members.json got corrupted
+      // (mid-write race, partial backup restore, manual edit). The
+      // try/catch in readMembersWithRole catches and treats as empty
+      // pool — operator sees honest unmet vs hard stack trace.
+      writeFileSync(
+        join(corpRoot, 'members.json'),
+        '{ this is { not [ valid JSON',
+      );
+      const t = fakeWalkTask();
+      (t.fields.task as { assignee?: string }).assignee = 'backend-engineer';
+      (t.fields.task as { claimedAt?: string }).claimedAt = '2025-01-01T00:00:00.000Z';
+      // Should NOT throw. Should return unmet (empty pool fallback).
+      const r = checkExpectedOutput(
+        { kind: 'chit-of-type', chitType: 'observation' },
+        t,
+        corpRoot,
+      );
+      expect(r.status).toBe('unmet');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('role expansion — role with no current members → unmet (honest, not unable)', () => {
     const { corpRoot, cleanup } = makeCorp();
     try {
