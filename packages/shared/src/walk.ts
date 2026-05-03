@@ -45,12 +45,14 @@
  */
 
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields, TaskWorkflowStatus, ChitTypeId } from './types/chit.js';
 import type { ExpectedOutputSpec } from './types/expected-output.js';
 import type { Member } from './types/member.js';
 import { queryChits, findChitById } from './chits.js';
 import { readConfigOr } from './parsers/index.js';
 import { isKnownRole } from './roles.js';
+import { safeGitExec } from './git-exec.js';
 
 // ─── Tag conventions ────────────────────────────────────────────────
 
@@ -775,50 +777,245 @@ function readMembersWithRole(corpRoot: string, roleId: string): Member[] {
 }
 
 /**
- * `branch-exists` — git shell-out for branch presence. Real impl in
- * commit 10 (uses safeGitExec helper from commit 9 with worktree-
- * aware cwd + ENOENT/EACCES/timeout handling).
+ * `branch-exists` — `git branch --list <pattern>` against the
+ * resolved cwd. Local branches only (default git behavior); remote
+ * branches don't count because the agent's work happens in their
+ * worktree before push, and `branch-exists` is the audit signal that
+ * the agent's local work has produced the expected branch.
+ *
+ * Outcome mapping from safeGitExec:
+ *   - ok + non-empty stdout       → met (branch list returned matches)
+ *   - ok + empty stdout            → unmet (no matching branch)
+ *   - cmd-failed + "not a git repository" stderr → unable-to-check
+ *     (the cwd resolved but isn't a git tree — usually a misconfigured
+ *      worktree path; agent shouldn't be blocked on this)
+ *   - cmd-failed + other stderr    → unmet (git rejected the pattern,
+ *     which we treat as "no match" — the agent didn't produce the
+ *     expected branch)
+ *   - cmd-not-found / cwd-missing / permission-denied / timeout / other
+ *                                  → unable-to-check (env-level failure)
  */
 function checkBranchExists(
-  _spec: { kind: 'branch-exists'; branchPattern: string },
+  spec: { kind: 'branch-exists'; branchPattern: string },
   _taskChit: Chit<'task'>,
-  _corpRoot: string,
-  _opts: CheckExpectedOutputOpts,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts,
 ): CheckResult {
-  return {
-    status: 'unable-to-check',
-    reason: 'branch-exists checker not implemented (lands in commit 10 of feat/2.1-walk-api)',
-  };
+  const cwd = opts.cwd ?? corpRoot;
+  const result = safeGitExec(['branch', '--list', spec.branchPattern], {
+    cwd,
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  });
+
+  switch (result.outcome) {
+    case 'ok': {
+      const trimmed = result.stdout.trim();
+      if (trimmed.length > 0) {
+        return {
+          status: 'met',
+          evidence: { branchPattern: spec.branchPattern, cwd, matched: trimmed.split('\n') },
+        };
+      }
+      return {
+        status: 'unmet',
+        missing: [`branch matching '${spec.branchPattern}' in ${cwd}`],
+        evidence: { branchPattern: spec.branchPattern, cwd, matched: [] },
+      };
+    }
+    case 'cmd-failed':
+      if (isNotAGitRepoError(result.stderr)) {
+        return {
+          status: 'unable-to-check',
+          reason: `cwd is not a git repository: ${cwd}`,
+          evidence: { stderr: result.stderr },
+        };
+      }
+      return {
+        status: 'unmet',
+        missing: [`branch matching '${spec.branchPattern}' in ${cwd}`],
+        evidence: { stderr: result.stderr, exitCode: result.exitCode },
+      };
+    default:
+      return mapEnvFailureToUnable(result.outcome, cwd, result.stderr);
+  }
 }
 
 /**
- * `commit-on-branch` — git shell-out for commits since claimedAt.
- * Real impl in commit 10.
+ * `commit-on-branch` — `git log <branch> --since=<sinceTime>
+ * --format=%H -n 1` against the resolved cwd. Returns met when ≥1
+ * commit is found on the branch since the claim boundary.
+ *
+ * sinceClaim semantics:
+ *   - true (default when absent): pass --since=<sinceTime> where
+ *     sinceTime is `taskFields.claimedAt` if set, else
+ *     `taskChit.createdAt` as the loose fallback (per the chit-of-type
+ *     fallback decision — tightens once the claim transition wires).
+ *   - false: omit --since entirely. "Any commit ever on this branch"
+ *     check, useful for steps that verify a branch HAS work
+ *     regardless of timing (e.g. a handoff step that wants to confirm
+ *     "the predecessor's branch has commits before we ship it").
+ *
+ * `--format=%H -n 1` minimizes output to the first commit's SHA — we
+ * only need to know if there's ≥1, not enumerate.
+ *
+ * Outcome mapping mirrors branch-exists: ok+stdout = met, ok+empty =
+ * unmet, cmd-failed classified by stderr (not-a-git-repo → unable;
+ * unknown revision / ambiguous argument = branch missing → unmet),
+ * env-level failures → unable.
  */
 function checkCommitOnBranch(
-  _spec: { kind: 'commit-on-branch'; branchPattern: string; sinceClaim?: boolean },
-  _taskChit: Chit<'task'>,
-  _corpRoot: string,
-  _opts: CheckExpectedOutputOpts,
+  spec: { kind: 'commit-on-branch'; branchPattern: string; sinceClaim?: boolean },
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts,
 ): CheckResult {
+  const cwd = opts.cwd ?? corpRoot;
+  const useSinceClaim = spec.sinceClaim !== false; // default true
+  const taskFields = taskChit.fields.task as TaskFields;
+  const sinceTime = useSinceClaim
+    ? (taskFields.claimedAt ?? taskChit.createdAt)
+    : null;
+
+  const args: string[] = ['log', spec.branchPattern, '--format=%H', '-n', '1'];
+  if (sinceTime) args.push(`--since=${sinceTime}`);
+
+  const result = safeGitExec(args, {
+    cwd,
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  });
+
+  switch (result.outcome) {
+    case 'ok': {
+      const trimmed = result.stdout.trim();
+      if (trimmed.length > 0) {
+        return {
+          status: 'met',
+          evidence: {
+            branchPattern: spec.branchPattern,
+            cwd,
+            since: sinceTime,
+            firstCommit: trimmed,
+          },
+        };
+      }
+      return {
+        status: 'unmet',
+        missing: [
+          `commit on branch '${spec.branchPattern}'${sinceTime ? ` since ${sinceTime}` : ''} in ${cwd}`,
+        ],
+        evidence: { branchPattern: spec.branchPattern, cwd, since: sinceTime },
+      };
+    }
+    case 'cmd-failed':
+      if (isNotAGitRepoError(result.stderr)) {
+        return {
+          status: 'unable-to-check',
+          reason: `cwd is not a git repository: ${cwd}`,
+          evidence: { stderr: result.stderr },
+        };
+      }
+      // Unknown branch = unmet (the spec required commits on this
+      // branch; the branch doesn't exist). git's stderr typically:
+      //   "fatal: ambiguous argument '<branch>': unknown revision"
+      // — we don't pattern-match further; any non-not-a-repo failure
+      // is treated as "the branch isn't producing what we expected."
+      return {
+        status: 'unmet',
+        missing: [`commit on branch '${spec.branchPattern}' in ${cwd}`],
+        evidence: { stderr: result.stderr, exitCode: result.exitCode },
+      };
+    default:
+      return mapEnvFailureToUnable(result.outcome, cwd, result.stderr);
+  }
+}
+
+/**
+ * `file-exists` — fs.existsSync against the resolved cwd + the
+ * pre-expanded path pattern. Pure fs check, no shell-out, no git.
+ *
+ * Path resolution: `join(cwd, pathPattern)`. Documented behavior is
+ * that pathPattern is relative to cwd; absolute paths or `..`
+ * traversals are not specially handled — the blueprint authors are
+ * trusted (founder + agents inside the corp) and arbitrary path
+ * checks aren't a security concern at this scale. If a future use
+ * case wants tighter sandboxing, that's a feature addition, not a
+ * v1 hardening.
+ *
+ * Three outcomes:
+ *   - cwd doesn't exist → unable-to-check (worktree not allocated;
+ *     resolved cwd was wrong)
+ *   - file exists       → met
+ *   - file doesn't exist → unmet
+ *
+ * Never throws; existsSync handles permission errors as `false`
+ * which we map to unmet (best-effort; the file is functionally
+ * inaccessible to the audit, which matches user intent). If we
+ * wanted to distinguish permission-denied from absent-file, we'd
+ * need stat() with explicit error handling — defer until a real
+ * use case demands it.
+ */
+function checkFileExists(
+  spec: { kind: 'file-exists'; pathPattern: string },
+  _taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts,
+): CheckResult {
+  const cwd = opts.cwd ?? corpRoot;
+  if (!existsSync(cwd)) {
+    return {
+      status: 'unable-to-check',
+      reason: `cwd does not exist: ${cwd}`,
+    };
+  }
+  const fullPath = join(cwd, spec.pathPattern);
+  if (existsSync(fullPath)) {
+    return {
+      status: 'met',
+      evidence: { pathPattern: spec.pathPattern, cwd, fullPath },
+    };
+  }
   return {
-    status: 'unable-to-check',
-    reason: 'commit-on-branch checker not implemented (lands in commit 10 of feat/2.1-walk-api)',
+    status: 'unmet',
+    missing: [`file '${spec.pathPattern}' in ${cwd}`],
+    evidence: { pathPattern: spec.pathPattern, cwd, fullPath },
   };
 }
 
 /**
- * `file-exists` — fs.existsSync against worktree-aware cwd. Real
- * impl in commit 10.
+ * Stderr classifier — git emits this exact phrase for the "wrong cwd"
+ * case across all subcommands. Used by branch-exists + commit-on-branch
+ * to distinguish "infra issue" (unable) from "the agent didn't produce
+ * what was expected" (unmet).
  */
-function checkFileExists(
-  _spec: { kind: 'file-exists'; pathPattern: string },
-  _taskChit: Chit<'task'>,
-  _corpRoot: string,
-  _opts: CheckExpectedOutputOpts,
+function isNotAGitRepoError(stderr: string): boolean {
+  return /not a git repository/i.test(stderr);
+}
+
+/**
+ * Map non-ok / non-cmd-failed safeGitExec outcomes to a CheckResult.
+ * All env-level failures (cmd-not-found, cwd-missing, permission-
+ * denied, timeout, other) become unable-to-check with descriptive
+ * reasons — these are infra states that shouldn't block the agent on
+ * the work itself.
+ */
+function mapEnvFailureToUnable(
+  outcome: 'cmd-not-found' | 'cwd-missing' | 'permission-denied' | 'timeout' | 'other',
+  cwd: string,
+  stderr: string,
 ): CheckResult {
-  return {
-    status: 'unable-to-check',
-    reason: 'file-exists checker not implemented (lands in commit 10 of feat/2.1-walk-api)',
-  };
+  switch (outcome) {
+    case 'cmd-not-found':
+      return { status: 'unable-to-check', reason: 'git not in PATH' };
+    case 'cwd-missing':
+      return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
+    case 'permission-denied':
+      return { status: 'unable-to-check', reason: `permission denied at ${cwd}` };
+    case 'timeout':
+      return { status: 'unable-to-check', reason: `git command timed out (cwd: ${cwd})` };
+    case 'other':
+      return {
+        status: 'unable-to-check',
+        reason: `git invocation failed: ${stderr || 'unknown error'}`,
+      };
+  }
 }
