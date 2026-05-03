@@ -234,6 +234,196 @@ describe('getWalkPosition — happy path', () => {
       cleanup();
     }
   });
+
+  it('surfaces pre-expanded fields from the task chit (expectedOutput, taskOutput, claimedAt)', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // Seed a blueprint + contract + ONE task with all the pre-expanded
+      // fields populated, then verify getWalkPosition returns them.
+      const blueprint = createChit(corpRoot, {
+        type: 'blueprint',
+        scope: 'corp',
+        createdBy: 'test',
+        body: '',
+        fields: {
+          blueprint: {
+            name: 'bp',
+            origin: 'authored',
+            steps: [{ id: 's1', title: 'S' }],
+          },
+        },
+      });
+      const expectedSpec = {
+        kind: 'tag-on-task' as const,
+        tag: 'reviewed',
+      };
+      const t = createChit(corpRoot, {
+        type: 'task',
+        scope: 'corp',
+        createdBy: 'test',
+        body: '',
+        tags: ['blueprint:bp', 'blueprint-step:s1'],
+        fields: {
+          task: {
+            title: 'S',
+            priority: 'normal',
+            assignee: 'toast',
+            output: 'shipped the thing',
+            claimedAt: '2026-05-01T15:00:00.000Z',
+            expectedOutput: expectedSpec,
+          },
+        },
+      });
+      createChit(corpRoot, {
+        type: 'contract',
+        scope: 'corp',
+        createdBy: 'test',
+        body: '',
+        fields: {
+          contract: {
+            title: 'c',
+            goal: 'g',
+            taskIds: [t.id],
+            blueprintId: blueprint.id,
+          },
+        },
+      });
+      const hit = findChitById(corpRoot, t.id);
+      const pos = getWalkPosition(hit!.chit as Chit<'task'>, corpRoot);
+      expect(pos).not.toBeNull();
+      expect(pos!.expectedOutput).toEqual(expectedSpec);
+      expect(pos!.taskOutput).toBe('shipped the thing');
+      expect(pos!.claimedAt).toBe('2026-05-01T15:00:00.000Z');
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe('cast → Task chit roundtrip — pre-expanded expectedOutput lands on task', () => {
+  it('blueprint with templated branchPattern is expanded onto the cast Task chit', async () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // Use the real cast pipeline so we exercise parser + cast +
+      // chit-write end-to-end. Verifies that a Handlebars-templated
+      // expectedOutput field on the blueprint becomes a concrete-
+      // string version on every cast Task chit.
+      const { castFromBlueprint } = await import('../packages/shared/src/index.js');
+
+      const blueprint = createChit(corpRoot, {
+        type: 'blueprint',
+        scope: 'corp',
+        status: 'active', // Cast requires active blueprints; default is draft.
+        createdBy: 'test',
+        body: '',
+        fields: {
+          blueprint: {
+            name: 'ship-feature',
+            origin: 'authored',
+            vars: [{ name: 'feature', type: 'string' }],
+            steps: [
+              {
+                id: 'acquire',
+                title: 'Acquire worktree for {{feature}}',
+                assigneeRole: 'backend-engineer',
+                expectedOutput: {
+                  kind: 'branch-exists',
+                  branchPattern: 'feat/{{feature}}',
+                },
+              },
+              {
+                id: 'submit',
+                title: 'Submit clearance for {{feature}}',
+                dependsOn: ['acquire'],
+                assigneeRole: 'backend-engineer',
+                expectedOutput: {
+                  kind: 'multi',
+                  specs: [
+                    {
+                      kind: 'chit-of-type',
+                      chitType: 'observation',
+                      withTags: ['feature:{{feature}}'],
+                    },
+                    { kind: 'task-output-nonempty' },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      });
+
+      const result = castFromBlueprint(corpRoot, blueprint as Chit<'blueprint'>, {
+        feature: 'fire-command',
+      }, {
+        scope: 'corp',
+        createdBy: 'test',
+      });
+
+      // First task: acquire-worktree. expectedOutput should have
+      // branchPattern with {{feature}} resolved to 'fire-command'.
+      const t1 = result.tasks[0]!;
+      expect(t1.fields.task.expectedOutput).toEqual({
+        kind: 'branch-exists',
+        branchPattern: 'feat/fire-command',
+      });
+
+      // Second task: submit-clearance. Multi-composed expectedOutput
+      // with the inner withTags also expanded.
+      const t2 = result.tasks[1]!;
+      expect(t2.fields.task.expectedOutput).toEqual({
+        kind: 'multi',
+        specs: [
+          {
+            kind: 'chit-of-type',
+            chitType: 'observation',
+            withTags: ['feature:fire-command'],
+          },
+          { kind: 'task-output-nonempty' },
+        ],
+      });
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('blueprint step with no expectedOutput → cast Task chit has no expectedOutput field', async () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const { castFromBlueprint } = await import('../packages/shared/src/index.js');
+      const blueprint = createChit(corpRoot, {
+        type: 'blueprint',
+        scope: 'corp',
+        status: 'active', // Cast requires active.
+        createdBy: 'test',
+        body: '',
+        fields: {
+          blueprint: {
+            name: 'no-expected',
+            origin: 'authored',
+            steps: [
+              {
+                id: 's1',
+                title: 'No expected output declared',
+                assigneeRole: 'backend-engineer',
+                // No expectedOutput at all.
+              },
+            ],
+          },
+        },
+      });
+      const result = castFromBlueprint(corpRoot, blueprint as Chit<'blueprint'>, {}, {
+        scope: 'corp',
+        createdBy: 'test',
+      });
+      const t = result.tasks[0]!;
+      // Field absent (spread-conditional in cast — null source step
+      // skips the field entirely so existing fixture shapes pass-through).
+      expect(t.fields.task.expectedOutput).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
 });
 
 describe('getWalkPosition — null cases', () => {
