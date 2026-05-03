@@ -44,7 +44,9 @@
  * exists so callers don't HAVE to gate every call on null-checking.
  */
 
-import type { Chit } from './types/chit.js';
+import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields } from './types/chit.js';
+import type { ExpectedOutputSpec } from './types/expected-output.js';
+import { queryChits, findChitById } from './chits.js';
 
 // ─── Tag conventions ────────────────────────────────────────────────
 
@@ -115,4 +117,150 @@ export function getWalkStepId(taskChit: Chit<'task'>): string | null {
   const tag = taskChit.tags.find((t) => t.startsWith(BLUEPRINT_STEP_TAG_PREFIX));
   if (!tag) return null;
   return tag.slice(BLUEPRINT_STEP_TAG_PREFIX.length) || null;
+}
+
+// ─── Walk position lookup ───────────────────────────────────────────
+
+/**
+ * The "where am I in the walk?" answer for a Task chit. All references
+ * are eagerly resolved — callers don't need to do a second hop to read
+ * the contract / blueprint / step. Pre-expanded data (taskOutput,
+ * expectedOutput, claimedAt) lives on the task and is surfaced here so
+ * audit / visibility don't have to dual-read.
+ *
+ * `stepIndex` is 1-based for human-facing display ("step 4 of 7"); a
+ * 0-based index would leak as "step 0 of 7" if a renderer forgot to
+ * add 1. Programmers consuming this for arithmetic should subtract 1
+ * if they want the array offset.
+ *
+ * `step` is the original (unexpanded) BlueprintStep so callers needing
+ * the DAG structure (`dependsOn`) get it. For rendering, prefer the
+ * task chit's already-expanded title / description instead — the
+ * blueprint step's strings still contain `{{handlebars}}` references
+ * which are fine for type purposes but useless for display.
+ */
+export interface WalkPosition {
+  /** Blueprint name (e.g. `ship-feature`). Same value as the `blueprint:` tag suffix. */
+  readonly blueprintName: string;
+  /** Step id within the blueprint (e.g. `acquire-worktree`). Same as the `blueprint-step:` tag suffix. */
+  readonly stepId: string;
+  /** 1-based index in the blueprint's steps array. UI-friendly; subtract 1 for array math. */
+  readonly stepIndex: number;
+  /** Total number of steps in the blueprint. */
+  readonly totalSteps: number;
+  /** The original (unexpanded) BlueprintStep — useful for dependsOn navigation. */
+  readonly step: BlueprintStep;
+  /** Full Contract chit containing this task's id. */
+  readonly contract: Chit<'contract'>;
+  /** Full Blueprint chit (also unexpanded; raw templates). */
+  readonly blueprint: Chit<'blueprint'>;
+  /** Pre-expanded ExpectedOutputSpec from the task chit (or null when no walk-aware enforcement on this step). */
+  readonly expectedOutput: ExpectedOutputSpec | null;
+  /** Agent's prose summary so far from `task.output` — null when not written yet. */
+  readonly taskOutput: string | null;
+  /** ISO timestamp of when the agent transitioned dispatched → in_progress, or null when unwired/pre-2.1. */
+  readonly claimedAt: string | null;
+}
+
+/**
+ * Resolve the full walk position for a Task chit. Returns null on any
+ * missing-data case along the lookup chain — callers should treat null
+ * as "this task isn't part of a walk we can navigate" and fall through
+ * to ad-hoc behavior. Specific null causes:
+ *
+ *   - Task is ad-hoc (no `blueprint:*` or `blueprint-step:*` tag)
+ *   - No Contract chit contains this task's id in `taskIds[]` (orphan
+ *     task — possible if the contract was hand-deleted or the task was
+ *     hand-created with the tags but no containing contract)
+ *   - Contract has null `blueprintId` (corruption — castFromBlueprint
+ *     always sets it, but defensive)
+ *   - Blueprint chit can't be resolved by id (deleted)
+ *   - Step id from the task tag isn't in the blueprint's steps array
+ *     (blueprint edited after cast — this task references a step that
+ *     no longer exists)
+ *
+ * Reverse lookup task → contract is O(N) over contracts. At realistic
+ * corp scale (dozens to hundreds of contracts) this is microseconds.
+ * Not denormalizing `contractId` onto TaskFields for this — premature
+ * optimization, and the existing taskIds-on-contract relationship is
+ * the canonical edge.
+ */
+export function getWalkPosition(
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+): WalkPosition | null {
+  // 1. Tag-based identity. Both required — a task with only one of the
+  //    walk tags is malformed; treat as ad-hoc rather than picking
+  //    apart partial state.
+  const blueprintName = getWalkBlueprintName(taskChit);
+  const stepId = getWalkStepId(taskChit);
+  if (blueprintName === null || stepId === null) return null;
+
+  // 2. Reverse lookup: find the contract containing this task. Scan
+  //    contracts via queryChits — limit 0 = unlimited so we don't miss
+  //    a hit at the tail of a large corp's contract list. Contracts
+  //    are non-ephemeral + small in count vs tasks, so this is cheap.
+  //    queryChits returns { chits, malformed }; we ignore malformed
+  //    here (the surface is callers concerned with corp health, not
+  //    walk navigation — a malformed contract is invisible to walks
+  //    until repaired).
+  const contractQuery = queryChits<'contract'>(corpRoot, {
+    types: ['contract'] as const,
+    limit: 0,
+  });
+  const containing = contractQuery.chits.filter((cwb) =>
+    (cwb.chit.fields as { contract: ContractFields }).contract.taskIds.includes(taskChit.id),
+  );
+  // Defensive duplicate handling: a task SHOULDN'T appear in multiple
+  // contracts' taskIds, but file corruption or manual edits could
+  // produce that state. Return the first match deterministically rather
+  // than throwing — callers see the same answer across calls.
+  const containingHit = containing[0];
+  if (!containingHit) return null;
+  const contract = containingHit.chit as Chit<'contract'>;
+
+  // 3. Contract → blueprint id. blueprintId can technically be null on
+  //    contracts created without a blueprint (`cc-cli contract create`
+  //    direct path). Treat as ad-hoc-ish — the contract exists but no
+  //    walk to navigate.
+  const contractFields = contract.fields.contract as ContractFields;
+  if (contractFields.blueprintId == null) return null;
+
+  // 4. Blueprint chit lookup by id. Defensive: blueprint may have been
+  //    deleted (closed + archived, manually removed) since cast. Tasks
+  //    persist; their references can dangle.
+  const blueprintHit = findChitById(corpRoot, contractFields.blueprintId);
+  if (!blueprintHit || blueprintHit.chit.type !== 'blueprint') return null;
+  const blueprint = blueprintHit.chit as Chit<'blueprint'>;
+
+  // 5. Locate the step within the blueprint. The cast pipeline tagged
+  //    this task with the step id; if the blueprint has since been
+  //    edited and this step id removed, treat as null (the walk shape
+  //    has drifted from the cast). The task's pre-expanded
+  //    expectedOutput remains valid because it's stored on the task,
+  //    not derived from the current blueprint — so audit can still
+  //    fire even when getWalkPosition returns null. But the navigation
+  //    surface (visibility) honestly says "this task is in a walk that
+  //    has changed since cast — no clean position to render."
+  const blueprintFields = blueprint.fields.blueprint as BlueprintFields;
+  const stepIdx0 = blueprintFields.steps.findIndex((s) => s.id === stepId);
+  if (stepIdx0 < 0) return null;
+  const step = blueprintFields.steps[stepIdx0]!;
+
+  // 6. Compose. Reads from the TASK for pre-expanded fields (output /
+  //    expectedOutput / claimedAt) — these reflect the cast moment and
+  //    the agent's work since, NOT the current blueprint state.
+  const taskFields = taskChit.fields.task as TaskFields;
+  return {
+    blueprintName,
+    stepId,
+    stepIndex: stepIdx0 + 1, // 1-based for human display
+    totalSteps: blueprintFields.steps.length,
+    step,
+    contract,
+    blueprint,
+    expectedOutput: taskFields.expectedOutput ?? null,
+    taskOutput: taskFields.output ?? null,
+    claimedAt: taskFields.claimedAt ?? null,
+  };
 }

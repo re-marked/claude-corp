@@ -406,7 +406,9 @@ export {
   isAdHocTask,
   getWalkBlueprintName,
   getWalkStepId,
+  getWalkPosition,
 } from './walk.js';
+export type { WalkPosition } from './walk.js';
 
 // Blueprint lookup — Project 1.8 PR 3. Centralizes name → chit resolution
 // with scope precedence, so every CLI command + Sexton's patrol cooking
