@@ -81,3 +81,16 @@ export type {
   PatternObservationFields,
   PatternSubject,
 } from './chit.js';
+
+export type {
+  ExpectedOutputSpec,
+  ExpectedOutputKind,
+  ExpectedOutputChitOfType,
+  ExpectedOutputBranchExists,
+  ExpectedOutputCommitOnBranch,
+  ExpectedOutputFileExists,
+  ExpectedOutputTagOnTask,
+  ExpectedOutputTaskOutputNonempty,
+  ExpectedOutputMulti,
+} from './expected-output.js';
+export { EXPECTED_OUTPUT_KINDS } from './expected-output.js';

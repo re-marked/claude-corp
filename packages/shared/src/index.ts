@@ -65,7 +65,17 @@ export type {
   LaneEventPayload,
   PatternObservationFields,
   PatternSubject,
+  ExpectedOutputSpec,
+  ExpectedOutputKind,
+  ExpectedOutputChitOfType,
+  ExpectedOutputBranchExists,
+  ExpectedOutputCommitOnBranch,
+  ExpectedOutputFileExists,
+  ExpectedOutputTagOnTask,
+  ExpectedOutputTaskOutputNonempty,
+  ExpectedOutputMulti,
 } from './types/index.js';
+export { EXPECTED_OUTPUT_KINDS } from './types/index.js';
 
 // Parsers
 export {
