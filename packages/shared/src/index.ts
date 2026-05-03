@@ -395,6 +395,19 @@ export type {
   CastSweeperFromBlueprintResult,
 } from './blueprint-cast.js';
 
+// Walk read API — Project 2.1 PR 2. Pure functions over Task / Contract /
+// Blueprint chits + the new expectedOutput schema. Consumed by 2.2's
+// visibility surfaces, 2.3's walk-aware audit, 2.4's stalled-walk patrol,
+// 2.7's `cc-cli walk show`. Each function documents its own contract;
+// shell-out checkers (branch-exists, commit-on-branch, file-exists) live
+// here too with three-state outcome (met / unmet / unable-to-check).
+export {
+  isWalkTask,
+  isAdHocTask,
+  getWalkBlueprintName,
+  getWalkStepId,
+} from './walk.js';
+
 // Blueprint lookup — Project 1.8 PR 3. Centralizes name → chit resolution
 // with scope precedence, so every CLI command + Sexton's patrol cooking
 // uses one consistent lookup path.
