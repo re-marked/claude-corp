@@ -246,6 +246,15 @@ function validateTask(fields: unknown): void {
   // explicitly (distinct from undefined which means "field not present"
   // on pre-1.3 chits); both are legal.
   if (f.output !== undefined) requireStringOrNull(f.output, 'task.output');
+  // Project 2.1 — pre-expanded expectedOutput carried over from the
+  // originating blueprint step at cast time. Validated with the same
+  // helper as BlueprintStep.expectedOutput — structural shape is
+  // identical, only difference is the absence of unresolved templates.
+  // Null/undefined both mean "no walk-aware enforcement on this step"
+  // (graceful degradation; ad-hoc tasks + pre-2.1 chits both read here).
+  if (f.expectedOutput !== undefined && f.expectedOutput !== null) {
+    validateExpectedOutput(f.expectedOutput, 'task.expectedOutput');
+  }
   // Project 1.12.2 — Editor review state. All four fields optional;
   // pre-1.12.2 chits and tasks that never reached under_review have
   // them undefined. requireInteger floor of 0 (counter never decreases).
