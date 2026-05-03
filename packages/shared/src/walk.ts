@@ -44,7 +44,7 @@
  * exists so callers don't HAVE to gate every call on null-checking.
  */
 
-import { join, resolve, dirname, sep } from 'node:path';
+import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
 import { existsSync } from 'node:fs';
 import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields, TaskWorkflowStatus, ChitTypeId } from './types/chit.js';
 import type { ExpectedOutputSpec } from './types/expected-output.js';
@@ -1072,12 +1072,17 @@ function findGitRoot(cwd: string, ceiling: string): string | null {
   const ceilingResolved = resolve(ceiling);
   let current = resolve(cwd);
 
-  // Reject cwd that's outside the ceiling. startsWith with a trailing
-  // separator avoids false-positive prefix matches (e.g.
-  // /home/foo-other vs /home/foo).
-  if (current !== ceilingResolved && !current.startsWith(ceilingResolved + sep)) {
-    return null;
-  }
+  // Reject cwd that's outside the ceiling. path.relative handles
+  // platform-correct case sensitivity automatically — Windows is
+  // case-insensitive (so `C:\corp\wt` and `c:\corp\wt` are treated
+  // as equal); POSIX is case-sensitive. A startsWith check would
+  // false-fail on Windows when corpRoot and cwd come from different
+  // sources with different casing (config-stored path vs runtime-
+  // resolved path is a real production case). The relative shape
+  // also avoids the "/home/foo-other vs /home/foo" prefix-collision
+  // hazard a naive startsWith hits.
+  const rel = relative(ceilingResolved, current);
+  if (rel.startsWith('..') || isAbsolute(rel)) return null;
 
   while (true) {
     if (existsSync(join(current, '.git'))) return current;
