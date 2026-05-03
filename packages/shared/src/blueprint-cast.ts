@@ -244,6 +244,15 @@ export function castFromBlueprint(
       ...(step.acceptanceCriteria.length > 0
         ? { acceptanceCriteria: [...step.acceptanceCriteria] }
         : {}),
+      // Project 2.1 — pre-expanded ExpectedOutputSpec carried over
+      // from the parsed blueprint step. Audit reads this concrete
+      // spec at `cc-cli done` time without re-running Handlebars.
+      // Null source step → null on the Task; spread-conditional keeps
+      // the field absent when null so pre-existing chit shapes are
+      // preserved (no rewrite of fixtures needed).
+      ...(step.expectedOutput !== null
+        ? { expectedOutput: step.expectedOutput }
+        : {}),
     };
 
     return createChit(corpRoot, {
