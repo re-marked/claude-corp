@@ -44,9 +44,13 @@
  * exists so callers don't HAVE to gate every call on null-checking.
  */
 
-import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields, TaskWorkflowStatus } from './types/chit.js';
+import { join } from 'node:path';
+import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields, TaskWorkflowStatus, ChitTypeId } from './types/chit.js';
 import type { ExpectedOutputSpec } from './types/expected-output.js';
+import type { Member } from './types/member.js';
 import { queryChits, findChitById } from './chits.js';
+import { readConfigOr } from './parsers/index.js';
+import { isKnownRole } from './roles.js';
 
 // ─── Tag conventions ────────────────────────────────────────────────
 
@@ -611,23 +615,163 @@ function checkMulti(
 // ─── Stub checkers (real impls land in subsequent commits) ─────────
 
 /**
- * `chit-of-type` — queries the chit store for produced chits of the
- * given type. Real implementation lands in commit 8 of this PR
- * (queryChits integration + role-vs-slot expansion + ALL-tags
- * post-filter + claimedAt fallback). Until then, returns
- * `unable-to-check` so a partial deploy (this commit landed but not
- * commit 8) doesn't crash audit.
+ * `chit-of-type` — query the chit store for chits of the given type
+ * produced by the assigned worker since the step claim, optionally
+ * filtered by ALL of the templated `withTags`. The most common kind
+ * for steps that produce a structured artifact (clearance-submission,
+ * review-comment, observation, etc.).
+ *
+ * ### Three load-bearing filters
+ *
+ * 1. **createdBy** — the chit must have been created by the worker
+ *    assigned to this task. Without this filter, a chit of the right
+ *    type produced by ANY agent at ANY time would falsely satisfy
+ *    the check (a clearance-submission from a different submitter
+ *    on a different task with the same task tag, e.g.). Two cases:
+ *    - assignee is a slot id → use it directly as createdBy.
+ *    - assignee is a known role-id → expand to the current member
+ *      slots in that role (members.json filter on `role === assignee`).
+ *      Accept any of those slot ids as createdBy. The role-expansion
+ *      is critical: a task handed to `backend-engineer` may end up
+ *      with assignee still = `backend-engineer` (role-queue path,
+ *      pre-bacteria pickup) OR `toast` (slot-resolved). The query
+ *      handles both.
+ *
+ * 2. **createdSince (claimedAt boundary)** — the chit must have been
+ *    produced AFTER the agent claimed this step (`task.claimedAt`).
+ *    When claimedAt is null (transition unwired in 1.3 + this PR
+ *    doesn't wire it), fall back to `taskChit.createdAt` as a loose
+ *    boundary. Loose-but-functional vs strict-but-broken — the
+ *    loose case admits some pre-step chits as evidence; tightening
+ *    happens automatically once the claim transition gets wired.
+ *
+ * 3. **withTags (ALL-match post-filter)** — queryChits's `tags`
+ *    filter is OR-match (returns chits with ANY of the given tags).
+ *    For expectedOutput we need AND-match (every withTag MUST be
+ *    present). Post-filter the queryChits result: keep chits where
+ *    every required tag appears in `chit.tags`. Empty withTags = no
+ *    tag filter (all chits of this type-by-creator-since pass).
+ *
+ * Returns `met` when ≥1 chit matches. Returns `unmet` with a
+ * diagnostic `evidence.query` payload showing exactly what we
+ * searched for so the agent can inspect via `cc-cli chit list` with
+ * the same filters. Returns `unable-to-check` only on the genuine
+ * "can't run the check at all" cases (no assignee → no creator scope).
  */
 function checkChitOfType(
-  _spec: { kind: 'chit-of-type'; chitType: string; withTags?: readonly string[] },
-  _taskChit: Chit<'task'>,
-  _corpRoot: string,
+  spec: { kind: 'chit-of-type'; chitType: string; withTags?: readonly string[] },
+  taskChit: Chit<'task'>,
+  corpRoot: string,
   _opts: CheckExpectedOutputOpts,
 ): CheckResult {
+  const taskFields = taskChit.fields.task as TaskFields;
+  const assignee = taskFields.assignee;
+
+  // No assignee → can't scope createdBy. Treat as unable rather than
+  // running a corp-wide query that's almost certainly wrong; audit
+  // logs the reason so the founder sees the missing-assignee case
+  // and can fix the upstream gap.
+  if (assignee == null) {
+    return {
+      status: 'unable-to-check',
+      reason: 'task has no assignee — cannot scope chit-of-type query to the worker',
+    };
+  }
+
+  // Resolve creator scope. Role expansion uses readMembersWithRole —
+  // pure read of members.json, scoped here so walk.ts doesn't expose
+  // a public getMembers surface (cli has its own; we don't need to
+  // duplicate the API contract).
+  const candidateCreators = isKnownRole(assignee)
+     ? readMembersWithRole(corpRoot, assignee).map((m) => m.id)
+    : [assignee];
+  if (candidateCreators.length === 0) {
+    // Role with no current members → no creator can have produced
+    // matching chits. Honest unmet (the check fired, the answer is
+    // "no" because the role pool is empty).
+    return {
+      status: 'unmet',
+      missing: [
+        `chit of type '${spec.chitType}' produced by any member of role '${assignee}'`,
+      ],
+      evidence: { reason: `role '${assignee}' has no current members` },
+    };
+  }
+
+  // Resolve since-claim boundary. claimedAt preferred; createdAt
+  // fallback when null (pre-2.1 + unwired-claim case). Tightens
+  // automatically once the claim transition wires up.
+  const sinceTime = taskFields.claimedAt ?? taskChit.createdAt;
+
+  // Single queryChits call. createdBy filter accepts only one value,
+  // so we can't push the role-expansion into the query — handle in
+  // post-filter below. type + createdSince narrow at the storage
+  // layer for efficiency.
+  const queryResult = queryChits<ChitTypeId>(corpRoot, {
+    types: [spec.chitType as ChitTypeId],
+    createdSince: sinceTime,
+    limit: 0,
+  });
+
+  // Post-filter: createdBy ∈ candidateCreators AND every withTag present.
+  const withTagsRequired = spec.withTags ?? [];
+  const matches = queryResult.chits.filter((cwb) => {
+    if (!candidateCreators.includes(cwb.chit.createdBy)) return false;
+    for (const required of withTagsRequired) {
+      if (!cwb.chit.tags.includes(required)) return false;
+    }
+    return true;
+  });
+
+  if (matches.length > 0) {
+    return {
+      status: 'met',
+      evidence: {
+        matchedChitIds: matches.map((cwb) => cwb.chit.id),
+        query: {
+          chitType: spec.chitType,
+          createdBy: candidateCreators,
+          since: sinceTime,
+          withTags: withTagsRequired,
+        },
+      },
+    };
+  }
+
+  // Build diagnostic missing message that mirrors `cc-cli chit list`
+  // syntax so the agent can re-run the same query manually.
+  const missing: string[] = [`chit of type '${spec.chitType}'`];
+  if (withTagsRequired.length > 0) {
+    missing.push(`with tags [${withTagsRequired.join(', ')}]`);
+  }
+  missing.push(`produced by ${candidateCreators.join(' / ')}`);
+  missing.push(`since ${sinceTime}`);
+
   return {
-    status: 'unable-to-check',
-    reason: 'chit-of-type checker not implemented (lands in commit 8 of feat/2.1-walk-api)',
+    status: 'unmet',
+    missing,
+    evidence: {
+      query: {
+        chitType: spec.chitType,
+        createdBy: candidateCreators,
+        since: sinceTime,
+        withTags: withTagsRequired,
+      },
+      sampledResults: queryResult.chits.length,
+    },
   };
+}
+
+/**
+ * Read members.json and return entries whose `role` matches. Pure
+ * filesystem read; no caching (audit fires infrequently enough that
+ * a per-call read is fine, and caching would risk staleness when
+ * agents hire/fire mid-walk). Returns empty array on missing/empty
+ * members.json (graceful — caller treats as "no candidates").
+ */
+function readMembersWithRole(corpRoot: string, roleId: string): Member[] {
+  const all = readConfigOr<Member[]>(join(corpRoot, 'members.json'), []);
+  return all.filter((m) => m.role === roleId);
 }
 
 /**
