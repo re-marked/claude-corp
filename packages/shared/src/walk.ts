@@ -44,7 +44,7 @@
  * exists so callers don't HAVE to gate every call on null-checking.
  */
 
-import { join } from 'node:path';
+import { join, resolve, dirname, sep } from 'node:path';
 import { existsSync } from 'node:fs';
 import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields, TaskWorkflowStatus, ChitTypeId } from './types/chit.js';
 import type { ExpectedOutputSpec } from './types/expected-output.js';
@@ -830,21 +830,22 @@ function checkBranchExists(
   // Pre-checks. Two distinct failure modes get distinct messages so
   // operators can diagnose:
   //   1. cwd doesn't exist at all → "cwd does not exist"
-  //   2. cwd exists but isn't a git tree → "cwd is not a git
-  //      repository". This second check is critical because git's
-  //      `branch --list` walks UP looking for a parent repo and
-  //      silently returns results from the wrong tree (e.g. a
-  //      tmpdir under the agentcorp checkout returns the agentcorp
-  //      branches). Both regular repos (`.git/` directory) and
-  //      worktrees (`.git` file pointing at the gitdir) satisfy
-  //      the .git-presence check.
+  //   2. cwd is not inside any git repository → "cwd is not inside
+  //      a git repository". Codex P2 review on PR #208: the earlier
+  //      check used `existsSync(join(cwd, '.git'))` which only matched
+  //      the repo ROOT — any subdirectory (e.g. agent worked in
+  //      <worktree>/packages/shared/) would falsely fail the check
+  //      and downgrade audit enforcement to a warning. findGitRoot
+  //      walks UP from cwd looking for the first .git ancestor; this
+  //      handles repo subdirectories AND still rejects truly-outside
+  //      cases (tmpdir not under any git tree returns null).
   if (!existsSync(cwd)) {
     return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
   }
-  if (!existsSync(join(cwd, '.git'))) {
+  if (findGitRoot(cwd, corpRoot) === null) {
     return {
       status: 'unable-to-check',
-      reason: `cwd is not a git repository: ${cwd}`,
+      reason: `cwd is not inside a git repository scoped to corpRoot: ${cwd}`,
     };
   }
   const result = safeGitExec(['branch', '--list', spec.branchPattern], {
@@ -915,13 +916,16 @@ function checkCommitOnBranch(
   opts: CheckExpectedOutputOpts,
 ): CheckResult {
   const cwd = opts.cwd ?? corpRoot;
-  // Same parent-repo pre-check as branch-exists. See that comment for
-  // the rationale (git walks UP without scoping; a non-repo cwd would
-  // silently return commits from a parent repo's branches).
-  if (!existsSync(join(cwd, '.git'))) {
+  // Same pre-check pattern as branch-exists — see that comment for
+  // the rationale + the Codex P2 fix for the subdirectory-of-repo
+  // case via findGitRoot's walk-up.
+  if (!existsSync(cwd)) {
+    return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
+  }
+  if (findGitRoot(cwd, corpRoot) === null) {
     return {
       status: 'unable-to-check',
-      reason: `cwd is not a git repository: ${cwd}`,
+      reason: `cwd is not inside a git repository scoped to corpRoot: ${cwd}`,
     };
   }
   const useSinceClaim = spec.sinceClaim !== false; // default true
@@ -1033,6 +1037,55 @@ function checkFileExists(
     missing: [`file '${spec.pathPattern}' in ${cwd}`],
     evidence: { pathPattern: spec.pathPattern, cwd, fullPath },
   };
+}
+
+/**
+ * Walk up from cwd looking for the first .git ancestor, bounded by
+ * `ceiling`. Returns the directory containing .git when found within
+ * the cwd-to-ceiling chain; null otherwise. Both shapes match:
+ *   - Regular repos: `.git/` directory at the toplevel.
+ *   - Worktrees:     `.git` FILE at the worktree dir.
+ *
+ * Three failure modes this guards against:
+ *
+ *   1. cwd is outside the ceiling — caller passed a path unrelated to
+ *      the corp's tree. Returns null immediately.
+ *
+ *   2. Codex P2 — cwd is a SUBDIRECTORY of a valid repo inside the
+ *      ceiling. Earlier `existsSync(join(cwd, '.git'))` only matched
+ *      the repo root, so subdirs falsely failed and downgraded audit
+ *      enforcement to a warning. Walk-up correctly resolves the .git
+ *      ancestor.
+ *
+ *   3. cwd is genuinely outside any git tree the ceiling protects.
+ *      Walk reaches the ceiling without finding .git → null. Without
+ *      the ceiling, the walk would continue past corpRoot and could
+ *      pick up any unrelated parent .git on the system (a real failure
+ *      mode on dev boxes where the OS tmpdir happens to live under a
+ *      git checkout). With the ceiling, that walk-too-far is impossible.
+ *
+ * The ceiling is always the corpRoot the checker received from audit
+ * — every meaningful cwd (corpRoot itself, a Clearinghouse worktree
+ * path under corpRoot) lives inside it.
+ */
+function findGitRoot(cwd: string, ceiling: string): string | null {
+  const ceilingResolved = resolve(ceiling);
+  let current = resolve(cwd);
+
+  // Reject cwd that's outside the ceiling. startsWith with a trailing
+  // separator avoids false-positive prefix matches (e.g.
+  // /home/foo-other vs /home/foo).
+  if (current !== ceilingResolved && !current.startsWith(ceilingResolved + sep)) {
+    return null;
+  }
+
+  while (true) {
+    if (existsSync(join(current, '.git'))) return current;
+    if (current === ceilingResolved) return null; // hit ceiling, no .git found
+    const parent = dirname(current);
+    if (parent === current) return null; // filesystem root (defensive — ceiling should stop us first)
+    current = parent;
+  }
 }
 
 /**

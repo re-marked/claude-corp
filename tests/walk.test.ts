@@ -1153,13 +1153,80 @@ describe('branch-exists checker', () => {
         { cwd: notRepo },
       );
       expect(r.status).toBe('unable-to-check');
-      expect(r.reason).toMatch(/not a git repository/i);
+      expect(r.reason).toMatch(/not (?:a |inside a )git repository/i);
     } finally {
       try {
         rmSync(notRepo, { recursive: true, force: true });
       } catch {
         // Best-effort.
       }
+    }
+  });
+
+  it('unable-to-check when cwd is outside corpRoot (ceiling enforced)', () => {
+    const { repo, cleanup } = makeGitRepo();
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'walk-outside-'));
+    try {
+      // cwd is outside the corpRoot ceiling. findGitRoot rejects
+      // cwd-outside-ceiling immediately so a misrouted audit caller
+      // can't pick up an unrelated parent .git tree.
+      const r = checkExpectedOutput(
+        { kind: 'branch-exists', branchPattern: 'main' },
+        fakeWalkTask(),
+        repo, // corpRoot
+        { cwd: outsideRoot }, // cwd outside corpRoot
+      );
+      expect(r.status).toBe('unable-to-check');
+    } finally {
+      cleanup();
+      try {
+        rmSync(outsideRoot, { recursive: true, force: true });
+      } catch {
+        // Best-effort.
+      }
+    }
+  });
+
+  it('runs against a subdirectory of a git repo (Codex P2 regression)', () => {
+    const { repo, cleanup } = makeGitRepo();
+    try {
+      execFileSync('git', ['checkout', '-b', 'feat/walks'], { cwd: repo, stdio: 'ignore' });
+      // Create a subdirectory inside the repo and pass IT as cwd.
+      // Earlier .git sentinel check (`existsSync(join(cwd, '.git'))`)
+      // only matched the repo root; this subdir would have falsely
+      // returned unable-to-check, downgrading audit enforcement.
+      // findGitRoot walks UP from cwd, finds the .git ancestor, and
+      // the check proceeds normally.
+      const subdir = join(repo, 'packages', 'deep', 'nested');
+      mkdirSync(subdir, { recursive: true });
+      const r = checkExpectedOutput(
+        { kind: 'branch-exists', branchPattern: 'feat/walks' },
+        fakeWalkTask(),
+        repo,
+        { cwd: subdir },
+      );
+      expect(r.status).toBe('met');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('commit-on-branch also runs against a subdirectory of a git repo (Codex P2 regression)', () => {
+    const { repo, cleanup } = makeGitRepo();
+    try {
+      const subdir = join(repo, 'packages', 'shared');
+      mkdirSync(subdir, { recursive: true });
+      const t = fakeWalkTask();
+      (t.fields.task as { claimedAt?: string }).claimedAt = '2000-01-01T00:00:00.000Z';
+      const r = checkExpectedOutput(
+        { kind: 'commit-on-branch', branchPattern: 'main' },
+        t,
+        repo,
+        { cwd: subdir },
+      );
+      expect(r.status).toBe('met');
+    } finally {
+      cleanup();
     }
   });
 
