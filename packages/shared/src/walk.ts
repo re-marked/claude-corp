@@ -44,7 +44,7 @@
  * exists so callers don't HAVE to gate every call on null-checking.
  */
 
-import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields } from './types/chit.js';
+import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields, TaskWorkflowStatus } from './types/chit.js';
 import type { ExpectedOutputSpec } from './types/expected-output.js';
 import { queryChits, findChitById } from './chits.js';
 
@@ -263,4 +263,156 @@ export function getWalkPosition(
     taskOutput: taskFields.output ?? null,
     claimedAt: taskFields.claimedAt ?? null,
   };
+}
+
+// ─── Walk progress (contract → full step picture) ──────────────────
+
+/**
+ * Per-step entry in WalkProgress. Combines blueprint structural info
+ * (id, raw step) with the corresponding Task chit's runtime state
+ * (id, status, latest activity timestamp). When a step has no task
+ * chit (data drift — task referenced in contract.taskIds doesn't
+ * resolve, or step exists in blueprint but no matching task was cast),
+ * `taskId` and `taskStatus` are null. Renderers use these to show
+ * "[step exists but no task]" gaps so corp-health surfaces flag the
+ * inconsistency.
+ */
+export interface WalkStep {
+  /** Step id (kebab-case) from blueprint.steps[].id. */
+  readonly stepId: string;
+  /** 1-based index in the blueprint's steps array. */
+  readonly stepIndex: number;
+  /** The original (unexpanded) BlueprintStep — title still has `{{vars}}` if templated. */
+  readonly step: BlueprintStep;
+  /** Task chit id matching this step (via `blueprint-step:` tag), or null when no task found. */
+  readonly taskId: string | null;
+  /** Task's current workflowStatus, or null when no task. */
+  readonly taskStatus: TaskWorkflowStatus | null;
+  /** Task's pre-expanded title (the rendered version, no `{{vars}}`), null when no task. */
+  readonly taskTitle: string | null;
+  /** ISO timestamp of the task chit's last update, null when no task. Useful for "recent activity" surfaces. */
+  readonly taskUpdatedAt: string | null;
+}
+
+/**
+ * Walk progress as seen from the Contract. Every step in the
+ * blueprint gets an entry, in declaration order. Caller filters /
+ * groups by status as needed (active vs completed vs blocked vs
+ * remaining). No "current step" concept here — DAG walks may have
+ * multiple in-progress steps simultaneously, so renderers compute
+ * "what's current" from the per-step taskStatus rather than us
+ * picking one.
+ */
+export interface WalkProgress {
+  /** Blueprint name (for display + cross-reference). */
+  readonly blueprintName: string;
+  /** Total number of steps in the blueprint. */
+  readonly totalSteps: number;
+  /** Per-step entry, blueprint-declaration order. */
+  readonly steps: readonly WalkStep[];
+  /** Full Contract chit echoed for callers that need it. */
+  readonly contract: Chit<'contract'>;
+  /** Full Blueprint chit echoed for callers that need it. */
+  readonly blueprint: Chit<'blueprint'>;
+}
+
+/**
+ * Resolve the full walk picture for a Contract chit. Returns null when
+ * the contract isn't a walk (no blueprintId) or its blueprint chit is
+ * missing. Tasks listed in contract.taskIds that don't resolve are
+ * rendered as `taskId/taskStatus = null` entries — visible to callers
+ * but not a hard fail (the alternative would be returning null for the
+ * whole walk on one missing task, which masks the actual data shape).
+ *
+ * For each blueprint step, finds the task chit by matching the
+ * `blueprint-step:<stepId>` tag against the contract's taskIds. If
+ * multiple tasks match (defensive — shouldn't happen with cast),
+ * returns the first deterministically.
+ */
+export function getWalkProgress(
+  contractChit: Chit<'contract'>,
+  corpRoot: string,
+): WalkProgress | null {
+  const contractFields = contractChit.fields.contract as ContractFields;
+  if (contractFields.blueprintId == null) return null;
+
+  const blueprintHit = findChitById(corpRoot, contractFields.blueprintId);
+  if (!blueprintHit || blueprintHit.chit.type !== 'blueprint') return null;
+  const blueprint = blueprintHit.chit as Chit<'blueprint'>;
+  const blueprintFields = blueprint.fields.blueprint as BlueprintFields;
+
+  // Eager-resolve every task chit listed in the contract. Tasks are
+  // stored under `chits/task/<id>.md` so findChitById is O(1) per
+  // task (with type prefix routing). Total: O(taskCount) per call.
+  const tasksById = new Map<string, Chit<'task'>>();
+  for (const taskId of contractFields.taskIds) {
+    const hit = findChitById(corpRoot, taskId);
+    if (hit && hit.chit.type === 'task') {
+      tasksById.set(taskId, hit.chit as Chit<'task'>);
+    }
+  }
+
+  // Walk blueprint steps in declaration order. For each, find the
+  // matching task by `blueprint-step:` tag among the contract's tasks.
+  const steps: WalkStep[] = blueprintFields.steps.map((step, idx) => {
+    let matchedTask: Chit<'task'> | null = null;
+    for (const task of tasksById.values()) {
+      if (task.tags.includes(`${BLUEPRINT_STEP_TAG_PREFIX}${step.id}`)) {
+        matchedTask = task;
+        break; // First match wins; cast guarantees uniqueness.
+      }
+    }
+    const taskFields = matchedTask?.fields.task as TaskFields | undefined;
+    return {
+      stepId: step.id,
+      stepIndex: idx + 1,
+      step,
+      taskId: matchedTask?.id ?? null,
+      taskStatus: taskFields?.workflowStatus ?? null,
+      taskTitle: taskFields?.title ?? null,
+      taskUpdatedAt: matchedTask?.updatedAt ?? null,
+    };
+  });
+
+  return {
+    blueprintName: blueprintFields.name,
+    totalSteps: blueprintFields.steps.length,
+    steps,
+    contract: contractChit,
+    blueprint,
+  };
+}
+
+// ─── DAG navigation (pure helpers on blueprint structure) ──────────
+
+/**
+ * Steps that depend ON the given step (forward edges in the DAG).
+ * Returns plural even though many walks are linear — DAGs can fan out.
+ * Pure: operates on blueprint structure, no chit store reads.
+ *
+ * Returns empty array when no step depends on this one (terminal step,
+ * or unknown stepId — both cases produce no successors).
+ */
+export function nextSteps(
+  blueprint: BlueprintFields,
+  currentStepId: string,
+): BlueprintStep[] {
+  return blueprint.steps.filter((s) => (s.dependsOn ?? []).includes(currentStepId));
+}
+
+/**
+ * Steps that the given step depends ON (backward edges). Reads
+ * directly from `currentStep.dependsOn` — same semantics as the
+ * cast-time DAG validator. Returns empty array when the step has no
+ * dependencies (top of chain) or when `currentStepId` doesn't match
+ * any blueprint step (defensive — shouldn't happen with valid input).
+ */
+export function previousSteps(
+  blueprint: BlueprintFields,
+  currentStepId: string,
+): BlueprintStep[] {
+  const current = blueprint.steps.find((s) => s.id === currentStepId);
+  if (!current) return [];
+  const depIds = current.dependsOn ?? [];
+  return blueprint.steps.filter((s) => depIds.includes(s.id));
 }
