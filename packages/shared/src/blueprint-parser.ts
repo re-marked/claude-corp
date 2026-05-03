@@ -40,6 +40,7 @@
 
 import Handlebars from 'handlebars';
 import type { BlueprintFields, BlueprintStep } from './types/chit.js';
+import type { ExpectedOutputSpec } from './types/expected-output.js';
 import { mergeBlueprintVars, type BlueprintVarValue } from './blueprint-vars.js';
 
 // ─── Error class ────────────────────────────────────────────────────
@@ -93,6 +94,19 @@ export interface ParsedBlueprintStep {
    * pattern-match on optionality.
    */
   readonly moduleRef: string | null;
+  /**
+   * Project 2.1 — pre-expanded ExpectedOutputSpec. The parser walks
+   * only the templatable string fields per kind (`branchPattern`,
+   * `pathPattern`, `tag`, `withTags[]` items) and leaves structural
+   * fields (`kind`, `chitType`, `sinceClaim`) untouched. Cast (PR 2 of
+   * 2.1) copies this resolved spec onto each Task chit's
+   * `fields.task.expectedOutput`, so audit-time checking sees concrete
+   * strings without re-running the template engine.
+   *
+   * Null when the source step had no expectedOutput. Recursive expand
+   * for `multi` — nested specs each get the same per-kind treatment.
+   */
+  readonly expectedOutput: ExpectedOutputSpec | null;
 }
 
 /**
@@ -184,7 +198,89 @@ function expandStep(
     // (a var that happens to match a module name) can't silently
     // repoint dispatch. Absent and null both normalize to null.
     moduleRef: step.moduleRef ?? null,
+    // Project 2.1 — pre-expanded ExpectedOutputSpec. Null source +
+    // null expansion both normalize to null here. expandExpectedOutput
+    // walks only the templatable string fields per kind; structural
+    // fields (kind, chitType, sinceClaim) pass through unchanged.
+    expectedOutput:
+      step.expectedOutput == null
+        ? null
+        : expandExpectedOutput(step.expectedOutput, context, step.id, 'expectedOutput'),
   };
+}
+
+/**
+ * Recursively expand the templatable string fields of an
+ * ExpectedOutputSpec against the cast-time vars context. Discriminator
+ * (`kind`), enum/literal fields (`chitType`), and boolean fields
+ * (`sinceClaim`) pass through unchanged — only prose-shaped fields get
+ * Handlebars treatment. The `multi` kind recurses into each sub-spec
+ * with a path-extended field label so error messages locate the bad
+ * sub-spec precisely (`expectedOutput.specs[2].branchPattern`).
+ *
+ * Templatable fields per kind:
+ *   - `chit-of-type`: `withTags[]` items (chitType is a literal type id)
+ *   - `branch-exists`: `branchPattern`
+ *   - `commit-on-branch`: `branchPattern` (sinceClaim is boolean)
+ *   - `file-exists`: `pathPattern`
+ *   - `tag-on-task`: `tag`
+ *   - `task-output-nonempty`: nothing to expand
+ *   - `multi`: recurse over `specs[]`
+ *
+ * Errors propagate as BlueprintParseError with the per-spec field
+ * path. Same translation as `expand()` for unknown vars / syntax errors.
+ */
+function expandExpectedOutput(
+  spec: ExpectedOutputSpec,
+  context: Record<string, BlueprintVarValue>,
+  stepId: string,
+  fieldPrefix: string,
+): ExpectedOutputSpec {
+  switch (spec.kind) {
+    case 'chit-of-type':
+      return {
+        kind: 'chit-of-type',
+        chitType: spec.chitType,
+        ...(spec.withTags !== undefined
+          ? {
+              withTags: spec.withTags.map((tag, i) =>
+                expand(tag, context, stepId, `${fieldPrefix}.withTags[${i}]`),
+              ),
+            }
+          : {}),
+      };
+    case 'branch-exists':
+      return {
+        kind: 'branch-exists',
+        branchPattern: expand(spec.branchPattern, context, stepId, `${fieldPrefix}.branchPattern`),
+      };
+    case 'commit-on-branch':
+      return {
+        kind: 'commit-on-branch',
+        branchPattern: expand(spec.branchPattern, context, stepId, `${fieldPrefix}.branchPattern`),
+        ...(spec.sinceClaim !== undefined ? { sinceClaim: spec.sinceClaim } : {}),
+      };
+    case 'file-exists':
+      return {
+        kind: 'file-exists',
+        pathPattern: expand(spec.pathPattern, context, stepId, `${fieldPrefix}.pathPattern`),
+      };
+    case 'tag-on-task':
+      return {
+        kind: 'tag-on-task',
+        tag: expand(spec.tag, context, stepId, `${fieldPrefix}.tag`),
+      };
+    case 'task-output-nonempty':
+      // No fields to expand — return as-is. The kind itself is the spec.
+      return spec;
+    case 'multi':
+      return {
+        kind: 'multi',
+        specs: spec.specs.map((sub, i) =>
+          expandExpectedOutput(sub, context, stepId, `${fieldPrefix}.specs[${i}]`),
+        ),
+      };
+  }
 }
 
 /**
