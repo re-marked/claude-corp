@@ -410,8 +410,15 @@ export {
   getWalkProgress,
   nextSteps,
   previousSteps,
+  checkExpectedOutput,
 } from './walk.js';
-export type { WalkPosition, WalkProgress, WalkStep } from './walk.js';
+export type {
+  WalkPosition,
+  WalkProgress,
+  WalkStep,
+  CheckResult,
+  CheckExpectedOutputOpts,
+} from './walk.js';
 
 // Blueprint lookup — Project 1.8 PR 3. Centralizes name → chit resolution
 // with scope precedence, so every CLI command + Sexton's patrol cooking

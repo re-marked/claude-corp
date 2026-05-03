@@ -416,3 +416,265 @@ export function previousSteps(
   const depIds = current.dependsOn ?? [];
   return blueprint.steps.filter((s) => depIds.includes(s.id));
 }
+
+// ─── Expected-output checking — dispatcher + pure checkers ─────────
+
+/**
+ * Three-state outcome of `checkExpectedOutput`:
+ *
+ *   - `met` — the check fired AND the expected output is present.
+ *     Audit (2.3) treats as approved.
+ *   - `unmet` — the check fired AND the expected output is absent.
+ *     Audit blocks `cc-cli done` with a teaching message that names
+ *     the missed step + the expected shape.
+ *   - `unable-to-check` — the check couldn't fire (git not in PATH,
+ *     gh missing, network down, missing cwd). Audit treats as
+ *     approved-with-warning + logs to chits/_log/audit-checks.jsonl;
+ *     repeated unable on the same step surfaces as a kink via
+ *     Sexton's patrol so degraded infra is operationally visible
+ *     without blocking the agent on transient flakes.
+ *
+ * `missing` populated on `unmet` for kinds that can name what's
+ * missing (e.g. specific tags absent). `evidence` is free-form per
+ * checker — chit ids found, git output, file paths checked. `reason`
+ * is the human-readable explainer for `unable-to-check`.
+ */
+export interface CheckResult {
+  readonly status: 'met' | 'unmet' | 'unable-to-check';
+  readonly missing?: readonly string[];
+  readonly evidence?: unknown;
+  readonly reason?: string;
+}
+
+/**
+ * Caller-facing options for `checkExpectedOutput`. All optional;
+ * defaults preserve safe behavior.
+ *
+ * `cwd` controls where shell-out checkers run (`branch-exists`,
+ * `commit-on-branch`, `file-exists`). 2.3's audit caller is
+ * responsible for resolving this — when a task has a Clearinghouse
+ * worktree allocated, audit passes the worktree path so checks fire
+ * against the correct git tree. Defaults to corpRoot (the corp's
+ * primary checkout) when absent.
+ *
+ * `timeoutMs` caps every shell-out at this duration. Default 10s —
+ * enough for git operations on typical repos, short enough that
+ * repeated unable-to-check from a hung command becomes visible to
+ * Sexton's patrol within a couple of cycles. Pure-data checkers
+ * (tag-on-task / task-output-nonempty / multi-of-pure) ignore this.
+ */
+export interface CheckExpectedOutputOpts {
+  /** Working directory for git / fs shell-outs. Default: corpRoot. */
+  readonly cwd?: string;
+  /** Per-shell-out timeout in milliseconds. Default: 10_000. */
+  readonly timeoutMs?: number;
+}
+
+/**
+ * Check whether a Task chit satisfies its expectedOutput spec.
+ * Vacuous-truth on null spec — callers that pass `task.fields.task
+ * .expectedOutput` directly don't need to gate on the null case.
+ *
+ * Per-kind dispatch routes to a checker function below. The
+ * dispatcher itself is exhaustive (TypeScript narrowing on the
+ * discriminant) so adding a new kind requires updating this switch
+ * + adding a checker function — the build catches missed kinds.
+ *
+ * Pure on data; checkers may shell out (git) or read fs but never
+ * mutate the working tree or the chit store. Three-state outcome
+ * propagates per the CheckResult contract above.
+ */
+export function checkExpectedOutput(
+  spec: ExpectedOutputSpec | null,
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts = {},
+): CheckResult {
+  // Vacuous truth: a null spec is "no walk-aware enforcement on this
+  // step." Returning `met` lets audit treat it as approved without
+  // having to gate every call site on null. Evidence names the
+  // reason so audit logs can distinguish vacuous from real-met.
+  if (spec === null) {
+    return { status: 'met', evidence: { reason: 'no expectedOutput specified' } };
+  }
+
+  switch (spec.kind) {
+    case 'tag-on-task':
+      return checkTagOnTask(spec, taskChit);
+    case 'task-output-nonempty':
+      return checkTaskOutputNonempty(spec, taskChit);
+    case 'multi':
+      return checkMulti(spec, taskChit, corpRoot, opts);
+    case 'chit-of-type':
+      return checkChitOfType(spec, taskChit, corpRoot, opts);
+    case 'branch-exists':
+      return checkBranchExists(spec, taskChit, corpRoot, opts);
+    case 'commit-on-branch':
+      return checkCommitOnBranch(spec, taskChit, corpRoot, opts);
+    case 'file-exists':
+      return checkFileExists(spec, taskChit, corpRoot, opts);
+  }
+}
+
+// ─── Pure-data checkers (real implementations) ─────────────────────
+
+/**
+ * `tag-on-task` — pure tag inspection on the task chit. The cast
+ * pipeline strips withTags Handlebars-rendered, so this checker
+ * doesn't see `{{vars}}` here. Trivially `met` or `unmet`; never
+ * `unable-to-check`.
+ */
+function checkTagOnTask(
+  spec: { kind: 'tag-on-task'; tag: string },
+  taskChit: Chit<'task'>,
+): CheckResult {
+  if (taskChit.tags.includes(spec.tag)) {
+    return { status: 'met', evidence: { tag: spec.tag, present: true } };
+  }
+  return {
+    status: 'unmet',
+    missing: [spec.tag],
+    evidence: { tag: spec.tag, present: false, allTags: taskChit.tags },
+  };
+}
+
+/**
+ * `task-output-nonempty` — minimum bar for any step where the agent
+ * must SAY what they did. Reads `taskChit.fields.task.output` (the
+ * 1.3 prose summary). Trim before length-checking so a string of
+ * only whitespace doesn't qualify as "non-empty." Trivially `met`
+ * or `unmet`.
+ */
+function checkTaskOutputNonempty(
+  _spec: { kind: 'task-output-nonempty' },
+  taskChit: Chit<'task'>,
+): CheckResult {
+  const output = (taskChit.fields.task as TaskFields).output ?? '';
+  if (output.trim().length > 0) {
+    return { status: 'met', evidence: { length: output.length } };
+  }
+  return {
+    status: 'unmet',
+    missing: ['task.output'],
+    evidence: { reason: 'task.output is empty or whitespace-only' },
+  };
+}
+
+/**
+ * `multi` — composed check. Status precedence:
+ *
+ *   1. Any sub-check `unmet` → `unmet` (definite failure beats
+ *      no-signal).
+ *   2. Else, any sub-check `unable-to-check` → `unable-to-check`
+ *      (we lack signal on at least one piece; can't claim met).
+ *   3. Else, all sub-checks `met` → `met`.
+ *
+ * Aggregated `missing` collects from every unmet sub-check (caller
+ * sees the full list, not just the first). Evidence is the array of
+ * sub-results (preserves per-sub-check evidence + reason for
+ * diagnostics). Recursive — sub-specs can themselves be `multi`.
+ */
+function checkMulti(
+  spec: { kind: 'multi'; specs: readonly ExpectedOutputSpec[] },
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts,
+): CheckResult {
+  const subResults = spec.specs.map((sub) =>
+    checkExpectedOutput(sub, taskChit, corpRoot, opts),
+  );
+
+  const anyUnmet = subResults.some((r) => r.status === 'unmet');
+  const anyUnable = subResults.some((r) => r.status === 'unable-to-check');
+  const aggregateMissing = subResults.flatMap((r) => r.missing ?? []);
+
+  if (anyUnmet) {
+    return {
+      status: 'unmet',
+      missing: aggregateMissing,
+      evidence: { subResults },
+    };
+  }
+  if (anyUnable) {
+    const reasons = subResults
+      .filter((r) => r.status === 'unable-to-check')
+      .map((r) => r.reason ?? 'unspecified');
+    return {
+      status: 'unable-to-check',
+      reason: `${reasons.length} sub-check${reasons.length === 1 ? '' : 's'} unable: ${reasons.join('; ')}`,
+      evidence: { subResults },
+    };
+  }
+  return { status: 'met', evidence: { subResults } };
+}
+
+// ─── Stub checkers (real impls land in subsequent commits) ─────────
+
+/**
+ * `chit-of-type` — queries the chit store for produced chits of the
+ * given type. Real implementation lands in commit 8 of this PR
+ * (queryChits integration + role-vs-slot expansion + ALL-tags
+ * post-filter + claimedAt fallback). Until then, returns
+ * `unable-to-check` so a partial deploy (this commit landed but not
+ * commit 8) doesn't crash audit.
+ */
+function checkChitOfType(
+  _spec: { kind: 'chit-of-type'; chitType: string; withTags?: readonly string[] },
+  _taskChit: Chit<'task'>,
+  _corpRoot: string,
+  _opts: CheckExpectedOutputOpts,
+): CheckResult {
+  return {
+    status: 'unable-to-check',
+    reason: 'chit-of-type checker not implemented (lands in commit 8 of feat/2.1-walk-api)',
+  };
+}
+
+/**
+ * `branch-exists` — git shell-out for branch presence. Real impl in
+ * commit 10 (uses safeGitExec helper from commit 9 with worktree-
+ * aware cwd + ENOENT/EACCES/timeout handling).
+ */
+function checkBranchExists(
+  _spec: { kind: 'branch-exists'; branchPattern: string },
+  _taskChit: Chit<'task'>,
+  _corpRoot: string,
+  _opts: CheckExpectedOutputOpts,
+): CheckResult {
+  return {
+    status: 'unable-to-check',
+    reason: 'branch-exists checker not implemented (lands in commit 10 of feat/2.1-walk-api)',
+  };
+}
+
+/**
+ * `commit-on-branch` — git shell-out for commits since claimedAt.
+ * Real impl in commit 10.
+ */
+function checkCommitOnBranch(
+  _spec: { kind: 'commit-on-branch'; branchPattern: string; sinceClaim?: boolean },
+  _taskChit: Chit<'task'>,
+  _corpRoot: string,
+  _opts: CheckExpectedOutputOpts,
+): CheckResult {
+  return {
+    status: 'unable-to-check',
+    reason: 'commit-on-branch checker not implemented (lands in commit 10 of feat/2.1-walk-api)',
+  };
+}
+
+/**
+ * `file-exists` — fs.existsSync against worktree-aware cwd. Real
+ * impl in commit 10.
+ */
+function checkFileExists(
+  _spec: { kind: 'file-exists'; pathPattern: string },
+  _taskChit: Chit<'task'>,
+  _corpRoot: string,
+  _opts: CheckExpectedOutputOpts,
+): CheckResult {
+  return {
+    status: 'unable-to-check',
+    reason: 'file-exists checker not implemented (lands in commit 10 of feat/2.1-walk-api)',
+  };
+}
