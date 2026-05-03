@@ -710,6 +710,78 @@ describe('chit-of-type checker', () => {
     }
   });
 
+  it('role expansion — assignee is role-id; matches any member of that role', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // Seed members.json so backend-engineer role expands to [toast, copper].
+      writeFileSync(
+        join(corpRoot, 'members.json'),
+        JSON.stringify([
+          { id: 'toast', displayName: 'Toast', rank: 'worker', role: 'backend-engineer' },
+          { id: 'copper', displayName: 'Copper', rank: 'worker', role: 'backend-engineer' },
+          { id: 'unrelated', displayName: 'Unrelated', rank: 'worker', role: 'frontend-engineer' },
+        ]),
+      );
+      // Create a chit produced by 'copper' (a member of backend-engineer role).
+      // Old createdAt to be safely after the test task's createdAt.
+      createChit(corpRoot, {
+        type: 'observation',
+        scope: 'corp',
+        createdBy: 'copper',
+        body: '',
+        fields: {
+          observation: { category: 'NOTICE', subject: 's', object: '', importance: 1 },
+        },
+      });
+      // Task assignee is the ROLE, not a slot. Role expansion should
+      // accept chits created by any backend-engineer member.
+      const t = fakeWalkTask({
+        createdAt: '2025-01-01T00:00:00.000Z',
+      });
+      (t.fields.task as { assignee?: string }).assignee = 'backend-engineer';
+      (t.fields.task as { claimedAt?: string }).claimedAt = '2025-01-01T00:00:00.000Z';
+      const r = checkExpectedOutput(
+        { kind: 'chit-of-type', chitType: 'observation' },
+        t,
+        corpRoot,
+      );
+      expect(r.status).toBe('met');
+      // Evidence should reflect the role-expanded creator set.
+      const evidence = r.evidence as { query: { createdBy: string[] } };
+      expect(evidence.query.createdBy).toEqual(expect.arrayContaining(['toast', 'copper']));
+      expect(evidence.query.createdBy).not.toContain('unrelated');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('role expansion — role with no current members → unmet (honest, not unable)', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // members.json has no backend-engineer entries.
+      writeFileSync(
+        join(corpRoot, 'members.json'),
+        JSON.stringify([
+          { id: 'unrelated', displayName: 'Unrelated', rank: 'worker', role: 'frontend-engineer' },
+        ]),
+      );
+      const t = fakeWalkTask();
+      (t.fields.task as { assignee?: string }).assignee = 'backend-engineer';
+      (t.fields.task as { claimedAt?: string }).claimedAt = '2025-01-01T00:00:00.000Z';
+      const r = checkExpectedOutput(
+        { kind: 'chit-of-type', chitType: 'observation' },
+        t,
+        corpRoot,
+      );
+      // Empty role pool → check FIRED, answer is "no, no members" → unmet.
+      // (Critically: NOT unable-to-check; the check ran successfully and
+      // discovered "no possible matches because pool is empty.")
+      expect(r.status).toBe('unmet');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('claimedAt fallback to taskChit.createdAt when claimedAt is null', () => {
     const { corpRoot, cleanup } = makeCorp();
     try {
