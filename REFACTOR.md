@@ -2577,7 +2577,34 @@ Push isn't an option vs. pull — push is the floor (mechanical visibility at ev
 - **Walk-aware audit degrades gracefully on pre-spec Contracts.** When 2.3 ships, existing in-flight Contracts cast before steps had `expectedOutput` declared still need to walk to completion. Treatment: a step with no `expectedOutput` spec → audit doesn't run walk-progress checks for that step (acceptance criteria still checked as today). Equivalent of "this step is no-walk" for audit purposes only; other walk surfaces (visibility, sexton patrol) still operate. Means a 2.3 deploy doesn't wall every active walk; existing walks just don't get the mechanical-output-check benefit until they're re-cast on new blueprints.
 - **The Stop hook is sequenced, not shared.** 2.3's walk-aware audit and 2.5's self-witnessing both want the Stop hook for Employees. Decision: review-session intercepts Stop FIRST and gates it; on `review→accept`, audit fires next; on `review→redo`, audit is skipped (agent re-enters work with review feedback in their next dispatch); on `review→flag`, audit + Tier 3 inbox + walk paused. Single hook, ordered chain — review owns the gate, audit owns the post-review enforcement.
 
-### 2.1 — Walk read API + ExpectedOutput schema
+### 2.1 — Walk read API + ExpectedOutput schema **[shipped 2026-05-02 — PRs #207 + #208]**
+
+**Status.** Closed as shipped. Two PRs landed onto `project/2`:
+- **PR #207** (schema, 5 commits) — `ExpectedOutputSpec` discriminated union with 7 kinds (chit-of-type / branch-exists / commit-on-branch / file-exists / tag-on-task / task-output-nonempty / multi); `BlueprintStep.expectedOutput` field; `TaskFields.claimedAt` field with `reviewerClaim.claimedAt` disambiguation; recursive `validateExpectedOutput` helper; 41 tests.
+- **PR #208** (read API + checkers, 16 commits including 4 Codex-round fixes) — `packages/shared/src/walk.ts` with the full read API (`isWalkTask`, `isAdHocTask`, `getWalkBlueprintName`, `getWalkStepId`, `getWalkPosition`, `getWalkProgress`, `nextSteps`, `previousSteps`, `checkExpectedOutput`); pre-expand at cast time (TaskFields.expectedOutput carries the resolved spec, no template engine at audit time); per-kind checkers including the chit-of-type with role-vs-slot expansion and ALL-tags filter; safe git shell-out helper (`git-exec.ts`, sync, classified outcomes); shell-out checkers with bounded `findGitRoot(cwd, ceiling)` walk-up that handles repo subdirectories AND ceiling-scoped scope-creep prevention; 60 tests covering real git in tmpdir + real fs + real chit store.
+
+**Codex-round fixes folded in:**
+- P1: null `withTags` in `expandExpectedOutput` (validator allowed null; expansion threw on `null.map`).
+- P2: malformed `members.json` crashed audit via uncaught `readConfigOr` throw — try/catch swallows + treats as empty pool.
+- P2: `.git` sentinel only matched repo root → subdirectory of repo falsely returned unable-to-check, downgrading required checks to warnings. Fixed with `findGitRoot` walk-up bounded by corpRoot.
+- Self-audit follow-up: switched ceiling-prefix check from `startsWith` to `path.relative` so Windows case-insensitive paths don't false-fail the ceiling.
+
+**Decisions made during implementation:**
+- **Pre-expand expectedOutput at cast time, store on Task chits.** Three options evaluated (re-derive from substituted strings — fragile; store cast-time vars on Contract — needs Handlebars at audit time; pre-expand onto Tasks — chosen). Tasks reflect cast moment regardless of later blueprint edits.
+- **Sync git shell-out, not async.** `execFileSync` keeps audit/done/Stop-hook chain synchronous. Blocking up to 10s per check is fine — audit fires from Stop with the agent's session paused.
+- **Three-state outcome** (`met` / `unmet` / `unable-to-check`) so transient infra never locks agents out. Repeats surface as Sexton kink.
+- **Vacuous truth on null spec.** `checkExpectedOutput(null, ...)` returns met — callers don't have to gate on null.
+- **Multi precedence: `unmet > unable-to-check > met`.** Definite-failure beats no-signal.
+- **Worktree-aware `cwd` via opts.** walk.ts is decoupled from Clearinghouse specifics; 2.3's audit (in a later PR) figures out worktree resolution and passes the right cwd.
+- **chit-of-type role-vs-slot expansion.** Handles both wire shapes (assignee = role-id from role-queue path, OR slot-id from resolved-and-handed path).
+- **`claimedAt` fallback to `taskChit.createdAt` when null.** Loose-but-functional; tightens automatically once the `claim` transition wires.
+
+**Optional PR 3 (cast-pipeline integration tests) skipped** — cast roundtrip already covered by two end-to-end tests in PR #208's suite (templated branchPattern + multi expansion through cast → Task chit assertion). No additional value from a dedicated PR.
+
+The original sub-project spec follows below for historical reference.
+
+---
+
 
 **Problem.** Walks aren't a first-class concept in code. Every Task chit cast from a blueprint already carries `blueprint:<name>` + `blueprint-step:<id>` tags, and its Contract has `blueprintId`, but no shared module exposes "given a Task, what walk is it part of, what step are we at, what comes next, what does this step expect to produce?" Building visibility / audit / discovery against ad-hoc reads of these tags would scatter walk logic across the codebase.
 
