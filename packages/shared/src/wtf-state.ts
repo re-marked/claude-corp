@@ -108,17 +108,79 @@ export function readWorklogHandoff(workspacePath: string): string | undefined {
  * the same shape in wtf output during the 1.6 transition — the
  * storage layer moved, the prompt-layer presentation did not.
  */
+/**
+ * Project 2.2.2 — return both the prose XML and the optional walk-
+ * summary line so a single chit-read produces both surfaces. Single-
+ * read is critical when consume=true (we don't want to consume the
+ * chit twice). Walk summary is null when the chit has no walk fields
+ * (pre-2.2.2 handoffs or ad-hoc tasks).
+ */
+interface ResolvedHandoffSurfaces {
+  readonly xml: string;
+  readonly walkSummary: string | null;
+}
+
 function resolveHandoffFromChit(
   corpRoot: string,
   agentSlug: string,
   consume: boolean,
   consumedBy: string,
-): string | undefined {
+): ResolvedHandoffSurfaces | undefined {
   const chit = consume
     ? consumeHandoffChit(corpRoot, agentSlug, consumedBy)
     : peekLatestHandoffChit(corpRoot, agentSlug);
   if (!chit) return undefined;
-  return handoffChitToXml(chit);
+  return {
+    xml: handoffChitToXml(chit),
+    walkSummary: renderHandoffWalkSummary(chit),
+  };
+}
+
+/**
+ * Render the predecessor's walk-position snapshot as a one-line
+ * summary suitable for placement above the prose handoff XML in the
+ * wtf header. Returns null when the handoff chit has no walk fields
+ * (pre-2.2.2 chits, ad-hoc tasks, or any field absent).
+ *
+ * Format:
+ *   Walk continuity: <name>, step <i> of <N> (<stepId>). Predecessor
+ *   completed: <s1>, <s2>, +<N> more.
+ *
+ * Truncates the completed-steps list to 3 with "+N more" suffix —
+ * keeps the line readable at 80 cols even on long walks. When the
+ * predecessor was on step 1 (no completed steps), says "No completed
+ * steps yet" so the absence is explicit rather than awkwardly empty.
+ */
+function renderHandoffWalkSummary(chit: Chit<'handoff'>): string | null {
+  const f = chit.fields.handoff as HandoffFields;
+  // All four position fields must be present for a meaningful summary.
+  // walkCompletedSteps is optional (null is legal — pre-progress data).
+  if (
+    !f.walkBlueprintName ||
+    !f.walkStepId ||
+    f.walkStepIndex == null ||
+    f.walkTotalSteps == null
+  ) {
+    return null;
+  }
+
+  const completedCap = 3;
+  const completedSteps = f.walkCompletedSteps ?? [];
+  const shown = completedSteps.slice(0, completedCap);
+  const overflow = completedSteps.length - shown.length;
+
+  const positionPart = `${f.walkBlueprintName}, step ${f.walkStepIndex} of ${f.walkTotalSteps} (${f.walkStepId})`;
+
+  let completedPart: string;
+  if (completedSteps.length === 0) {
+    completedPart = 'No completed steps yet.';
+  } else {
+    const ids = shown.map((s) => s.stepId).join(', ');
+    const overflowSuffix = overflow > 0 ? `, +${overflow} more` : '';
+    completedPart = `Predecessor completed: ${ids}${overflowSuffix}.`;
+  }
+
+  return `Walk continuity: ${positionPart}. ${completedPart}`;
 }
 
 function handoffChitToXml(chit: Chit<'handoff'>): string {
@@ -357,7 +419,7 @@ export function buildWtfOutput(opts: WtfOutputOpts): WtfOutput {
   // WORKLOG.md's `<handoff>` XML block. Dredge fragment deletion
   // (commit 4) makes wtf the single reader; consumption semantics
   // drive by opts.consumeHandoff (default false for peek-safe calls).
-  const handoffXml =
+  const handoffSurfaces =
     kind === 'employee'
       ? resolveHandoffFromChit(
           opts.corpRoot,
@@ -366,6 +428,8 @@ export function buildWtfOutput(opts: WtfOutputOpts): WtfOutput {
           opts.consumedBy ?? opts.agentSlug,
         )
       : undefined;
+  const handoffXml = handoffSurfaces?.xml;
+  const handoffWalkSummary = handoffSurfaces?.walkSummary ?? null;
   const inboxSummary = resolveInboxSummary(opts.corpRoot, opts.agentSlug, opts.now);
 
   const corpOpts: CorpMdOpts = {
@@ -397,6 +461,7 @@ export function buildWtfOutput(opts: WtfOutputOpts): WtfOutput {
     generatedAt: opts.generatedAt,
     currentTask,
     handoffXml,
+    ...(handoffWalkSummary !== null ? { handoffWalkSummary } : {}),
     inboxSummary,
   });
 

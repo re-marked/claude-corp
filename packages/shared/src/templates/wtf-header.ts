@@ -58,6 +58,20 @@ export interface WtfHeaderOpts {
   currentTask?: WtfCurrentTask;
   /** Predecessor session's WORKLOG handoff XML. Employee-only; ignored for Partners. */
   handoffXml?: string;
+  /**
+   * Project 2.2.2 — pre-rendered one-line walk-position summary for
+   * the predecessor's session, derived from the handoff chit's walk
+   * fields by wtf-state.renderHandoffWalkSummary. Surfaces above the
+   * prose XML in the handoff block when present, so a successor
+   * picking up mid-walk sees structured "Walk continuity: ship-feature,
+   * step 4 of 7 (acquire-worktree). Predecessor completed: ..." context
+   * before reading the XML body.
+   *
+   * Null/absent for pre-2.2.2 handoff chits or ad-hoc tasks (no walk
+   * linkage). Successor falls back to XML alone — graceful degradation.
+   * Employee-only; mirrors handoffXml's kind gating.
+   */
+  handoffWalkSummary?: string;
   /** Inbox summary (counts + optional per-tier peeks). */
   inboxSummary: WtfInboxSummary;
 }
@@ -79,7 +93,7 @@ export function buildWtfHeader(opts: WtfHeaderOpts): string {
   // accidentally passes handoffXml (bug-resistance).
   if (opts.kind === 'employee' && opts.handoffXml && opts.handoffXml.trim().length > 0) {
     parts.push('');
-    parts.push(handoffBlock(opts.handoffXml));
+    parts.push(handoffBlock(opts.handoffXml, opts.handoffWalkSummary));
   }
 
   parts.push('');
@@ -140,13 +154,18 @@ function inboxBlock(summary: WtfInboxSummary): string {
   return lines.join('\n');
 }
 
-function handoffBlock(xml: string): string {
-  return [
-    `Handoff from predecessor session:`,
-    '```xml',
-    xml.trim(),
-    '```',
-  ].join('\n');
+function handoffBlock(xml: string, walkSummary?: string): string {
+  const lines: string[] = [`Handoff from predecessor session:`];
+  // Project 2.2.2 — walk continuity line above the XML when present.
+  // Pre-rendered by wtf-state's renderHandoffWalkSummary; this template
+  // doesn't know about HandoffFields' walk shape, just splices the
+  // resolved string. Empty/whitespace summary is treated as absent.
+  if (walkSummary && walkSummary.trim().length > 0) {
+    lines.push(walkSummary.trim());
+    lines.push('');
+  }
+  lines.push('```xml', xml.trim(), '```');
+  return lines.join('\n');
 }
 
 function footerBlock(opts: WtfHeaderOpts): string {
