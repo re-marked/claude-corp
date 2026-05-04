@@ -481,6 +481,59 @@ describe('buildWtfOutput — successor sees walk continuity in handoff block', (
     }
   });
 
+  it('renders "Predecessor progress unknown" when walkCompletedSteps is null (Codex P2 regression)', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // walkCompletedSteps: null is the snapshot writer's explicit
+      // failure marker (resolveWalkSnapshotForHandoff sets null when
+      // getWalkProgress is unavailable). Earlier draft conflated null
+      // with [] and rendered "No completed steps yet" — misleading
+      // successors about predecessor progress in degraded scenarios.
+      // Distinct render now disambiguates.
+      createChit(corpRoot, {
+        type: 'handoff',
+        scope: 'agent:successor',
+        createdBy: 'toast',
+        body: '',
+        fields: {
+          handoff: {
+            predecessorSession: 'toast-1',
+            currentStep: 'chit-t-current',
+            completed: ['some prose'],
+            nextAction: 'continue',
+            walkBlueprintName: 'ship-feature',
+            walkStepId: 'implement',
+            walkStepIndex: 3,
+            walkTotalSteps: 5,
+            walkCompletedSteps: null, // <-- failure marker, NOT empty
+          },
+        },
+      });
+
+      const result = buildWtfOutput({
+        corpRoot,
+        corpName: 'test-corp',
+        agentSlug: 'successor',
+        displayName: 'Copper',
+        rank: 'worker',
+        kind: 'employee',
+        roleId: 'backend-engineer',
+        workspacePath: join(corpRoot, 'agents', 'successor'),
+        generatedAt: '2026-05-02T15:00:00.000Z',
+        now: new Date('2026-05-02T15:00:00.000Z'),
+        consumeHandoff: false,
+      });
+
+      expect(result.header).toContain('Walk continuity: ship-feature, step 3 of 5 (implement)');
+      expect(result.header).toContain('Predecessor progress unknown');
+      // Critically: NOT the "No completed steps yet" render — that's
+      // the [] case with different semantics.
+      expect(result.header).not.toContain('No completed steps yet');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('renders "No completed steps yet" when predecessor was on step 1', () => {
     const { corpRoot, cleanup } = makeCorp();
     try {

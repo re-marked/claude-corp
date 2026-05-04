@@ -164,17 +164,34 @@ function renderHandoffWalkSummary(chit: Chit<'handoff'>): string | null {
     return null;
   }
 
-  const completedCap = 3;
-  const completedSteps = f.walkCompletedSteps ?? [];
-  const shown = completedSteps.slice(0, completedCap);
-  const overflow = completedSteps.length - shown.length;
-
   const positionPart = `${f.walkBlueprintName}, step ${f.walkStepIndex} of ${f.walkTotalSteps} (${f.walkStepId})`;
 
+  // Codex P2 review on PR #210: distinguish three semantically
+  // different states on the walkCompletedSteps field. Earlier draft
+  // collapsed null + [] into the same "No completed steps yet"
+  // render — but the snapshot writer
+  // (resolveWalkSnapshotForHandoff) uses `null` as an explicit
+  // best-effort failure marker (when getWalkProgress is unavailable).
+  // Conflating null with "knew, no steps yet" misleads successors in
+  // degraded / corrupt-store scenarios.
+  //
+  //   - null (or undefined, defensive)  → progress couldn't be
+  //     resolved at snapshot time. The honest framing is "unknown,"
+  //     not "empty."
+  //   - [] (empty array)                → progress resolved AND
+  //     showed no completed steps yet. Predecessor was on step 1
+  //     of the walk.
+  //   - [...]                           → list (with truncation cap).
+  const completedSteps = f.walkCompletedSteps;
   let completedPart: string;
-  if (completedSteps.length === 0) {
+  if (completedSteps === null || completedSteps === undefined) {
+    completedPart = 'Predecessor progress unknown (snapshot resolver unavailable).';
+  } else if (completedSteps.length === 0) {
     completedPart = 'No completed steps yet.';
   } else {
+    const completedCap = 3;
+    const shown = completedSteps.slice(0, completedCap);
+    const overflow = completedSteps.length - shown.length;
     const ids = shown.map((s) => s.stepId).join(', ');
     const overflowSuffix = overflow > 0 ? `, +${overflow} more` : '';
     completedPart = `Predecessor completed: ${ids}${overflowSuffix}.`;
