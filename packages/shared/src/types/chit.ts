@@ -342,6 +342,34 @@ export interface TaskFields {
    */
   output?: string | null;
   /**
+   * Project 2.1 — pre-expanded ExpectedOutputSpec carried over from the
+   * blueprint step at cast time. Co-located with `output` because the
+   * pair is symmetric: `expectedOutput` is the SHAPE this step is
+   * supposed to produce; `output` is the agent's prose summary of what
+   * actually was produced. Walk-aware audit (Project 2.3) reads
+   * `expectedOutput` and runs `checkExpectedOutput` against the
+   * concrete spec — no template engine needed at audit time, because
+   * the cast pipeline already substituted Handlebars vars (`feature`,
+   * `topic`, etc.) using the cast-time vars context. Re-expansion at
+   * audit time isn't possible without storing the cast vars, and
+   * pre-expansion is the cleaner solution: spec data co-located with
+   * task data, expansion happens once not per audit fire, and tasks
+   * reflect their cast moment regardless of later blueprint edits.
+   *
+   * Null / absent means the originating blueprint step had no
+   * expectedOutput declared (or this task wasn't cast from a blueprint
+   * at all — ad-hoc tasks). Walk-aware audit treats null as "no
+   * mechanical-output check on this step" — graceful degradation.
+   * Other walk surfaces (visibility in 2.2, sexton patrol in 2.4) still
+   * operate normally.
+   *
+   * Validated via the same validateExpectedOutput helper used for
+   * BlueprintStep.expectedOutput. The structural shape is identical;
+   * only the absence of unresolved `{{vars}}` in templated fields
+   * distinguishes a task's expectedOutput from a blueprint step's.
+   */
+  expectedOutput?: ExpectedOutputSpec | null;
+  /**
    * Project 1.12.2 — Editor review counter. Increments at each
    * Editor `reject`. Survives across audit cycles (an under_review →
    * blocked → in_progress → under_review oscillation by the author

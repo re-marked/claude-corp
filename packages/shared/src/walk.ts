@@ -1,0 +1,1133 @@
+/**
+ * walk.ts — Project 2.1 read API for walks.
+ *
+ * A "walk" is a Contract chit cast from a blueprint, plus its Task
+ * chits, plus the originating Blueprint chit. The walk concept is
+ * derivable from existing chit data — there's no new chit type — but
+ * the navigation logic was scattered across callers before this module.
+ * This file centralizes it.
+ *
+ * The module is the consumer of:
+ *   - BlueprintFields.steps[].expectedOutput (Project 2.1 schema PR)
+ *   - TaskFields.expectedOutput (this PR's schema commit)
+ *   - The `blueprint:<name>` + `blueprint-step:<id>` tags on Task chits
+ *     written by castFromBlueprint
+ *
+ * And the read API for:
+ *   - 2.2 visibility surfaces (dispatch fragment, cc-cli wtf header,
+ *     handoff chits) — call getWalkPosition + getWalkProgress
+ *   - 2.3 walk-aware audit — calls checkExpectedOutput
+ *   - 2.4 Sexton stalled-walk patrol — calls getWalkProgress
+ *   - 2.7 cc-cli walk show — calls getWalkProgress
+ *
+ * Pure read API: no chit writes, no state mutation. The shell-out
+ * checkers (branch-exists / commit-on-branch / file-exists) DO touch
+ * the filesystem and may shell out to git, but only as reads — they
+ * never mutate the working tree or the chit store.
+ *
+ * ### Three-state outcome contract
+ *
+ * `checkExpectedOutput` returns `{ status: 'met' | 'unmet' |
+ * 'unable-to-check' }`. The third state covers environmental flakes
+ * (git not in PATH, gh CLI missing, network down, missing cwd) so
+ * transient infra never locks agents out of `cc-cli done`. 2.3's
+ * audit treats `unable-to-check` as approved-with-warning + logs to
+ * `chits/_log/audit-checks.jsonl`; repeated unable-to-check on the
+ * same step surfaces as a kink via Sexton's patrol.
+ *
+ * ### Vacuous-truth on null spec
+ *
+ * `checkExpectedOutput` called with a step whose expectedOutput is
+ * null returns `{ status: 'met', evidence: { reason: 'no
+ * expectedOutput specified' } }`. Caller may choose to skip the call
+ * entirely if it knows the spec is null; the vacuous-truth path
+ * exists so callers don't HAVE to gate every call on null-checking.
+ */
+
+import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
+import { existsSync } from 'node:fs';
+import type { Chit, BlueprintStep, BlueprintFields, ContractFields, TaskFields, TaskWorkflowStatus, ChitTypeId } from './types/chit.js';
+import type { ExpectedOutputSpec } from './types/expected-output.js';
+import type { Member } from './types/member.js';
+import { queryChits, findChitById } from './chits.js';
+import { readConfigOr } from './parsers/index.js';
+import { isKnownRole } from './roles.js';
+import { safeGitExec } from './git-exec.js';
+
+// ─── Tag conventions ────────────────────────────────────────────────
+
+/**
+ * Tag prefix castFromBlueprint writes on every Task chit it produces.
+ * Uniqueness within a Task's tag list is guaranteed by the cast
+ * pipeline (one tag per blueprint name). Format: `blueprint:<name>`.
+ */
+const BLUEPRINT_TAG_PREFIX = 'blueprint:';
+
+/**
+ * Tag prefix castFromBlueprint writes on every Task chit it produces.
+ * One tag per task; the suffix is the step's local kebab-case id from
+ * the source blueprint. Format: `blueprint-step:<step-id>`.
+ */
+const BLUEPRINT_STEP_TAG_PREFIX = 'blueprint-step:';
+
+// ─── Pure helpers ────────────────────────────────────────────────────
+
+/**
+ * True when the given Task chit was cast from a blueprint and carries
+ * the canonical walk tags. Both the `blueprint:<name>` AND
+ * `blueprint-step:<id>` tags must be present — castFromBlueprint always
+ * writes both, so a task missing either is either ad-hoc (not from a
+ * cast) or has had its tags hand-mutated (out of scope to handle).
+ *
+ * Pure data inspection — no chit store reads. Cheap to call in hot
+ * paths (dispatch fragment will call this on every dispatch).
+ */
+export function isWalkTask(taskChit: Chit<'task'>): boolean {
+  return (
+    taskChit.tags.some((t) => t.startsWith(BLUEPRINT_TAG_PREFIX)) &&
+    taskChit.tags.some((t) => t.startsWith(BLUEPRINT_STEP_TAG_PREFIX))
+  );
+}
+
+/**
+ * Inverse of isWalkTask. A task is "ad-hoc" when it doesn't carry the
+ * walk-defining tags — typically `cc-cli task new` or `cc-cli task
+ * create` style standalone tasks not associated with a Contract walk.
+ *
+ * Walk-aware audit (2.3) treats ad-hoc tasks as no-walk-check (the
+ * existing AC checks still run). 2.2's visibility surface renders
+ * "Walk: ad-hoc" for these so the agent isn't ambiguously oriented.
+ */
+export function isAdHocTask(taskChit: Chit<'task'>): boolean {
+  return !isWalkTask(taskChit);
+}
+
+/**
+ * Extract the blueprint name from a walk task's tags. Returns null if
+ * the task is ad-hoc (no blueprint tag). When multiple `blueprint:`
+ * tags somehow exist (defensive — shouldn't happen with cast), returns
+ * the first one to keep behavior deterministic.
+ */
+export function getWalkBlueprintName(taskChit: Chit<'task'>): string | null {
+  const tag = taskChit.tags.find((t) => t.startsWith(BLUEPRINT_TAG_PREFIX));
+  if (!tag) return null;
+  return tag.slice(BLUEPRINT_TAG_PREFIX.length) || null;
+}
+
+/**
+ * Extract the blueprint step id from a walk task's tags. Returns null
+ * if the task is ad-hoc. Same first-match semantics as
+ * getWalkBlueprintName for the defensive duplicate case.
+ */
+export function getWalkStepId(taskChit: Chit<'task'>): string | null {
+  const tag = taskChit.tags.find((t) => t.startsWith(BLUEPRINT_STEP_TAG_PREFIX));
+  if (!tag) return null;
+  return tag.slice(BLUEPRINT_STEP_TAG_PREFIX.length) || null;
+}
+
+// ─── Walk position lookup ───────────────────────────────────────────
+
+/**
+ * The "where am I in the walk?" answer for a Task chit. All references
+ * are eagerly resolved — callers don't need to do a second hop to read
+ * the contract / blueprint / step. Pre-expanded data (taskOutput,
+ * expectedOutput, claimedAt) lives on the task and is surfaced here so
+ * audit / visibility don't have to dual-read.
+ *
+ * `stepIndex` is 1-based for human-facing display ("step 4 of 7"); a
+ * 0-based index would leak as "step 0 of 7" if a renderer forgot to
+ * add 1. Programmers consuming this for arithmetic should subtract 1
+ * if they want the array offset.
+ *
+ * `step` is the original (unexpanded) BlueprintStep so callers needing
+ * the DAG structure (`dependsOn`) get it. For rendering, prefer the
+ * task chit's already-expanded title / description instead — the
+ * blueprint step's strings still contain `{{handlebars}}` references
+ * which are fine for type purposes but useless for display.
+ */
+export interface WalkPosition {
+  /** Blueprint name (e.g. `ship-feature`). Same value as the `blueprint:` tag suffix. */
+  readonly blueprintName: string;
+  /** Step id within the blueprint (e.g. `acquire-worktree`). Same as the `blueprint-step:` tag suffix. */
+  readonly stepId: string;
+  /** 1-based index in the blueprint's steps array. UI-friendly; subtract 1 for array math. */
+  readonly stepIndex: number;
+  /** Total number of steps in the blueprint. */
+  readonly totalSteps: number;
+  /** The original (unexpanded) BlueprintStep — useful for dependsOn navigation. */
+  readonly step: BlueprintStep;
+  /** Full Contract chit containing this task's id. */
+  readonly contract: Chit<'contract'>;
+  /** Full Blueprint chit (also unexpanded; raw templates). */
+  readonly blueprint: Chit<'blueprint'>;
+  /** Pre-expanded ExpectedOutputSpec from the task chit (or null when no walk-aware enforcement on this step). */
+  readonly expectedOutput: ExpectedOutputSpec | null;
+  /** Agent's prose summary so far from `task.output` — null when not written yet. */
+  readonly taskOutput: string | null;
+  /** ISO timestamp of when the agent transitioned dispatched → in_progress, or null when unwired/pre-2.1. */
+  readonly claimedAt: string | null;
+}
+
+/**
+ * Resolve the full walk position for a Task chit. Returns null on any
+ * missing-data case along the lookup chain — callers should treat null
+ * as "this task isn't part of a walk we can navigate" and fall through
+ * to ad-hoc behavior. Specific null causes:
+ *
+ *   - Task is ad-hoc (no `blueprint:*` or `blueprint-step:*` tag)
+ *   - No Contract chit contains this task's id in `taskIds[]` (orphan
+ *     task — possible if the contract was hand-deleted or the task was
+ *     hand-created with the tags but no containing contract)
+ *   - Contract has null `blueprintId` (corruption — castFromBlueprint
+ *     always sets it, but defensive)
+ *   - Blueprint chit can't be resolved by id (deleted)
+ *   - Step id from the task tag isn't in the blueprint's steps array
+ *     (blueprint edited after cast — this task references a step that
+ *     no longer exists)
+ *
+ * Reverse lookup task → contract is O(N) over contracts. At realistic
+ * corp scale (dozens to hundreds of contracts) this is microseconds.
+ * Not denormalizing `contractId` onto TaskFields for this — premature
+ * optimization, and the existing taskIds-on-contract relationship is
+ * the canonical edge.
+ */
+export function getWalkPosition(
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+): WalkPosition | null {
+  // 1. Tag-based identity. Both required — a task with only one of the
+  //    walk tags is malformed; treat as ad-hoc rather than picking
+  //    apart partial state.
+  const blueprintName = getWalkBlueprintName(taskChit);
+  const stepId = getWalkStepId(taskChit);
+  if (blueprintName === null || stepId === null) return null;
+
+  // 2. Reverse lookup: find the contract containing this task. Scan
+  //    contracts via queryChits — limit 0 = unlimited so we don't miss
+  //    a hit at the tail of a large corp's contract list. Contracts
+  //    are non-ephemeral + small in count vs tasks, so this is cheap.
+  //    queryChits returns { chits, malformed }; we ignore malformed
+  //    here (the surface is callers concerned with corp health, not
+  //    walk navigation — a malformed contract is invisible to walks
+  //    until repaired).
+  const contractQuery = queryChits<'contract'>(corpRoot, {
+    types: ['contract'] as const,
+    limit: 0,
+  });
+  const containing = contractQuery.chits.filter((cwb) =>
+    (cwb.chit.fields as { contract: ContractFields }).contract.taskIds.includes(taskChit.id),
+  );
+  // Defensive duplicate handling: a task SHOULDN'T appear in multiple
+  // contracts' taskIds, but file corruption or manual edits could
+  // produce that state. Return the first match deterministically rather
+  // than throwing — callers see the same answer across calls.
+  const containingHit = containing[0];
+  if (!containingHit) return null;
+  const contract = containingHit.chit as Chit<'contract'>;
+
+  // 3. Contract → blueprint id. blueprintId can technically be null on
+  //    contracts created without a blueprint (`cc-cli contract create`
+  //    direct path). Treat as ad-hoc-ish — the contract exists but no
+  //    walk to navigate.
+  const contractFields = contract.fields.contract as ContractFields;
+  if (contractFields.blueprintId == null) return null;
+
+  // 4. Blueprint chit lookup by id. Defensive: blueprint may have been
+  //    deleted (closed + archived, manually removed) since cast. Tasks
+  //    persist; their references can dangle.
+  const blueprintHit = findChitById(corpRoot, contractFields.blueprintId);
+  if (!blueprintHit || blueprintHit.chit.type !== 'blueprint') return null;
+  const blueprint = blueprintHit.chit as Chit<'blueprint'>;
+
+  // 5. Locate the step within the blueprint. The cast pipeline tagged
+  //    this task with the step id; if the blueprint has since been
+  //    edited and this step id removed, treat as null (the walk shape
+  //    has drifted from the cast). The task's pre-expanded
+  //    expectedOutput remains valid because it's stored on the task,
+  //    not derived from the current blueprint — so audit can still
+  //    fire even when getWalkPosition returns null. But the navigation
+  //    surface (visibility) honestly says "this task is in a walk that
+  //    has changed since cast — no clean position to render."
+  const blueprintFields = blueprint.fields.blueprint as BlueprintFields;
+  const stepIdx0 = blueprintFields.steps.findIndex((s) => s.id === stepId);
+  if (stepIdx0 < 0) return null;
+  const step = blueprintFields.steps[stepIdx0]!;
+
+  // 6. Compose. Reads from the TASK for pre-expanded fields (output /
+  //    expectedOutput / claimedAt) — these reflect the cast moment and
+  //    the agent's work since, NOT the current blueprint state.
+  const taskFields = taskChit.fields.task as TaskFields;
+  return {
+    blueprintName,
+    stepId,
+    stepIndex: stepIdx0 + 1, // 1-based for human display
+    totalSteps: blueprintFields.steps.length,
+    step,
+    contract,
+    blueprint,
+    expectedOutput: taskFields.expectedOutput ?? null,
+    taskOutput: taskFields.output ?? null,
+    claimedAt: taskFields.claimedAt ?? null,
+  };
+}
+
+// ─── Walk progress (contract → full step picture) ──────────────────
+
+/**
+ * Per-step entry in WalkProgress. Combines blueprint structural info
+ * (id, raw step) with the corresponding Task chit's runtime state
+ * (id, status, latest activity timestamp). When a step has no task
+ * chit (data drift — task referenced in contract.taskIds doesn't
+ * resolve, or step exists in blueprint but no matching task was cast),
+ * `taskId` and `taskStatus` are null. Renderers use these to show
+ * "[step exists but no task]" gaps so corp-health surfaces flag the
+ * inconsistency.
+ */
+export interface WalkStep {
+  /** Step id (kebab-case) from blueprint.steps[].id. */
+  readonly stepId: string;
+  /** 1-based index in the blueprint's steps array. */
+  readonly stepIndex: number;
+  /** The original (unexpanded) BlueprintStep — title still has `{{vars}}` if templated. */
+  readonly step: BlueprintStep;
+  /** Task chit id matching this step (via `blueprint-step:` tag), or null when no task found. */
+  readonly taskId: string | null;
+  /** Task's current workflowStatus, or null when no task. */
+  readonly taskStatus: TaskWorkflowStatus | null;
+  /** Task's pre-expanded title (the rendered version, no `{{vars}}`), null when no task. */
+  readonly taskTitle: string | null;
+  /** ISO timestamp of the task chit's last update, null when no task. Useful for "recent activity" surfaces. */
+  readonly taskUpdatedAt: string | null;
+}
+
+/**
+ * Walk progress as seen from the Contract. Every step in the
+ * blueprint gets an entry, in declaration order. Caller filters /
+ * groups by status as needed (active vs completed vs blocked vs
+ * remaining). No "current step" concept here — DAG walks may have
+ * multiple in-progress steps simultaneously, so renderers compute
+ * "what's current" from the per-step taskStatus rather than us
+ * picking one.
+ */
+export interface WalkProgress {
+  /** Blueprint name (for display + cross-reference). */
+  readonly blueprintName: string;
+  /** Total number of steps in the blueprint. */
+  readonly totalSteps: number;
+  /** Per-step entry, blueprint-declaration order. */
+  readonly steps: readonly WalkStep[];
+  /** Full Contract chit echoed for callers that need it. */
+  readonly contract: Chit<'contract'>;
+  /** Full Blueprint chit echoed for callers that need it. */
+  readonly blueprint: Chit<'blueprint'>;
+}
+
+/**
+ * Resolve the full walk picture for a Contract chit. Returns null when
+ * the contract isn't a walk (no blueprintId) or its blueprint chit is
+ * missing. Tasks listed in contract.taskIds that don't resolve are
+ * rendered as `taskId/taskStatus = null` entries — visible to callers
+ * but not a hard fail (the alternative would be returning null for the
+ * whole walk on one missing task, which masks the actual data shape).
+ *
+ * For each blueprint step, finds the task chit by matching the
+ * `blueprint-step:<stepId>` tag against the contract's taskIds. If
+ * multiple tasks match (defensive — shouldn't happen with cast),
+ * returns the first deterministically.
+ */
+export function getWalkProgress(
+  contractChit: Chit<'contract'>,
+  corpRoot: string,
+): WalkProgress | null {
+  const contractFields = contractChit.fields.contract as ContractFields;
+  if (contractFields.blueprintId == null) return null;
+
+  const blueprintHit = findChitById(corpRoot, contractFields.blueprintId);
+  if (!blueprintHit || blueprintHit.chit.type !== 'blueprint') return null;
+  const blueprint = blueprintHit.chit as Chit<'blueprint'>;
+  const blueprintFields = blueprint.fields.blueprint as BlueprintFields;
+
+  // Eager-resolve every task chit listed in the contract. Tasks are
+  // stored under `chits/task/<id>.md` so findChitById is O(1) per
+  // task (with type prefix routing). Total: O(taskCount) per call.
+  const tasksById = new Map<string, Chit<'task'>>();
+  for (const taskId of contractFields.taskIds) {
+    const hit = findChitById(corpRoot, taskId);
+    if (hit && hit.chit.type === 'task') {
+      tasksById.set(taskId, hit.chit as Chit<'task'>);
+    }
+  }
+
+  // Walk blueprint steps in declaration order. For each, find the
+  // matching task by `blueprint-step:` tag among the contract's tasks.
+  const steps: WalkStep[] = blueprintFields.steps.map((step, idx) => {
+    let matchedTask: Chit<'task'> | null = null;
+    for (const task of tasksById.values()) {
+      if (task.tags.includes(`${BLUEPRINT_STEP_TAG_PREFIX}${step.id}`)) {
+        matchedTask = task;
+        break; // First match wins; cast guarantees uniqueness.
+      }
+    }
+    const taskFields = matchedTask?.fields.task as TaskFields | undefined;
+    return {
+      stepId: step.id,
+      stepIndex: idx + 1,
+      step,
+      taskId: matchedTask?.id ?? null,
+      taskStatus: taskFields?.workflowStatus ?? null,
+      taskTitle: taskFields?.title ?? null,
+      taskUpdatedAt: matchedTask?.updatedAt ?? null,
+    };
+  });
+
+  return {
+    blueprintName: blueprintFields.name,
+    totalSteps: blueprintFields.steps.length,
+    steps,
+    contract: contractChit,
+    blueprint,
+  };
+}
+
+// ─── DAG navigation (pure helpers on blueprint structure) ──────────
+
+/**
+ * Steps that depend ON the given step (forward edges in the DAG).
+ * Returns plural even though many walks are linear — DAGs can fan out.
+ * Pure: operates on blueprint structure, no chit store reads.
+ *
+ * Returns empty array when no step depends on this one (terminal step,
+ * or unknown stepId — both cases produce no successors).
+ */
+export function nextSteps(
+  blueprint: BlueprintFields,
+  currentStepId: string,
+): BlueprintStep[] {
+  return blueprint.steps.filter((s) => (s.dependsOn ?? []).includes(currentStepId));
+}
+
+/**
+ * Steps that the given step depends ON (backward edges). Reads
+ * directly from `currentStep.dependsOn` — same semantics as the
+ * cast-time DAG validator. Returns empty array when the step has no
+ * dependencies (top of chain) or when `currentStepId` doesn't match
+ * any blueprint step (defensive — shouldn't happen with valid input).
+ */
+export function previousSteps(
+  blueprint: BlueprintFields,
+  currentStepId: string,
+): BlueprintStep[] {
+  const current = blueprint.steps.find((s) => s.id === currentStepId);
+  if (!current) return [];
+  const depIds = current.dependsOn ?? [];
+  return blueprint.steps.filter((s) => depIds.includes(s.id));
+}
+
+// ─── Expected-output checking — dispatcher + pure checkers ─────────
+
+/**
+ * Three-state outcome of `checkExpectedOutput`:
+ *
+ *   - `met` — the check fired AND the expected output is present.
+ *     Audit (2.3) treats as approved.
+ *   - `unmet` — the check fired AND the expected output is absent.
+ *     Audit blocks `cc-cli done` with a teaching message that names
+ *     the missed step + the expected shape.
+ *   - `unable-to-check` — the check couldn't fire (git not in PATH,
+ *     gh missing, network down, missing cwd). Audit treats as
+ *     approved-with-warning + logs to chits/_log/audit-checks.jsonl;
+ *     repeated unable on the same step surfaces as a kink via
+ *     Sexton's patrol so degraded infra is operationally visible
+ *     without blocking the agent on transient flakes.
+ *
+ * `missing` populated on `unmet` for kinds that can name what's
+ * missing (e.g. specific tags absent). `evidence` is free-form per
+ * checker — chit ids found, git output, file paths checked. `reason`
+ * is the human-readable explainer for `unable-to-check`.
+ */
+export interface CheckResult {
+  readonly status: 'met' | 'unmet' | 'unable-to-check';
+  readonly missing?: readonly string[];
+  readonly evidence?: unknown;
+  readonly reason?: string;
+}
+
+/**
+ * Caller-facing options for `checkExpectedOutput`. All optional;
+ * defaults preserve safe behavior.
+ *
+ * `cwd` controls where shell-out checkers run (`branch-exists`,
+ * `commit-on-branch`, `file-exists`). 2.3's audit caller is
+ * responsible for resolving this — when a task has a Clearinghouse
+ * worktree allocated, audit passes the worktree path so checks fire
+ * against the correct git tree. Defaults to corpRoot (the corp's
+ * primary checkout) when absent.
+ *
+ * `timeoutMs` caps every shell-out at this duration. Default 10s —
+ * enough for git operations on typical repos, short enough that
+ * repeated unable-to-check from a hung command becomes visible to
+ * Sexton's patrol within a couple of cycles. Pure-data checkers
+ * (tag-on-task / task-output-nonempty / multi-of-pure) ignore this.
+ */
+export interface CheckExpectedOutputOpts {
+  /** Working directory for git / fs shell-outs. Default: corpRoot. */
+  readonly cwd?: string;
+  /** Per-shell-out timeout in milliseconds. Default: 10_000. */
+  readonly timeoutMs?: number;
+}
+
+/**
+ * Check whether a Task chit satisfies its expectedOutput spec.
+ * Vacuous-truth on null spec — callers that pass `task.fields.task
+ * .expectedOutput` directly don't need to gate on the null case.
+ *
+ * Per-kind dispatch routes to a checker function below. The
+ * dispatcher itself is exhaustive (TypeScript narrowing on the
+ * discriminant) so adding a new kind requires updating this switch
+ * + adding a checker function — the build catches missed kinds.
+ *
+ * Pure on data; checkers may shell out (git) or read fs but never
+ * mutate the working tree or the chit store. Three-state outcome
+ * propagates per the CheckResult contract above.
+ */
+export function checkExpectedOutput(
+  spec: ExpectedOutputSpec | null,
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts = {},
+): CheckResult {
+  // Vacuous truth: a null spec is "no walk-aware enforcement on this
+  // step." Returning `met` lets audit treat it as approved without
+  // having to gate every call site on null. Evidence names the
+  // reason so audit logs can distinguish vacuous from real-met.
+  if (spec === null) {
+    return { status: 'met', evidence: { reason: 'no expectedOutput specified' } };
+  }
+
+  switch (spec.kind) {
+    case 'tag-on-task':
+      return checkTagOnTask(spec, taskChit);
+    case 'task-output-nonempty':
+      return checkTaskOutputNonempty(spec, taskChit);
+    case 'multi':
+      return checkMulti(spec, taskChit, corpRoot, opts);
+    case 'chit-of-type':
+      return checkChitOfType(spec, taskChit, corpRoot, opts);
+    case 'branch-exists':
+      return checkBranchExists(spec, taskChit, corpRoot, opts);
+    case 'commit-on-branch':
+      return checkCommitOnBranch(spec, taskChit, corpRoot, opts);
+    case 'file-exists':
+      return checkFileExists(spec, taskChit, corpRoot, opts);
+  }
+}
+
+// ─── Pure-data checkers (real implementations) ─────────────────────
+
+/**
+ * `tag-on-task` — pure tag inspection on the task chit. The cast
+ * pipeline strips withTags Handlebars-rendered, so this checker
+ * doesn't see `{{vars}}` here. Trivially `met` or `unmet`; never
+ * `unable-to-check`.
+ */
+function checkTagOnTask(
+  spec: { kind: 'tag-on-task'; tag: string },
+  taskChit: Chit<'task'>,
+): CheckResult {
+  if (taskChit.tags.includes(spec.tag)) {
+    return { status: 'met', evidence: { tag: spec.tag, present: true } };
+  }
+  return {
+    status: 'unmet',
+    missing: [spec.tag],
+    evidence: { tag: spec.tag, present: false, allTags: taskChit.tags },
+  };
+}
+
+/**
+ * `task-output-nonempty` — minimum bar for any step where the agent
+ * must SAY what they did. Reads `taskChit.fields.task.output` (the
+ * 1.3 prose summary). Trim before length-checking so a string of
+ * only whitespace doesn't qualify as "non-empty." Trivially `met`
+ * or `unmet`.
+ */
+function checkTaskOutputNonempty(
+  _spec: { kind: 'task-output-nonempty' },
+  taskChit: Chit<'task'>,
+): CheckResult {
+  const output = (taskChit.fields.task as TaskFields).output ?? '';
+  if (output.trim().length > 0) {
+    return { status: 'met', evidence: { length: output.length } };
+  }
+  return {
+    status: 'unmet',
+    missing: ['task.output'],
+    evidence: { reason: 'task.output is empty or whitespace-only' },
+  };
+}
+
+/**
+ * `multi` — composed check. Status precedence:
+ *
+ *   1. Any sub-check `unmet` → `unmet` (definite failure beats
+ *      no-signal).
+ *   2. Else, any sub-check `unable-to-check` → `unable-to-check`
+ *      (we lack signal on at least one piece; can't claim met).
+ *   3. Else, all sub-checks `met` → `met`.
+ *
+ * Aggregated `missing` collects from every unmet sub-check (caller
+ * sees the full list, not just the first). Evidence is the array of
+ * sub-results (preserves per-sub-check evidence + reason for
+ * diagnostics). Recursive — sub-specs can themselves be `multi`.
+ */
+function checkMulti(
+  spec: { kind: 'multi'; specs: readonly ExpectedOutputSpec[] },
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts,
+): CheckResult {
+  const subResults = spec.specs.map((sub) =>
+    checkExpectedOutput(sub, taskChit, corpRoot, opts),
+  );
+
+  const anyUnmet = subResults.some((r) => r.status === 'unmet');
+  const anyUnable = subResults.some((r) => r.status === 'unable-to-check');
+  const aggregateMissing = subResults.flatMap((r) => r.missing ?? []);
+
+  if (anyUnmet) {
+    return {
+      status: 'unmet',
+      missing: aggregateMissing,
+      evidence: { subResults },
+    };
+  }
+  if (anyUnable) {
+    const reasons = subResults
+      .filter((r) => r.status === 'unable-to-check')
+      .map((r) => r.reason ?? 'unspecified');
+    return {
+      status: 'unable-to-check',
+      reason: `${reasons.length} sub-check${reasons.length === 1 ? '' : 's'} unable: ${reasons.join('; ')}`,
+      evidence: { subResults },
+    };
+  }
+  return { status: 'met', evidence: { subResults } };
+}
+
+// ─── Stub checkers (real impls land in subsequent commits) ─────────
+
+/**
+ * `chit-of-type` — query the chit store for chits of the given type
+ * produced by the assigned worker since the step claim, optionally
+ * filtered by ALL of the templated `withTags`. The most common kind
+ * for steps that produce a structured artifact (clearance-submission,
+ * review-comment, observation, etc.).
+ *
+ * ### Three load-bearing filters
+ *
+ * 1. **createdBy** — the chit must have been created by the worker
+ *    assigned to this task. Without this filter, a chit of the right
+ *    type produced by ANY agent at ANY time would falsely satisfy
+ *    the check (a clearance-submission from a different submitter
+ *    on a different task with the same task tag, e.g.). Two cases:
+ *    - assignee is a slot id → use it directly as createdBy.
+ *    - assignee is a known role-id → expand to the current member
+ *      slots in that role (members.json filter on `role === assignee`).
+ *      Accept any of those slot ids as createdBy. The role-expansion
+ *      is critical: a task handed to `backend-engineer` may end up
+ *      with assignee still = `backend-engineer` (role-queue path,
+ *      pre-bacteria pickup) OR `toast` (slot-resolved). The query
+ *      handles both.
+ *
+ * 2. **createdSince (claimedAt boundary)** — the chit must have been
+ *    produced AFTER the agent claimed this step (`task.claimedAt`).
+ *    When claimedAt is null (transition unwired in 1.3 + this PR
+ *    doesn't wire it), fall back to `taskChit.createdAt` as a loose
+ *    boundary. Loose-but-functional vs strict-but-broken — the
+ *    loose case admits some pre-step chits as evidence; tightening
+ *    happens automatically once the claim transition gets wired.
+ *
+ * 3. **withTags (ALL-match post-filter)** — queryChits's `tags`
+ *    filter is OR-match (returns chits with ANY of the given tags).
+ *    For expectedOutput we need AND-match (every withTag MUST be
+ *    present). Post-filter the queryChits result: keep chits where
+ *    every required tag appears in `chit.tags`. Empty withTags = no
+ *    tag filter (all chits of this type-by-creator-since pass).
+ *
+ * Returns `met` when ≥1 chit matches. Returns `unmet` with a
+ * diagnostic `evidence.query` payload showing exactly what we
+ * searched for so the agent can inspect via `cc-cli chit list` with
+ * the same filters. Returns `unable-to-check` only on the genuine
+ * "can't run the check at all" cases (no assignee → no creator scope).
+ */
+function checkChitOfType(
+  spec: { kind: 'chit-of-type'; chitType: string; withTags?: readonly string[] },
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+  _opts: CheckExpectedOutputOpts,
+): CheckResult {
+  const taskFields = taskChit.fields.task as TaskFields;
+  const assignee = taskFields.assignee;
+
+  // No assignee → can't scope createdBy. Treat as unable rather than
+  // running a corp-wide query that's almost certainly wrong; audit
+  // logs the reason so the founder sees the missing-assignee case
+  // and can fix the upstream gap.
+  if (assignee == null) {
+    return {
+      status: 'unable-to-check',
+      reason: 'task has no assignee — cannot scope chit-of-type query to the worker',
+    };
+  }
+
+  // Resolve creator scope. Role expansion uses readMembersWithRole —
+  // pure read of members.json, scoped here so walk.ts doesn't expose
+  // a public getMembers surface (cli has its own; we don't need to
+  // duplicate the API contract).
+  const candidateCreators = isKnownRole(assignee)
+     ? readMembersWithRole(corpRoot, assignee).map((m) => m.id)
+    : [assignee];
+  if (candidateCreators.length === 0) {
+    // Role with no current members → no creator can have produced
+    // matching chits. Honest unmet (the check fired, the answer is
+    // "no" because the role pool is empty).
+    return {
+      status: 'unmet',
+      missing: [
+        `chit of type '${spec.chitType}' produced by any member of role '${assignee}'`,
+      ],
+      evidence: { reason: `role '${assignee}' has no current members` },
+    };
+  }
+
+  // Resolve since-claim boundary. claimedAt preferred; createdAt
+  // fallback when null (pre-2.1 + unwired-claim case). Tightens
+  // automatically once the claim transition wires up.
+  const sinceTime = taskFields.claimedAt ?? taskChit.createdAt;
+
+  // Single queryChits call. createdBy filter accepts only one value,
+  // so we can't push the role-expansion into the query — handle in
+  // post-filter below. type + createdSince narrow at the storage
+  // layer for efficiency.
+  const queryResult = queryChits<ChitTypeId>(corpRoot, {
+    types: [spec.chitType as ChitTypeId],
+    createdSince: sinceTime,
+    limit: 0,
+  });
+
+  // Post-filter: createdBy ∈ candidateCreators AND every withTag present.
+  const withTagsRequired = spec.withTags ?? [];
+  const matches = queryResult.chits.filter((cwb) => {
+    if (!candidateCreators.includes(cwb.chit.createdBy)) return false;
+    for (const required of withTagsRequired) {
+      if (!cwb.chit.tags.includes(required)) return false;
+    }
+    return true;
+  });
+
+  if (matches.length > 0) {
+    return {
+      status: 'met',
+      evidence: {
+        matchedChitIds: matches.map((cwb) => cwb.chit.id),
+        query: {
+          chitType: spec.chitType,
+          createdBy: candidateCreators,
+          since: sinceTime,
+          withTags: withTagsRequired,
+        },
+      },
+    };
+  }
+
+  // Build diagnostic missing message that mirrors `cc-cli chit list`
+  // syntax so the agent can re-run the same query manually.
+  const missing: string[] = [`chit of type '${spec.chitType}'`];
+  if (withTagsRequired.length > 0) {
+    missing.push(`with tags [${withTagsRequired.join(', ')}]`);
+  }
+  missing.push(`produced by ${candidateCreators.join(' / ')}`);
+  missing.push(`since ${sinceTime}`);
+
+  return {
+    status: 'unmet',
+    missing,
+    evidence: {
+      query: {
+        chitType: spec.chitType,
+        createdBy: candidateCreators,
+        since: sinceTime,
+        withTags: withTagsRequired,
+      },
+      sampledResults: queryResult.chits.length,
+    },
+  };
+}
+
+/**
+ * Read members.json and return entries whose `role` matches. Pure
+ * filesystem read; no caching (audit fires infrequently enough that
+ * a per-call read is fine, and caching would risk staleness when
+ * agents hire/fire mid-walk). Returns empty array on missing/empty
+ * members.json AND on malformed members.json — caller treats both
+ * as "no candidates" (graceful degradation).
+ *
+ * Codex P2 review on PR #208: readConfigOr's docstring is
+ * "missing-or-malformed → fallback," but its actual behavior is
+ * "missing → fallback, malformed JSON → throw." Catching here
+ * prevents the throw from propagating out of checkChitOfType into
+ * audit, which would crash the gate for role-assigned tasks
+ * whenever members.json gets corrupted (mid-write race, manual
+ * edit gone wrong, partial backup restore). With the catch, audit
+ * sees the role pool as empty and returns honest unmet — operator
+ * sees a clear "no role members" signal vs. a hard crash.
+ *
+ * The empty-pool fallback is the same path as "role with zero
+ * members" so the unmet diagnostic is consistent: agent reads
+ * "role 'backend-engineer' has no current members" and knows to
+ * check members.json regardless of whether it's missing, empty,
+ * or corrupted.
+ */
+function readMembersWithRole(corpRoot: string, roleId: string): Member[] {
+  try {
+    const all = readConfigOr<Member[]>(join(corpRoot, 'members.json'), []);
+    return all.filter((m) => m.role === roleId);
+  } catch {
+    // Malformed JSON, permission error, or any other read-time
+    // exception. Treat as empty pool — caller surfaces as honest
+    // unmet rather than crashing audit. Operational visibility
+    // happens via the unmet evidence trail, not a stack trace.
+    return [];
+  }
+}
+
+/**
+ * `branch-exists` — `git branch --list <pattern>` against the
+ * resolved cwd. Local branches only (default git behavior); remote
+ * branches don't count because the agent's work happens in their
+ * worktree before push, and `branch-exists` is the audit signal that
+ * the agent's local work has produced the expected branch.
+ *
+ * Outcome mapping from safeGitExec:
+ *   - ok + non-empty stdout       → met (branch list returned matches)
+ *   - ok + empty stdout            → unmet (no matching branch)
+ *   - cmd-failed + "not a git repository" stderr → unable-to-check
+ *     (the cwd resolved but isn't a git tree — usually a misconfigured
+ *      worktree path; agent shouldn't be blocked on this)
+ *   - cmd-failed + other stderr    → unmet (git rejected the pattern,
+ *     which we treat as "no match" — the agent didn't produce the
+ *     expected branch)
+ *   - cmd-not-found / cwd-missing / permission-denied / timeout / other
+ *                                  → unable-to-check (env-level failure)
+ */
+function checkBranchExists(
+  spec: { kind: 'branch-exists'; branchPattern: string },
+  _taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts,
+): CheckResult {
+  const cwd = opts.cwd ?? corpRoot;
+  // Pre-checks. Two distinct failure modes get distinct messages so
+  // operators can diagnose:
+  //   1. cwd doesn't exist at all → "cwd does not exist"
+  //   2. cwd is not inside any git repository → "cwd is not inside
+  //      a git repository". Codex P2 review on PR #208: the earlier
+  //      check used `existsSync(join(cwd, '.git'))` which only matched
+  //      the repo ROOT — any subdirectory (e.g. agent worked in
+  //      <worktree>/packages/shared/) would falsely fail the check
+  //      and downgrade audit enforcement to a warning. findGitRoot
+  //      walks UP from cwd looking for the first .git ancestor; this
+  //      handles repo subdirectories AND still rejects truly-outside
+  //      cases (tmpdir not under any git tree returns null).
+  if (!existsSync(cwd)) {
+    return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
+  }
+  if (findGitRoot(cwd, corpRoot) === null) {
+    return {
+      status: 'unable-to-check',
+      reason: `cwd is not inside a git repository scoped to corpRoot: ${cwd}`,
+    };
+  }
+  const result = safeGitExec(['branch', '--list', spec.branchPattern], {
+    cwd,
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  });
+
+  switch (result.outcome) {
+    case 'ok': {
+      const trimmed = result.stdout.trim();
+      if (trimmed.length > 0) {
+        return {
+          status: 'met',
+          evidence: { branchPattern: spec.branchPattern, cwd, matched: trimmed.split('\n') },
+        };
+      }
+      return {
+        status: 'unmet',
+        missing: [`branch matching '${spec.branchPattern}' in ${cwd}`],
+        evidence: { branchPattern: spec.branchPattern, cwd, matched: [] },
+      };
+    }
+    case 'cmd-failed':
+      if (isNotAGitRepoError(result.stderr)) {
+        return {
+          status: 'unable-to-check',
+          reason: `cwd is not a git repository: ${cwd}`,
+          evidence: { stderr: result.stderr },
+        };
+      }
+      return {
+        status: 'unmet',
+        missing: [`branch matching '${spec.branchPattern}' in ${cwd}`],
+        evidence: { stderr: result.stderr, exitCode: result.exitCode },
+      };
+    default:
+      return mapEnvFailureToUnable(result.outcome, cwd, result.stderr);
+  }
+}
+
+/**
+ * `commit-on-branch` — `git log <branch> --since=<sinceTime>
+ * --format=%H -n 1` against the resolved cwd. Returns met when ≥1
+ * commit is found on the branch since the claim boundary.
+ *
+ * sinceClaim semantics:
+ *   - true (default when absent): pass --since=<sinceTime> where
+ *     sinceTime is `taskFields.claimedAt` if set, else
+ *     `taskChit.createdAt` as the loose fallback (per the chit-of-type
+ *     fallback decision — tightens once the claim transition wires).
+ *   - false: omit --since entirely. "Any commit ever on this branch"
+ *     check, useful for steps that verify a branch HAS work
+ *     regardless of timing (e.g. a handoff step that wants to confirm
+ *     "the predecessor's branch has commits before we ship it").
+ *
+ * `--format=%H -n 1` minimizes output to the first commit's SHA — we
+ * only need to know if there's ≥1, not enumerate.
+ *
+ * Outcome mapping mirrors branch-exists: ok+stdout = met, ok+empty =
+ * unmet, cmd-failed classified by stderr (not-a-git-repo → unable;
+ * unknown revision / ambiguous argument = branch missing → unmet),
+ * env-level failures → unable.
+ */
+function checkCommitOnBranch(
+  spec: { kind: 'commit-on-branch'; branchPattern: string; sinceClaim?: boolean },
+  taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts,
+): CheckResult {
+  const cwd = opts.cwd ?? corpRoot;
+  // Same pre-check pattern as branch-exists — see that comment for
+  // the rationale + the Codex P2 fix for the subdirectory-of-repo
+  // case via findGitRoot's walk-up.
+  if (!existsSync(cwd)) {
+    return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
+  }
+  if (findGitRoot(cwd, corpRoot) === null) {
+    return {
+      status: 'unable-to-check',
+      reason: `cwd is not inside a git repository scoped to corpRoot: ${cwd}`,
+    };
+  }
+  const useSinceClaim = spec.sinceClaim !== false; // default true
+  const taskFields = taskChit.fields.task as TaskFields;
+  const sinceTime = useSinceClaim
+    ? (taskFields.claimedAt ?? taskChit.createdAt)
+    : null;
+
+  const args: string[] = ['log', spec.branchPattern, '--format=%H', '-n', '1'];
+  if (sinceTime) args.push(`--since=${sinceTime}`);
+
+  const result = safeGitExec(args, {
+    cwd,
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+  });
+
+  switch (result.outcome) {
+    case 'ok': {
+      const trimmed = result.stdout.trim();
+      if (trimmed.length > 0) {
+        return {
+          status: 'met',
+          evidence: {
+            branchPattern: spec.branchPattern,
+            cwd,
+            since: sinceTime,
+            firstCommit: trimmed,
+          },
+        };
+      }
+      return {
+        status: 'unmet',
+        missing: [
+          `commit on branch '${spec.branchPattern}'${sinceTime ? ` since ${sinceTime}` : ''} in ${cwd}`,
+        ],
+        evidence: { branchPattern: spec.branchPattern, cwd, since: sinceTime },
+      };
+    }
+    case 'cmd-failed':
+      if (isNotAGitRepoError(result.stderr)) {
+        return {
+          status: 'unable-to-check',
+          reason: `cwd is not a git repository: ${cwd}`,
+          evidence: { stderr: result.stderr },
+        };
+      }
+      // Unknown branch = unmet (the spec required commits on this
+      // branch; the branch doesn't exist). git's stderr typically:
+      //   "fatal: ambiguous argument '<branch>': unknown revision"
+      // — we don't pattern-match further; any non-not-a-repo failure
+      // is treated as "the branch isn't producing what we expected."
+      return {
+        status: 'unmet',
+        missing: [`commit on branch '${spec.branchPattern}' in ${cwd}`],
+        evidence: { stderr: result.stderr, exitCode: result.exitCode },
+      };
+    default:
+      return mapEnvFailureToUnable(result.outcome, cwd, result.stderr);
+  }
+}
+
+/**
+ * `file-exists` — fs.existsSync against the resolved cwd + the
+ * pre-expanded path pattern. Pure fs check, no shell-out, no git.
+ *
+ * Path resolution: `join(cwd, pathPattern)`. Documented behavior is
+ * that pathPattern is relative to cwd; absolute paths or `..`
+ * traversals are not specially handled — the blueprint authors are
+ * trusted (founder + agents inside the corp) and arbitrary path
+ * checks aren't a security concern at this scale. If a future use
+ * case wants tighter sandboxing, that's a feature addition, not a
+ * v1 hardening.
+ *
+ * Three outcomes:
+ *   - cwd doesn't exist → unable-to-check (worktree not allocated;
+ *     resolved cwd was wrong)
+ *   - file exists       → met
+ *   - file doesn't exist → unmet
+ *
+ * Never throws; existsSync handles permission errors as `false`
+ * which we map to unmet (best-effort; the file is functionally
+ * inaccessible to the audit, which matches user intent). If we
+ * wanted to distinguish permission-denied from absent-file, we'd
+ * need stat() with explicit error handling — defer until a real
+ * use case demands it.
+ */
+function checkFileExists(
+  spec: { kind: 'file-exists'; pathPattern: string },
+  _taskChit: Chit<'task'>,
+  corpRoot: string,
+  opts: CheckExpectedOutputOpts,
+): CheckResult {
+  const cwd = opts.cwd ?? corpRoot;
+  if (!existsSync(cwd)) {
+    return {
+      status: 'unable-to-check',
+      reason: `cwd does not exist: ${cwd}`,
+    };
+  }
+  const fullPath = join(cwd, spec.pathPattern);
+  if (existsSync(fullPath)) {
+    return {
+      status: 'met',
+      evidence: { pathPattern: spec.pathPattern, cwd, fullPath },
+    };
+  }
+  return {
+    status: 'unmet',
+    missing: [`file '${spec.pathPattern}' in ${cwd}`],
+    evidence: { pathPattern: spec.pathPattern, cwd, fullPath },
+  };
+}
+
+/**
+ * Walk up from cwd looking for the first .git ancestor, bounded by
+ * `ceiling`. Returns the directory containing .git when found within
+ * the cwd-to-ceiling chain; null otherwise. Both shapes match:
+ *   - Regular repos: `.git/` directory at the toplevel.
+ *   - Worktrees:     `.git` FILE at the worktree dir.
+ *
+ * Three failure modes this guards against:
+ *
+ *   1. cwd is outside the ceiling — caller passed a path unrelated to
+ *      the corp's tree. Returns null immediately.
+ *
+ *   2. Codex P2 — cwd is a SUBDIRECTORY of a valid repo inside the
+ *      ceiling. Earlier `existsSync(join(cwd, '.git'))` only matched
+ *      the repo root, so subdirs falsely failed and downgraded audit
+ *      enforcement to a warning. Walk-up correctly resolves the .git
+ *      ancestor.
+ *
+ *   3. cwd is genuinely outside any git tree the ceiling protects.
+ *      Walk reaches the ceiling without finding .git → null. Without
+ *      the ceiling, the walk would continue past corpRoot and could
+ *      pick up any unrelated parent .git on the system (a real failure
+ *      mode on dev boxes where the OS tmpdir happens to live under a
+ *      git checkout). With the ceiling, that walk-too-far is impossible.
+ *
+ * The ceiling is always the corpRoot the checker received from audit
+ * — every meaningful cwd (corpRoot itself, a Clearinghouse worktree
+ * path under corpRoot) lives inside it.
+ */
+function findGitRoot(cwd: string, ceiling: string): string | null {
+  const ceilingResolved = resolve(ceiling);
+  let current = resolve(cwd);
+
+  // Reject cwd that's outside the ceiling. path.relative handles
+  // platform-correct case sensitivity automatically — Windows is
+  // case-insensitive (so `C:\corp\wt` and `c:\corp\wt` are treated
+  // as equal); POSIX is case-sensitive. A startsWith check would
+  // false-fail on Windows when corpRoot and cwd come from different
+  // sources with different casing (config-stored path vs runtime-
+  // resolved path is a real production case). The relative shape
+  // also avoids the "/home/foo-other vs /home/foo" prefix-collision
+  // hazard a naive startsWith hits.
+  const rel = relative(ceilingResolved, current);
+  if (rel.startsWith('..') || isAbsolute(rel)) return null;
+
+  while (true) {
+    if (existsSync(join(current, '.git'))) return current;
+    if (current === ceilingResolved) return null; // hit ceiling, no .git found
+    const parent = dirname(current);
+    if (parent === current) return null; // filesystem root (defensive — ceiling should stop us first)
+    current = parent;
+  }
+}
+
+/**
+ * Stderr classifier — git emits this exact phrase for the "wrong cwd"
+ * case across all subcommands. Used by branch-exists + commit-on-branch
+ * to distinguish "infra issue" (unable) from "the agent didn't produce
+ * what was expected" (unmet).
+ */
+function isNotAGitRepoError(stderr: string): boolean {
+  return /not a git repository/i.test(stderr);
+}
+
+/**
+ * Map non-ok / non-cmd-failed safeGitExec outcomes to a CheckResult.
+ * All env-level failures (cmd-not-found, cwd-missing, permission-
+ * denied, timeout, other) become unable-to-check with descriptive
+ * reasons — these are infra states that shouldn't block the agent on
+ * the work itself.
+ */
+function mapEnvFailureToUnable(
+  outcome: 'cmd-not-found' | 'cwd-missing' | 'permission-denied' | 'timeout' | 'other',
+  cwd: string,
+  stderr: string,
+): CheckResult {
+  switch (outcome) {
+    case 'cmd-not-found':
+      return { status: 'unable-to-check', reason: 'git not in PATH' };
+    case 'cwd-missing':
+      return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
+    case 'permission-denied':
+      return { status: 'unable-to-check', reason: `permission denied at ${cwd}` };
+    case 'timeout':
+      return { status: 'unable-to-check', reason: `git command timed out (cwd: ${cwd})` };
+    case 'other':
+      return {
+        status: 'unable-to-check',
+        reason: `git invocation failed: ${stderr || 'unknown error'}`,
+      };
+  }
+}

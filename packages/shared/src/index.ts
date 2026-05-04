@@ -395,6 +395,43 @@ export type {
   CastSweeperFromBlueprintResult,
 } from './blueprint-cast.js';
 
+// Safe git shell-out — Project 2.1 PR 2. Synchronous helper for
+// walk-aware audit's branch-exists / commit-on-branch checkers. One
+// purpose: spawn git with classified outcomes that map cleanly onto
+// CheckResult. Re-exported here for future consumers (Sexton patrols,
+// Clearinghouse health checks) — generic primitive, not walk-specific.
+export { safeGitExec } from './git-exec.js';
+export type {
+  GitExecOutcome,
+  SafeGitExecResult,
+  SafeGitExecOpts,
+} from './git-exec.js';
+
+// Walk read API — Project 2.1 PR 2. Pure functions over Task / Contract /
+// Blueprint chits + the new expectedOutput schema. Consumed by 2.2's
+// visibility surfaces, 2.3's walk-aware audit, 2.4's stalled-walk patrol,
+// 2.7's `cc-cli walk show`. Each function documents its own contract;
+// shell-out checkers (branch-exists, commit-on-branch, file-exists) live
+// here too with three-state outcome (met / unmet / unable-to-check).
+export {
+  isWalkTask,
+  isAdHocTask,
+  getWalkBlueprintName,
+  getWalkStepId,
+  getWalkPosition,
+  getWalkProgress,
+  nextSteps,
+  previousSteps,
+  checkExpectedOutput,
+} from './walk.js';
+export type {
+  WalkPosition,
+  WalkProgress,
+  WalkStep,
+  CheckResult,
+  CheckExpectedOutputOpts,
+} from './walk.js';
+
 // Blueprint lookup — Project 1.8 PR 3. Centralizes name → chit resolution
 // with scope precedence, so every CLI command + Sexton's patrol cooking
 // uses one consistent lookup path.
