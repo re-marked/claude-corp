@@ -15,7 +15,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { findChitById, queryChits } from './chits.js';
+import { findChitById, queryChits, casketChitId } from './chits.js';
 import type { Chit, HandoffFields } from './types/chit.js';
 import type { Member } from './types/member.js';
 import { buildCorpMd, type CorpMdKind, type CorpMdOpts } from './templates/corp-md.js';
@@ -45,7 +45,7 @@ export function resolveCurrentTask(
   corpRoot: string,
   agentSlug: string,
 ): WtfCurrentTask | undefined {
-  const casketId = `chit-cask-${agentSlug}`;
+  const casketId = casketChitId(agentSlug);
   let casket: Chit | null = null;
   try {
     const hit = findChitById(corpRoot, casketId);
@@ -96,7 +96,7 @@ export function resolveWalkBlock(
   agentSlug: string,
   now: Date,
 ): string | undefined {
-  const casketId = `chit-cask-${agentSlug}`;
+  const casketId = casketChitId(agentSlug);
   let casket: Chit | null = null;
   try {
     const hit = findChitById(corpRoot, casketId);

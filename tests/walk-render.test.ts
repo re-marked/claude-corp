@@ -657,7 +657,7 @@ describe('buildWtfOutput — walk block end-to-end', () => {
       // Write a casket pointing at t2 (the in-progress task).
       createChit(corpRoot, {
         type: 'casket',
-        id: 'chit-cask-toast',
+        id: 'casket-toast',
         scope: 'agent:toast',
         createdBy: 'toast',
         body: '',
@@ -709,7 +709,7 @@ describe('buildWtfOutput — walk block end-to-end', () => {
       });
       createChit(corpRoot, {
         type: 'casket',
-        id: 'chit-cask-toast',
+        id: 'casket-toast',
         scope: 'agent:toast',
         createdBy: 'toast',
         body: '',
@@ -743,7 +743,7 @@ describe('buildWtfOutput — walk block end-to-end', () => {
       // Casket exists but has null currentStep.
       createChit(corpRoot, {
         type: 'casket',
-        id: 'chit-cask-toast',
+        id: 'casket-toast',
         scope: 'agent:toast',
         createdBy: 'toast',
         body: '',
