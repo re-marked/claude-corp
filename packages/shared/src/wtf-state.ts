@@ -206,7 +206,17 @@ function renderHandoffWalkSummary(chit: Chit<'handoff'>): string | null {
     // When ANY step is non-completed terminal, switch to explicit
     // per-step status framing so the successor sees exactly which
     // steps reached which terminal state.
-    const allCompleted = shown.every((s) => s.status === 'completed');
+    //
+    // Self-audit: check the ENTIRE completedSteps array, not just
+    // `shown`. A truncated step (in "+N more") that's failed would
+    // otherwise stay hidden behind the terse "Predecessor completed"
+    // label even though only the visible-3 are actually completed.
+    // Honest answer: if any hidden step is non-completed, the whole
+    // render goes verbose — the visible items get explicit
+    // (completed) tags so the agent knows the truncated tail might
+    // include failures and can `cc-cli chit read <handoff-id>` for
+    // the full list.
+    const allCompleted = completedSteps.every((s) => s.status === 'completed');
     if (allCompleted) {
       const ids = shown.map((s) => s.stepId).join(', ');
       completedPart = `Predecessor completed: ${ids}${overflowSuffix}.`;

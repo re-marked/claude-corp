@@ -634,6 +634,68 @@ describe('buildWtfOutput — successor sees walk continuity in handoff block', (
     }
   });
 
+  it('switches to verbose mode when a HIDDEN (truncated) step is non-completed (audit follow-on)', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // Self-audit follow-on to Codex P2 round 2: earlier draft
+      // checked shown.every — meaning a failed step truncated past
+      // the visible cap stayed hidden behind the terse "Predecessor
+      // completed" label. Now checks the full completedSteps array
+      // so any hidden non-completed step forces verbose mode on the
+      // visible items too. Successor sees explicit "(completed)" on
+      // visible items + "+N more" suffix; can `cc-cli chit read` for
+      // the full tail.
+      createChit(corpRoot, {
+        type: 'handoff',
+        scope: 'agent:successor',
+        createdBy: 'toast',
+        body: '',
+        fields: {
+          handoff: {
+            predecessorSession: 'toast-1',
+            currentStep: 'chit-t-current',
+            completed: ['mixed bag'],
+            nextAction: 'recover',
+            walkBlueprintName: 'big-walk',
+            walkStepId: 'recovery',
+            walkStepIndex: 6,
+            walkTotalSteps: 8,
+            walkCompletedSteps: [
+              { stepId: 'a', taskId: 'chit-t-a', status: 'completed', completedAt: null },
+              { stepId: 'b', taskId: 'chit-t-b', status: 'completed', completedAt: null },
+              { stepId: 'c', taskId: 'chit-t-c', status: 'completed', completedAt: null },
+              // 4th step is FAILED but cap=3 hides it — must still
+              // force verbose mode on the visible 3.
+              { stepId: 'd', taskId: 'chit-t-d', status: 'failed', completedAt: null },
+              { stepId: 'e', taskId: 'chit-t-e', status: 'completed', completedAt: null },
+            ],
+          },
+        },
+      });
+
+      const result = buildWtfOutput({
+        corpRoot,
+        corpName: 'test-corp',
+        agentSlug: 'successor',
+        displayName: 'Copper',
+        rank: 'worker',
+        kind: 'employee',
+        roleId: 'backend-engineer',
+        workspacePath: join(corpRoot, 'agents', 'successor'),
+        generatedAt: '2026-05-02T15:00:00.000Z',
+        now: new Date('2026-05-02T15:00:00.000Z'),
+        consumeHandoff: false,
+      });
+
+      // Verbose mode kicks in even though shown items (a, b, c) are
+      // all completed — because hidden 'd' is failed.
+      expect(result.header).toContain('Predecessor steps: a (completed), b (completed), c (completed), +2 more');
+      expect(result.header).not.toContain('Predecessor completed:');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('keeps terse "Predecessor completed" framing when all shown steps are completed (common case)', () => {
     const { corpRoot, cleanup } = makeCorp();
     try {
