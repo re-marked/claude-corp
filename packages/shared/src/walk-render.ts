@@ -211,11 +211,14 @@ function formatPrevStep(
   }
 
   const status = step.taskStatus;
-  const assigneeIsMe =
-    walkProgress.steps.find((s) => s.stepId === step.stepId)?.step?.assigneeRole === currentSlug ||
-    // Heuristic: if updatedAt is recent + status is terminal, attribute to currentSlug
-    // when no better signal. Conservative — only used as a tie-breaker.
-    false;
+  // "by you" attribution compares the task chit's assignee field
+  // (the LAST-WRITTEN assignee — slot-id once a specific Employee
+  // picked the work up, or role-id while still in the role queue)
+  // against the agent's current slug. The earlier draft compared
+  // step.assigneeRole (the blueprint role like 'backend-engineer')
+  // to the slot — always false. Self-audit found this and pinned
+  // the fix to use the task's runtime assignee via taskAssignee.
+  const assigneeIsMe = step.taskAssignee !== null && step.taskAssignee === currentSlug;
   const byClause = assigneeIsMe ? 'by you' : '';
 
   // status verb

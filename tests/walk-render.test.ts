@@ -115,7 +115,8 @@ function fakeWalkProgress(overrides: Partial<WalkProgress> = {}): WalkProgress {
       taskId: 'chit-t-1',
       taskStatus: 'completed',
       taskTitle: 'Pick up',
-      taskUpdatedAt: '2026-05-02T14:46:00.000Z', // 14m ago
+      taskUpdatedAt: '2026-05-02T14:46:00.000Z',
+      taskAssignee: 'toast', // 14m ago
     },
     {
       stepId: 'acquire-worktree',
@@ -125,6 +126,7 @@ function fakeWalkProgress(overrides: Partial<WalkProgress> = {}): WalkProgress {
       taskStatus: 'in_progress',
       taskTitle: 'Acquire',
       taskUpdatedAt: '2026-05-02T14:55:00.000Z',
+      taskAssignee: 'toast',
     },
     {
       stepId: 'implement',
@@ -134,6 +136,7 @@ function fakeWalkProgress(overrides: Partial<WalkProgress> = {}): WalkProgress {
       taskStatus: 'queued',
       taskTitle: 'Implement',
       taskUpdatedAt: '2026-05-02T14:55:00.000Z',
+      taskAssignee: 'toast',
     },
   ];
   return {
@@ -196,14 +199,25 @@ describe('renderWalkPositionBlock — walk-shaped + full spec', () => {
     expect(out).not.toContain('audit-degraded');
   });
 
-  it('renders Previous line for steps with dependencies', () => {
+  it('renders Previous line for steps with dependencies (with "by you" attribution when assignee matches currentSlug)', () => {
     const out = renderWalkPositionBlock({
       walkPos: fakeWalkPosition(),
       walkProgress: fakeWalkProgress(),
       currentSlug: 'toast',
       now: FIXED_NOW,
     });
+    expect(out).toContain('  Previous: pick-up-task — completed by you,');
+  });
+
+  it('renders Previous line WITHOUT "by you" when assignee differs from currentSlug', () => {
+    const out = renderWalkPositionBlock({
+      walkPos: fakeWalkPosition(),
+      walkProgress: fakeWalkProgress(),
+      currentSlug: 'someone-else',
+      now: FIXED_NOW,
+    });
     expect(out).toContain('  Previous: pick-up-task — completed,');
+    expect(out).not.toContain('by you');
   });
 
   it('renders Next line with downstream step status', () => {
@@ -266,6 +280,7 @@ describe('renderWalkPositionBlock — DAG fan-out / fan-in', () => {
           taskStatus: 'in_progress',
           taskTitle: 'Root',
           taskUpdatedAt: '2026-05-02T14:55:00.000Z',
+      taskAssignee: 'toast',
         },
         {
           stepId: 'left',
@@ -275,6 +290,7 @@ describe('renderWalkPositionBlock — DAG fan-out / fan-in', () => {
           taskStatus: 'queued',
           taskTitle: 'Left',
           taskUpdatedAt: '2026-05-02T14:55:00.000Z',
+      taskAssignee: 'toast',
         },
         {
           stepId: 'right',
@@ -284,6 +300,7 @@ describe('renderWalkPositionBlock — DAG fan-out / fan-in', () => {
           taskStatus: 'queued',
           taskTitle: 'Right',
           taskUpdatedAt: '2026-05-02T14:55:00.000Z',
+      taskAssignee: 'toast',
         },
       ],
     });
@@ -313,6 +330,7 @@ describe('renderWalkPositionBlock — DAG fan-out / fan-in', () => {
           taskStatus: 'completed',
           taskTitle: 'A',
           taskUpdatedAt: '2026-05-02T14:46:00.000Z',
+      taskAssignee: 'toast',
         },
         {
           stepId: 'b',
@@ -322,6 +340,7 @@ describe('renderWalkPositionBlock — DAG fan-out / fan-in', () => {
           taskStatus: 'completed',
           taskTitle: 'B',
           taskUpdatedAt: '2026-05-02T14:46:00.000Z',
+      taskAssignee: 'toast',
         },
         {
           stepId: 'merge',
@@ -331,6 +350,7 @@ describe('renderWalkPositionBlock — DAG fan-out / fan-in', () => {
           taskStatus: 'in_progress',
           taskTitle: 'Merge',
           taskUpdatedAt: '2026-05-02T14:55:00.000Z',
+      taskAssignee: 'toast',
         },
       ],
     });
@@ -359,6 +379,7 @@ describe('renderWalkPositionBlock — DAG fan-out / fan-in', () => {
       taskStatus: 'completed' as const,
       taskTitle: id.toUpperCase(),
       taskUpdatedAt: '2026-05-02T14:46:00.000Z',
+      taskAssignee: 'toast',
     }));
     const fanIn = fakeWalkProgress({
       steps: [
@@ -371,6 +392,7 @@ describe('renderWalkPositionBlock — DAG fan-out / fan-in', () => {
           taskStatus: 'in_progress',
           taskTitle: 'Merge',
           taskUpdatedAt: '2026-05-02T14:55:00.000Z',
+      taskAssignee: 'toast',
         },
       ],
     });
@@ -450,6 +472,7 @@ describe('renderWalkPositionBlock — task status framing', () => {
           taskStatus: status,
           taskTitle: 'A',
           taskUpdatedAt: '2026-05-02T14:46:00.000Z',
+      taskAssignee: 'toast',
         },
         {
           stepId: 'b',
@@ -459,6 +482,7 @@ describe('renderWalkPositionBlock — task status framing', () => {
           taskStatus: 'in_progress',
           taskTitle: 'B',
           taskUpdatedAt: '2026-05-02T14:55:00.000Z',
+      taskAssignee: 'toast',
         },
       ],
     });
