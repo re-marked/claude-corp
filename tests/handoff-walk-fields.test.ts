@@ -578,6 +578,111 @@ describe('buildWtfOutput — successor sees walk continuity in handoff block', (
     }
   });
 
+  it('renders explicit per-step status when any step is non-completed terminal (Codex P2 round 2 regression)', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // walkCompletedSteps captures all TERMINAL-status steps via
+      // isTerminal — completed, failed, rejected, cancelled. Earlier
+      // draft labeled them all "Predecessor completed" — would have
+      // told successors a failed step was completed. Now disambiguates:
+      //   all-completed → terse "Predecessor completed: X, Y."
+      //   mixed         → explicit "Predecessor steps: X (completed), Y (failed)."
+      createChit(corpRoot, {
+        type: 'handoff',
+        scope: 'agent:successor',
+        createdBy: 'toast',
+        body: '',
+        fields: {
+          handoff: {
+            predecessorSession: 'toast-1',
+            currentStep: 'chit-t-current',
+            completed: ['some prose'],
+            nextAction: 'recover',
+            walkBlueprintName: 'ship-feature',
+            walkStepId: 'recovery',
+            walkStepIndex: 4,
+            walkTotalSteps: 5,
+            walkCompletedSteps: [
+              { stepId: 'pick-up', taskId: 'chit-t-1', status: 'completed', completedAt: null },
+              { stepId: 'design', taskId: 'chit-t-2', status: 'failed', completedAt: null },
+              { stepId: 'attempt', taskId: 'chit-t-3', status: 'cancelled', completedAt: null },
+            ],
+          },
+        },
+      });
+
+      const result = buildWtfOutput({
+        corpRoot,
+        corpName: 'test-corp',
+        agentSlug: 'successor',
+        displayName: 'Copper',
+        rank: 'worker',
+        kind: 'employee',
+        roleId: 'backend-engineer',
+        workspacePath: join(corpRoot, 'agents', 'successor'),
+        generatedAt: '2026-05-02T15:00:00.000Z',
+        now: new Date('2026-05-02T15:00:00.000Z'),
+        consumeHandoff: false,
+      });
+
+      // Per-step status framing: each step's status visible.
+      expect(result.header).toContain('Predecessor steps: pick-up (completed), design (failed), attempt (cancelled)');
+      // Critically: NOT the misleading "Predecessor completed:" framing.
+      expect(result.header).not.toContain('Predecessor completed: pick-up');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('keeps terse "Predecessor completed" framing when all shown steps are completed (common case)', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // The dominant case in healthy walks — all shown steps reached
+      // terminal-success. Terse render preserved.
+      createChit(corpRoot, {
+        type: 'handoff',
+        scope: 'agent:successor',
+        createdBy: 'toast',
+        body: '',
+        fields: {
+          handoff: {
+            predecessorSession: 'toast-1',
+            currentStep: 'chit-t-current',
+            completed: ['ok'],
+            nextAction: 'continue',
+            walkBlueprintName: 'ship-feature',
+            walkStepId: 'implement',
+            walkStepIndex: 3,
+            walkTotalSteps: 5,
+            walkCompletedSteps: [
+              { stepId: 'a', taskId: 'chit-t-a', status: 'completed', completedAt: null },
+              { stepId: 'b', taskId: 'chit-t-b', status: 'completed', completedAt: null },
+            ],
+          },
+        },
+      });
+
+      const result = buildWtfOutput({
+        corpRoot,
+        corpName: 'test-corp',
+        agentSlug: 'successor',
+        displayName: 'Copper',
+        rank: 'worker',
+        kind: 'employee',
+        roleId: 'backend-engineer',
+        workspacePath: join(corpRoot, 'agents', 'successor'),
+        generatedAt: '2026-05-02T15:00:00.000Z',
+        now: new Date('2026-05-02T15:00:00.000Z'),
+        consumeHandoff: false,
+      });
+
+      expect(result.header).toContain('Predecessor completed: a, b');
+      expect(result.header).not.toContain('Predecessor steps:');
+    } finally {
+      cleanup();
+    }
+  });
+
   it('truncates completedSteps with "+N more" when over cap', () => {
     const { corpRoot, cleanup } = makeCorp();
     try {

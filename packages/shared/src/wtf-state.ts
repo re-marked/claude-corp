@@ -192,9 +192,28 @@ function renderHandoffWalkSummary(chit: Chit<'handoff'>): string | null {
     const completedCap = 3;
     const shown = completedSteps.slice(0, completedCap);
     const overflow = completedSteps.length - shown.length;
-    const ids = shown.map((s) => s.stepId).join(', ');
     const overflowSuffix = overflow > 0 ? `, +${overflow} more` : '';
-    completedPart = `Predecessor completed: ${ids}${overflowSuffix}.`;
+    // Codex P2 review on PR #210: walkCompletedSteps captures all
+    // TERMINAL-status steps via isTerminal — that includes failed,
+    // rejected, cancelled — not just completed. Earlier draft said
+    // "Predecessor completed: <ids>" for all of them, telling
+    // successors a failed step was completed. Materially misleading
+    // during handoff (successor may pick up assuming success, miss
+    // the retry/recovery decision).
+    //
+    // Fix: when all steps are terminal-success, keep the terse
+    // "completed" framing (the dominant case in healthy walks).
+    // When ANY step is non-completed terminal, switch to explicit
+    // per-step status framing so the successor sees exactly which
+    // steps reached which terminal state.
+    const allCompleted = shown.every((s) => s.status === 'completed');
+    if (allCompleted) {
+      const ids = shown.map((s) => s.stepId).join(', ');
+      completedPart = `Predecessor completed: ${ids}${overflowSuffix}.`;
+    } else {
+      const items = shown.map((s) => `${s.stepId} (${s.status})`).join(', ');
+      completedPart = `Predecessor steps: ${items}${overflowSuffix}.`;
+    }
   }
 
   return `Walk continuity: ${positionPart}. ${completedPart}`;
