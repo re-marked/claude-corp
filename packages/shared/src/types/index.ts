@@ -60,6 +60,7 @@ export type {
   ObservationFields,
   CasketFields,
   HandoffFields,
+  HandoffWalkCompletedStep,
   DispatchContextFields,
   PreBrainEntryFields,
   StepLogFields,

@@ -489,6 +489,30 @@ export interface CasketFields {
   sessionCount?: number;
 }
 
+/**
+ * Project 2.2.2 — single completed step in a handoff's walk snapshot.
+ * Embedded in HandoffFields.walkCompletedSteps so the successor's wtf
+ * header can render structured "predecessor finished steps 1 + 2"
+ * context instead of relying solely on the prose handoff XML.
+ *
+ * `status` is the WORKflowStatus on the task chit at handoff snapshot
+ * time. Typically 'completed' but can also be terminal-failures
+ * ('failed' / 'rejected' / 'cancelled') when the predecessor finished
+ * walking past those steps without recovery (rare but legal — terminal-
+ * failure cascades the rest of the chain to blocked but the snapshot
+ * is honest about what reached terminal state).
+ */
+export interface HandoffWalkCompletedStep {
+  /** Step id within the blueprint (e.g. 'pick-up-task'). */
+  readonly stepId: string;
+  /** Task chit id for that step, or null when no task was found at handoff time (data drift). */
+  readonly taskId: string | null;
+  /** Task workflowStatus snapshot at handoff time. */
+  readonly status: TaskWorkflowStatus;
+  /** ISO timestamp from task.updatedAt (proxy for completion time). Null when not resolvable. */
+  readonly completedAt: string | null;
+}
+
 export interface HandoffFields {
   /** Session id of the predecessor that wrote this handoff (e.g. "toast-17"). */
   predecessorSession: string;
@@ -504,6 +528,34 @@ export interface HandoffFields {
   sandboxState?: string | null;
   /** Free-form notes. */
   notes?: string | null;
+  /**
+   * Project 2.2.2 — walk-position snapshot at handoff time.
+   * Populated by audit's `promotePendingHandoff` when the predecessor's
+   * task was walk-shaped (cast from a blueprint with the
+   * `blueprint:<name>` + `blueprint-step:<id>` tags). Successor's wtf
+   * header reads these to render structured walk context — "you're
+   * picking up at step 4 of 7 of `ship-feature`; predecessor completed
+   * steps 1, 2, 3" — making mid-walk substitute pickup clean.
+   *
+   * All five fields are optional + nullable so existing handoff chits
+   * (pre-2.2.2 or ad-hoc tasks) validate unchanged. Successor falls
+   * back to the existing prose handoff XML alone when these are
+   * absent — graceful degradation.
+   *
+   * Snapshot semantics: these fields capture the walk state AT
+   * HANDOFF MOMENT, not the current walk state. If the successor
+   * picks up days later and the walk has advanced (other agents
+   * working parallel branches, etc.), the wtf header reads these
+   * fields for "what predecessor saw" while the rest of the walk
+   * surface (visibility from 2.2.1) reads live state.
+   */
+  walkBlueprintName?: string | null;
+  walkStepId?: string | null;
+  /** 1-based step index in the blueprint's steps array. Human display. */
+  walkStepIndex?: number | null;
+  walkTotalSteps?: number | null;
+  /** Steps that reached terminal status by handoff snapshot time, in walk-declaration order. */
+  walkCompletedSteps?: readonly HandoffWalkCompletedStep[] | null;
 }
 
 export interface DispatchContextFields {
