@@ -102,7 +102,7 @@ describe('composeSystemMessage — wtf prepend (0.7.2)', () => {
     createChit(corpRoot, {
       type: 'casket',
       scope: 'agent:ceo',
-      id: 'chit-cask-ceo',
+      id: 'casket-ceo',
       createdBy: 'ceo',
       fields: { casket: { currentStep: task.id } },
     });

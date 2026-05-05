@@ -56,6 +56,21 @@ export interface WtfHeaderOpts {
   generatedAt: string;
   /** Current task from Casket.current_step, if any. */
   currentTask?: WtfCurrentTask;
+  /**
+   * Project 2.2.1 — pre-rendered walk-position block from
+   * walk-render.ts. Rendered above the current-task line when present
+   * (one of three states: walk-shaped+spec, walk-shaped+audit-degraded,
+   * or ad-hoc one-liner). Caller (wtf-state orchestrator) computes
+   * this by calling getWalkPosition + getWalkProgress on the agent's
+   * current task chit and passing the result through
+   * renderWalkPositionBlock.
+   *
+   * Empty/absent skips the section — typically when there's no
+   * current task at all (Casket idle). When current task exists, the
+   * block is always present (renderer handles ad-hoc one-liner +
+   * walk-shaped multi-line block uniformly).
+   */
+  walkBlock?: string;
   /** Predecessor session's WORKLOG handoff XML. Employee-only; ignored for Partners. */
   handoffXml?: string;
   /** Inbox summary (counts + optional per-tier peeks). */
@@ -71,6 +86,14 @@ export function buildWtfHeader(opts: WtfHeaderOpts): string {
   parts.push(identityLine(opts));
   parts.push(workspaceLine(opts));
   parts.push('');
+  // Project 2.2.1 — walk block above current-task line when caller
+  // supplied one. Both surfaces (walk-shaped multi-line + ad-hoc
+  // one-liner) flow through this single opt. Empty/absent → skip;
+  // typically only when no current task exists.
+  if (opts.walkBlock && opts.walkBlock.trim().length > 0) {
+    parts.push(opts.walkBlock);
+    parts.push('');
+  }
   parts.push(currentTaskBlock(opts));
   parts.push('');
   parts.push(inboxBlock(opts.inboxSummary));

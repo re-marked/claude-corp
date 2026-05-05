@@ -432,6 +432,14 @@ export type {
   CheckExpectedOutputOpts,
 } from './walk.js';
 
+// Walk-position renderer — Project 2.2.1. Pure formatter that
+// converts walk read API output into the string block surfaced in
+// the wtf header (and any future surface that wants the same shape).
+// Three rendering states: walk-shaped with full spec, walk-shaped
+// with audit-degraded step (pre-spec contract), genuinely-ad-hoc.
+export { renderWalkPositionBlock } from './walk-render.js';
+export type { RenderWalkInput } from './walk-render.js';
+
 // Blueprint lookup — Project 1.8 PR 3. Centralizes name → chit resolution
 // with scope precedence, so every CLI command + Sexton's patrol cooking
 // uses one consistent lookup path.

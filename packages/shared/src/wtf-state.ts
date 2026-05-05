@@ -15,7 +15,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { findChitById, queryChits } from './chits.js';
+import { findChitById, queryChits, casketChitId } from './chits.js';
 import type { Chit, HandoffFields } from './types/chit.js';
 import type { Member } from './types/member.js';
 import { buildCorpMd, type CorpMdKind, type CorpMdOpts } from './templates/corp-md.js';
@@ -27,6 +27,8 @@ import {
   type WtfInboxSummary,
 } from './templates/wtf-header.js';
 import { peekLatestHandoffChit, consumeHandoffChit } from './audit/handoff-promotion.js';
+import { getWalkPosition, getWalkProgress } from './walk.js';
+import { renderWalkPositionBlock } from './walk-render.js';
 
 // ─── State resolution (pure within each call; degrades on failure) ──
 
@@ -43,7 +45,7 @@ export function resolveCurrentTask(
   corpRoot: string,
   agentSlug: string,
 ): WtfCurrentTask | undefined {
-  const casketId = `chit-cask-${agentSlug}`;
+  const casketId = casketChitId(agentSlug);
   let casket: Chit | null = null;
   try {
     const hit = findChitById(corpRoot, casketId);
@@ -64,6 +66,87 @@ export function resolveCurrentTask(
     const title =
       (taskHit.chit.fields as { task: { title: string } }).task?.title ?? currentStepId;
     return { chitId: currentStepId, title };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Project 2.2.1 — resolve the walk-position block for the agent's
+ * current task. Returns a pre-rendered string suitable for splicing
+ * into the wtf header (`opts.walkBlock`), or undefined when there's
+ * no current task (Casket idle / no-task-chit).
+ *
+ * The returned string handles all three rendering states uniformly:
+ *   - Walk-shaped + full spec: multi-line block.
+ *   - Walk-shaped + audit-degraded step: same block + tag suffix.
+ *   - Genuinely ad-hoc (no blueprint linkage): one-liner.
+ *
+ * Pipeline:
+ *   casket → currentStep → task chit → getWalkPosition →
+ *     getWalkProgress (only if walkPos != null) →
+ *     renderWalkPositionBlock(...)
+ *
+ * Silent on failure — the wtf header degrades to "Current task: <id>"
+ * without the walk block when any step fails. Walk surface is best-
+ * effort orientation; corruption shouldn't block the agent's session.
+ */
+export function resolveWalkBlock(
+  corpRoot: string,
+  agentSlug: string,
+  now: Date,
+): string | undefined {
+  const casketId = casketChitId(agentSlug);
+  let casket: Chit | null = null;
+  try {
+    const hit = findChitById(corpRoot, casketId);
+    casket = hit?.chit ?? null;
+  } catch {
+    return undefined;
+  }
+
+  if (!casket || casket.type !== 'casket') return undefined;
+
+  const currentStepId = (casket.fields as { casket: { currentStep: string | null } }).casket
+    ?.currentStep;
+  if (!currentStepId) return undefined;
+
+  let taskChit: Chit<'task'>;
+  try {
+    const taskHit = findChitById(corpRoot, currentStepId);
+    if (!taskHit || taskHit.chit.type !== 'task') return undefined;
+    taskChit = taskHit.chit as Chit<'task'>;
+  } catch {
+    return undefined;
+  }
+
+  // getWalkPosition handles all five null-return cases internally
+  // (ad-hoc / orphan / null blueprintId / blueprint deleted / step
+  // removed). Renderer takes null for ad-hoc and produces the
+  // one-liner.
+  let walkPos: ReturnType<typeof getWalkPosition>;
+  try {
+    walkPos = getWalkPosition(taskChit, corpRoot);
+  } catch {
+    walkPos = null;
+  }
+
+  let walkProgress: ReturnType<typeof getWalkProgress> = null;
+  if (walkPos !== null) {
+    try {
+      walkProgress = getWalkProgress(walkPos.contract, corpRoot);
+    } catch {
+      walkProgress = null;
+    }
+  }
+
+  try {
+    return renderWalkPositionBlock({
+      walkPos,
+      walkProgress,
+      currentSlug: agentSlug,
+      now,
+    });
   } catch {
     return undefined;
   }
@@ -353,6 +436,11 @@ export function buildWtfOutput(opts: WtfOutputOpts): WtfOutput {
   const corpMdPath = join(opts.workspacePath, 'CORP.md');
 
   const currentTask = resolveCurrentTask(opts.corpRoot, opts.agentSlug);
+  // Project 2.2.1 — walk block for the wtf header. Pre-rendered so
+  // the template module stays pure (no walk imports). Silent on
+  // failure; header degrades to current-task-line-only when walk
+  // resolution returns undefined.
+  const walkBlock = resolveWalkBlock(opts.corpRoot, opts.agentSlug, opts.now);
   // Project 1.6: handoff sourced from the `handoff` chit, not
   // WORKLOG.md's `<handoff>` XML block. Dredge fragment deletion
   // (commit 4) makes wtf the single reader; consumption semantics
@@ -396,6 +484,7 @@ export function buildWtfOutput(opts: WtfOutputOpts): WtfOutput {
     corpMdPath,
     generatedAt: opts.generatedAt,
     currentTask,
+    ...(walkBlock !== undefined ? { walkBlock } : {}),
     handoffXml,
     inboxSummary,
   });

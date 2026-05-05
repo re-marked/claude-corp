@@ -298,6 +298,17 @@ export interface WalkStep {
   readonly taskTitle: string | null;
   /** ISO timestamp of the task chit's last update, null when no task. Useful for "recent activity" surfaces. */
   readonly taskUpdatedAt: string | null;
+  /**
+   * Task's assignee field (slot-id or role-id; whichever was last
+   * written). Surfaced from TaskFields.assignee so renderers can
+   * frame "by you" attribution against the agent's current slug.
+   * Null when no task. Distinct from step.assigneeRole — the
+   * blueprint declares the ROLE; the task's assignee is what the
+   * cast / hand pipeline most recently wrote (resolves to a slot
+   * once a specific Employee picks up the work, or stays as the
+   * role-id while sitting in the role queue).
+   */
+  readonly taskAssignee: string | null;
 }
 
 /**
@@ -377,6 +388,7 @@ export function getWalkProgress(
       taskStatus: taskFields?.workflowStatus ?? null,
       taskTitle: taskFields?.title ?? null,
       taskUpdatedAt: matchedTask?.updatedAt ?? null,
+      taskAssignee: taskFields?.assignee ?? null,
     };
   });
 
