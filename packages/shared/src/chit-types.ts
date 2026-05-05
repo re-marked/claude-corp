@@ -336,6 +336,44 @@ function validateHandoff(fields: unknown): void {
   if (f.openQuestion !== undefined) requireStringOrNull(f.openQuestion, 'handoff.openQuestion');
   if (f.sandboxState !== undefined) requireStringOrNull(f.sandboxState, 'handoff.sandboxState');
   if (f.notes !== undefined) requireStringOrNull(f.notes, 'handoff.notes');
+  // Project 2.2.2 — walk-position snapshot fields. Optional + nullable
+  // so existing handoff chits (pre-2.2.2 or ad-hoc) validate unchanged.
+  // Pure structural checks here; semantic correctness (e.g. stepIndex
+  // matches walkCompletedSteps array) is the audit-promotion's
+  // responsibility at write time, not the validator's.
+  if (f.walkBlueprintName !== undefined) {
+    requireStringOrNull(f.walkBlueprintName, 'handoff.walkBlueprintName');
+  }
+  if (f.walkStepId !== undefined) {
+    requireStringOrNull(f.walkStepId, 'handoff.walkStepId');
+  }
+  if (f.walkStepIndex !== undefined && f.walkStepIndex !== null) {
+    requireInteger(f.walkStepIndex, 'handoff.walkStepIndex', 1, 1_000_000);
+  }
+  if (f.walkTotalSteps !== undefined && f.walkTotalSteps !== null) {
+    requireInteger(f.walkTotalSteps, 'handoff.walkTotalSteps', 1, 1_000_000);
+  }
+  if (f.walkCompletedSteps !== undefined && f.walkCompletedSteps !== null) {
+    if (!Array.isArray(f.walkCompletedSteps)) {
+      throw new ChitValidationError(
+        'handoff.walkCompletedSteps must be an array (or null)',
+        'handoff.walkCompletedSteps',
+      );
+    }
+    f.walkCompletedSteps.forEach((entry, i) => {
+      const path = `handoff.walkCompletedSteps[${i}]`;
+      const e = requireObject(entry, path) as Partial<{
+        stepId: unknown;
+        taskId: unknown;
+        status: unknown;
+        completedAt: unknown;
+      }>;
+      requireNonEmptyString(e.stepId, `${path}.stepId`);
+      requireStringOrNull(e.taskId, `${path}.taskId`);
+      requireNonEmptyString(e.status, `${path}.status`);
+      requireStringOrNull(e.completedAt, `${path}.completedAt`);
+    });
+  }
 }
 
 function validateDispatchContext(fields: unknown): void {

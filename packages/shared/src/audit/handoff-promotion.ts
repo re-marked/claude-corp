@@ -47,10 +47,11 @@ import {
   chitScopeFromPath,
 } from '../chits.js';
 import { advanceCurrentStep, getCurrentStep } from '../casket.js';
-import { validateTransition, TaskTransitionError } from '../task-state-machine.js';
+import { validateTransition, TaskTransitionError, isTerminal } from '../task-state-machine.js';
 import { advanceChain, nextReadyTask, type DependentDelta } from '../chain.js';
 import { queryChits } from '../chits.js';
-import type { Chit, HandoffFields, TaskFields } from '../types/chit.js';
+import type { Chit, HandoffFields, HandoffWalkCompletedStep, TaskFields } from '../types/chit.js';
+import { getWalkPosition, getWalkProgress } from '../walk.js';
 
 export interface PendingHandoffPayload {
   predecessorSession: string;
@@ -174,6 +175,16 @@ export function promotePendingHandoff(
   // 3. Handoff chit. Ephemeral; the 0.6 lifecycle scanner destroys
   // unconsumed ones, keeping the per-agent chit store tidy across
   // many successful handoffs.
+  //
+  // Project 2.2.2 — walk-position snapshot. When the predecessor's
+  // task was walk-shaped (cast from a blueprint), capture the walk's
+  // current state at handoff moment so the successor's wtf header
+  // can render structured "you're picking up at step N of M of
+  // <walk>; predecessor completed steps X, Y" context. Resolution
+  // is best-effort — any failure (no current task, deleted blueprint,
+  // ad-hoc task) leaves the snapshot fields absent, falling back to
+  // the existing prose handoff XML alone.
+  const walkSnapshot = resolveWalkSnapshotForHandoff(corpRoot, currentStepId);
   try {
     const chitFields: HandoffFields = {
       predecessorSession: payload.predecessorSession,
@@ -183,6 +194,7 @@ export function promotePendingHandoff(
       openQuestion: payload.openQuestion,
       sandboxState: payload.sandboxState,
       notes: payload.notes,
+      ...(walkSnapshot ?? {}),
     };
     const chit = createChit(corpRoot, {
       type: 'handoff',
@@ -503,6 +515,80 @@ export function revertTaskFromUnderReview(
   });
 
   return { reverted: true, taskId: chit.id };
+}
+
+// ─── Walk snapshot helper — Project 2.2.2 ──────────────────────────
+
+/**
+ * Resolve the walk-position snapshot for the predecessor's current
+ * task at handoff time. Returns the partial HandoffFields walk
+ * fields when the task is walk-shaped, or null when ad-hoc / data
+ * drift / any resolution failure.
+ *
+ * Best-effort: silent on every failure mode (missing task, deleted
+ * blueprint, getWalkPosition returning null for any of its five
+ * documented null cases). When this returns null, the handoff chit
+ * skips the walk fields entirely — successor falls back to the
+ * existing prose handoff XML.
+ *
+ * Returned shape mirrors the optional walk-* fields on HandoffFields
+ * so the caller can spread the result into the chit-write payload
+ * without re-typing each field.
+ */
+function resolveWalkSnapshotForHandoff(
+  corpRoot: string,
+  currentStepId: string | null,
+): Partial<HandoffFields> | null {
+  if (!currentStepId) return null;
+
+  let taskChit: Chit<'task'>;
+  try {
+    const hit = findChitById(corpRoot, currentStepId);
+    if (!hit || hit.chit.type !== 'task') return null;
+    taskChit = hit.chit as Chit<'task'>;
+  } catch {
+    return null;
+  }
+
+  let walkPos: ReturnType<typeof getWalkPosition>;
+  try {
+    walkPos = getWalkPosition(taskChit, corpRoot);
+  } catch {
+    return null;
+  }
+  if (walkPos === null) return null;
+
+  let walkProgress: ReturnType<typeof getWalkProgress> = null;
+  try {
+    walkProgress = getWalkProgress(walkPos.contract, corpRoot);
+  } catch {
+    walkProgress = null;
+  }
+
+  // Build the completed-steps array. Without progress, we can't
+  // enumerate prior steps' status — emit just the position fields
+  // (still load-bearing for "you're at step 4 of 7" framing) and
+  // leave walkCompletedSteps null. With progress, filter steps to
+  // those that reached terminal status (success or failure variants).
+  const completedSteps: HandoffWalkCompletedStep[] | null =
+    walkProgress === null
+      ? null
+      : walkProgress.steps
+          .filter((s) => s.taskStatus !== null && isTerminal(s.taskStatus))
+          .map((s) => ({
+            stepId: s.stepId,
+            taskId: s.taskId,
+            status: s.taskStatus!,
+            completedAt: s.taskUpdatedAt,
+          }));
+
+  return {
+    walkBlueprintName: walkPos.blueprintName,
+    walkStepId: walkPos.stepId,
+    walkStepIndex: walkPos.stepIndex,
+    walkTotalSteps: walkPos.totalSteps,
+    walkCompletedSteps: completedSteps,
+  };
 }
 
 // ─── Consumer side — Project 1.6 ───────────────────────────────────
