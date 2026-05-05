@@ -233,7 +233,7 @@ describe('cmdWtf', () => {
       createChit(tmpCorpRoot, {
         type: 'casket',
         scope: 'agent:ceo',
-        id: 'chit-cask-ceo',
+        id: 'casket-ceo',
         createdBy: 'ceo',
         fields: { casket: { currentStep: task.id } },
       });
@@ -247,7 +247,7 @@ describe('cmdWtf', () => {
       createChit(tmpCorpRoot, {
         type: 'casket',
         scope: 'agent:ceo',
-        id: 'chit-cask-ceo',
+        id: 'casket-ceo',
         createdBy: 'ceo',
         fields: { casket: { currentStep: null } },
       });
@@ -262,7 +262,7 @@ describe('cmdWtf', () => {
       createChit(tmpCorpRoot, {
         type: 'casket',
         scope: 'agent:ceo',
-        id: 'chit-cask-ceo',
+        id: 'casket-ceo',
         createdBy: 'ceo',
         fields: { casket: { currentStep: 'chit-t-deadbeef' } },
       });
@@ -293,7 +293,7 @@ describe('cmdWtf', () => {
       const casketDir = join(tmpCorpRoot, 'agents', 'ceo', 'chits', 'casket');
       mkdirSync(casketDir, { recursive: true });
       writeFileSync(
-        join(casketDir, 'chit-cask-ceo.md'),
+        join(casketDir, 'casket-ceo.md'),
         '---\nthis is not valid yaml :::\nfields:\n  casket:\n    missing_quote: "unterminated\n---\n',
         'utf-8',
       );
