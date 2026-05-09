@@ -327,13 +327,11 @@ async function runHookPath(
     agentDisplayName: member.displayName,
   };
 
-  const decision = runAudit(auditInput);
+  const auditDecision = runAudit(auditInput);
 
   // Project 2.3 — walk-aware check. Runs IFF currentTask is a real
   // task chit (idle / substrate-gap paths skip — runAudit already
-  // approved with nothing to gate). Outcome is observed + logged here
-  // but does NOT yet alter `decision`; the enforcement step lands in
-  // a separate commit so the decision flip is isolated and revertable.
+  // approved with nothing to gate).
   let walkCheck: WalkCheckOutcome | null = null;
   if (currentTask) {
     try {
@@ -353,12 +351,37 @@ async function runHookPath(
     logWalkCheckEvent(corpRoot, slug, currentTask?.id ?? null, walkCheck);
   }
 
+  // Project 2.3 enforcement — when walk-check is `unmet`, override the
+  // decision to block (or extend an existing block reason). Three
+  // cases vs runAudit's verdict:
+  //   approve + unmet  → block with walk teaching message
+  //   block   + unmet  → keep the AC reason, append walk teaching
+  //   *       + unable → unchanged (approved-with-warning; the unable
+  //                       entry is already in audit-checks.jsonl for
+  //                       Sexton's degraded-infra detection).
+  // unable-to-check deliberately does NOT block. Transient infra
+  // (git missing, network down) is the wrong place to wall an agent
+  // out of `done` — that's a Sexton-patrol signal, not an enforcement
+  // signal. The trade-off is documented in expected-output.ts.
+  const decision: AuditDecision =
+    walkCheck && walkCheck.status === 'unmet'
+      ? {
+          decision: 'block',
+          reason:
+            auditDecision.decision === 'block' && auditDecision.reason
+              ? `${auditDecision.reason}\n\n---\n\n${walkCheck.teachingMessage}`
+              : walkCheck.teachingMessage,
+        }
+      : auditDecision;
+
   logAuditDecision(corpRoot, slug, decision, {
     event,
     stopHookActive,
     taskId: currentTask?.id,
     tier3Count: openTier3Inbox.length,
     walkCheck: walkCheck ? summarizeWalkCheck(walkCheck) : null,
+    walkCheckEnforced:
+      walkCheck?.status === 'unmet' && auditDecision.decision === 'approve',
   });
 
   if (decision.decision === 'approve') {
