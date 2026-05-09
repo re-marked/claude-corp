@@ -289,6 +289,15 @@ async function runHookPath(
   // the workflow's next step still has nothing to depend on,
   // regardless of whether we can see their tool use.
   let walkCheck: WalkCheckOutcome | null = null;
+  // Honor stopHookActive (anti-loop guard) the same way runAudit does
+  // — if a prior Stop in this cycle already blocked, we approve to
+  // break the loop. Walk-check enforcement that ignored this would
+  // trap genuine "agent tried, can't satisfy" cases (e.g. branch
+  // deleted by a sync) in an infinite block-retry; surfaces via
+  // Sexton's stalled-walk patrol instead. Walk-check still RUNS for
+  // observability — the outcome lands in audit-checks.jsonl so post-
+  // hoc analysis can see what happened — it just doesn't FLIP the
+  // decision when stopHookActive is set.
   if (currentTask) {
     try {
       const workspace = findAgentWorkspace(corpRoot, slug);
@@ -309,12 +318,13 @@ async function runHookPath(
   }
 
   // Walk-check unmet — pre-empt every later path (transcript fail-open,
-  // runAudit, AC evidence). The agent didn't produce the artifact;
-  // block with the teaching message, revert the task back to
+  // runAudit, AC evidence) UNLESS stopHookActive is set (Claude Code's
+  // anti-loop guard; see runAudit). The agent didn't produce the
+  // artifact; block with the teaching message, revert the task back to
   // in_progress so they can self-retry, and emit. No need to read the
   // transcript or invoke the AC engine — walk-check is sufficient
   // signal on its own.
-  if (walkCheck && walkCheck.status === 'unmet') {
+  if (walkCheck && walkCheck.status === 'unmet' && !stopHookActive) {
     const blockDecision: AuditDecision = {
       decision: 'block',
       reason: walkCheck.teachingMessage,
