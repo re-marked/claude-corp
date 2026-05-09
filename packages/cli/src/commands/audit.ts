@@ -281,6 +281,66 @@ async function runHookPath(
   const currentTask = resolveCurrentTask(corpRoot, slug);
   const openTier3Inbox = queryOpenTier3Inbox(corpRoot, slug);
 
+  // Project 2.3 — walk-aware check. Hoisted ABOVE the transcript
+  // fail-open + runAudit pure-engine call because walk-check reads
+  // the chit store + filesystem + git, not the session transcript.
+  // A missing transcript can't excuse a missing expectedOutput
+  // artifact: if the agent didn't produce the chit / branch / file,
+  // the workflow's next step still has nothing to depend on,
+  // regardless of whether we can see their tool use.
+  let walkCheck: WalkCheckOutcome | null = null;
+  if (currentTask) {
+    try {
+      const workspace = findAgentWorkspace(corpRoot, slug);
+      walkCheck = runWalkCheck(corpRoot, currentTask, slug, {
+        cwd: workspace ?? corpRoot,
+      });
+    } catch (err) {
+      // Walk-check failure is OPERATIONAL, not a gating signal — same
+      // fail-open philosophy as the rest of audit. Log + treat as
+      // "no walk-check ran" so subsequent decision logic proceeds
+      // unchanged.
+      logAuditError(corpRoot, slug, err);
+    }
+  }
+
+  if (walkCheck && (walkCheck.status === 'unmet' || walkCheck.status === 'unable-to-check')) {
+    logWalkCheckEvent(corpRoot, slug, currentTask?.id ?? null, walkCheck);
+  }
+
+  // Walk-check unmet — pre-empt every later path (transcript fail-open,
+  // runAudit, AC evidence). The agent didn't produce the artifact;
+  // block with the teaching message, revert the task back to
+  // in_progress so they can self-retry, and emit. No need to read the
+  // transcript or invoke the AC engine — walk-check is sufficient
+  // signal on its own.
+  if (walkCheck && walkCheck.status === 'unmet') {
+    const blockDecision: AuditDecision = {
+      decision: 'block',
+      reason: walkCheck.teachingMessage,
+    };
+    logAuditDecision(corpRoot, slug, blockDecision, {
+      event: 'walk-check-block',
+      taskId: currentTask?.id,
+      walkCheck: summarizeWalkCheck(walkCheck),
+      walkCheckEnforced: true,
+    });
+    try {
+      const revert = revertTaskFromUnderReview(corpRoot, slug);
+      if (revert.reverted || revert.reason) {
+        logAuditDecision(corpRoot, slug, blockDecision, {
+          event: 'block-revert',
+          revertedTaskId: revert.taskId ?? null,
+          revertedReason: revert.reason ?? null,
+        });
+      }
+    } catch (err) {
+      logAuditError(corpRoot, slug, err);
+    }
+    emitDecision(blockDecision);
+    return;
+  }
+
   const transcriptPath =
     typeof hookInput.transcript_path === 'string' ? hookInput.transcript_path : '';
   const transcriptAvailable = Boolean(transcriptPath) && existsSync(transcriptPath);
@@ -294,6 +354,8 @@ async function runHookPath(
   // agents (currentTask === null) don't hit this because there's no
   // evidence gate to fall through to — the engine approves or falls
   // to the tier-3 inbox check, which is independent of transcript.
+  // Walk-check has ALREADY fired above and was met / no-walk / unable
+  // by the time we reach here — unmet returned early.
   if (currentTask !== null && currentTask !== undefined && !transcriptAvailable) {
     logAuditError(
       corpRoot,
@@ -307,7 +369,11 @@ async function runHookPath(
       corpRoot,
       slug,
       { decision: 'approve' },
-      { event: 'transcript-unavailable-fail-open', taskId: currentTask.id },
+      {
+        event: 'transcript-unavailable-fail-open',
+        taskId: currentTask.id,
+        walkCheck: walkCheck ? summarizeWalkCheck(walkCheck) : null,
+      },
     );
     await approveAndMaybePromote(corpRoot, slug);
     return;
@@ -327,61 +393,18 @@ async function runHookPath(
     agentDisplayName: member.displayName,
   };
 
-  const auditDecision = runAudit(auditInput);
+  const decision = runAudit(auditInput);
 
-  // Project 2.3 — walk-aware check. Runs IFF currentTask is a real
-  // task chit (idle / substrate-gap paths skip — runAudit already
-  // approved with nothing to gate).
-  let walkCheck: WalkCheckOutcome | null = null;
-  if (currentTask) {
-    try {
-      const workspace = findAgentWorkspace(corpRoot, slug);
-      walkCheck = runWalkCheck(corpRoot, currentTask, slug, {
-        cwd: workspace ?? corpRoot,
-      });
-    } catch (err) {
-      // Walk-check failure is OPERATIONAL, not a gating signal — same
-      // fail-open philosophy as the rest of audit. Log + treat as
-      // "no walk-check ran" so the decision proceeds unchanged.
-      logAuditError(corpRoot, slug, err);
-    }
-  }
-
-  if (walkCheck && (walkCheck.status === 'unmet' || walkCheck.status === 'unable-to-check')) {
-    logWalkCheckEvent(corpRoot, slug, currentTask?.id ?? null, walkCheck);
-  }
-
-  // Project 2.3 enforcement — when walk-check is `unmet`, override the
-  // decision to block (or extend an existing block reason). Three
-  // cases vs runAudit's verdict:
-  //   approve + unmet  → block with walk teaching message
-  //   block   + unmet  → keep the AC reason, append walk teaching
-  //   *       + unable → unchanged (approved-with-warning; the unable
-  //                       entry is already in audit-checks.jsonl for
-  //                       Sexton's degraded-infra detection).
-  // unable-to-check deliberately does NOT block. Transient infra
-  // (git missing, network down) is the wrong place to wall an agent
-  // out of `done` — that's a Sexton-patrol signal, not an enforcement
-  // signal. The trade-off is documented in expected-output.ts.
-  const decision: AuditDecision =
-    walkCheck && walkCheck.status === 'unmet'
-      ? {
-          decision: 'block',
-          reason:
-            auditDecision.decision === 'block' && auditDecision.reason
-              ? `${auditDecision.reason}\n\n---\n\n${walkCheck.teachingMessage}`
-              : walkCheck.teachingMessage,
-        }
-      : auditDecision;
-
+  // Walk-check fired above and either approved (met / no-spec / no-walk),
+  // logged-and-warned (unable-to-check), or returned early (unmet).
+  // No further enforcement needed here — the AC decision is what we
+  // emit, with walkCheck attached to the log entry for retrospective.
   logAuditDecision(corpRoot, slug, decision, {
     event,
     stopHookActive,
     taskId: currentTask?.id,
     tier3Count: openTier3Inbox.length,
     walkCheck: walkCheck ? summarizeWalkCheck(walkCheck) : null,
-    walkCheckEnforced:
-      walkCheck?.status === 'unmet' && auditDecision.decision === 'approve',
   });
 
   if (decision.decision === 'approve') {
