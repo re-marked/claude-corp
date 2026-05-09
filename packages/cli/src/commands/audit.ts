@@ -50,6 +50,7 @@ import {
   parseTranscript,
   parseTranscriptBeforeCompact,
   runAudit,
+  runWalkCheck,
   getCurrentStep,
   casketExists,
   resolveKind,
@@ -72,6 +73,7 @@ import {
   type HookEventName,
   type Member,
   type CheckpointRecentActivity,
+  type WalkCheckOutcome,
 } from '@claudecorp/shared';
 import { getCorpRoot } from '../client.js';
 import { readFileSync as fsReadSync } from 'node:fs';
@@ -327,11 +329,36 @@ async function runHookPath(
 
   const decision = runAudit(auditInput);
 
+  // Project 2.3 — walk-aware check. Runs IFF currentTask is a real
+  // task chit (idle / substrate-gap paths skip — runAudit already
+  // approved with nothing to gate). Outcome is observed + logged here
+  // but does NOT yet alter `decision`; the enforcement step lands in
+  // a separate commit so the decision flip is isolated and revertable.
+  let walkCheck: WalkCheckOutcome | null = null;
+  if (currentTask) {
+    try {
+      const workspace = findAgentWorkspace(corpRoot, slug);
+      walkCheck = runWalkCheck(corpRoot, currentTask, slug, {
+        cwd: workspace ?? corpRoot,
+      });
+    } catch (err) {
+      // Walk-check failure is OPERATIONAL, not a gating signal — same
+      // fail-open philosophy as the rest of audit. Log + treat as
+      // "no walk-check ran" so the decision proceeds unchanged.
+      logAuditError(corpRoot, slug, err);
+    }
+  }
+
+  if (walkCheck && (walkCheck.status === 'unmet' || walkCheck.status === 'unable-to-check')) {
+    logWalkCheckEvent(corpRoot, slug, currentTask?.id ?? null, walkCheck);
+  }
+
   logAuditDecision(corpRoot, slug, decision, {
     event,
     stopHookActive,
     taskId: currentTask?.id,
     tier3Count: openTier3Inbox.length,
+    walkCheck: walkCheck ? summarizeWalkCheck(walkCheck) : null,
   });
 
   if (decision.decision === 'approve') {
@@ -1065,6 +1092,75 @@ function logAuditDecision(
   } catch {
     /* best-effort observability */
   }
+}
+
+/**
+ * Project 2.3 — append a walk-check event to chits/_log/audit-checks.jsonl.
+ * Called on `unmet` or `unable-to-check` outcomes only; met / no-spec /
+ * no-walk are silent (they're already implicit in the absence of a
+ * log entry). The file is corp-scoped (not per-agent) because Sexton's
+ * stalled-walk patrol reads it across all agents to detect repeated
+ * unable-to-check (degraded infra signal) on the same step.
+ *
+ * Best-effort: any I/O failure is swallowed. The agent's session
+ * ending depends on the audit emit, never on this log write.
+ */
+function logWalkCheckEvent(
+  corpRoot: string,
+  slug: string,
+  taskId: string | null,
+  outcome: WalkCheckOutcome,
+): void {
+  if (outcome.status === 'no-walk' || outcome.status === 'no-spec' || outcome.status === 'met') {
+    return;
+  }
+  try {
+    const path = join(corpRoot, 'chits', '_log', 'audit-checks.jsonl');
+    mkdirSync(dirname(path), { recursive: true });
+    const entry: Record<string, unknown> = {
+      ts: new Date().toISOString(),
+      slug,
+      taskId,
+      stepId: outcome.stepId,
+      blueprintName: outcome.blueprintName,
+      kind: outcome.kind,
+      status: outcome.status,
+    };
+    if (outcome.status === 'unmet') {
+      entry.missing = outcome.missing;
+      // Cap the teaching message preview — the full text already
+      // ships in the audit decision when enforcement lands; here it
+      // is just retrospective context, so a slice keeps the file
+      // grep-friendly across many entries.
+      entry.teachingPreview = outcome.teachingMessage.slice(0, 200);
+    }
+    if (outcome.status === 'unable-to-check') {
+      entry.reason = outcome.reason;
+    }
+    appendFileSync(path, JSON.stringify(entry) + '\n', 'utf-8');
+  } catch {
+    /* best-effort observability — same as logAuditDecision */
+  }
+}
+
+/**
+ * Compact projection of a WalkCheckOutcome for the per-agent
+ * .audit-log.jsonl line. Keeps the log entry small (the full
+ * teaching message lives in audit-checks.jsonl) while still letting
+ * post-hoc analysis filter audit-log entries by walk-check status
+ * without joining the two files.
+ */
+function summarizeWalkCheck(outcome: WalkCheckOutcome): Record<string, unknown> {
+  if (outcome.status === 'no-walk') return { status: 'no-walk' };
+  if (outcome.status === 'no-spec') {
+    return { status: 'no-spec', stepId: outcome.stepId, blueprintName: outcome.blueprintName };
+  }
+  return {
+    status: outcome.status,
+    stepId: outcome.stepId,
+    blueprintName: outcome.blueprintName,
+    kind: outcome.kind,
+  };
 }
 
 function logAuditError(corpRoot: string, slug: string, err: unknown): void {
