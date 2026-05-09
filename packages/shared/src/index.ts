@@ -489,6 +489,8 @@ export {
   buildPreCompactInstructions,
   buildCheckpointObservation,
   extractLatestUsageFromTranscript,
+  runWalkCheck,
+  renderTeachingMessage,
 } from './audit/index.js';
 export type {
   HookEventName,
@@ -510,6 +512,7 @@ export type {
   CheckpointChitSpec,
   CheckpointRecentActivity,
   TranscriptUsageSnapshot,
+  WalkCheckOutcome,
 } from './audit/index.js';
 
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
