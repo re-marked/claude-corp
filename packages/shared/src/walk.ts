@@ -487,6 +487,20 @@ export interface CheckExpectedOutputOpts {
   /** Per-shell-out timeout in milliseconds. Default: 10_000. */
   readonly timeoutMs?: number;
   /**
+   * Project 2.3 P2 — ceiling for the git-root walk-up in branch-exists
+   * + commit-on-branch checks. Default: corpRoot. Override when the
+   * agent's workspace lives OUTSIDE corpRoot (e.g. members.json with
+   * an absolute agentDir under /tmp or an external worktree); without
+   * the override, findGitRoot rejects any cwd outside corpRoot before
+   * running git, silently downgrading enforcement to unable-to-check.
+   *
+   * Audit derives this: when workspace is absolute and outside
+   * corpRoot, ceiling = workspace; else ceiling = corpRoot. Keeps the
+   * "don't walk up to an unrelated parent .git on the dev box"
+   * invariant while letting supported absolute workspaces self-bound.
+   */
+  readonly ceiling?: string;
+  /**
    * Project 2.3 — staged handoff payload from `.pending-handoff.json`.
    * Audit calls `checkExpectedOutput` BEFORE handoff promotion writes
    * `task.output` to the chit, so `task-output-nonempty` would always
@@ -896,10 +910,10 @@ function checkBranchExists(
   if (!existsSync(cwd)) {
     return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
   }
-  if (findGitRoot(cwd, corpRoot) === null) {
+  if (findGitRoot(cwd, opts.ceiling ?? corpRoot) === null) {
     return {
       status: 'unable-to-check',
-      reason: `cwd is not inside a git repository scoped to corpRoot: ${cwd}`,
+      reason: `cwd is not inside a git repository scoped to the configured ceiling: ${cwd}`,
     };
   }
   const result = safeGitExec(['branch', '--list', spec.branchPattern], {
@@ -976,10 +990,10 @@ function checkCommitOnBranch(
   if (!existsSync(cwd)) {
     return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
   }
-  if (findGitRoot(cwd, corpRoot) === null) {
+  if (findGitRoot(cwd, opts.ceiling ?? corpRoot) === null) {
     return {
       status: 'unable-to-check',
-      reason: `cwd is not inside a git repository scoped to corpRoot: ${cwd}`,
+      reason: `cwd is not inside a git repository scoped to the configured ceiling: ${cwd}`,
     };
   }
   const useSinceClaim = spec.sinceClaim !== false; // default true

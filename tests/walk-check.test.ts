@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   runWalkCheck,
   renderTeachingMessage,
+  checkExpectedOutput,
   createChit,
   castFromBlueprint,
   findChitById,
@@ -389,7 +391,74 @@ describe('runWalkCheck — task-output-nonempty pending-handoff hint', () => {
   });
 });
 
-// ─── 5. Defensive: shape divergence ────────────────────────────────
+// ─── 5. ceiling opt — workspaces outside corpRoot ──────────────────
+
+describe('CheckExpectedOutputOpts.ceiling — supports workspaces outside corpRoot', () => {
+  it('honors ceiling override so external workspace can satisfy branch-exists', () => {
+    // Codex P2 on PR #211: when members.json stores an absolute
+    // agentDir outside corpRoot, branch-exists / commit-on-branch
+    // would unable-to-check because findGitRoot rejects any cwd
+    // outside its corpRoot ceiling. The ceiling opt lets the caller
+    // self-bound to the workspace itself.
+    const { corpRoot, cleanup: cleanupCorp } = makeCorp();
+    const repo = mkdtempSync(join(tmpdir(), 'walk-check-ceiling-'));
+    try {
+      execFileSync('git', ['init', '--initial-branch=main'], { cwd: repo, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.email', 'test@test'], { cwd: repo, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.name', 'test'], { cwd: repo, stdio: 'ignore' });
+      writeFileSync(join(repo, 'README.md'), '# test\n');
+      execFileSync('git', ['add', '.'], { cwd: repo, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: repo, stdio: 'ignore' });
+      execFileSync('git', ['checkout', '-b', 'feat/external'], { cwd: repo, stdio: 'ignore' });
+
+      const fakeTask = {
+        id: 'chit-t-test',
+        type: 'task' as const,
+        status: 'active' as const,
+        createdAt: '2026-05-01T10:00:00.000Z',
+        updatedAt: '2026-05-01T10:00:00.000Z',
+        createdBy: 'coder',
+        tags: [],
+        fields: { task: { title: 'external work', priority: 'normal' as const } },
+      } as Chit<'task'>;
+
+      // WITHOUT ceiling override (defaults to corpRoot): findGitRoot
+      // rejects because repo is outside corpRoot → unable-to-check.
+      const noCeiling = checkExpectedOutput(
+        { kind: 'branch-exists', branchPattern: 'feat/external' },
+        fakeTask,
+        corpRoot,
+        { cwd: repo },
+      );
+      expect(noCeiling.status).toBe('unable-to-check');
+
+      // WITH ceiling = repo: walk-up runs in the external repo and
+      // finds .git → enforcement holds.
+      const withCeiling = checkExpectedOutput(
+        { kind: 'branch-exists', branchPattern: 'feat/external' },
+        fakeTask,
+        corpRoot,
+        { cwd: repo, ceiling: repo },
+      );
+      expect(withCeiling.status).toBe('met');
+
+      // Negative case: same ceiling, branch absent → unmet (real
+      // enforcement signal, not the unable-to-check downgrade).
+      const withCeilingMissing = checkExpectedOutput(
+        { kind: 'branch-exists', branchPattern: 'feat/never-existed' },
+        fakeTask,
+        corpRoot,
+        { cwd: repo, ceiling: repo },
+      );
+      expect(withCeilingMissing.status).toBe('unmet');
+    } finally {
+      cleanupCorp();
+      try { rmSync(repo, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+  });
+});
+
+// ─── 6. Defensive: shape divergence ────────────────────────────────
 
 describe('renderTeachingMessage — defensive paths', () => {
   it('multi with mismatched evidence falls back to kind enumeration', () => {
