@@ -242,13 +242,17 @@ describe('renderTeachingMessage — per ExpectedOutputKind', () => {
     expect(msg).toContain('cc-cli chit tag chit-t-test +reviewed');
   });
 
-  it('task-output-nonempty teaching mentions the field + cc-cli done --output', () => {
+  it('task-output-nonempty teaching mentions the field + the actual cc-cli done flag', () => {
+    // Codex P2 on PR #211: --output doesn't exist on cc-cli done; the
+    // real flag is --completed (multi-valued). The teaching has to
+    // name the actual flag or the agent has no recovery path.
     const msg = renderTeachingMessage({
       ...baseCtx,
       spec: { kind: 'task-output-nonempty' },
     });
     expect(msg).toContain('task.output');
-    expect(msg).toContain('cc-cli done --output');
+    expect(msg).toContain('--completed');
+    expect(msg).not.toContain('--output');
   });
 });
 

@@ -229,8 +229,10 @@ export function renderTeachingMessage(ctx: TeachingContext): string {
     case 'task-output-nonempty': {
       return (
         `Walk-aware audit blocked: ${where} expected \`task.output\` to contain a prose summary ` +
-        `of what you did. The field is empty. Set it via \`cc-cli done --output "..."\` (or fill it ` +
-        `before running \`cc-cli done\`) — downstream steps and audits read this field.`
+        `of what you did. The field is empty. Pass at least one \`--completed "..."\` argument to ` +
+        `\`cc-cli done\` (the flag accepts multiple — one per discrete thing you finished). The ` +
+        `--completed entries get joined with newlines into task.output during handoff promotion, ` +
+        `and downstream steps + audits read that field.`
       );
     }
 
