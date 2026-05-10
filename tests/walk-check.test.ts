@@ -324,7 +324,68 @@ describe('runWalkCheck — multi composition', () => {
   });
 });
 
-// ─── 4. Defensive: shape divergence ────────────────────────────────
+// ─── 4. task-output-nonempty timing — pending-handoff payload hint ─
+
+describe('runWalkCheck — task-output-nonempty pending-handoff hint', () => {
+  it('returns met when chit.output is empty but pendingHandoffPayload.completed has content', async () => {
+    // Codex P1 on PR #211: audit fires walk-check BEFORE
+    // promotePendingHandoff writes task.output. Without the payload
+    // hint, every `cc-cli done --completed "..."` call against a step
+    // whose spec is task-output-nonempty would block in an infinite
+    // retry loop. The payload hint lets the checker satisfy on the
+    // staged completed[] before the chit field is populated.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const task = await castSingleStepWalk(corpRoot, {
+        kind: 'task-output-nonempty',
+      });
+      // task.output is empty (cast doesn't write it). Without the hint,
+      // walk-check would unmet.
+      const outcome = runWalkCheck(corpRoot, task, 'toast', {
+        pendingHandoffPayload: {
+          completed: ['did the thing', 'committed'],
+        },
+      });
+      expect(outcome.status).toBe('met');
+    } finally { cleanup(); }
+  });
+
+  it('returns unmet when both chit.output and pendingHandoffPayload.completed are empty', async () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const task = await castSingleStepWalk(corpRoot, {
+        kind: 'task-output-nonempty',
+      });
+      const outcome = runWalkCheck(corpRoot, task, 'toast', {
+        pendingHandoffPayload: { completed: [] },
+      });
+      expect(outcome.status).toBe('unmet');
+    } finally { cleanup(); }
+  });
+
+  it('falls back to chit.output when no pendingHandoffPayload provided (post-promotion read path)', async () => {
+    // Sexton patrols / `cc-cli walk show` / any post-promotion caller
+    // doesn't pass the pending hint. The chit.output read still gates
+    // them — same behavior as pre-2.3 fix.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const task = await castSingleStepWalk(corpRoot, {
+        kind: 'task-output-nonempty',
+      });
+      const taskWithOutput = {
+        ...task,
+        fields: {
+          ...task.fields,
+          task: { ...task.fields.task, output: 'shipped' },
+        },
+      } as Chit<'task'>;
+      const outcome = runWalkCheck(corpRoot, taskWithOutput, 'toast');
+      expect(outcome.status).toBe('met');
+    } finally { cleanup(); }
+  });
+});
+
+// ─── 5. Defensive: shape divergence ────────────────────────────────
 
 describe('renderTeachingMessage — defensive paths', () => {
   it('multi with mismatched evidence falls back to kind enumeration', () => {

@@ -301,8 +301,21 @@ async function runHookPath(
   if (currentTask) {
     try {
       const workspace = findAgentWorkspace(corpRoot, slug);
+      // Read the pending handoff payload if present so the
+      // task-output-nonempty checker can satisfy on the agent's
+      // staged --completed[] BEFORE promotion writes task.output to
+      // the chit. Without this, every `cc-cli done --completed "..."`
+      // call against a step with task-output-nonempty in its spec
+      // would block the agent in an infinite retry loop. The payload
+      // is staged at audit-time but the chit field isn't populated
+      // until promotePendingHandoff runs — which is gated behind
+      // approve, creating the deadlock this read closes.
+      const pendingHandoffPayload = workspace
+        ? readPendingHandoffPayload(workspace)
+        : undefined;
       walkCheck = runWalkCheck(corpRoot, currentTask, slug, {
         cwd: workspace ?? corpRoot,
+        pendingHandoffPayload,
       });
     } catch (err) {
       // Walk-check failure is OPERATIONAL, not a gating signal — same
@@ -1234,6 +1247,30 @@ function logAuditError(corpRoot: string, slug: string, err: unknown): void {
     );
   } catch {
     /* even error logging can fail on permissions; nothing to do */
+  }
+}
+
+/**
+ * Read + parse `<workspace>/.pending-handoff.json` if it exists.
+ * Returns the parsed payload or undefined on missing-file / parse
+ * failure / wrong shape. Best-effort: a malformed pending file falls
+ * back to the chit-output read inside checkTaskOutputNonempty, never
+ * surfaces as a walk-check error.
+ */
+function readPendingHandoffPayload(
+  workspacePath: string,
+): { completed?: readonly string[] } | undefined {
+  try {
+    const path = join(workspacePath, '.pending-handoff.json');
+    if (!existsSync(path)) return undefined;
+    const raw = readFileSync(path, 'utf-8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const completed = (parsed as { completed?: unknown }).completed;
+    if (!Array.isArray(completed)) return { completed: [] };
+    return { completed: completed.filter((c): c is string => typeof c === 'string') };
+  } catch {
+    return undefined;
   }
 }
 

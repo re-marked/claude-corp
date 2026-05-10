@@ -243,6 +243,66 @@ describe('cmdAudit — walk-aware integration', () => {
     expect(decision.reason ?? '').toMatch(/Walk-aware audit blocked/);
   });
 
+  it('approves task-output-nonempty when .pending-handoff.json has non-empty completed (Codex P1 regression)', async () => {
+    // Codex P1 on PR #211: task.output gets populated by
+    // promotePendingHandoff AFTER audit approves. So at audit-time
+    // the chit field is empty even when the agent ran
+    // `cc-cli done --completed "did X"` correctly. Walk-check now
+    // reads the pending payload to satisfy task-output-nonempty.
+    const dir = createAgentWorkspace(tmpCorpRoot, 'coder');
+    writeMembers(tmpCorpRoot, [{ id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: dir }]);
+
+    setupWalkFixture(tmpCorpRoot, 'coder', {
+      kind: 'task-output-nonempty',
+    });
+
+    // Simulate what cmdDone writes: a pending-handoff file with
+    // completed[]. Audit's walk-check should pick this up.
+    writeFileSync(
+      join(dir, '.pending-handoff.json'),
+      JSON.stringify({
+        predecessorSession: 'test',
+        completed: ['shipped the feature'],
+        nextAction: 'merge',
+        createdAt: new Date().toISOString(),
+        createdBy: 'coder',
+      }),
+      'utf-8',
+    );
+
+    await cmdAudit({ agent: 'coder', json: false });
+    const decision = decisionFromStdout();
+    expect(decision.decision).toBe('approve');
+  });
+
+  it('blocks task-output-nonempty when pending-handoff has empty completed', async () => {
+    // The agent ran `cc-cli done` without --completed. Pending file
+    // exists but completed is []. Walk-check unmet.
+    const dir = createAgentWorkspace(tmpCorpRoot, 'coder');
+    writeMembers(tmpCorpRoot, [{ id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: dir }]);
+
+    setupWalkFixture(tmpCorpRoot, 'coder', {
+      kind: 'task-output-nonempty',
+    });
+
+    writeFileSync(
+      join(dir, '.pending-handoff.json'),
+      JSON.stringify({
+        predecessorSession: 'test',
+        completed: [],
+        nextAction: 'merge',
+        createdAt: new Date().toISOString(),
+        createdBy: 'coder',
+      }),
+      'utf-8',
+    );
+
+    await cmdAudit({ agent: 'coder', json: false });
+    const decision = decisionFromStdout();
+    expect(decision.decision).toBe('block');
+    expect(decision.reason ?? '').toMatch(/task\.output/);
+  });
+
   it('approves cleanly when task has no walk (ad-hoc, no expectedOutput enforcement)', async () => {
     const dir = createAgentWorkspace(tmpCorpRoot, 'ceo');
     writeMembers(tmpCorpRoot, [{ id: 'ceo', displayName: 'CEO', rank: 'master', agentDir: dir }]);
