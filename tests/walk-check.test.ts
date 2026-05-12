@@ -148,7 +148,10 @@ describe('runWalkCheck — outcome states', () => {
         // the step id — the agent should be able to act on it without
         // re-reading the blueprint.
         expect(outcome.teachingMessage).toContain('reviewed');
-        expect(outcome.teachingMessage).toContain('cc-cli chit tag');
+        // Real command is `cc-cli chit update <id> --add-tag <tag> --from <slug>`
+        // (Codex P2 on PR #211: `cc-cli chit tag` is not a real subcommand).
+        expect(outcome.teachingMessage).toContain('cc-cli chit update');
+        expect(outcome.teachingMessage).toContain('--add-tag');
         expect(outcome.teachingMessage).toContain('only-step');
       }
     } finally { cleanup(); }
@@ -236,12 +239,15 @@ describe('renderTeachingMessage — per ExpectedOutputKind', () => {
     expect(msg).toContain('dist/main.js');
   });
 
-  it('tag-on-task teaching gives the cc-cli command verbatim', () => {
+  it('tag-on-task teaching gives the real cc-cli chit update command (Codex P2)', () => {
     const msg = renderTeachingMessage({
       ...baseCtx,
       spec: { kind: 'tag-on-task', tag: 'reviewed' },
     });
-    expect(msg).toContain('cc-cli chit tag chit-t-test +reviewed');
+    // The real chit-update verb takes --add-tag + --from. The earlier
+    // `cc-cli chit tag <id> +<tag>` form was not a real subcommand.
+    expect(msg).toContain('cc-cli chit update chit-t-test --add-tag reviewed --from coder');
+    expect(msg).not.toContain('cc-cli chit tag');
   });
 
   it('task-output-nonempty teaching mentions the field + the actual cc-cli done flag', () => {

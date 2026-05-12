@@ -265,8 +265,9 @@ export function renderTeachingMessage(ctx: TeachingContext): string {
     case 'tag-on-task': {
       return (
         `Walk-aware audit blocked: ${where} expected tag \`${spec.tag}\` on this task chit ` +
-        `(\`${taskId}\`). Tag is missing. Add it with \`cc-cli chit tag ${taskId} +${spec.tag}\` ` +
-        `before \`cc-cli done\` — the tag is how the step's completion signal is recorded.`
+        `(\`${taskId}\`). Tag is missing. Add it with ` +
+        `\`cc-cli chit update ${taskId} --add-tag ${spec.tag} --from ${slug}\` before ` +
+        `\`cc-cli done\` — the tag is how the step's completion signal is recorded.`
       );
     }
 
