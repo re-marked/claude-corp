@@ -13,9 +13,13 @@
  * unenforced step). Same approve effect, different log lines, so
  * post-hoc analysis can tell why a particular task wasn't gated.
  *
- *   - `no-walk`         → task has no walk tags / no containing
- *                          contract / blueprint missing. Audit
- *                          unchanged for trivial work.
+ *   - `no-walk`         → task is tagless ad-hoc, OR walk-tagged but
+ *                          neither the walk lookup nor the task-
+ *                          carried fallback yield an expectedOutput
+ *                          spec to run. Audit unchanged. (Blueprint
+ *                          drift — blueprint deleted / step removed
+ *                          after cast — does NOT fall here; the
+ *                          task-carried spec keeps the gate alive.)
  *   - `no-spec`         → walk resolved but step has no
  *                          expectedOutput. Vacuous met per 2.1
  *                          checker contract; audit unchanged.
