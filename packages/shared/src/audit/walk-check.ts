@@ -33,7 +33,7 @@
  * agent-facing wording without driving the whole hook flow.
  */
 
-import type { Chit } from '../types/chit.js';
+import type { Chit, TaskFields } from '../types/chit.js';
 import type {
   ExpectedOutputSpec,
   ExpectedOutputKind,
@@ -41,6 +41,8 @@ import type {
 import {
   checkExpectedOutput,
   getWalkPosition,
+  getWalkStepId,
+  getWalkBlueprintName,
   type CheckExpectedOutputOpts,
   type CheckResult,
 } from '../walk.js';
@@ -101,27 +103,65 @@ export function runWalkCheck(
   slug: string,
   opts: CheckExpectedOutputOpts = {},
 ): WalkCheckOutcome {
+  // Resolve the spec + identifiers we'll use. Two paths:
+  //
+  //   1. Walk-position resolves (blueprint + contract still intact)
+  //      → use walkPos.expectedOutput + walkPos.stepId/blueprintName.
+  //
+  //   2. Walk-position is null but the task carries its pre-expanded
+  //      expectedOutput from cast time → use the task field +
+  //      identifiers from the task's `blueprint:*` / `blueprint-step:*`
+  //      tags. Codex P2 on PR #211: task.fields.task.expectedOutput is
+  //      stored at cast specifically so audit can still enforce when
+  //      the blueprint is edited/deleted or the step is removed AFTER
+  //      cast (the documented drift case in walk.ts:174-186). Without
+  //      this fallback, blueprint-drift silently bypasses enforcement
+  //      — every cast task whose blueprint changes mid-flight escapes
+  //      the gate.
+  //
+  // Tagless ad-hoc tasks (no walk-step tag at all) fall through to
+  // no-walk — those genuinely have no walk to enforce.
   const walkPos = getWalkPosition(taskChit, corpRoot);
-  if (walkPos === null) {
-    return { status: 'no-walk' };
+
+  let spec: ExpectedOutputSpec | null;
+  let stepId: string;
+  let blueprintName: string;
+  if (walkPos) {
+    spec = walkPos.expectedOutput;
+    stepId = walkPos.stepId;
+    blueprintName = walkPos.blueprintName;
+  } else {
+    const taskFields = taskChit.fields.task as TaskFields;
+    const taskSpec = taskFields.expectedOutput ?? null;
+    const tagStepId = getWalkStepId(taskChit);
+    const tagBlueprintName = getWalkBlueprintName(taskChit);
+    if (!taskSpec || !tagStepId || !tagBlueprintName) {
+      // Genuinely ad-hoc (no walk tags) OR walk-tagged but with no
+      // cast-time spec to enforce (deferred-validation case). Both
+      // are no-walk from the gate's perspective.
+      return { status: 'no-walk' };
+    }
+    spec = taskSpec;
+    stepId = tagStepId;
+    blueprintName = tagBlueprintName;
   }
 
-  if (walkPos.expectedOutput === null) {
+  if (spec === null) {
     return {
       status: 'no-spec',
-      stepId: walkPos.stepId,
-      blueprintName: walkPos.blueprintName,
+      stepId,
+      blueprintName,
     };
   }
 
-  const result = checkExpectedOutput(walkPos.expectedOutput, taskChit, corpRoot, opts);
-  const kind = walkPos.expectedOutput.kind;
+  const result = checkExpectedOutput(spec, taskChit, corpRoot, opts);
+  const kind = spec.kind;
 
   if (result.status === 'met') {
     return {
       status: 'met',
-      stepId: walkPos.stepId,
-      blueprintName: walkPos.blueprintName,
+      stepId,
+      blueprintName,
       kind,
     };
   }
@@ -129,8 +169,8 @@ export function runWalkCheck(
   if (result.status === 'unable-to-check') {
     return {
       status: 'unable-to-check',
-      stepId: walkPos.stepId,
-      blueprintName: walkPos.blueprintName,
+      stepId,
+      blueprintName,
       kind,
       reason: result.reason ?? 'unable-to-check (no reason given by checker)',
     };
@@ -139,15 +179,15 @@ export function runWalkCheck(
   // unmet — render the teaching message and return.
   return {
     status: 'unmet',
-    stepId: walkPos.stepId,
-    blueprintName: walkPos.blueprintName,
+    stepId,
+    blueprintName,
     kind,
     missing: result.missing ?? [],
     teachingMessage: renderTeachingMessage({
-      spec: walkPos.expectedOutput,
+      spec,
       result,
-      stepId: walkPos.stepId,
-      blueprintName: walkPos.blueprintName,
+      stepId,
+      blueprintName,
       taskId: taskChit.id,
       slug,
     }),

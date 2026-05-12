@@ -458,7 +458,121 @@ describe('CheckExpectedOutputOpts.ceiling — supports workspaces outside corpRo
   });
 });
 
-// ─── 6. Defensive: shape divergence ────────────────────────────────
+// ─── 6. Blueprint-drift fallback ───────────────────────────────────
+
+describe('runWalkCheck — blueprint-drift fallback (Codex P2)', () => {
+  it('enforces the task-carried spec when getWalkPosition returns null', () => {
+    // Codex P2 on PR #211: tasks store `fields.task.expectedOutput`
+    // at cast specifically so audit can still enforce when the
+    // blueprint is edited/deleted or the step removed after cast
+    // (the documented drift case in walk.ts). Without the fallback,
+    // walk-check returns no-walk for these tasks and enforcement is
+    // silently bypassed.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      // Hand-craft a walk-tagged task that has expectedOutput but
+      // NO matching blueprint or contract — simulates the post-cast
+      // drift state (blueprint deleted / step removed).
+      const driftedTask: Chit<'task'> = {
+        id: 'chit-t-drift1',
+        type: 'task',
+        status: 'active',
+        createdAt: '2026-05-01T10:00:00.000Z',
+        updatedAt: '2026-05-01T10:00:00.000Z',
+        createdBy: 'coder',
+        tags: ['blueprint:vanished-walk', 'blueprint-step:doomed-step'],
+        fields: {
+          task: {
+            title: 'orphaned step work',
+            priority: 'normal',
+            expectedOutput: { kind: 'tag-on-task', tag: 'reviewed' },
+          },
+        },
+      } as Chit<'task'>;
+
+      const outcome = runWalkCheck(corpRoot, driftedTask, 'coder');
+      // Spec is unmet (tag absent) — proves we ran the check rather
+      // than silently approving via no-walk.
+      expect(outcome.status).toBe('unmet');
+      if (outcome.status === 'unmet') {
+        expect(outcome.stepId).toBe('doomed-step');
+        expect(outcome.blueprintName).toBe('vanished-walk');
+        expect(outcome.kind).toBe('tag-on-task');
+      }
+    } finally { cleanup(); }
+  });
+
+  it('met via fallback when task-carried spec is satisfied', () => {
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const driftedTask: Chit<'task'> = {
+        id: 'chit-t-drift2',
+        type: 'task',
+        status: 'active',
+        createdAt: '2026-05-01T10:00:00.000Z',
+        updatedAt: '2026-05-01T10:00:00.000Z',
+        createdBy: 'coder',
+        tags: ['blueprint:vanished-walk', 'blueprint-step:doomed-step', 'reviewed'],
+        fields: {
+          task: {
+            title: 'orphaned step work',
+            priority: 'normal',
+            expectedOutput: { kind: 'tag-on-task', tag: 'reviewed' },
+          },
+        },
+      } as Chit<'task'>;
+
+      const outcome = runWalkCheck(corpRoot, driftedTask, 'coder');
+      expect(outcome.status).toBe('met');
+    } finally { cleanup(); }
+  });
+
+  it('returns no-walk for genuinely ad-hoc tasks (no walk tags, no spec)', () => {
+    // The non-drift no-walk case still works: a true ad-hoc task
+    // with neither walk tags nor an expectedOutput field falls
+    // through to no-walk as before.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const adhoc: Chit<'task'> = {
+        id: 'chit-t-adhoc-real',
+        type: 'task',
+        status: 'active',
+        createdAt: '2026-05-01T10:00:00.000Z',
+        updatedAt: '2026-05-01T10:00:00.000Z',
+        createdBy: 'mark',
+        tags: [],
+        fields: { task: { title: 'truly ad-hoc', priority: 'normal' } },
+      } as Chit<'task'>;
+      const outcome = runWalkCheck(corpRoot, adhoc, 'mark');
+      expect(outcome.status).toBe('no-walk');
+    } finally { cleanup(); }
+  });
+
+  it('returns no-walk when task has walk tags but NO cast-time spec (deferred-validation)', () => {
+    // A walk-tagged task that doesn't carry expectedOutput in its
+    // fields can't be enforced post-drift — no spec to run. Falls
+    // through to no-walk. This documents the intentional graceful
+    // degradation when both blueprint-side and task-side specs are
+    // missing.
+    const { corpRoot, cleanup } = makeCorp();
+    try {
+      const noSpecTagged: Chit<'task'> = {
+        id: 'chit-t-tagged-no-spec',
+        type: 'task',
+        status: 'active',
+        createdAt: '2026-05-01T10:00:00.000Z',
+        updatedAt: '2026-05-01T10:00:00.000Z',
+        createdBy: 'coder',
+        tags: ['blueprint:vanished-walk', 'blueprint-step:doomed-step'],
+        fields: { task: { title: 'tagged but specless', priority: 'normal' } },
+      } as Chit<'task'>;
+      const outcome = runWalkCheck(corpRoot, noSpecTagged, 'coder');
+      expect(outcome.status).toBe('no-walk');
+    } finally { cleanup(); }
+  });
+});
+
+// ─── 7. Defensive: shape divergence ────────────────────────────────
 
 describe('renderTeachingMessage — defensive paths', () => {
   it('multi with mismatched evidence falls back to kind enumeration', () => {
