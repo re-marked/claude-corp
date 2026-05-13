@@ -494,10 +494,11 @@ export interface CheckExpectedOutputOpts {
    * the override, findGitRoot rejects any cwd outside corpRoot before
    * running git, silently downgrading enforcement to unable-to-check.
    *
-   * Audit derives this: when workspace is absolute and outside
-   * corpRoot, ceiling = workspace; else ceiling = corpRoot. Keeps the
-   * "don't walk up to an unrelated parent .git on the dev box"
-   * invariant while letting supported absolute workspaces self-bound.
+   * Audit (2.3) doesn't pass this — it always uses cwd=corpRoot, which
+   * is by definition inside its own ceiling. Future off-corp callers
+   * (Sexton 2.4 patrols inspecting external worktrees, etc.) override
+   * when they need to point cwd at a tree that isn't under corpRoot;
+   * setting `ceiling = cwd` self-bounds the walk-up.
    */
   readonly ceiling?: string;
   /**

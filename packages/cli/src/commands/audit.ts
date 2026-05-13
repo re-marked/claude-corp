@@ -316,9 +316,18 @@ async function runHookPath(
       // spec with `packages/shared/src/foo.ts` against agentDir would
       // check `<corp>/agents/<name>/packages/shared/src/foo.ts` and
       // unmet against the agent's actual artifact at
-      // `<corp>/packages/shared/src/foo.ts`. Shared refs make the git
-      // checks work from corpRoot even when an agent committed in a
-      // Clearinghouse worktree.
+      // `<corp>/packages/shared/src/foo.ts`.
+      //
+      // Clearinghouse worktree caveat: branch-exists + commit-on-branch
+      // work correctly from corpRoot because git worktrees share refs.
+      // file-exists against an artifact that ONLY exists in a Clearinghouse
+      // worktree (not yet merged to main) would unmet here — accurate at
+      // the gate (the work hasn't merged) but blueprint authors should
+      // prefer commit-on-branch or chit-of-type for Clearinghouse-shape
+      // walks. The proper resolution — taskId → worktreePath lookup,
+      // using the worktree as cwd — is follow-up work; the substrate
+      // for it (1.12's deterministic worktree paths) exists but isn't
+      // audit-wired yet.
       walkCheck = runWalkCheck(corpRoot, currentTask, slug, {
         cwd: corpRoot,
         pendingHandoffPayload,
