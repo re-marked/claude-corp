@@ -187,28 +187,20 @@ describe('cmdAudit — walk-aware integration', () => {
     expect(decision.reason ?? '').toMatch(/Walk-aware audit blocked/);
   });
 
-  it('approves with audit-checks.jsonl unable entry when checker cannot fire', async () => {
+  it('approves with audit-checks.jsonl unable entry when checker cannot fire (no git repo at corpRoot)', async () => {
     const dir = createAgentWorkspace(tmpCorpRoot, 'coder');
     writeMembers(tmpCorpRoot, [{ id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: dir }]);
 
-    // file-exists with a path that resolves under a cwd we'll force
-    // unavailable. The agent's workspace dir IS the cwd in real use;
-    // we simulate the unable case by giving the spec a path under a
-    // non-existent dir AND setting agentDir to that non-existent dir.
-    const ghostDir = join(tmpCorpRoot, 'agents', 'ghost-dir-does-not-exist');
-    writeMembers(tmpCorpRoot, [
-      { id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: ghostDir },
-    ]);
-
+    // branch-exists needs a git repo at corpRoot. The test corpRoot
+    // is a bare tmpdir without `git init`, so the checker returns
+    // unable-to-check → approved-with-warning + audit-checks.jsonl entry.
     setupWalkFixture(tmpCorpRoot, 'coder', {
-      kind: 'file-exists',
-      pathPattern: 'dist/main.js',
+      kind: 'branch-exists',
+      branchPattern: 'feat/never',
     });
 
     await cmdAudit({ agent: 'coder', json: false });
     const decision = decisionFromStdout();
-    // unable-to-check → approved-with-warning. Decision is approve;
-    // warning lands in audit-checks.jsonl.
     expect(decision.decision).toBe('approve');
 
     const checksPath = join(tmpCorpRoot, 'chits', '_log', 'audit-checks.jsonl');
@@ -217,8 +209,56 @@ describe('cmdAudit — walk-aware integration', () => {
     expect(lines.length).toBeGreaterThan(0);
     const entry = JSON.parse(lines[0]!);
     expect(entry.status).toBe('unable-to-check');
-    expect(entry.kind).toBe('file-exists');
+    expect(entry.kind).toBe('branch-exists');
     expect(entry.slug).toBe('coder');
+  });
+
+  it('file-exists check resolves against corpRoot, not agentDir (Codex P2 round 5)', async () => {
+    // Codex P2 on PR #211: agentDir is `agents/<name>/` (a prompt/state
+    // dir), NOT where the agent's git work lives. A file-exists spec
+    // with `dist/main.js` would have evaluated at
+    // `<corp>/agents/coder/dist/main.js` and unmet against the agent's
+    // real artifact at `<corp>/dist/main.js`. The fix: cwd = corpRoot.
+    const dir = createAgentWorkspace(tmpCorpRoot, 'coder');
+    writeMembers(tmpCorpRoot, [{ id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: dir }]);
+
+    // Create the file at corpRoot/dist/main.js — the REAL artifact location.
+    mkdirSync(join(tmpCorpRoot, 'dist'), { recursive: true });
+    writeFileSync(join(tmpCorpRoot, 'dist', 'main.js'), 'console.log("ok")', 'utf-8');
+
+    setupWalkFixture(tmpCorpRoot, 'coder', {
+      kind: 'file-exists',
+      pathPattern: 'dist/main.js',
+    });
+
+    await cmdAudit({ agent: 'coder', json: false });
+    const decision = decisionFromStdout();
+    // With cwd=corpRoot, the file is found → approve. With the old
+    // cwd=agentDir, this would have blocked because the file isn't at
+    // <corp>/agents/coder/dist/main.js.
+    expect(decision.decision).toBe('approve');
+  });
+
+  it('file-exists check blocks when file is only at agentDir (proves cwd is NOT agentDir)', async () => {
+    // Mirror-image regression: putting the file at agentDir/<path>
+    // (not corpRoot/<path>) should NOT satisfy the check. If audit
+    // were still using agentDir as cwd, this test would falsely approve.
+    const dir = createAgentWorkspace(tmpCorpRoot, 'coder');
+    writeMembers(tmpCorpRoot, [{ id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: dir }]);
+
+    mkdirSync(join(dir, 'dist'), { recursive: true });
+    writeFileSync(join(dir, 'dist', 'main.js'), 'console.log("ok")', 'utf-8');
+    // Deliberately do NOT create corpRoot/dist/main.js.
+
+    setupWalkFixture(tmpCorpRoot, 'coder', {
+      kind: 'file-exists',
+      pathPattern: 'dist/main.js',
+    });
+
+    await cmdAudit({ agent: 'coder', json: false });
+    const decision = decisionFromStdout();
+    expect(decision.decision).toBe('block');
+    expect(decision.reason ?? '').toMatch(/dist\/main\.js/);
   });
 
   it('walk-check fires even when transcript is missing (corner-case correctness)', async () => {

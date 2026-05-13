@@ -41,7 +41,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync, appendFileSync } from 'node:fs';
-import { join, dirname, isAbsolute, relative } from 'node:path';
+import { join, dirname, isAbsolute } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   MEMBERS_JSON,
@@ -304,25 +304,23 @@ async function runHookPath(
       // Read the pending handoff payload if present so the
       // task-output-nonempty checker can satisfy on the agent's
       // staged --completed[] BEFORE promotion writes task.output to
-      // the chit. Without this, every `cc-cli done --completed "..."`
-      // call against a step with task-output-nonempty in its spec
-      // would block the agent in an infinite retry loop. The payload
-      // is staged at audit-time but the chit field isn't populated
-      // until promotePendingHandoff runs — which is gated behind
-      // approve, creating the deadlock this read closes.
+      // the chit. The payload is staged in agentDir; this is the ONE
+      // walk-check read that uses agentDir.
       const pendingHandoffPayload = workspace
         ? readPendingHandoffPayload(workspace)
         : undefined;
-      // Codex P2 on PR #211: when members.json stores agentDir as an
-      // absolute path outside corpRoot (rare but supported), passing
-      // that path as cwd makes findGitRoot reject it because corpRoot
-      // is its default ceiling. Branch-exists / commit-on-branch then
-      // silently degrade to unable-to-check, defeating enforcement.
-      // Derive the ceiling so external workspaces are self-bounded.
-      const ceiling = workspace ? ceilingForWorkspace(workspace, corpRoot) : corpRoot;
+      // Codex P2 on PR #211 (round 5): cwd for shell-out checkers
+      // (file-exists / branch-exists / commit-on-branch) is corpRoot,
+      // NOT agentDir. agentDir is `agents/<name>/` — a prompt/state
+      // directory, not where the agent's git work lives. A file-exists
+      // spec with `packages/shared/src/foo.ts` against agentDir would
+      // check `<corp>/agents/<name>/packages/shared/src/foo.ts` and
+      // unmet against the agent's actual artifact at
+      // `<corp>/packages/shared/src/foo.ts`. Shared refs make the git
+      // checks work from corpRoot even when an agent committed in a
+      // Clearinghouse worktree.
       walkCheck = runWalkCheck(corpRoot, currentTask, slug, {
-        cwd: workspace ?? corpRoot,
-        ceiling,
+        cwd: corpRoot,
         pendingHandoffPayload,
       });
     } catch (err) {
@@ -1256,30 +1254,6 @@ function logAuditError(corpRoot: string, slug: string, err: unknown): void {
   } catch {
     /* even error logging can fail on permissions; nothing to do */
   }
-}
-
-/**
- * Derive the git-root ceiling for walk-check shell-out checkers.
- *
- *   - Workspace inside corpRoot (the common case): ceiling = corpRoot.
- *     The walk-up still rejects truly-outside paths (preserves the
- *     "don't pick up an unrelated parent .git on the dev box"
- *     invariant findGitRoot was built for).
- *   - Workspace outside corpRoot (absolute agentDir, supported by
- *     findAgentWorkspace): ceiling = workspace itself. The workspace
- *     is its own bound; checkers can find the worktree's .git
- *     without findGitRoot rejecting on the corpRoot-relative test.
- *   - Relative workspace path (defensive — shouldn't occur at this
- *     call site since findAgentWorkspace resolves to absolute, but
- *     bounded just in case): ceiling = corpRoot.
- */
-function ceilingForWorkspace(workspace: string, corpRoot: string): string {
-  if (!isAbsolute(workspace)) return corpRoot;
-  // path.relative handles platform-correct case sensitivity; mirrors
-  // findGitRoot's containment check shape.
-  const rel = relative(corpRoot, workspace);
-  const insideCorp = !rel.startsWith('..') && !isAbsolute(rel);
-  return insideCorp ? corpRoot : workspace;
 }
 
 /**
