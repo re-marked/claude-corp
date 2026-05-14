@@ -194,9 +194,17 @@ export function applyReviewVerdict(
       // Emit a Tier-3 inbox-item. Task stays in under_review (chain
       // walker won't advance past it; the walk is implicitly paused
       // until the founder weighs in).
-      const subject = capDowngrade
-        ? `Walk review hit redo cap on task ${review.taskId} — founder needed`
-        : `Walk review flagged task ${review.taskId} — founder needed`;
+      // Subject embeds a short reasoning preview so the founder sees
+      // WHY at the `cc-cli inbox list` level (one-line display)
+      // without having to open the chit. Body has the full text;
+      // subject has the first ~80 chars of the reasoning prose.
+      const reasoningPreview = previewOneLine(review.reasoning, 80);
+      const subjectPrefix = capDowngrade
+        ? `Walk review hit redo cap on ${review.taskId}`
+        : `Walk review flagged ${review.taskId}`;
+      const subject = reasoningPreview
+        ? `${subjectPrefix}: ${reasoningPreview}`
+        : `${subjectPrefix} — founder needed`;
       // Codex P2 on PR #213: surface the review reasoning + (on cap-
       // downgrade) the redoFeedback in the inbox-item body so the
       // founder sees WHY the walk is paused without chasing the
@@ -280,6 +288,23 @@ export function applyReviewVerdict(
     taskId: review.taskId,
     errors,
   };
+}
+
+/**
+ * Collapse a (possibly multi-line) string into a one-line preview
+ * suitable for embedding in an inbox-item subject. Strips newlines
+ * + collapses runs of whitespace; truncates with ellipsis at maxLen.
+ *
+ * Subjects render in `cc-cli inbox list` as a single line; un-
+ * trimmed multi-line input would break the layout. Empty / whitespace-
+ * only input returns empty string so the caller can fall back to a
+ * generic subject.
+ */
+function previewOneLine(raw: string, maxLen: number): string {
+  const cleaned = raw.replace(/\s+/g, ' ').trim();
+  if (cleaned.length === 0) return '';
+  if (cleaned.length <= maxLen) return cleaned;
+  return cleaned.slice(0, maxLen - 1).trimEnd() + '…';
 }
 
 /**

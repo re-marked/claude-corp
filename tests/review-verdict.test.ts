@@ -394,6 +394,32 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
     expect(inboxFields.tier).toBe(3);
   });
 
+  it('flag inbox subject embeds a reasoning preview so `cc-cli inbox list` shows the WHY', () => {
+    // Body fix from the prior commit shows reasoning on chit-read.
+    // This further surfaces a short preview in the subject — the only
+    // field rendered in `cc-cli inbox list` output. Founder sees the
+    // WHY at the list level without opening the chit.
+    const reasoning = 'step 4 contradicts step 2 decision';
+    const { reviewId } = setupVerdict({ verdict: 'flag', reasoning });
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+
+    const inboxHit = findChitById(corpRoot, result.inboxItemId!);
+    const fields = inboxHit!.chit.fields['inbox-item'] as { subject: string };
+    expect(fields.subject).toContain(reasoning);
+  });
+
+  it('flag inbox subject truncates long reasoning with ellipsis', () => {
+    const reasoning = 'a'.repeat(200);
+    const { reviewId } = setupVerdict({ verdict: 'flag', reasoning });
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+
+    const inboxHit = findChitById(corpRoot, result.inboxItemId!);
+    const fields = inboxHit!.chit.fields['inbox-item'] as { subject: string };
+    expect(fields.subject).toMatch(/…$/);
+    // Subject stays inside the 200-char hard cap (.slice(0, 200) wrapper).
+    expect(fields.subject.length).toBeLessThanOrEqual(200);
+  });
+
   it('flag inbox body surfaces the review reasoning (Codex P2)', () => {
     const reasoning = 'step 4 contradicts step 2 cache-invalidation decision';
     const { reviewId } = setupVerdict({ verdict: 'flag', reasoning });
