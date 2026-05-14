@@ -222,18 +222,52 @@ export async function runWalkStalled(
       })
       .join('\n');
 
-    // Suggested Hand commands embed the blueprint step's assigneeRole
-    // where present — that's the role pool the cast intended the work
-    // to land in, so the default re-route target is well-defined.
-    // Sexton can still override with a specific slot id if she has
-    // judgment about which Employee should pick this up.
-    const suggestedRehand = openSteps
-      .filter((s) => s.taskId)
+    // `cc-cli hand` only accepts tasks in {draft, queued, dispatched}.
+    // It refuses in_progress/blocked/under_review (state-machine guard
+    // in hand-core.ts:validateTransition('dispatch', ...)). For stalls
+    // that hit those states because the assignee was archived, the
+    // recovery requires rewinding workflowStatus first. Split the
+    // suggestion by reachability so Sexton's recommendation always
+    // names a command that will actually succeed.
+    const HANDABLE_STATUSES = new Set(['draft', 'queued', 'dispatched']);
+    const handableOrphans = openSteps.filter(
+      (s) => s.taskId && (!s.taskStatus || HANDABLE_STATUSES.has(s.taskStatus)),
+    );
+    const stuckOrphans = openSteps.filter(
+      (s) => s.taskId && s.taskStatus && !HANDABLE_STATUSES.has(s.taskStatus),
+    );
+
+    const handLines = handableOrphans
       .map((s) => {
         const target = s.step.assigneeRole ?? '<slot-or-role>';
         return `\`cc-cli hand --to ${target} --chit ${s.taskId} --from sexton\``;
       })
       .join(', ');
+    const rewindLines = stuckOrphans
+      .map((s) => {
+        const target = s.step.assigneeRole ?? '<slot-or-role>';
+        return (
+          `task ${s.taskId} (workflowStatus=${s.taskStatus}): rewind to queued first, ` +
+          `then hand — \`cc-cli chit update ${s.taskId} --set-field task.workflowStatus=queued --from sexton\` ` +
+          `&& \`cc-cli hand --to ${target} --chit ${s.taskId} --from sexton\``
+        );
+      })
+      .join('\n  ');
+
+    const suggestedAction =
+      [
+        handableOrphans.length > 0
+          ? `Re-Hand the orphan task(s): ${handLines}.`
+          : '',
+        stuckOrphans.length > 0
+          ? `For tasks stuck mid-flight (state machine refuses \`cc-cli hand\` from in_progress/blocked/under_review):\n  ${rewindLines}.`
+          : '',
+        handableOrphans.length === 0 && stuckOrphans.length === 0
+          ? '(No task chits to recover; cast may need re-running.)'
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
 
     findings.push({
       subject: contract.id,
@@ -245,8 +279,7 @@ export async function runWalkStalled(
         `~${ageMin} min ago (threshold: ${Math.round(stallThresholdMs / 60_000)} min).\n\n` +
         `Last completed: ${lastCompletedDesc}\n\n` +
         `Open steps:\n${orphanLines}\n\n` +
-        `Suggested action: re-Hand the orphan task(s) to a fresh slot or role pool — ` +
-        `${suggestedRehand || '(no task chits to hand; cast may need re-running)'}. ` +
+        `Suggested action: ${suggestedAction} ` +
         `If this is an intentional long-lead pause (waiting on external dep), acknowledge ` +
         `the kink to silence it.`,
     });

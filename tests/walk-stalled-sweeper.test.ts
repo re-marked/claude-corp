@@ -346,6 +346,59 @@ describe('runWalkStalled — detection scenarios', () => {
     expect(result.findings).toHaveLength(0);
   });
 
+  it('suggests rewind-then-hand for stuck-state orphans, plain hand for handable ones (Codex P2)', async () => {
+    // `cc-cli hand` rejects in_progress/blocked/under_review via the
+    // task state-machine. The body must name the rewind path
+    // (`chit update --set-field task.workflowStatus=queued`) for those
+    // states rather than a hand command the CLI would refuse. Plain
+    // hand stays appropriate for queued/dispatched/draft.
+    writeMembers([member({ id: 'coder', status: 'archived' as Member['status'] })]);
+    const { tasks } = castTwoStepWalk();
+
+    // Step A completed; Step B in_progress with an archived assignee
+    // — the stuck-state scenario Codex flagged.
+    setTaskWorkflowStatus(tasks[0]!.id, 'completed');
+    setTaskWorkflowStatus(tasks[1]!.id, 'in_progress', { assignee: 'coder' });
+
+    const result = await runWalkStalled({ daemon: daemonStub }, { now: FAR_FUTURE_NOW() });
+    expect(result.findings).toHaveLength(1);
+    const body = result.findings[0]!.body;
+
+    // Stuck-state task → rewind first, then hand.
+    expect(body).toContain('rewind to queued first');
+    expect(body).toContain('task.workflowStatus=queued');
+    expect(body).toContain('cc-cli chit update');
+
+    // The bare hand template MUST NOT appear under the "Re-Hand"
+    // section for this stuck task — that command would fail. (The
+    // hand command DOES appear inside the rewind-then-hand line as
+    // the SECOND step of the chain, gated behind the rewind; that's
+    // legitimate. The check here is that the body distinguishes the
+    // two paths.)
+    expect(body).not.toMatch(
+      /Re-Hand the orphan task\(s\): `cc-cli hand --to [^`]+ --chit chit-t-[^`]+/,
+    );
+  });
+
+  it('uses plain hand suggestion when stalled orphan is in a handable state (queued)', async () => {
+    // Companion to the previous test — queued orphan with no live
+    // assignee gets the plain `cc-cli hand` command, no rewind.
+    writeMembers([member({ id: 'coder' })]);
+    const { tasks } = castTwoStepWalk();
+
+    setTaskWorkflowStatus(tasks[0]!.id, 'completed');
+    setTaskWorkflowStatus(tasks[1]!.id, 'queued', { assignee: null });
+
+    const result = await runWalkStalled({ daemon: daemonStub }, { now: FAR_FUTURE_NOW() });
+    expect(result.findings).toHaveLength(1);
+    const body = result.findings[0]!.body;
+
+    // Re-Hand section names the actual command.
+    expect(body).toMatch(/Re-Hand the orphan task\(s\): `cc-cli hand --to/);
+    // No rewind chatter for handable states.
+    expect(body).not.toContain('rewind to queued');
+  });
+
   it('default threshold constant is 30 minutes', () => {
     // Pins the documented contract: Pulse cadence is 5min, so
     // 6 ticks of zero motion = meaningful stall threshold. If a
