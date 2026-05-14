@@ -41,6 +41,7 @@ import type {
   BreakerTripFields,
   ClearanceSubmissionFields,
   ReviewCommentFields,
+  ReviewFields,
   LaneEventFields,
   PatternObservationFields,
   PatternSubject,
@@ -279,6 +280,20 @@ function validateTask(fields: unknown): void {
     }
   }
   if (f.branchUnderReview !== undefined) requireStringOrNull(f.branchUnderReview, 'task.branchUnderReview');
+  // Project 2.5 — self-witnessing redo counter. Optional; null /
+  // undefined = "no redos yet" (treated as 0 by the verdict-decide
+  // flow). Floor 0 (counter never decreases). Soft ceiling enforced
+  // at the verdict-decide layer (cap=1); the validator just blocks
+  // negative or fractional values.
+  if (f.reviewRedoCount !== undefined && f.reviewRedoCount !== null) {
+    requireInteger(f.reviewRedoCount, 'task.reviewRedoCount', 0, 1_000_000);
+  }
+  // Project 2.5 — pendingRedoFeedback: copied from a review chit's
+  // redoFeedback on `verdict=redo` application; consumed by the
+  // redispatch path. Null permitted (the consumed state).
+  if (f.pendingRedoFeedback !== undefined) {
+    requireStringOrNull(f.pendingRedoFeedback, 'task.pendingRedoFeedback');
+  }
 }
 
 function validateContract(fields: unknown): void {
@@ -297,6 +312,34 @@ function validateContract(fields: unknown): void {
   if (f.reviewNotes !== undefined) requireStringOrNull(f.reviewNotes, 'contract.reviewNotes');
   optionalNonNegativeInteger(f.rejectionCount, 'contract.rejectionCount');
   if (f.projectId !== undefined) requireStringOrNull(f.projectId, 'contract.projectId');
+  // Project 2.5 — accept-verdict carry-forward notes. Optional;
+  // null/undefined when no review has stamped a note yet. Each entry
+  // requires fromTaskId + note + reviewerSlug + createdAt; shape
+  // validated structurally so a malformed array element fails loudly
+  // rather than corrupting the next-dispatch surface.
+  if (f.handoffNotesFromReview !== undefined && f.handoffNotesFromReview !== null) {
+    if (!Array.isArray(f.handoffNotesFromReview)) {
+      throw new ChitValidationError(
+        'contract.handoffNotesFromReview must be an array or null',
+        'contract.handoffNotesFromReview',
+      );
+    }
+    for (let i = 0; i < f.handoffNotesFromReview.length; i++) {
+      const entry = f.handoffNotesFromReview[i];
+      const path = `contract.handoffNotesFromReview[${i}]`;
+      const obj = requireObject(entry, path);
+      requireNonEmptyString((obj as { fromTaskId?: unknown }).fromTaskId, `${path}.fromTaskId`);
+      requireNonEmptyString((obj as { note?: unknown }).note, `${path}.note`);
+      requireNonEmptyString((obj as { reviewerSlug?: unknown }).reviewerSlug, `${path}.reviewerSlug`);
+      optionalIsoTimestamp((obj as { createdAt?: unknown }).createdAt, `${path}.createdAt`);
+      if ((obj as { createdAt?: unknown }).createdAt === undefined || (obj as { createdAt?: unknown }).createdAt === null) {
+        throw new ChitValidationError(
+          `${path}.createdAt is required (ISO timestamp)`,
+          `${path}.createdAt`,
+        );
+      }
+    }
+  }
 }
 
 function validateObservation(fields: unknown): void {
@@ -945,6 +988,91 @@ function validateClearanceSubmission(fields: unknown): void {
   }
 }
 
+/**
+ * Project 2.5 — self-witnessing review chit validator.
+ *
+ * Required: verdict, reasoning (when redo/flag), taskId, contractId,
+ * reviewerSlug. notesForNextTask + redoFeedback are verdict-gated:
+ *
+ *   - `accept` may carry notesForNextTask; rejects non-null redoFeedback
+ *     (mixing accept-mode + redo-mode signals is incoherent).
+ *   - `redo`   REQUIRES non-empty redoFeedback (the cap exists because
+ *     pointless redos are the failure mode; a redo without specific
+ *     feedback is exactly that). Rejects non-null notesForNextTask.
+ *   - `flag`   rejects both (next-task isn't dispatching; founder
+ *     reads `reasoning` directly).
+ *
+ * reasoning has a length floor on redo + flag (the verdict carries
+ * a payload the reader needs to act on) but is permissive on accept
+ * (silent approvals are legitimate when work is unambiguous).
+ */
+function validateReview(fields: unknown): void {
+  const f = requireObject(fields, 'review') as Partial<ReviewFields>;
+
+  requireEnum(f.verdict, 'review.verdict', ['accept', 'redo', 'flag'] as const);
+  requireNonEmptyString(f.taskId, 'review.taskId');
+  requireNonEmptyString(f.contractId, 'review.contractId');
+  requireNonEmptyString(f.reviewerSlug, 'review.reviewerSlug');
+
+  // reasoning: always required as a string. Length floor on the
+  // verdicts whose downstream readers can't proceed without it.
+  if (typeof f.reasoning !== 'string') {
+    throw new ChitValidationError('review.reasoning must be a string', 'review.reasoning');
+  }
+  if (f.verdict === 'redo' || f.verdict === 'flag') {
+    if (f.reasoning.trim().length < 3) {
+      throw new ChitValidationError(
+        `review.reasoning must be non-empty on verdict=${f.verdict} — the next reader needs the why`,
+        'review.reasoning',
+      );
+    }
+  }
+
+  // Verdict-gated companion fields.
+  if (f.verdict === 'accept') {
+    if (f.notesForNextTask !== undefined && f.notesForNextTask !== null) {
+      if (typeof f.notesForNextTask !== 'string') {
+        throw new ChitValidationError(
+          'review.notesForNextTask must be string or null',
+          'review.notesForNextTask',
+        );
+      }
+    }
+    if (f.redoFeedback !== undefined && f.redoFeedback !== null) {
+      throw new ChitValidationError(
+        'review.redoFeedback must be null on verdict=accept (no redo dispatching)',
+        'review.redoFeedback',
+      );
+    }
+  } else if (f.verdict === 'redo') {
+    if (f.notesForNextTask !== undefined && f.notesForNextTask !== null) {
+      throw new ChitValidationError(
+        'review.notesForNextTask must be null on verdict=redo (next-task is not dispatching; the same task is)',
+        'review.notesForNextTask',
+      );
+    }
+    if (typeof f.redoFeedback !== 'string' || f.redoFeedback.trim().length < 3) {
+      throw new ChitValidationError(
+        'review.redoFeedback required + non-empty on verdict=redo (a redo without specific feedback is the cost-blowing loop the cap exists to prevent)',
+        'review.redoFeedback',
+      );
+    }
+  } else if (f.verdict === 'flag') {
+    if (f.notesForNextTask !== undefined && f.notesForNextTask !== null) {
+      throw new ChitValidationError(
+        'review.notesForNextTask must be null on verdict=flag (no next-task dispatches)',
+        'review.notesForNextTask',
+      );
+    }
+    if (f.redoFeedback !== undefined && f.redoFeedback !== null) {
+      throw new ChitValidationError(
+        'review.redoFeedback must be null on verdict=flag (escalation, not redo)',
+        'review.redoFeedback',
+      );
+    }
+  }
+}
+
 function validateReviewComment(fields: unknown): void {
   const f = requireObject(fields, 'review-comment') as Partial<ReviewCommentFields>;
 
@@ -1467,6 +1595,29 @@ export const CHIT_TYPES: readonly ChitTypeEntry[] = [
     terminalStatuses: ['closed', 'burning'],
     destructionPolicy: 'keep-forever',
     validate: validateReviewComment,
+  },
+  {
+    id: 'review',
+    idPrefix: 'rev',
+    // Project 2.5 — ephemeral by default. Most reviews are noise once
+    // the verdict has been applied. The 0.6 4-signal rule promotes a
+    // review chit to durable when the Contract gets Warden-rejected:
+    // at that point the prior accept-verdicts become evidence of what
+    // the Employee thought at each gate.
+    defaultEphemeral: true,
+    // 7d matches the observation / inbox-item / escalation cohort —
+    // long enough that a downstream Warden rejection (typically
+    // minutes-to-hours after the reviews fire) still finds the prior
+    // verdicts to learn from; short enough that the unpromoted ones
+    // don't crowd the chit store indefinitely.
+    defaultTTL: '7d',
+    defaultStatus: 'active',
+    // active = verdict pending application; closed = verdict applied.
+    // burning is the shared abort-mid-write terminal.
+    validStatuses: ['active', 'closed', 'burning'],
+    terminalStatuses: ['closed', 'burning'],
+    destructionPolicy: 'destroy-if-not-promoted',
+    validate: validateReview,
   },
   {
     id: 'lane-event',

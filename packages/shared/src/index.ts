@@ -491,6 +491,11 @@ export {
   extractLatestUsageFromTranscript,
   runWalkCheck,
   renderTeachingMessage,
+  applyReviewVerdict,
+  findActiveReviewForTask,
+  consumePendingRedoFeedback,
+  getHandoffNoteFromReview,
+  REVIEW_REDO_CAP_DEFAULT,
 } from './audit/index.js';
 export type {
   HookEventName,
@@ -513,6 +518,8 @@ export type {
   CheckpointRecentActivity,
   TranscriptUsageSnapshot,
   WalkCheckOutcome,
+  ApplyReviewVerdictOpts,
+  ApplyReviewVerdictResult,
 } from './audit/index.js';
 
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
@@ -691,6 +698,11 @@ export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarne
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
 export { pressmanRules, type PressmanRulesOpts } from './templates/pressman-bootstrap.js';
 export { editorRules, type EditorRulesOpts } from './templates/editor-bootstrap.js';
+export { buildReviewPrompt } from './templates/review-prompt.js';
+export type {
+  BuildReviewPromptOpts,
+  PriorTaskOutput,
+} from './templates/review-prompt.js';
 export { roleSpecificAgentsContent, type RoleSpecificRulesOpts } from './templates/role-rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
 export {
