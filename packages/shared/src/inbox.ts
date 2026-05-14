@@ -66,6 +66,16 @@ export interface CreateInboxItemOpts {
   createdBy?: string;
   /** Loose pointers to related chits (e.g. the task chit being handed). */
   references?: string[];
+  /**
+   * Optional override for the inbox-item's body markdown. When absent,
+   * a generic preamble is written ("Tier N inbox-item for X from Y …").
+   * Callers with substantive context to surface to the recipient (the
+   * 2.5 founder-flag path passes the review reasoning + redoFeedback,
+   * for example) provide a custom body so the recipient sees the full
+   * picture in `cc-cli inbox check` without having to chase referenced
+   * chits manually.
+   */
+  body?: string;
 }
 
 /**
@@ -120,9 +130,12 @@ export function createInboxItem(opts: CreateInboxItemOpts): Chit<'inbox-item'> {
     ...(destructionPolicy ? { destructionPolicy } : {}),
     references: opts.references,
     body:
+      opts.body ??
       // Human-readable preamble for founder eyeballing the raw file on
       // disk. Not load-bearing; the frontmatter has everything
-      // structural.
+      // structural. Callers can override via opts.body when they have
+      // substantive context to surface (review reasoning, escalation
+      // detail, etc.) — see CreateInboxItemOpts.body docstring.
       `Tier ${opts.tier} inbox-item for \`${opts.recipient}\` from \`${opts.from}\` ` +
       `via ${opts.source}. Resolve with \`cc-cli inbox respond/dismiss/carry-forward <id>\`.\n`,
   });

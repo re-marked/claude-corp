@@ -394,6 +394,40 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
     expect(inboxFields.tier).toBe(3);
   });
 
+  it('flag inbox body surfaces the review reasoning (Codex P2)', () => {
+    const reasoning = 'step 4 contradicts step 2 cache-invalidation decision';
+    const { reviewId } = setupVerdict({ verdict: 'flag', reasoning });
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+
+    expect(result.applied).toBe(true);
+    const inboxHit = findChitById(corpRoot, result.inboxItemId!);
+    // The inbox-item's body carries the reasoning + the verdict
+    // context so the founder doesn't have to chase the review chit.
+    expect(inboxHit?.body).toContain(reasoning);
+    expect(inboxHit?.body).toContain('flag');
+    expect(inboxHit?.body).toContain(result.reviewChitId);
+  });
+
+  it('cap-downgrade inbox body surfaces both reasoning AND redoFeedback (Codex P2)', () => {
+    const reasoning = 'review judged: needs different approach';
+    const redoFeedback = 'step 2 should be rewritten from scratch with X';
+    const { reviewId } = setupVerdict({
+      verdict: 'redo',
+      reasoning,
+      redoFeedback,
+      initialRedoCount: REVIEW_REDO_CAP_DEFAULT,
+    });
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+
+    expect(result.capDowngrade).toBe(true);
+    const inboxHit = findChitById(corpRoot, result.inboxItemId!);
+    expect(inboxHit?.body).toContain(reasoning);
+    expect(inboxHit?.body).toContain(redoFeedback);
+    // Body names the auto-downgrade explicitly so the founder sees
+    // this wasn't a fresh flag — it was a redo the system gave up on.
+    expect(inboxHit?.body).toMatch(/auto-downgraded|cap/i);
+  });
+
   // ── Refusal modes ───────────────────────────────────────────────
 
   it('refuses when the review chit is already closed (verdict already applied)', () => {
@@ -611,6 +645,52 @@ describe('findActiveReviewForTask', () => {
 
     const found = findActiveReviewForTask(corpRoot, taskId);
     expect(found?.id).toBe(review.id);
+  });
+
+  it('finds the per-task review even when 50+ active reviews exist (Codex P2 limit fix)', () => {
+    // queryChits defaults to limit: 50. Before the fix, this helper
+    // ran in-memory filtering on the limited result, so a corp with
+    // 50+ active review chits could silently drop the per-task hit
+    // for a task that DOES have a pending verdict. limit: 0 in the
+    // query covers the corpus exhaustively.
+    const targetTaskId = 'chit-t-target';
+    // Create 60 noise reviews on unrelated tasks first — these
+    // populate the limit window before the target.
+    for (let i = 0; i < 60; i++) {
+      createChit(corpRoot, {
+        type: 'review',
+        scope: 'agent:coder',
+        createdBy: 'coder',
+        fields: {
+          review: {
+            verdict: 'accept',
+            reasoning: `noise ${i}`,
+            taskId: `chit-t-noise${i}`,
+            contractId: 'chit-c-noise',
+            reviewerSlug: 'coder',
+          } as ReviewFields,
+        } as never,
+      });
+    }
+    // Now create the target review.
+    const target = createChit(corpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'redo',
+          reasoning: 'specific gap',
+          taskId: targetTaskId,
+          contractId: 'chit-c-test',
+          reviewerSlug: 'coder',
+          redoFeedback: 'concrete fix',
+        } as ReviewFields,
+      } as never,
+    });
+
+    const found = findActiveReviewForTask(corpRoot, targetTaskId);
+    expect(found?.id).toBe(target.id);
   });
 
   it('returns null when the only review chit for the task is closed', () => {

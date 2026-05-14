@@ -197,6 +197,38 @@ export function applyReviewVerdict(
       const subject = capDowngrade
         ? `Walk review hit redo cap on task ${review.taskId} — founder needed`
         : `Walk review flagged task ${review.taskId} — founder needed`;
+      // Codex P2 on PR #213: surface the review reasoning + (on cap-
+      // downgrade) the redoFeedback in the inbox-item body so the
+      // founder sees WHY the walk is paused without chasing the
+      // referenced review chit. The default createInboxItem body is a
+      // generic preamble; we override to embed the substance.
+      const bodyLines: string[] = [
+        `**Tier 3 — walk-review escalation**`,
+        ``,
+        `Task: \`${review.taskId}\``,
+        `Contract: \`${review.contractId}\``,
+        `Reviewer: \`${review.reviewerSlug}\``,
+        `Review chit: \`${opts.reviewChitId}\``,
+        ``,
+        `**Verdict:** \`${inputVerdict}\`${capDowngrade ? ` (auto-downgraded to flag — redo cap of ${redoCap} already hit)` : ''}`,
+        ``,
+        `**Reasoning:**`,
+        '',
+        review.reasoning.trim() || '_(empty)_',
+      ];
+      if (capDowngrade && review.redoFeedback) {
+        bodyLines.push(
+          '',
+          `**Last redoFeedback (cap-downgrade context):**`,
+          '',
+          review.redoFeedback.trim(),
+        );
+      }
+      bodyLines.push(
+        '',
+        '---',
+        'Resolve with `cc-cli inbox respond/dismiss/carry-forward <id>`.',
+      );
       const item = createInboxItem({
         corpRoot,
         recipient: opts.founderMemberId,
@@ -206,6 +238,7 @@ export function applyReviewVerdict(
         source: 'system',
         sourceRef: opts.reviewChitId,
         references: [opts.reviewChitId, review.taskId, review.contractId],
+        body: bodyLines.join('\n'),
       });
       inboxItemId = item.id;
     }
@@ -297,9 +330,15 @@ export function findActiveReviewForTask(
   taskId: string,
 ): Chit<'review'> | null {
   try {
+    // Codex P2 on PR #213: queryChits defaults to limit: 50 — a corp
+    // with 50+ active review chits could silently drop the per-task
+    // hit. This helper exists to answer the exact per-task lookup;
+    // limit: 0 (unlimited) is required for correctness even though
+    // it's slightly more expensive on big corps.
     const result = queryChits<'review'>(corpRoot, {
       types: ['review'],
       statuses: ['active'],
+      limit: 0,
     });
     const matches = result.chits
       .map((cwb) => cwb.chit as Chit<'review'>)
