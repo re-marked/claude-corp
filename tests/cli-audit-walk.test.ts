@@ -344,6 +344,126 @@ describe('cmdAudit — walk-aware integration', () => {
     expect(decision.reason ?? '').toMatch(/task\.output/);
   });
 
+  it('routes to review-decide via agent-scoped lookup even when casket is null (Codex P1)', async () => {
+    // The original task-scoped lookup failed when audit-approve had
+    // already promoted the reviewed task (clearing the Casket).
+    // Agent-scoped lookup finds the active review by reviewer slug
+    // regardless of casket state.
+    const dir = createAgentWorkspace(tmpCorpRoot, 'coder');
+    writeMembers(tmpCorpRoot, [
+      { id: 'mark', displayName: 'Mark', rank: 'owner', agentDir: 'agents/mark/' },
+      { id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: dir },
+    ]);
+
+    // Task in completed state (post-promotion, retrospective-review path).
+    const task = createChit(tmpCorpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: {
+          title: 'already-shipped task',
+          priority: 'normal',
+          workflowStatus: 'completed',
+        },
+      } as never,
+    });
+    // Casket explicitly NULL (mirrors post-promotion clear).
+    createChit(tmpCorpRoot, {
+      type: 'casket',
+      scope: 'agent:coder',
+      id: 'casket-coder',
+      createdBy: 'coder',
+      fields: { casket: { currentStep: null } },
+    });
+    const review = createChit(tmpCorpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'accept',
+          reasoning: 'retrospective review — work coheres',
+          taskId: task.id,
+          contractId: 'chit-c-pretend',
+          reviewerSlug: 'coder',
+          notesForNextTask: 'cache decision should be documented',
+        },
+      } as never,
+    });
+
+    await cmdAudit({ agent: 'coder', json: false });
+    const decision = decisionFromStdout();
+    expect(decision.decision).toBe('approve');
+
+    // Agent-scoped lookup found + applied the verdict even though
+    // casket.currentStep was null.
+    const reviewHit = findChitById(tmpCorpRoot, review.id);
+    expect(reviewHit?.chit.status).toBe('closed');
+  });
+
+  it('falls through to normal audit on applied:false (Codex P2)', async () => {
+    // When applyReviewVerdict refuses (e.g. linked task in wrong state),
+    // audit must NOT silently emit approve — that hides the failure.
+    // Instead, fall through to the normal audit pipeline; the review
+    // chit stays active for retry once state is corrected.
+    const dir = createAgentWorkspace(tmpCorpRoot, 'coder');
+    writeMembers(tmpCorpRoot, [
+      { id: 'mark', displayName: 'Mark', rank: 'owner', agentDir: 'agents/mark/' },
+      { id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: dir },
+    ]);
+
+    // Task in in_progress — outside the review allowlist.
+    const task = createChit(tmpCorpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: {
+          title: 'busy task',
+          priority: 'normal',
+          workflowStatus: 'in_progress',
+        },
+      } as never,
+    });
+    createChit(tmpCorpRoot, {
+      type: 'casket',
+      scope: 'agent:coder',
+      id: 'casket-coder',
+      createdBy: 'coder',
+      fields: { casket: { currentStep: task.id } },
+    });
+    // Review chit referencing the same task — but task isn't in
+    // under_review OR completed, so applyReviewVerdict refuses.
+    const review = createChit(tmpCorpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'accept',
+          reasoning: 'should work but task state is wrong',
+          taskId: task.id,
+          contractId: 'chit-c-pretend',
+          reviewerSlug: 'coder',
+        },
+      } as never,
+    });
+
+    await cmdAudit({ agent: 'coder', json: false });
+    // audit fell through to the normal pipeline; some decision was
+    // emitted (approve via fail-open transcript path is fine for
+    // this assertion — the load-bearing piece is that the review
+    // chit STAYS ACTIVE).
+    decisionFromStdout();
+
+    // Review chit stays active (not closed; not applied).
+    const reviewHit = findChitById(tmpCorpRoot, review.id);
+    expect(reviewHit?.chit.status).toBe('active');
+  });
+
   it('routes to review-decide when an active review chit exists for the task (Phase 2)', async () => {
     // When the agent's current task has an active review chit at
     // Stop-hook time, audit detects review-mode and applies the
