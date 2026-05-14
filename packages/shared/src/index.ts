@@ -696,6 +696,11 @@ export { defaultEnvironment, type EnvironmentTemplateOpts, type EnvironmentHarne
 export { defaultRules, type RulesTemplateOpts, type TemplateHarness } from './templates/rules.js';
 export { pressmanRules, type PressmanRulesOpts } from './templates/pressman-bootstrap.js';
 export { editorRules, type EditorRulesOpts } from './templates/editor-bootstrap.js';
+export { buildReviewPrompt } from './templates/review-prompt.js';
+export type {
+  BuildReviewPromptOpts,
+  PriorTaskOutput,
+} from './templates/review-prompt.js';
 export { roleSpecificAgentsContent, type RoleSpecificRulesOpts } from './templates/role-rules.js';
 export { defaultHeartbeat } from './templates/heartbeat.js';
 export {
