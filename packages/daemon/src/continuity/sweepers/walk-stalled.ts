@@ -260,7 +260,7 @@ export async function runWalkStalled(
           ? `Re-Hand the orphan task(s): ${handLines}.`
           : '',
         stuckOrphans.length > 0
-          ? `For tasks stuck mid-flight (state machine refuses \`cc-cli hand\` from in_progress/blocked/under_review):\n  ${rewindLines}.`
+          ? `For tasks stuck mid-flight (state machine refuses \`cc-cli hand\` from in_progress/blocked/under_review):\n  ${rewindLines}.\n\nThe rewind preserves prior stamps (claimedAt, editorReviewRound, any in-flight .pending-handoff.json in the original assignee's workspace). Most consumers ignore those once workflowStatus=queued, but an under_review task's pending handoff is lost work the new assignee will need to redo.`
           : '',
         handableOrphans.length === 0 && stuckOrphans.length === 0
           ? '(No task chits to recover; cast may need re-running.)'
