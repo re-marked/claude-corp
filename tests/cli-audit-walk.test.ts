@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import {
   createChit,
   castFromBlueprint,
+  findChitById,
   type Chit,
 } from '../packages/shared/src/index.js';
 
@@ -341,6 +342,64 @@ describe('cmdAudit — walk-aware integration', () => {
     const decision = decisionFromStdout();
     expect(decision.decision).toBe('block');
     expect(decision.reason ?? '').toMatch(/task\.output/);
+  });
+
+  it('routes to review-decide when an active review chit exists for the task (Phase 2)', async () => {
+    // When the agent's current task has an active review chit at
+    // Stop-hook time, audit detects review-mode and applies the
+    // verdict via applyReviewVerdict BEFORE running the walk-check
+    // + runAudit pipeline. Emit approve to close the review session
+    // cleanly; the state effects (review chit close, task transition,
+    // inbox-item on flag) are written by applyReviewVerdict.
+    const dir = createAgentWorkspace(tmpCorpRoot, 'coder');
+    writeMembers(tmpCorpRoot, [
+      { id: 'mark', displayName: 'Mark', rank: 'owner', agentDir: 'agents/mark/' },
+      { id: 'coder', displayName: 'Coder', rank: 'worker', agentDir: dir },
+    ]);
+
+    // Set up: task in under_review + active review chit (verdict=accept).
+    const task = createChit(tmpCorpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: {
+          title: 'reviewed task',
+          priority: 'normal',
+          workflowStatus: 'under_review',
+        },
+      } as never,
+    });
+    createChit(tmpCorpRoot, {
+      type: 'casket',
+      scope: 'agent:coder',
+      id: 'casket-coder',
+      createdBy: 'coder',
+      fields: { casket: { currentStep: task.id } },
+    });
+    const review = createChit(tmpCorpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'accept',
+          reasoning: 'work coheres with prior steps',
+          taskId: task.id,
+          contractId: 'chit-c-pretend',
+          reviewerSlug: 'coder',
+        },
+      } as never,
+    });
+
+    await cmdAudit({ agent: 'coder', json: false });
+    const decision = decisionFromStdout();
+    expect(decision.decision).toBe('approve');
+
+    // Review chit is now closed (verdict applied).
+    const reviewHit = findChitById(tmpCorpRoot, review.id);
+    expect(reviewHit?.chit.status).toBe('closed');
   });
 
   it('approves cleanly when task has no walk (ad-hoc, no expectedOutput enforcement)', async () => {
