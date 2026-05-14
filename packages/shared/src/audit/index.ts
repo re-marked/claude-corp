@@ -59,3 +59,12 @@ export type {
 } from './handoff-promotion.js';
 export { runWalkCheck, renderTeachingMessage } from './walk-check.js';
 export type { WalkCheckOutcome } from './walk-check.js';
+export {
+  applyReviewVerdict,
+  findActiveReviewForTask,
+  REVIEW_REDO_CAP_DEFAULT,
+} from './review-decide.js';
+export type {
+  ApplyReviewVerdictOpts,
+  ApplyReviewVerdictResult,
+} from './review-decide.js';

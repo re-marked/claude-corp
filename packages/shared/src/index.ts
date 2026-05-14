@@ -491,6 +491,9 @@ export {
   extractLatestUsageFromTranscript,
   runWalkCheck,
   renderTeachingMessage,
+  applyReviewVerdict,
+  findActiveReviewForTask,
+  REVIEW_REDO_CAP_DEFAULT,
 } from './audit/index.js';
 export type {
   HookEventName,
@@ -513,6 +516,8 @@ export type {
   CheckpointRecentActivity,
   TranscriptUsageSnapshot,
   WalkCheckOutcome,
+  ApplyReviewVerdictOpts,
+  ApplyReviewVerdictResult,
 } from './audit/index.js';
 
 export { detectFeedback, FEEDBACK_PATTERN_COUNTS } from './feedback-detector.js';
