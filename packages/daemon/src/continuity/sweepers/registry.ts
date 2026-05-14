@@ -29,6 +29,7 @@ import { runOrphantask } from './orphantask.js';
 import { runPhantomCleanup } from './phantom-cleanup.js';
 import { runChitHygiene } from './chit-hygiene.js';
 import { runLogRotation } from './log-rotation.js';
+import { runWalkStalled } from './walk-stalled.js';
 
 export const SWEEPER_REGISTRY: Record<SweeperName, SweeperModule> = {
   silentexit: runSilentexit,
@@ -37,6 +38,7 @@ export const SWEEPER_REGISTRY: Record<SweeperName, SweeperModule> = {
   'phantom-cleanup': runPhantomCleanup,
   'chit-hygiene': runChitHygiene,
   'log-rotation': runLogRotation,
+  'walk-stalled': runWalkStalled,
 };
 
 /** All registered sweeper names — useful for help output + listings. */

@@ -130,4 +130,5 @@ export type SweeperName =
   | 'orphantask'
   | 'phantom-cleanup'
   | 'chit-hygiene'
-  | 'log-rotation';
+  | 'log-rotation'
+  | 'walk-stalled';
