@@ -77,6 +77,11 @@ export async function cmdReviewDecide(
 
   if (opts.json) {
     console.log(JSON.stringify(result, null, 2));
+    // Codex P2 on PR #213: exit nonzero on refused apply even in JSON
+    // mode. Hook/automation callers check exit code as the failure
+    // signal; without this, --json would treat a refusal as success
+    // unless the consumer also parses `.applied` from the body.
+    if (!result.applied) process.exit(2);
   } else {
     if (!result.applied) {
       console.error(`review-decide refused to apply verdict on ${opts.reviewId}:`);

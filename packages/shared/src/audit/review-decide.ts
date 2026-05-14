@@ -172,6 +172,12 @@ export function applyReviewVerdict(
       const nextWs = validateTransition(taskWs, 'audit-block', taskChit.id);
       const taskScope = chitScopeFromPath(corpRoot, taskHit.path);
       const newReviewRedoCount = currentRedoCount + 1;
+      // Codex P2 on PR #213: stamp redoFeedback onto the Task so the
+      // future redispatch surface can read it without status-filtering.
+      // The review chit closes immediately on verdict-application; a
+      // findActiveReviewForTask call would miss the closed chit and
+      // the next session would boot the same Task without the
+      // specific feedback the cap exists to make non-pointless.
       updateChit(corpRoot, taskScope, 'task', taskChit.id, {
         updatedBy: review.reviewerSlug,
         fields: {
@@ -179,6 +185,7 @@ export function applyReviewVerdict(
             ...task,
             workflowStatus: nextWs,
             reviewRedoCount: newReviewRedoCount,
+            pendingRedoFeedback: review.redoFeedback ?? null,
           },
         } as never,
       });
@@ -267,14 +274,17 @@ function makeNoOp(
 }
 
 /**
- * Find the most-recent active `review` chit for a given task. Used
- * by future redo-dispatch surfaces to pick up the `redoFeedback`
- * payload when the next session boots on the same Task. Returns null
- * when no active review exists for this task (the common case after
- * verdict-application closes the chit).
+ * Find the most-recent active `review` chit for a given task. Mostly
+ * a debugging / inspection helper at this point — Codex P2 on PR
+ * #213 surfaced that verdict-application closes the review chit, so
+ * the redispatch surface should NOT depend on a still-active chit
+ * carrying the feedback. The substrate path is now: redo verdict
+ * stamps `task.pendingRedoFeedback` directly, and the redispatch
+ * reads + consumes that via consumePendingRedoFeedback().
  *
- * Active-status filter is load-bearing: closed reviews record what
- * the system did, not what's pending. We want the pending one.
+ * Active-status filter preserved: this helper answers "is there a
+ * verdict waiting to be applied right now?" — useful for the audit
+ * hook's review-mode detection in Phase 2.
  *
  * Defensive: if two active reviews exist for the same task (data
  * drift — shouldn't happen with proper verdict-application but
@@ -299,5 +309,57 @@ export function findActiveReviewForTask(
   } catch {
     return null;
   }
+}
+
+/**
+ * Consume `task.pendingRedoFeedback` — return the string and clear
+ * the field atomically (well, as atomic as a single updateChit can
+ * be — reader sees one of two consistent states).
+ *
+ * The future redispatch path calls this when booting a session on a
+ * Task that was redo'd. The returned string is what gets surfaced
+ * in the new session's prompt (the agent's "you redid this; here's
+ * the feedback that fired" context). Clearing on consume prevents
+ * the same feedback from re-firing on a later unrelated dispatch.
+ *
+ * Returns null when:
+ *   - task chit not found / wrong type (returns null + logs nothing;
+ *     pre-mutation guard like applyReviewVerdict's path)
+ *   - pendingRedoFeedback is absent / null / empty string (the
+ *     common case for tasks that never had a redo verdict applied)
+ *
+ * Best-effort: any write failure leaves the field as-is so a future
+ * consume can retry. The caller doesn't need the field to be cleared
+ * to proceed — they need the string. We surface what we read.
+ */
+export function consumePendingRedoFeedback(
+  corpRoot: string,
+  taskId: string,
+  consumerSlug: string,
+): string | null {
+  const hit = findChitById(corpRoot, taskId);
+  if (!hit || hit.chit.type !== 'task') return null;
+  const taskChit = hit.chit as Chit<'task'>;
+  const task = taskChit.fields.task as TaskFields;
+  const feedback = task.pendingRedoFeedback;
+  if (typeof feedback !== 'string' || feedback.length === 0) return null;
+
+  try {
+    const scope = chitScopeFromPath(corpRoot, hit.path);
+    updateChit(corpRoot, scope, 'task', taskChit.id, {
+      updatedBy: consumerSlug,
+      fields: {
+        task: {
+          ...task,
+          pendingRedoFeedback: null,
+        },
+      } as never,
+    });
+  } catch {
+    // Best-effort clear. Caller still gets the feedback string;
+    // worst case the next consume re-reads the same string and clears
+    // then. Not catastrophic.
+  }
+  return feedback;
 }
 

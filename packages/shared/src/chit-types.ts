@@ -288,6 +288,12 @@ function validateTask(fields: unknown): void {
   if (f.reviewRedoCount !== undefined && f.reviewRedoCount !== null) {
     requireInteger(f.reviewRedoCount, 'task.reviewRedoCount', 0, 1_000_000);
   }
+  // Project 2.5 — pendingRedoFeedback: copied from a review chit's
+  // redoFeedback on `verdict=redo` application; consumed by the
+  // redispatch path. Null permitted (the consumed state).
+  if (f.pendingRedoFeedback !== undefined) {
+    requireStringOrNull(f.pendingRedoFeedback, 'task.pendingRedoFeedback');
+  }
 }
 
 function validateContract(fields: unknown): void {

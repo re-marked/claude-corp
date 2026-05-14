@@ -453,6 +453,20 @@ export interface TaskFields {
    * verdict-decide flow.
    */
   reviewRedoCount?: number | null;
+  /**
+   * Project 2.5 — copied from a review chit's `redoFeedback` field
+   * on `verdict=redo` application. Lives on the Task (not the review
+   * chit) so the future redispatch path can surface it without
+   * status-filtering — the review chit closes immediately on
+   * verdict-application, and a status='active' filter would miss
+   * it. The redispatch surface reads this string into the next
+   * session's prompt; consuming clears the field (via
+   * consumePendingRedoFeedback).
+   *
+   * Null / undefined / empty when no pending redo feedback applies
+   * (the common case — every Task that hasn't been redone).
+   */
+  pendingRedoFeedback?: string | null;
 }
 
 export interface ContractFields {

@@ -199,6 +199,24 @@ describe('cmdReviewDecide — CLI shell coverage', () => {
     expect(consoleErrorCalls()).toMatch(/review chit not found/);
   });
 
+  it('exits 2 in --json mode when applyReviewVerdict refuses (Codex P2)', async () => {
+    // Hook/automation callers check exit code, not body. Before the
+    // fix, --json + refused-apply printed `{ "applied": false }` and
+    // exited 0, so consumers had to parse the body to detect failure.
+    writeMembers(tmpCorpRoot, [
+      { id: 'mark', displayName: 'Mark', rank: 'owner', agentDir: 'agents/mark/' },
+    ]);
+    await expect(
+      cmdReviewDecide(['--review-id', 'chit-rev-deadbeef', '--json']),
+    ).rejects.toThrow(/process\.exit\(2\)/);
+    // JSON body still gets emitted so consumers can read the error
+    // list — the change is the exit code, not the silent surface.
+    const out = consoleLogCalls();
+    const parsed = JSON.parse(out);
+    expect(parsed.applied).toBe(false);
+    expect(parsed.errors.join(' ')).toMatch(/review chit not found/);
+  });
+
   it('honors an explicit --founder override (skips the registry lookup)', async () => {
     // No rank=owner registered — registry fallback would fail, but
     // --founder bypasses the fallback.
