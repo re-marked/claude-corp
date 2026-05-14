@@ -653,6 +653,16 @@ async function run() {
       await cmdBlock(process.argv.slice(3));
       break;
     }
+    case 'review-decide': {
+      // Project 2.5: apply a self-witnessing review chit's verdict.
+      // Wraps applyReviewVerdict + resolves founder from members.json
+      // when --founder is omitted. The follow-up Stop-hook re-wire
+      // will dispatch this on review-mode session ends; right now it
+      // exists primarily so the substrate is testable from the shell.
+      const { cmdReviewDecide } = await import('./commands/review-decide.js');
+      await cmdReviewDecide(process.argv.slice(3));
+      break;
+    }
     case 'wtf': {
       const { cmdWtf } = await import('./commands/wtf.js');
       await cmdWtf({
