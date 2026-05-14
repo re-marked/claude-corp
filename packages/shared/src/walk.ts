@@ -486,6 +486,40 @@ export interface CheckExpectedOutputOpts {
   readonly cwd?: string;
   /** Per-shell-out timeout in milliseconds. Default: 10_000. */
   readonly timeoutMs?: number;
+  /**
+   * Project 2.3 P2 — ceiling for the git-root walk-up in branch-exists
+   * + commit-on-branch checks. Default: corpRoot. Override when the
+   * agent's workspace lives OUTSIDE corpRoot (e.g. members.json with
+   * an absolute agentDir under /tmp or an external worktree); without
+   * the override, findGitRoot rejects any cwd outside corpRoot before
+   * running git, silently downgrading enforcement to unable-to-check.
+   *
+   * Audit (2.3) doesn't pass this — it always uses cwd=corpRoot, which
+   * is by definition inside its own ceiling. Future off-corp callers
+   * (Sexton 2.4 patrols inspecting external worktrees, etc.) override
+   * when they need to point cwd at a tree that isn't under corpRoot;
+   * setting `ceiling = cwd` self-bounds the walk-up.
+   */
+  readonly ceiling?: string;
+  /**
+   * Project 2.3 — staged handoff payload from `.pending-handoff.json`.
+   * Audit calls `checkExpectedOutput` BEFORE handoff promotion writes
+   * `task.output` to the chit, so `task-output-nonempty` would always
+   * unmet on the normal `cc-cli done --completed "..."` flow without
+   * this hint. When provided, the checker treats the payload's
+   * `completed[]` as authoritative for "the agent supplied output."
+   * Other kinds (chit-of-type, branch-exists, commit-on-branch,
+   * file-exists, tag-on-task) read state that's already on disk by
+   * audit-time so they don't need this.
+   *
+   * Caller (audit.ts) reads + parses `.pending-handoff.json` once and
+   * passes the parsed payload through; the checker doesn't touch the
+   * filesystem. Optional + best-effort: a malformed pending file falls
+   * back to the chit.output read.
+   */
+  readonly pendingHandoffPayload?: {
+    readonly completed?: readonly string[];
+  };
 }
 
 /**
@@ -520,7 +554,7 @@ export function checkExpectedOutput(
     case 'tag-on-task':
       return checkTagOnTask(spec, taskChit);
     case 'task-output-nonempty':
-      return checkTaskOutputNonempty(spec, taskChit);
+      return checkTaskOutputNonempty(spec, taskChit, opts);
     case 'multi':
       return checkMulti(spec, taskChit, corpRoot, opts);
     case 'chit-of-type':
@@ -566,15 +600,38 @@ function checkTagOnTask(
 function checkTaskOutputNonempty(
   _spec: { kind: 'task-output-nonempty' },
   taskChit: Chit<'task'>,
+  opts: CheckExpectedOutputOpts = {},
 ): CheckResult {
+  // Project 2.3 timing fix: audit fires walk-check BEFORE
+  // promotePendingHandoff writes `task.output` from the pending
+  // payload's `completed[]`. When audit passes the parsed pending
+  // payload, treat its non-empty `completed` joined-prose as
+  // satisfying the spec. Falls back to the chit field for non-audit
+  // callers (Sexton patrols, manual `cc-cli walk show`, post-promotion
+  // checks) and for the no-pending-file case.
+  const pendingCompleted = opts.pendingHandoffPayload?.completed ?? null;
+  if (pendingCompleted) {
+    const joined = pendingCompleted.join('\n').trim();
+    if (joined.length > 0) {
+      return {
+        status: 'met',
+        evidence: { source: 'pending-handoff', length: joined.length },
+      };
+    }
+    // Pending file exists but completed is empty — agent ran
+    // `cc-cli done` without --completed. Fall through to the chit
+    // read (which will also be empty) so the unmet path's evidence
+    // is consistent.
+  }
+
   const output = (taskChit.fields.task as TaskFields).output ?? '';
   if (output.trim().length > 0) {
-    return { status: 'met', evidence: { length: output.length } };
+    return { status: 'met', evidence: { source: 'chit', length: output.length } };
   }
   return {
     status: 'unmet',
     missing: ['task.output'],
-    evidence: { reason: 'task.output is empty or whitespace-only' },
+    evidence: { reason: 'task.output is empty or whitespace-only (and no pending-handoff completed[])' },
   };
 }
 
@@ -854,10 +911,10 @@ function checkBranchExists(
   if (!existsSync(cwd)) {
     return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
   }
-  if (findGitRoot(cwd, corpRoot) === null) {
+  if (findGitRoot(cwd, opts.ceiling ?? corpRoot) === null) {
     return {
       status: 'unable-to-check',
-      reason: `cwd is not inside a git repository scoped to corpRoot: ${cwd}`,
+      reason: `cwd is not inside a git repository scoped to the configured ceiling: ${cwd}`,
     };
   }
   const result = safeGitExec(['branch', '--list', spec.branchPattern], {
@@ -934,10 +991,10 @@ function checkCommitOnBranch(
   if (!existsSync(cwd)) {
     return { status: 'unable-to-check', reason: `cwd does not exist: ${cwd}` };
   }
-  if (findGitRoot(cwd, corpRoot) === null) {
+  if (findGitRoot(cwd, opts.ceiling ?? corpRoot) === null) {
     return {
       status: 'unable-to-check',
-      reason: `cwd is not inside a git repository scoped to corpRoot: ${cwd}`,
+      reason: `cwd is not inside a git repository scoped to the configured ceiling: ${cwd}`,
     };
   }
   const useSinceClaim = spec.sinceClaim !== false; // default true

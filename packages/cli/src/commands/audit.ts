@@ -50,6 +50,7 @@ import {
   parseTranscript,
   parseTranscriptBeforeCompact,
   runAudit,
+  runWalkCheck,
   getCurrentStep,
   casketExists,
   resolveKind,
@@ -72,6 +73,7 @@ import {
   type HookEventName,
   type Member,
   type CheckpointRecentActivity,
+  type WalkCheckOutcome,
 } from '@claudecorp/shared';
 import { getCorpRoot } from '../client.js';
 import { readFileSync as fsReadSync } from 'node:fs';
@@ -279,6 +281,104 @@ async function runHookPath(
   const currentTask = resolveCurrentTask(corpRoot, slug);
   const openTier3Inbox = queryOpenTier3Inbox(corpRoot, slug);
 
+  // Project 2.3 — walk-aware check. Hoisted ABOVE the transcript
+  // fail-open + runAudit pure-engine call because walk-check reads
+  // the chit store + filesystem + git, not the session transcript.
+  // A missing transcript can't excuse a missing expectedOutput
+  // artifact: if the agent didn't produce the chit / branch / file,
+  // the workflow's next step still has nothing to depend on,
+  // regardless of whether we can see their tool use.
+  let walkCheck: WalkCheckOutcome | null = null;
+  // Honor stopHookActive (anti-loop guard) the same way runAudit does
+  // — if a prior Stop in this cycle already blocked, we approve to
+  // break the loop. Walk-check enforcement that ignored this would
+  // trap genuine "agent tried, can't satisfy" cases (e.g. branch
+  // deleted by a sync) in an infinite block-retry; surfaces via
+  // Sexton's stalled-walk patrol instead. Walk-check still RUNS for
+  // observability — the outcome lands in audit-checks.jsonl so post-
+  // hoc analysis can see what happened — it just doesn't FLIP the
+  // decision when stopHookActive is set.
+  if (currentTask) {
+    try {
+      const workspace = findAgentWorkspace(corpRoot, slug);
+      // Read the pending handoff payload if present so the
+      // task-output-nonempty checker can satisfy on the agent's
+      // staged --completed[] BEFORE promotion writes task.output to
+      // the chit. The payload is staged in agentDir; this is the ONE
+      // walk-check read that uses agentDir.
+      const pendingHandoffPayload = workspace
+        ? readPendingHandoffPayload(workspace)
+        : undefined;
+      // Codex P2 on PR #211 (round 5): cwd for shell-out checkers
+      // (file-exists / branch-exists / commit-on-branch) is corpRoot,
+      // NOT agentDir. agentDir is `agents/<name>/` — a prompt/state
+      // directory, not where the agent's git work lives. A file-exists
+      // spec with `packages/shared/src/foo.ts` against agentDir would
+      // check `<corp>/agents/<name>/packages/shared/src/foo.ts` and
+      // unmet against the agent's actual artifact at
+      // `<corp>/packages/shared/src/foo.ts`.
+      //
+      // Clearinghouse worktree caveat: branch-exists + commit-on-branch
+      // work correctly from corpRoot because git worktrees share refs.
+      // file-exists against an artifact that ONLY exists in a Clearinghouse
+      // worktree (not yet merged to main) would unmet here — accurate at
+      // the gate (the work hasn't merged) but blueprint authors should
+      // prefer commit-on-branch or chit-of-type for Clearinghouse-shape
+      // walks. The proper resolution — taskId → worktreePath lookup,
+      // using the worktree as cwd — is follow-up work; the substrate
+      // for it (1.12's deterministic worktree paths) exists but isn't
+      // audit-wired yet.
+      walkCheck = runWalkCheck(corpRoot, currentTask, slug, {
+        cwd: corpRoot,
+        pendingHandoffPayload,
+      });
+    } catch (err) {
+      // Walk-check failure is OPERATIONAL, not a gating signal — same
+      // fail-open philosophy as the rest of audit. Log + treat as
+      // "no walk-check ran" so subsequent decision logic proceeds
+      // unchanged.
+      logAuditError(corpRoot, slug, err);
+    }
+  }
+
+  if (walkCheck && (walkCheck.status === 'unmet' || walkCheck.status === 'unable-to-check')) {
+    logWalkCheckEvent(corpRoot, slug, currentTask?.id ?? null, walkCheck);
+  }
+
+  // Walk-check unmet — pre-empt every later path (transcript fail-open,
+  // runAudit, AC evidence) UNLESS stopHookActive is set (Claude Code's
+  // anti-loop guard; see runAudit). The agent didn't produce the
+  // artifact; block with the teaching message, revert the task back to
+  // in_progress so they can self-retry, and emit. No need to read the
+  // transcript or invoke the AC engine — walk-check is sufficient
+  // signal on its own.
+  if (walkCheck && walkCheck.status === 'unmet' && !stopHookActive) {
+    const blockDecision: AuditDecision = {
+      decision: 'block',
+      reason: walkCheck.teachingMessage,
+    };
+    logAuditDecision(corpRoot, slug, blockDecision, {
+      event: 'walk-check-block',
+      taskId: currentTask?.id,
+      walkCheck: summarizeWalkCheck(walkCheck),
+      walkCheckEnforced: true,
+    });
+    try {
+      const revert = revertTaskFromUnderReview(corpRoot, slug);
+      if (revert.reverted || revert.reason) {
+        logAuditDecision(corpRoot, slug, blockDecision, {
+          event: 'block-revert',
+          revertedTaskId: revert.taskId ?? null,
+          revertedReason: revert.reason ?? null,
+        });
+      }
+    } catch (err) {
+      logAuditError(corpRoot, slug, err);
+    }
+    emitDecision(blockDecision);
+    return;
+  }
+
   const transcriptPath =
     typeof hookInput.transcript_path === 'string' ? hookInput.transcript_path : '';
   const transcriptAvailable = Boolean(transcriptPath) && existsSync(transcriptPath);
@@ -292,6 +392,8 @@ async function runHookPath(
   // agents (currentTask === null) don't hit this because there's no
   // evidence gate to fall through to — the engine approves or falls
   // to the tier-3 inbox check, which is independent of transcript.
+  // Walk-check has ALREADY fired above and was met / no-walk / unable
+  // by the time we reach here — unmet returned early.
   if (currentTask !== null && currentTask !== undefined && !transcriptAvailable) {
     logAuditError(
       corpRoot,
@@ -305,7 +407,11 @@ async function runHookPath(
       corpRoot,
       slug,
       { decision: 'approve' },
-      { event: 'transcript-unavailable-fail-open', taskId: currentTask.id },
+      {
+        event: 'transcript-unavailable-fail-open',
+        taskId: currentTask.id,
+        walkCheck: walkCheck ? summarizeWalkCheck(walkCheck) : null,
+      },
     );
     await approveAndMaybePromote(corpRoot, slug);
     return;
@@ -327,11 +433,16 @@ async function runHookPath(
 
   const decision = runAudit(auditInput);
 
+  // Walk-check fired above and either approved (met / no-spec / no-walk),
+  // logged-and-warned (unable-to-check), or returned early (unmet).
+  // No further enforcement needed here — the AC decision is what we
+  // emit, with walkCheck attached to the log entry for retrospective.
   logAuditDecision(corpRoot, slug, decision, {
     event,
     stopHookActive,
     taskId: currentTask?.id,
     tier3Count: openTier3Inbox.length,
+    walkCheck: walkCheck ? summarizeWalkCheck(walkCheck) : null,
   });
 
   if (decision.decision === 'approve') {
@@ -1067,6 +1178,75 @@ function logAuditDecision(
   }
 }
 
+/**
+ * Project 2.3 — append a walk-check event to chits/_log/audit-checks.jsonl.
+ * Called on `unmet` or `unable-to-check` outcomes only; met / no-spec /
+ * no-walk are silent (they're already implicit in the absence of a
+ * log entry). The file is corp-scoped (not per-agent) because Sexton's
+ * stalled-walk patrol reads it across all agents to detect repeated
+ * unable-to-check (degraded infra signal) on the same step.
+ *
+ * Best-effort: any I/O failure is swallowed. The agent's session
+ * ending depends on the audit emit, never on this log write.
+ */
+function logWalkCheckEvent(
+  corpRoot: string,
+  slug: string,
+  taskId: string | null,
+  outcome: WalkCheckOutcome,
+): void {
+  if (outcome.status === 'no-walk' || outcome.status === 'no-spec' || outcome.status === 'met') {
+    return;
+  }
+  try {
+    const path = join(corpRoot, 'chits', '_log', 'audit-checks.jsonl');
+    mkdirSync(dirname(path), { recursive: true });
+    const entry: Record<string, unknown> = {
+      ts: new Date().toISOString(),
+      slug,
+      taskId,
+      stepId: outcome.stepId,
+      blueprintName: outcome.blueprintName,
+      kind: outcome.kind,
+      status: outcome.status,
+    };
+    if (outcome.status === 'unmet') {
+      entry.missing = outcome.missing;
+      // Cap the teaching message preview — the full text already
+      // ships in the audit decision when enforcement lands; here it
+      // is just retrospective context, so a slice keeps the file
+      // grep-friendly across many entries.
+      entry.teachingPreview = outcome.teachingMessage.slice(0, 200);
+    }
+    if (outcome.status === 'unable-to-check') {
+      entry.reason = outcome.reason;
+    }
+    appendFileSync(path, JSON.stringify(entry) + '\n', 'utf-8');
+  } catch {
+    /* best-effort observability — same as logAuditDecision */
+  }
+}
+
+/**
+ * Compact projection of a WalkCheckOutcome for the per-agent
+ * .audit-log.jsonl line. Keeps the log entry small (the full
+ * teaching message lives in audit-checks.jsonl) while still letting
+ * post-hoc analysis filter audit-log entries by walk-check status
+ * without joining the two files.
+ */
+function summarizeWalkCheck(outcome: WalkCheckOutcome): Record<string, unknown> {
+  if (outcome.status === 'no-walk') return { status: 'no-walk' };
+  if (outcome.status === 'no-spec') {
+    return { status: 'no-spec', stepId: outcome.stepId, blueprintName: outcome.blueprintName };
+  }
+  return {
+    status: outcome.status,
+    stepId: outcome.stepId,
+    blueprintName: outcome.blueprintName,
+    kind: outcome.kind,
+  };
+}
+
 function logAuditError(corpRoot: string, slug: string, err: unknown): void {
   try {
     const agentWorkspace = findAgentWorkspace(corpRoot, slug);
@@ -1082,6 +1262,30 @@ function logAuditError(corpRoot: string, slug: string, err: unknown): void {
     );
   } catch {
     /* even error logging can fail on permissions; nothing to do */
+  }
+}
+
+/**
+ * Read + parse `<workspace>/.pending-handoff.json` if it exists.
+ * Returns the parsed payload or undefined on missing-file / parse
+ * failure / wrong shape. Best-effort: a malformed pending file falls
+ * back to the chit-output read inside checkTaskOutputNonempty, never
+ * surfaces as a walk-check error.
+ */
+function readPendingHandoffPayload(
+  workspacePath: string,
+): { completed?: readonly string[] } | undefined {
+  try {
+    const path = join(workspacePath, '.pending-handoff.json');
+    if (!existsSync(path)) return undefined;
+    const raw = readFileSync(path, 'utf-8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const completed = (parsed as { completed?: unknown }).completed;
+    if (!Array.isArray(completed)) return { completed: [] };
+    return { completed: completed.filter((c): c is string => typeof c === 'string') };
+  } catch {
+    return undefined;
   }
 }
 

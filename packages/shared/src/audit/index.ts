@@ -57,3 +57,5 @@ export type {
   RevertUnderReviewResult,
   CompleteDeferredCloseResult,
 } from './handoff-promotion.js';
+export { runWalkCheck, renderTeachingMessage } from './walk-check.js';
+export type { WalkCheckOutcome } from './walk-check.js';
