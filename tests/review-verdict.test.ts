@@ -11,6 +11,7 @@ import {
   applyReviewVerdict,
   findActiveReviewForTask,
   REVIEW_REDO_CAP_DEFAULT,
+  buildReviewPrompt,
   ChitValidationError,
   type Chit,
   type Member,
@@ -382,6 +383,150 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
     });
     expect(result.applied).toBe(false);
     expect(result.errors.join(' ')).toMatch(/review chit not found/);
+  });
+});
+
+describe('buildReviewPrompt — section structure + key content', () => {
+  function fakeTask(overrides: Partial<TaskFields> = {}): Chit<'task'> {
+    return {
+      id: 'chit-t-test',
+      type: 'task',
+      status: 'active',
+      createdAt: '2026-05-01T10:00:00.000Z',
+      updatedAt: '2026-05-01T10:00:00.000Z',
+      createdBy: 'coder',
+      tags: [],
+      fields: {
+        task: {
+          title: 'do the thing',
+          priority: 'normal',
+          workflowStatus: 'under_review',
+          acceptanceCriteria: ['criterion A', 'criterion B'],
+          output: 'completed the thing as specified; tested A; tested B',
+          ...overrides,
+        } as TaskFields,
+      },
+    } as Chit<'task'>;
+  }
+
+  function fakeContract(): Chit<'contract'> {
+    return {
+      id: 'chit-c-test',
+      type: 'contract',
+      status: 'active',
+      createdAt: '2026-05-01T09:00:00.000Z',
+      updatedAt: '2026-05-01T09:00:00.000Z',
+      createdBy: 'mark',
+      tags: [],
+      fields: {
+        contract: {
+          title: 'demo contract title',
+          goal: 'demo contract goal',
+          taskIds: ['chit-t-test'],
+          priority: 'normal',
+        },
+      },
+    } as Chit<'contract'>;
+  }
+
+  it('includes the three verdicts + redo cap status + contract goal + task output', () => {
+    const prompt = buildReviewPrompt({
+      agentDisplayName: 'Coder',
+      reviewerSlug: 'coder',
+      task: fakeTask(),
+      contract: fakeContract(),
+      priorTaskOutputs: [],
+      walkPosition: null,
+      redoCap: 1,
+      currentRedoCount: 0,
+    });
+
+    // Mode declaration.
+    expect(prompt).toContain('REVIEW session');
+    expect(prompt).toContain('Coder');
+
+    // All three verdicts named.
+    expect(prompt).toContain('**accept**');
+    expect(prompt).toContain('**redo**');
+    expect(prompt).toContain('**flag**');
+
+    // Redo cap state — count + cap surfaced.
+    expect(prompt).toContain('Redo count for this Task: 0 of 1');
+
+    // Contract section.
+    expect(prompt).toContain('demo contract goal');
+    expect(prompt).toContain('demo contract title');
+
+    // Task section.
+    expect(prompt).toContain('do the thing');
+    expect(prompt).toContain('completed the thing as specified');
+    expect(prompt).toContain('criterion A');
+    expect(prompt).toContain('criterion B');
+
+    // CLI command examples — each verdict gets its own command.
+    expect(prompt).toContain('--field verdict=accept');
+    expect(prompt).toContain('--field verdict=redo');
+    expect(prompt).toContain('--field verdict=flag');
+    expect(prompt).toContain('--field redoFeedback="<REQUIRED');
+  });
+
+  it('changes wording when the redo cap is already hit (cap state messaging)', () => {
+    const prompt = buildReviewPrompt({
+      agentDisplayName: 'Coder',
+      reviewerSlug: 'coder',
+      task: fakeTask({ reviewRedoCount: 1 }),
+      contract: fakeContract(),
+      priorTaskOutputs: [],
+      walkPosition: null,
+      redoCap: 1,
+      currentRedoCount: 1,
+    });
+
+    // Wording explicitly tells the reviewer redo is mechanically flag.
+    expect(prompt).toContain('auto-promoted to **flag**');
+    expect(prompt).toContain('accept vs flag');
+  });
+
+  it('renders prior task outputs when present', () => {
+    const prompt = buildReviewPrompt({
+      agentDisplayName: 'Coder',
+      reviewerSlug: 'coder',
+      task: fakeTask(),
+      contract: fakeContract(),
+      priorTaskOutputs: [
+        {
+          stepId: 'step-1',
+          taskId: 'chit-t-prior1',
+          taskTitle: 'first step',
+          output: 'first step did X with decision: cache invalidation goes via Y',
+        },
+      ],
+      walkPosition: null,
+      redoCap: 1,
+      currentRedoCount: 0,
+    });
+
+    expect(prompt).toContain('first step did X');
+    expect(prompt).toContain('cache invalidation goes via Y');
+    expect(prompt).toContain('step-1');
+    expect(prompt).toContain('chit-t-prior1');
+  });
+
+  it('flags empty task.output as signal in its own right', () => {
+    const prompt = buildReviewPrompt({
+      agentDisplayName: 'Coder',
+      reviewerSlug: 'coder',
+      task: fakeTask({ output: undefined }),
+      contract: fakeContract(),
+      priorTaskOutputs: [],
+      walkPosition: null,
+      redoCap: 1,
+      currentRedoCount: 0,
+    });
+
+    // The "empty output is itself signal" framing — coherence often
+    // starts with skipping the externalization step.
+    expect(prompt).toMatch(/empty.*signal|skipping the externalization/i);
   });
 });
 
