@@ -269,6 +269,19 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
     expect(fields.handoffNotesFromReview).toBeUndefined();
   });
 
+  it('accept: whitespace-only notesForNextTask is treated as empty (no contract stamp)', () => {
+    // Trims before the empty check — a note that's just whitespace
+    // carries no real information; the contract shouldn't accumulate
+    // dead entries from agents who passed an empty-shaped flag.
+    const { taskId, contractId, reviewId } = setupVerdict({
+      verdict: 'accept',
+      notesForNextTask: '   \n  \t  ',
+    });
+    applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+
+    expect(getHandoffNoteFromReview(corpRoot, contractId, taskId)).toBeNull();
+  });
+
   it('accept: re-application on the same task replaces the prior note (one per source task)', () => {
     const firstNote = 'first review said: cache invalidation matters';
     const secondNote = 'second review (after redo) said: actually, batch by tenant';
