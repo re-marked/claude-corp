@@ -65,6 +65,8 @@ import {
   buildCheckpointObservation,
   createChit,
   extractLatestUsageFromTranscript,
+  applyReviewVerdict,
+  findActiveReviewForTask,
   type Chit,
   type ContractFields,
   type HookInput,
@@ -280,6 +282,70 @@ async function runHookPath(
 
   const currentTask = resolveCurrentTask(corpRoot, slug);
   const openTier3Inbox = queryOpenTier3Inbox(corpRoot, slug);
+
+  // Project 2.5 Phase 2 — review-mode routing. If the agent's
+  // current task has an ACTIVE review chit, this Stop hook is firing
+  // at the end of a REVIEW session (not a task session). Apply the
+  // verdict via the shared verdict-decide helper, emit approve so
+  // Claude Code closes the session cleanly, and return — skipping
+  // the normal audit pipeline entirely.
+  //
+  // The verdict's state effects are written by applyReviewVerdict:
+  //   - accept: review chit closes; notesForNextTask stamped onto
+  //     contract; task stays in under_review. The NEXT audit-mode
+  //     Stop (when the next dispatch task-session ends? or when
+  //     audit fires again?) sees a closed accept-review +
+  //     eligibility=false and proceeds with normal promotion. In
+  //     the minimum-viable Phase 2 ship the operator runs
+  //     `cc-cli audit --agent <slug>` manually after accept to
+  //     trigger that path; Phase 3's watcher will automate it.
+  //   - redo: task reverts to in_progress + pendingRedoFeedback +
+  //     reviewRedoCount++. Next dispatch (manual or via Phase 3
+  //     watcher) picks up the task with the feedback in context.
+  //   - flag: task stays under_review; tier-3 inbox to founder.
+  //
+  // Skip on idle agents (no currentTask) and substrate gaps
+  // (resolveCurrentTask returned undefined) — no review can fire
+  // without a real task chit to anchor on.
+  if (currentTask) {
+    try {
+      const activeReview = findActiveReviewForTask(corpRoot, currentTask.id);
+      if (activeReview) {
+        const founderId = resolveFounderMemberId(corpRoot);
+        const verdictResult = applyReviewVerdict(corpRoot, {
+          reviewChitId: activeReview.id,
+          founderMemberId: founderId ?? slug,
+        });
+        logAuditDecision(
+          corpRoot,
+          slug,
+          { decision: 'approve' },
+          {
+            event: 'review-verdict-applied',
+            reviewChitId: activeReview.id,
+            taskId: currentTask.id,
+            inputVerdict: verdictResult.inputVerdict,
+            outcomeVerdict: verdictResult.outcomeVerdict,
+            capDowngrade: verdictResult.capDowngrade,
+            applied: verdictResult.applied,
+            verdictErrors: verdictResult.errors,
+          },
+        );
+        // Emit approve so Claude Code closes the review session cleanly.
+        // The decisions about chain advance live in the state changes
+        // applyReviewVerdict already made.
+        emitDecision({ decision: 'approve' });
+        return;
+      }
+    } catch (err) {
+      // Review-mode routing failure is OPERATIONAL — log + fall
+      // through to normal audit. Failing closed (blocking the Stop
+      // hook) would trap the session; failing open (skipping the
+      // review routing) means the next manual audit invocation
+      // picks up the active review and applies it.
+      logAuditError(corpRoot, slug, err);
+    }
+  }
 
   // Project 2.3 — walk-aware check. Hoisted ABOVE the transcript
   // fail-open + runAudit pure-engine call because walk-check reads
@@ -941,6 +1007,25 @@ function resolveMember(corpRoot: string, slug: string): Member | null {
     if (!existsSync(membersPath)) return null;
     const members = JSON.parse(readFileSync(membersPath, 'utf-8')) as Member[];
     return members.find((m) => m.id === slug) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Project 2.5 Phase 2 — resolve the founder's member id for
+ * tier-3 inbox-item recipient on review flag / cap-downgrade
+ * verdicts. Falls back to null when members.json is missing or no
+ * rank=owner member exists; callers route to a sensible default
+ * (typically the slug of the agent itself, which keeps the chit
+ * write valid even if no founder is registered).
+ */
+function resolveFounderMemberId(corpRoot: string): string | null {
+  try {
+    const membersPath = join(corpRoot, MEMBERS_JSON);
+    if (!existsSync(membersPath)) return null;
+    const members = JSON.parse(readFileSync(membersPath, 'utf-8')) as Member[];
+    return members.find((m) => m.rank === 'owner')?.id ?? null;
   } catch {
     return null;
   }
