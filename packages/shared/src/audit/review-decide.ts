@@ -58,7 +58,7 @@
 import { findChitById, updateChit, chitScopeFromPath, queryChits } from '../chits.js';
 import { createInboxItem } from '../inbox.js';
 import { validateTransition, TaskTransitionError } from '../task-state-machine.js';
-import type { Chit, ReviewFields, TaskFields } from '../types/chit.js';
+import type { Chit, ContractFields, ReviewFields, TaskFields } from '../types/chit.js';
 
 /** Hard cap on redo verdicts per Task. Spec: 1. */
 export const REVIEW_REDO_CAP_DEFAULT = 1;
@@ -414,6 +414,60 @@ export function findActiveReviewForTask(
     return matches[0] ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Project 2.5 Phase 2 — should the daemon spawn a review-session
+ * after audit approves this task? The eligibility gate that the
+ * audit-approve path consults before deciding whether to defer
+ * promotion (and dispatch a review) vs proceed directly.
+ *
+ * Eligibility requires ALL of:
+ *   1. Task is on a Contract (taskId appears in some contract.taskIds).
+ *   2. The Contract has `blueprintId` set (cast from a walk — ad-hoc
+ *      multi-Task contracts skip review).
+ *   3. The Contract has ≥ 2 tasks (a single-task "walk" can't have
+ *      cross-task incoherence; review-session has nothing to compare).
+ *   4. No closed `accept` review chit already exists for this task
+ *      (the post-review re-approve path — review already fired +
+ *      accepted; this approve should proceed to promotion normally).
+ *
+ * Returns false on any I/O / lookup failure (defensive: skip review
+ * rather than block the chain advance on a substrate flake).
+ */
+export function shouldRunReviewSessionForTask(
+  corpRoot: string,
+  taskChit: Chit<'task'>,
+): boolean {
+  try {
+    // (1) + (2) + (3): find the contract, check it's a walk + multi-task.
+    const contractResult = queryChits<'contract'>(corpRoot, {
+      types: ['contract'],
+      limit: 0,
+    });
+    const containing = contractResult.chits.find((cwb) =>
+      (cwb.chit.fields.contract as ContractFields).taskIds.includes(taskChit.id),
+    );
+    if (!containing) return false;
+    const contractFields = containing.chit.fields.contract as ContractFields;
+    if (!contractFields.blueprintId) return false;
+    if (contractFields.taskIds.length < 2) return false;
+
+    // (4): has a closed accept-review already fired for this task?
+    const reviews = queryChits<'review'>(corpRoot, {
+      types: ['review'],
+      limit: 0,
+    });
+    const acceptApplied = reviews.chits.some((cwb) => {
+      const c = cwb.chit as Chit<'review'>;
+      if (c.status !== 'closed') return false;
+      const r = c.fields.review as ReviewFields;
+      return r.taskId === taskChit.id && r.verdict === 'accept';
+    });
+    return !acceptApplied;
+  } catch {
+    return false;
   }
 }
 

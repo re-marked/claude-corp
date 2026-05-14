@@ -12,6 +12,7 @@ import {
   findActiveReviewForTask,
   consumePendingRedoFeedback,
   getHandoffNoteFromReview,
+  shouldRunReviewSessionForTask,
   REVIEW_REDO_CAP_DEFAULT,
   buildReviewPrompt,
   ChitValidationError,
@@ -746,6 +747,186 @@ describe('buildReviewPrompt — section structure + key content', () => {
     // The "empty output is itself signal" framing — coherence often
     // starts with skipping the externalization step.
     expect(prompt).toMatch(/empty.*signal|skipping the externalization/i);
+  });
+});
+
+describe('shouldRunReviewSessionForTask — Phase 2 eligibility gate', () => {
+  let corpRoot: string;
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'should-review-'));
+  });
+  afterEach(() => {
+    try { rmSync(corpRoot, { recursive: true, force: true }); } catch { /* Windows */ }
+  });
+
+  function makeMultiTaskWalkContract(): { task: Chit<'task'>; contractId: string } {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: {
+          title: 'first task',
+          priority: 'normal',
+          workflowStatus: 'under_review',
+        },
+      } as never,
+    });
+    const sibling = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: { task: { title: 'second task', priority: 'normal' } } as never,
+    });
+    const contract = createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        contract: {
+          title: 'multi-task walk',
+          goal: 'demo',
+          taskIds: [task.id, sibling.id],
+          priority: 'normal',
+          blueprintId: 'chit-bp-demo', // pretend a walk
+        },
+      },
+    });
+    return { task: task as Chit<'task'>, contractId: contract.id };
+  }
+
+  it('returns true for a multi-task walk task with no prior review', () => {
+    const { task } = makeMultiTaskWalkContract();
+    expect(shouldRunReviewSessionForTask(corpRoot, task)).toBe(true);
+  });
+
+  it('returns false when the task has a closed accept-review (post-review re-approve path)', () => {
+    const { task, contractId } = makeMultiTaskWalkContract();
+    // Simulate: review fired previously, was accepted, chit closed.
+    const review = createChit(corpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'accept',
+          reasoning: 'looks good',
+          taskId: task.id,
+          contractId,
+          reviewerSlug: 'coder',
+        } as ReviewFields,
+      } as never,
+    });
+    const hit = findChitById(corpRoot, review.id);
+    updateChit(corpRoot, chitScopeFromPath(corpRoot, hit!.path), 'review', review.id, {
+      updatedBy: 'test',
+      status: 'closed',
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task)).toBe(false);
+  });
+
+  it('returns true when the only prior review was a closed REDO (retry path — review again on the retry)', () => {
+    const { task, contractId } = makeMultiTaskWalkContract();
+    const review = createChit(corpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'redo',
+          reasoning: 'first attempt missed step 2 decision',
+          taskId: task.id,
+          contractId,
+          reviewerSlug: 'coder',
+          redoFeedback: 'fix the cache invalidation order',
+        } as ReviewFields,
+      } as never,
+    });
+    const hit = findChitById(corpRoot, review.id);
+    updateChit(corpRoot, chitScopeFromPath(corpRoot, hit!.path), 'review', review.id, {
+      updatedBy: 'test',
+      status: 'closed',
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task)).toBe(true);
+  });
+
+  it('returns false for a single-task contract (no cross-task coherence to check)', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: { title: 'lonely task', priority: 'normal', workflowStatus: 'under_review' },
+      } as never,
+    });
+    createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        contract: {
+          title: 'single-task contract',
+          goal: 'demo',
+          taskIds: [task.id],
+          priority: 'normal',
+          blueprintId: 'chit-bp-tiny',
+        },
+      },
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task as Chit<'task'>)).toBe(false);
+  });
+
+  it('returns false for an ad-hoc contract (no blueprintId)', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: { title: 'ad-hoc work', priority: 'normal', workflowStatus: 'under_review' },
+      } as never,
+    });
+    const sibling = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: { task: { title: 'sibling', priority: 'normal' } } as never,
+    });
+    createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        contract: {
+          title: 'manual multi-task',
+          goal: 'demo',
+          taskIds: [task.id, sibling.id],
+          priority: 'normal',
+          // No blueprintId — ad-hoc coordination contract, not a walk.
+        },
+      },
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task as Chit<'task'>)).toBe(false);
+  });
+
+  it('returns false when the task is not in any contract (orphan task)', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: { title: 'orphan', priority: 'normal', workflowStatus: 'under_review' },
+      } as never,
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task as Chit<'task'>)).toBe(false);
   });
 });
 

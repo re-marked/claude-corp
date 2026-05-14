@@ -495,6 +495,7 @@ export {
   findActiveReviewForTask,
   consumePendingRedoFeedback,
   getHandoffNoteFromReview,
+  shouldRunReviewSessionForTask,
   REVIEW_REDO_CAP_DEFAULT,
 } from './audit/index.js';
 export type {
