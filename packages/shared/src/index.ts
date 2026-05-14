@@ -493,8 +493,10 @@ export {
   renderTeachingMessage,
   applyReviewVerdict,
   findActiveReviewForTask,
+  findActiveReviewByReviewer,
   consumePendingRedoFeedback,
   getHandoffNoteFromReview,
+  shouldRunReviewSessionForTask,
   REVIEW_REDO_CAP_DEFAULT,
 } from './audit/index.js';
 export type {

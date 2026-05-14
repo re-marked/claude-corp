@@ -58,7 +58,7 @@
 import { findChitById, updateChit, chitScopeFromPath, queryChits } from '../chits.js';
 import { createInboxItem } from '../inbox.js';
 import { validateTransition, TaskTransitionError } from '../task-state-machine.js';
-import type { Chit, ReviewFields, TaskFields } from '../types/chit.js';
+import type { Chit, ContractFields, ReviewFields, TaskFields } from '../types/chit.js';
 
 /** Hard cap on redo verdicts per Task. Spec: 1. */
 export const REVIEW_REDO_CAP_DEFAULT = 1;
@@ -136,14 +136,41 @@ export function applyReviewVerdict(
   const taskChit = taskHit.chit as Chit<'task'>;
   const task = taskChit.fields.task as TaskFields;
   const taskWs = task.workflowStatus ?? null;
-  // Review fires when the Task is in under_review — the same state
-  // audit operates on. Other states mean the orchestration is wrong
-  // (audit already fired, hand re-routed, founder forced a state).
-  // Refuse rather than corrupt the state machine.
-  if (taskWs !== 'under_review') {
+  // Codex P1/P2 round 2 — task-state tolerance.
+  //
+  // The Phase 2 spec assumed review fires WHILE task is in
+  // under_review (i.e. before audit-approve promotes). In the
+  // manual Phase 2 flow Mark actually runs (cc-cli done → audit
+  // approves + promotes → cc-cli review-spawn → review chit
+  // written → audit fires again), the task has already moved to
+  // `completed` by the time review-decide runs. Refusing all non-
+  // under_review states would make every retrospective review chit
+  // un-applicable.
+  //
+  // Per-verdict tolerance:
+  //   - accept: pure documentation (writes notesForNextTask onto
+  //     contract). Safe on any non-failure terminal state. Allowed
+  //     on under_review (live-review timing) AND completed
+  //     (retrospective-review timing).
+  //   - flag: pure surfacing (emits Tier-3 inbox to founder).
+  //     Same allowlist as accept.
+  //   - redo: requires reverting workflowStatus to in_progress via
+  //     the audit-block trigger. State machine permits that ONLY
+  //     from under_review. A redo on a completed task is a state-
+  //     machine impossibility — refuse loudly so the operator
+  //     sees why instead of silently no-op'ing.
+  if (taskWs !== 'under_review' && taskWs !== 'completed') {
     errors.push(
       `task ${review.taskId} workflowStatus is ${taskWs ?? '(unset)'}; ` +
-        `review-decide expects under_review`,
+        `review-decide expects under_review (live-review) or completed (retrospective-review)`,
+    );
+    return makeNoOp(opts.reviewChitId, review.taskId, errors, inputVerdict);
+  }
+  // Narrowed: taskWs is 'under_review' | 'completed'.
+  if (inputVerdict === 'redo' && taskWs !== 'under_review') {
+    errors.push(
+      `redo verdict requires task in under_review (state machine refuses dispatch from completed); ` +
+        `task ${review.taskId} is ${taskWs}. The retrospective-review path is accept-or-flag only.`,
     );
     return makeNoOp(opts.reviewChitId, review.taskId, errors, inputVerdict);
   }
@@ -392,6 +419,47 @@ function makeNoOp(
  * created one. Doesn't auto-close the duplicates; chit-hygiene's
  * domain.
  */
+/**
+ * Project 2.5 Phase 2 (Codex P1) — find any active review chit
+ * written by a given reviewer slug. Used by the audit-side review-
+ * mode router because the Stop hook firing AFTER a review session
+ * doesn't have a reliable task-scoped lookup: the audit-approve
+ * promotion path may have closed the reviewed task and cleared (or
+ * advanced) the agent's Casket, so currentTask at this point is
+ * null or points at the NEXT task — not the one the review chit
+ * is for.
+ *
+ * The reviewer-slug filter answers the right question: "has this
+ * agent written a verdict that hasn't been applied yet?" That maps
+ * to "we're at the end of a review session for this slot, route
+ * the verdict."
+ *
+ * Returns the most-recently-created active review chit when multiple
+ * match (defensive — shouldn't happen with proper apply-then-close,
+ * but possible if a write half-succeeded). Returns null on any I/O
+ * failure (defensive: skip review-mode routing rather than crash
+ * the Stop hook on a substrate flake).
+ */
+export function findActiveReviewByReviewer(
+  corpRoot: string,
+  reviewerSlug: string,
+): Chit<'review'> | null {
+  try {
+    const result = queryChits<'review'>(corpRoot, {
+      types: ['review'],
+      statuses: ['active'],
+      limit: 0,
+    });
+    const matches = result.chits
+      .map((cwb) => cwb.chit as Chit<'review'>)
+      .filter((c) => (c.fields.review as ReviewFields).reviewerSlug === reviewerSlug)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return matches[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function findActiveReviewForTask(
   corpRoot: string,
   taskId: string,
@@ -414,6 +482,60 @@ export function findActiveReviewForTask(
     return matches[0] ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Project 2.5 Phase 2 — should the daemon spawn a review-session
+ * after audit approves this task? The eligibility gate that the
+ * audit-approve path consults before deciding whether to defer
+ * promotion (and dispatch a review) vs proceed directly.
+ *
+ * Eligibility requires ALL of:
+ *   1. Task is on a Contract (taskId appears in some contract.taskIds).
+ *   2. The Contract has `blueprintId` set (cast from a walk — ad-hoc
+ *      multi-Task contracts skip review).
+ *   3. The Contract has ≥ 2 tasks (a single-task "walk" can't have
+ *      cross-task incoherence; review-session has nothing to compare).
+ *   4. No closed `accept` review chit already exists for this task
+ *      (the post-review re-approve path — review already fired +
+ *      accepted; this approve should proceed to promotion normally).
+ *
+ * Returns false on any I/O / lookup failure (defensive: skip review
+ * rather than block the chain advance on a substrate flake).
+ */
+export function shouldRunReviewSessionForTask(
+  corpRoot: string,
+  taskChit: Chit<'task'>,
+): boolean {
+  try {
+    // (1) + (2) + (3): find the contract, check it's a walk + multi-task.
+    const contractResult = queryChits<'contract'>(corpRoot, {
+      types: ['contract'],
+      limit: 0,
+    });
+    const containing = contractResult.chits.find((cwb) =>
+      (cwb.chit.fields.contract as ContractFields).taskIds.includes(taskChit.id),
+    );
+    if (!containing) return false;
+    const contractFields = containing.chit.fields.contract as ContractFields;
+    if (!contractFields.blueprintId) return false;
+    if (contractFields.taskIds.length < 2) return false;
+
+    // (4): has a closed accept-review already fired for this task?
+    const reviews = queryChits<'review'>(corpRoot, {
+      types: ['review'],
+      limit: 0,
+    });
+    const acceptApplied = reviews.chits.some((cwb) => {
+      const c = cwb.chit as Chit<'review'>;
+      if (c.status !== 'closed') return false;
+      const r = c.fields.review as ReviewFields;
+      return r.taskId === taskChit.id && r.verdict === 'accept';
+    });
+    return !acceptApplied;
+  } catch {
+    return false;
   }
 }
 

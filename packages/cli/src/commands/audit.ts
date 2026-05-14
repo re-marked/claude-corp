@@ -65,6 +65,8 @@ import {
   buildCheckpointObservation,
   createChit,
   extractLatestUsageFromTranscript,
+  applyReviewVerdict,
+  findActiveReviewByReviewer,
   type Chit,
   type ContractFields,
   type HookInput,
@@ -280,6 +282,79 @@ async function runHookPath(
 
   const currentTask = resolveCurrentTask(corpRoot, slug);
   const openTier3Inbox = queryOpenTier3Inbox(corpRoot, slug);
+
+  // Project 2.5 Phase 2 — review-mode routing.
+  //
+  // Codex P1 (round 2): the original implementation looked up the
+  // active review by `currentTask.id`. That's wrong on the manual
+  // Phase 2 flow: when `cc-cli done` fires audit, audit-approve
+  // promotes the task (closes it + clears/advances the Casket), so
+  // by the time the operator's `cc-cli review-spawn` causes the
+  // review session to end, the Casket points at the NEXT task (or
+  // is null). The task-scoped lookup never finds the chit and the
+  // verdict stays unapplied.
+  //
+  // Agent-scoped lookup: "does this agent slug have an active review
+  // chit waiting for verdict-application?" maps cleanly to "we're at
+  // the end of a review session for this slot." Found chits route
+  // through applyReviewVerdict regardless of the agent's current
+  // Casket state.
+  //
+  // applied:false handling (Codex P2): when applyReviewVerdict
+  // returns applied=false (linked task in wrong state, chit shape
+  // drift), we DON'T silently emit approve — that hides the failure
+  // and leaves the review unapplied. Instead, log loudly and fall
+  // through to the normal audit pipeline. Normal audit may have
+  // useful behavior to surface (audit-block, walk-check, etc.) and
+  // the operator's next command can re-attempt the verdict against
+  // a corrected state.
+  try {
+    const activeReview = findActiveReviewByReviewer(corpRoot, slug);
+    if (activeReview) {
+      const founderId = resolveFounderMemberId(corpRoot);
+      const verdictResult = applyReviewVerdict(corpRoot, {
+        reviewChitId: activeReview.id,
+        founderMemberId: founderId ?? slug,
+      });
+      logAuditDecision(
+        corpRoot,
+        slug,
+        { decision: 'approve' },
+        {
+          event: verdictResult.applied
+            ? 'review-verdict-applied'
+            : 'review-verdict-refused',
+          reviewChitId: activeReview.id,
+          reviewerSlug: slug,
+          taskId: verdictResult.taskId,
+          currentCasketTaskId: currentTask?.id ?? null,
+          inputVerdict: verdictResult.inputVerdict,
+          outcomeVerdict: verdictResult.outcomeVerdict,
+          capDowngrade: verdictResult.capDowngrade,
+          applied: verdictResult.applied,
+          verdictErrors: verdictResult.errors,
+        },
+      );
+      if (verdictResult.applied) {
+        // Emit approve so Claude Code closes the review session cleanly.
+        // The state effects (chit close, task transition, inbox-item)
+        // live inside applyReviewVerdict.
+        emitDecision({ decision: 'approve' });
+        return;
+      }
+      // applied=false → fall through. The active review chit stays
+      // visible (still status=active) for retry under a corrected
+      // state. The structured errors are in the audit log; an
+      // operator inspecting `.audit-log.jsonl` sees what blocked.
+    }
+  } catch (err) {
+    // Review-mode routing failure is OPERATIONAL — log + fall
+    // through to normal audit. Failing closed (blocking the Stop
+    // hook) would trap the session; failing open (skipping the
+    // review routing) means the next audit invocation picks up
+    // the active review and applies it.
+    logAuditError(corpRoot, slug, err);
+  }
 
   // Project 2.3 — walk-aware check. Hoisted ABOVE the transcript
   // fail-open + runAudit pure-engine call because walk-check reads
@@ -941,6 +1016,25 @@ function resolveMember(corpRoot: string, slug: string): Member | null {
     if (!existsSync(membersPath)) return null;
     const members = JSON.parse(readFileSync(membersPath, 'utf-8')) as Member[];
     return members.find((m) => m.id === slug) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Project 2.5 Phase 2 — resolve the founder's member id for
+ * tier-3 inbox-item recipient on review flag / cap-downgrade
+ * verdicts. Falls back to null when members.json is missing or no
+ * rank=owner member exists; callers route to a sensible default
+ * (typically the slug of the agent itself, which keeps the chit
+ * write valid even if no founder is registered).
+ */
+function resolveFounderMemberId(corpRoot: string): string | null {
+  try {
+    const membersPath = join(corpRoot, MEMBERS_JSON);
+    if (!existsSync(membersPath)) return null;
+    const members = JSON.parse(readFileSync(membersPath, 'utf-8')) as Member[];
+    return members.find((m) => m.rank === 'owner')?.id ?? null;
   } catch {
     return null;
   }

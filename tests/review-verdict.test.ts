@@ -10,8 +10,10 @@ import {
   queryChits,
   applyReviewVerdict,
   findActiveReviewForTask,
+  findActiveReviewByReviewer,
   consumePendingRedoFeedback,
   getHandoffNoteFromReview,
+  shouldRunReviewSessionForTask,
   REVIEW_REDO_CAP_DEFAULT,
   buildReviewPrompt,
   ChitValidationError,
@@ -575,9 +577,93 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
     expect(second.errors.join(' ')).toMatch(/already applied|status is closed/);
   });
 
-  it('refuses when the linked task is not in under_review', () => {
+  it('refuses when the linked task is in a state outside the review allowlist', () => {
+    // Codex P1 round 2: under_review (live-review) and completed
+    // (retrospective-review) are both allowed. Other states — like
+    // in_progress, blocked, cancelled — refuse.
     const { taskId, reviewId } = setupVerdict({ verdict: 'accept' });
-    // Force the task into a different state.
+    const taskHit = findChitById(corpRoot, taskId);
+    const scope = chitScopeFromPath(corpRoot, taskHit!.path);
+    updateChit(corpRoot, scope, 'task', taskId, {
+      updatedBy: 'test',
+      fields: {
+        task: {
+          ...(taskHit!.chit.fields.task as TaskFields),
+          workflowStatus: 'in_progress',
+        },
+      } as never,
+    });
+
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+    expect(result.applied).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/workflowStatus is in_progress/);
+  });
+
+  // ── Codex P1 round 2: retrospective-review tolerance ────────────
+
+  it('accept on a completed task applies successfully (retrospective-review path)', () => {
+    // Manual Phase 2 flow: cc-cli done → audit approves + promotes
+    // (task → completed) → cc-cli review-spawn fires review session.
+    // By the time the review chit gets verdict-applied, the task is
+    // already completed. accept verdict is documentation (notes for
+    // next task on contract), so it's still meaningful.
+    const note = 'next step should re-check the cache decision';
+    const { taskId, contractId, reviewId } = setupVerdict({
+      verdict: 'accept',
+      notesForNextTask: note,
+    });
+    // Move task to completed (mirrors post-promotion state).
+    const taskHit = findChitById(corpRoot, taskId);
+    const scope = chitScopeFromPath(corpRoot, taskHit!.path);
+    updateChit(corpRoot, scope, 'task', taskId, {
+      updatedBy: 'test',
+      fields: {
+        task: {
+          ...(taskHit!.chit.fields.task as TaskFields),
+          workflowStatus: 'completed',
+        },
+      } as never,
+    });
+
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+    expect(result.applied).toBe(true);
+    expect(result.outcomeVerdict).toBe('accept');
+    // Note still stamped on the contract.
+    expect(getHandoffNoteFromReview(corpRoot, contractId, taskId)?.note).toBe(note);
+  });
+
+  it('flag on a completed task applies successfully (retrospective surfacing)', () => {
+    const { taskId, reviewId } = setupVerdict({
+      verdict: 'flag',
+      reasoning: 'in hindsight, the decision was wrong; founder needed',
+    });
+    const taskHit = findChitById(corpRoot, taskId);
+    const scope = chitScopeFromPath(corpRoot, taskHit!.path);
+    updateChit(corpRoot, scope, 'task', taskId, {
+      updatedBy: 'test',
+      fields: {
+        task: {
+          ...(taskHit!.chit.fields.task as TaskFields),
+          workflowStatus: 'completed',
+        },
+      } as never,
+    });
+
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+    expect(result.applied).toBe(true);
+    expect(result.outcomeVerdict).toBe('flag');
+    expect(result.inboxItemId).not.toBeNull();
+  });
+
+  it('redo on a completed task REFUSES (state machine impossibility)', () => {
+    // Redo requires reverting the task to in_progress via the
+    // audit-block trigger. State machine permits that ONLY from
+    // under_review. A redo on a completed task is mechanically
+    // impossible; refuse with a clear error.
+    const { taskId, reviewId } = setupVerdict({
+      verdict: 'redo',
+      redoFeedback: 'rework with the cache decision baked in',
+    });
     const taskHit = findChitById(corpRoot, taskId);
     const scope = chitScopeFromPath(corpRoot, taskHit!.path);
     updateChit(corpRoot, scope, 'task', taskId, {
@@ -592,7 +678,34 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
 
     const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
     expect(result.applied).toBe(false);
-    expect(result.errors.join(' ')).toMatch(/workflowStatus is completed/);
+    expect(result.errors.join(' ')).toMatch(/redo verdict requires task in under_review/);
+  });
+
+  // ── Codex P1: agent-scoped lookup (findActiveReviewByReviewer) ──
+
+  it('findActiveReviewByReviewer finds the active review by reviewer slug, regardless of casket', () => {
+    // The original task-scoped lookup failed when audit-approve had
+    // already promoted the reviewed task. Agent-scoped lookup
+    // sidesteps that — what matters is which slot wrote the review,
+    // not what the casket happens to currently point at.
+    const { reviewId } = setupVerdict({
+      verdict: 'accept',
+      notesForNextTask: 'whatever',
+    });
+    const found = findActiveReviewByReviewer(corpRoot, 'coder');
+    expect(found?.id).toBe(reviewId);
+  });
+
+  it('findActiveReviewByReviewer returns null for unknown slug', () => {
+    setupVerdict({ verdict: 'accept' });
+    expect(findActiveReviewByReviewer(corpRoot, 'someone-else')).toBeNull();
+  });
+
+  it('findActiveReviewByReviewer ignores closed reviews', () => {
+    const { reviewId } = setupVerdict({ verdict: 'accept' });
+    // Apply the verdict — closes the review chit.
+    applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+    expect(findActiveReviewByReviewer(corpRoot, 'coder')).toBeNull();
   });
 
   it('refuses when the review chit id does not resolve', () => {
@@ -746,6 +859,186 @@ describe('buildReviewPrompt — section structure + key content', () => {
     // The "empty output is itself signal" framing — coherence often
     // starts with skipping the externalization step.
     expect(prompt).toMatch(/empty.*signal|skipping the externalization/i);
+  });
+});
+
+describe('shouldRunReviewSessionForTask — Phase 2 eligibility gate', () => {
+  let corpRoot: string;
+  beforeEach(() => {
+    corpRoot = mkdtempSync(join(tmpdir(), 'should-review-'));
+  });
+  afterEach(() => {
+    try { rmSync(corpRoot, { recursive: true, force: true }); } catch { /* Windows */ }
+  });
+
+  function makeMultiTaskWalkContract(): { task: Chit<'task'>; contractId: string } {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: {
+          title: 'first task',
+          priority: 'normal',
+          workflowStatus: 'under_review',
+        },
+      } as never,
+    });
+    const sibling = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: { task: { title: 'second task', priority: 'normal' } } as never,
+    });
+    const contract = createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        contract: {
+          title: 'multi-task walk',
+          goal: 'demo',
+          taskIds: [task.id, sibling.id],
+          priority: 'normal',
+          blueprintId: 'chit-bp-demo', // pretend a walk
+        },
+      },
+    });
+    return { task: task as Chit<'task'>, contractId: contract.id };
+  }
+
+  it('returns true for a multi-task walk task with no prior review', () => {
+    const { task } = makeMultiTaskWalkContract();
+    expect(shouldRunReviewSessionForTask(corpRoot, task)).toBe(true);
+  });
+
+  it('returns false when the task has a closed accept-review (post-review re-approve path)', () => {
+    const { task, contractId } = makeMultiTaskWalkContract();
+    // Simulate: review fired previously, was accepted, chit closed.
+    const review = createChit(corpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'accept',
+          reasoning: 'looks good',
+          taskId: task.id,
+          contractId,
+          reviewerSlug: 'coder',
+        } as ReviewFields,
+      } as never,
+    });
+    const hit = findChitById(corpRoot, review.id);
+    updateChit(corpRoot, chitScopeFromPath(corpRoot, hit!.path), 'review', review.id, {
+      updatedBy: 'test',
+      status: 'closed',
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task)).toBe(false);
+  });
+
+  it('returns true when the only prior review was a closed REDO (retry path — review again on the retry)', () => {
+    const { task, contractId } = makeMultiTaskWalkContract();
+    const review = createChit(corpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'redo',
+          reasoning: 'first attempt missed step 2 decision',
+          taskId: task.id,
+          contractId,
+          reviewerSlug: 'coder',
+          redoFeedback: 'fix the cache invalidation order',
+        } as ReviewFields,
+      } as never,
+    });
+    const hit = findChitById(corpRoot, review.id);
+    updateChit(corpRoot, chitScopeFromPath(corpRoot, hit!.path), 'review', review.id, {
+      updatedBy: 'test',
+      status: 'closed',
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task)).toBe(true);
+  });
+
+  it('returns false for a single-task contract (no cross-task coherence to check)', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: { title: 'lonely task', priority: 'normal', workflowStatus: 'under_review' },
+      } as never,
+    });
+    createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        contract: {
+          title: 'single-task contract',
+          goal: 'demo',
+          taskIds: [task.id],
+          priority: 'normal',
+          blueprintId: 'chit-bp-tiny',
+        },
+      },
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task as Chit<'task'>)).toBe(false);
+  });
+
+  it('returns false for an ad-hoc contract (no blueprintId)', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: { title: 'ad-hoc work', priority: 'normal', workflowStatus: 'under_review' },
+      } as never,
+    });
+    const sibling = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: { task: { title: 'sibling', priority: 'normal' } } as never,
+    });
+    createChit(corpRoot, {
+      type: 'contract',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        contract: {
+          title: 'manual multi-task',
+          goal: 'demo',
+          taskIds: [task.id, sibling.id],
+          priority: 'normal',
+          // No blueprintId — ad-hoc coordination contract, not a walk.
+        },
+      },
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task as Chit<'task'>)).toBe(false);
+  });
+
+  it('returns false when the task is not in any contract (orphan task)', () => {
+    const task = createChit(corpRoot, {
+      type: 'task',
+      scope: 'corp',
+      status: 'active',
+      createdBy: 'coder',
+      fields: {
+        task: { title: 'orphan', priority: 'normal', workflowStatus: 'under_review' },
+      } as never,
+    });
+    expect(shouldRunReviewSessionForTask(corpRoot, task as Chit<'task'>)).toBe(false);
   });
 });
 

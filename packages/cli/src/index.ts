@@ -663,6 +663,17 @@ async function run() {
       await cmdReviewDecide(process.argv.slice(3));
       break;
     }
+    case 'review-spawn': {
+      // Project 2.5 Phase 2: manually dispatch a review-session for a
+      // just-completed task on a multi-task contract. Builds the
+      // review-mode prompt via buildReviewPrompt and delivers it to
+      // the agent via /cc/say. The agent writes a review chit + ends;
+      // their Stop hook fires `cc-cli audit`, which routes through
+      // the review-mode detection and applies the verdict.
+      const { cmdReviewSpawn } = await import('./commands/review-spawn.js');
+      await cmdReviewSpawn(process.argv.slice(3));
+      break;
+    }
     case 'wtf': {
       const { cmdWtf } = await import('./commands/wtf.js');
       await cmdWtf({
