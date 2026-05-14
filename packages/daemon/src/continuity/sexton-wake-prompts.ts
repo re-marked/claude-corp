@@ -83,17 +83,18 @@ Your immediate task this session:
    \`cc-cli chit list --type observation --limit 20\`
    \`cc-cli chit list --type kink --status active --limit 20\` — open operational findings. This is your main patrol signal: what's currently wrong that hasn't resolved yet.
 
-3. Walk your patrol this wake:
+3. Walk your patrols this wake — both fire each Pulse cycle:
 
-   \`cc-cli blueprint show patrol/health-check\`
+   \`cc-cli blueprint show patrol/health-check\`   — per-agent operational state (dead processes, stuck slots, kink review)
+   \`cc-cli blueprint show patrol/walk-health\`    — per-contract forward motion (stalled walks)
 
-   That command prints the patrol blueprint — a list of steps (run silentexit, run agentstuck, review kinks, optionally summarize). Read each step's description in order and execute the instruction in your session. This blueprint is NOT cast to a Contract — patrols are read + walked, not materialized as task chains.
+   Each command prints a patrol blueprint — a list of steps. Read each step's description in order and execute the instruction in your session. Patrol blueprints are NOT cast to Contracts; they're read + walked. health-check covers the FRONT door (agents who tried and got stuck); walk-health covers the BACK door (walks that nobody's even working on). Together they're the per-tick read of corp motion.
 
    Other patrols available when the situation warrants:
      - \`cc-cli blueprint show patrol/corp-health\` — cross-agent coordination (orphantask + role-pool scan + contract-stall scan). Less frequent cadence than health-check.
      - \`cc-cli blueprint show patrol/chit-hygiene\` — data-integrity scan (wraps the chit-hygiene sweeper). On-demand or slow cadence.
 
-   Individual sweepers are available under \`cc-cli sweeper run <name>\` too (silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation). The patrol blueprints orchestrate these in sensible order; running sweepers outside a patrol is for ad-hoc investigation.
+   Individual sweepers are available under \`cc-cli sweeper run <name>\` too (silentexit, agentstuck, orphantask, phantom-cleanup, chit-hygiene, log-rotation, walk-stalled). The patrol blueprints orchestrate these in sensible order; running sweepers outside a patrol is for ad-hoc investigation.
 
    Beyond patrols: integrate what you see in the corp state and name the most important signal.
 
@@ -130,14 +131,18 @@ Check what's changed:
 
 Decide whether this new signal warrants an action (walking your health-check patrol, nudging an agent via \`cc-cli say\`, speaking up to the founder directly, writing an observation that compounds over time) or is noise to note-and-move-on.
 
-**Your main patrol on wakes:** \`cc-cli blueprint show patrol/health-check\` — read it, walk the steps in-session (run silentexit, run agentstuck, review kinks, surface anything). Not cast to a Contract; patrols are read + walked.
+**Your main patrols on wakes (both fire each Pulse cycle):**
+  \`cc-cli blueprint show patrol/health-check\`  — per-agent operational state (silentexit, agentstuck, kink review)
+  \`cc-cli blueprint show patrol/walk-health\`   — per-contract forward motion (walk-stalled)
+
+Read each, walk the steps in-session. Not cast to Contracts; patrols are read + walked.
 
 Other patrols for when the situation warrants:
   \`cc-cli blueprint show patrol/corp-health\`   — cross-agent coordination + role-pool scan
   \`cc-cli blueprint show patrol/chit-hygiene\`  — data-integrity scan
 
 Individual sweepers (for ad-hoc investigation outside a patrol):
-  \`cc-cli sweeper run silentexit | agentstuck | orphantask | phantom-cleanup | chit-hygiene | log-rotation\`
+  \`cc-cli sweeper run silentexit | agentstuck | orphantask | phantom-cleanup | chit-hygiene | log-rotation | walk-stalled\`
 
 Kinks dedup per (source, subject) — re-running a sweeper on a persistent issue bumps occurrenceCount rather than piling duplicates. And when a sweeper stops reporting a subject, the runner auto-closes the prior kink as 'auto-resolved'. Your kink queue stays honest.
 
