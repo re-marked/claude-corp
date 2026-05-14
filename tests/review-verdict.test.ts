@@ -294,31 +294,12 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
     // feedback lives on the Task itself — survives chit closure +
     // status-filtering.
     const feedback = 'step 3 missed the cache-invalidation decision from step 1';
-    const { taskId } = setupVerdict({ verdict: 'redo', redoFeedback: feedback });
-    const { reviewId } = setupVerdict({
-      verdict: 'redo',
-      redoFeedback: feedback,
-    });
+    const { taskId, reviewId } = setupVerdict({ verdict: 'redo', redoFeedback: feedback });
     applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
 
-    // pendingRedoFeedback is stamped on the task.
     const taskHit = findChitById(corpRoot, taskId);
     const taskFields = taskHit!.chit.fields.task as TaskFields;
-    // The second setup mutated the same singletons in the fixture
-    // helper; in real flow there's one Task per review. Read the
-    // most-recently-applied task's pendingRedoFeedback. The setupVerdict
-    // helper creates fresh chits per call, so taskId from the second
-    // call is what got the redo applied.
-    void taskId;
-    // Just check ANY task in the corp has the feedback stamped — the
-    // helper creates one per call and we applied to the second one.
-    const allTasks = queryChits<'task'>(corpRoot, { types: ['task'] });
-    const withFeedback = allTasks.chits
-      .map((cwb) => cwb.chit.fields.task as TaskFields)
-      .find((f) => f.pendingRedoFeedback === feedback);
-    expect(withFeedback).toBeDefined();
-    expect(withFeedback?.pendingRedoFeedback).toBe(feedback);
-    expect(taskFields).toBeDefined();
+    expect(taskFields.pendingRedoFeedback).toBe(feedback);
   });
 
   it('consumePendingRedoFeedback: returns the string and clears the field', () => {
