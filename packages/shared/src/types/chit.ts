@@ -38,6 +38,7 @@ export interface FieldsForType {
   'breaker-trip': BreakerTripFields;
   'clearance-submission': ClearanceSubmissionFields;
   'review-comment': ReviewCommentFields;
+  review: ReviewFields;
   'lane-event': LaneEventFields;
   'pattern-observation': PatternObservationFields;
 }
@@ -436,6 +437,22 @@ export interface TaskFields {
    * task right now." pickNextReview filters on non-null.
    */
   branchUnderReview?: string | null;
+  /**
+   * Project 2.5 — running count of self-witnessing review-session
+   * `redo` verdicts emitted for this Task. Hard cap = 1: the verdict-
+   * decide flow auto-promotes a second redo to `flag` instead of
+   * spinning the same Employee on the same Task indefinitely (cost
+   * containment is the dominant constraint — a Task that doesn't
+   * cohere after one focused redo isn't going to cohere on the
+   * fifteenth). Increments on `verdict=redo` application; resets
+   * implicitly when the Task's chit is closed or burned (a new
+   * cast of the same blueprint step produces a fresh Task with
+   * the field absent).
+   *
+   * Null / undefined = "no redos yet" — treated as 0 by the
+   * verdict-decide flow.
+   */
+  reviewRedoCount?: number | null;
 }
 
 export interface ContractFields {
@@ -1337,6 +1354,78 @@ export interface ReviewCommentFields {
   suggestedPatch?: string | null;
   /** Which Phase-1 round this comment came from. Lets the corp track "issues we caught in round 1 vs round 2." */
   reviewRound: number;
+}
+
+/**
+ * Project 2.5 — self-witnessing review chit.
+ *
+ * A `review` chit captures a single per-Task verdict the agent's
+ * review-session writes between Tasks on a multi-Task walk Contract.
+ * The review-session reads the just-completed Task's output + prior
+ * Task outputs + the Contract's goal + acceptance criteria, then
+ * issues one of three verdicts:
+ *
+ *   - `accept`  → the work coheres; dispatch the next Task in the walk.
+ *   - `redo`    → the work didn't cohere; flip current Task back to
+ *                 in_progress with `redoFeedback` and redispatch. Hard
+ *                 cap of ONE redo per Task — a second review verdict
+ *                 of `redo` on the same Task auto-promotes to `flag`
+ *                 (cost containment; spec note).
+ *   - `flag`    → reviewer can't decide alone; emit a Tier-3 inbox-item
+ *                 for the founder + pause the walk until the founder
+ *                 weighs in.
+ *
+ * Distinct from `review-comment` (1.12 Editor's diff comments — code-
+ * level feedback during clearance) — `review` is COARSER: a single
+ * verdict per Task with a reasoning blob, no line-level pointers.
+ *
+ * Same-self identity is load-bearing per the 2.5 spec: the review-
+ * session and the task-session share the same Employee Casket, same
+ * pre-BRAIN, same display name. `reviewerSlug` will usually match the
+ * Task's assignee.
+ *
+ * ### Lifecycle
+ * Ephemeral by default — most reviews are noise once the verdict has
+ * been applied. Promotes to durable via 0.6's 4-signal rule when the
+ * Contract later gets Warden-rejected: at that point the prior
+ * `accept` verdicts become evidence of what the Employee thought at
+ * each gate (useful for Warden's drift analysis + CULTURE.md
+ * compounding). chit.status `active` while the verdict is pending
+ * application; `closed` after the verdict-decide flow has acted.
+ */
+export interface ReviewFields {
+  /** The verdict — drives downstream dispatch routing. */
+  verdict: 'accept' | 'redo' | 'flag';
+  /**
+   * Why the verdict. Free-form prose. Required + non-empty for `redo`
+   * and `flag` (the next reader needs to know what to fix or what to
+   * escalate); recommended but not strictly required for `accept`
+   * (silent approvals are legitimate when the work is unambiguous).
+   */
+  reasoning: string;
+  /** Chit id of the Task this review is about. Load-bearing pointer. */
+  taskId: string;
+  /** Chit id of the Contract this Task belongs to. Lets the verdict-decide flow walk to the contract's taskIds without re-querying. */
+  contractId: string;
+  /** Member id of the slot that wrote the review. Per 2.5 same-self: typically matches the Task's assignee. */
+  reviewerSlug: string;
+  /**
+   * Guidance for the NEXT Task's session — what the reviewer wants the
+   * dispatcher to surface in the next dispatch's wtf header / boot
+   * prompt. Populated on `verdict=accept`; null on `redo` (the redo
+   * dispatch carries `redoFeedback` instead) and `flag` (no next
+   * Task fires).
+   */
+  notesForNextTask?: string | null;
+  /**
+   * Guidance for the REDO dispatch — what the reviewer wants the next
+   * attempt to do differently. Populated on `verdict=redo`; null on
+   * `accept` and `flag`. Empty/whitespace strings rejected at validate-
+   * time: a redo without specific feedback is the kind of stupid loop
+   * the cap exists to prevent, and naming the missing piece is the
+   * whole point of self-witnessing.
+   */
+  redoFeedback?: string | null;
 }
 
 /**

@@ -107,6 +107,12 @@ describe('CHIT_TYPES registry invariants', () => {
     // observations as priors for the drift pass. Proto-CULTURE.md
     // material before Project 5.2 formalizes.
     'pattern-observation',
+    // Project 2.5: review — self-witnessing verdict an Employee
+    // writes between Tasks on a multi-Task walk Contract. Verdict
+    // ∈ {accept, redo, flag}. Ephemeral by default (7d); promotes
+    // to durable via 0.6's 4-signal rule when Warden later rejects
+    // the Contract.
+    'review',
   ];
 
   it('contains exactly one entry per registered ChitTypeId', () => {
