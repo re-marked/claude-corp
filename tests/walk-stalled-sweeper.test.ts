@@ -399,6 +399,64 @@ describe('runWalkStalled — detection scenarios', () => {
     expect(body).not.toContain('rewind to queued');
   });
 
+  it('suggests inspect-or-wait for blocked orphans, NOT rewind (Codex P2)', async () => {
+    // chain.ts owns the unblock path for blocked tasks (unblock /
+    // unblock-to-queue deltas after readiness + validateTransition).
+    // Forcing workflowStatus=queued here would skip those guards and
+    // dispatch work that should stay blocked.
+    writeMembers([member({ id: 'coder', status: 'archived' as Member['status'] })]);
+    const { tasks } = castTwoStepWalk();
+
+    setTaskWorkflowStatus(tasks[0]!.id, 'completed');
+    setTaskWorkflowStatus(tasks[1]!.id, 'blocked', { assignee: 'coder' });
+
+    const result = await runWalkStalled({ daemon: daemonStub }, { now: FAR_FUTURE_NOW() });
+    expect(result.findings).toHaveLength(1);
+    const body = result.findings[0]!.body;
+
+    // Body must explicitly forbid rewinding a blocked task + name the
+    // chain-walker as the owner of the unblock path.
+    expect(body).toContain('DO NOT rewind');
+    expect(body).toContain('chain walker');
+    expect(body).toContain('inspect dependsOn');
+
+    // The rewind chain (--set-field task.workflowStatus=queued) MUST
+    // NOT appear for the blocked task. The body may still contain the
+    // string for other purposes, so the assertion is specifically that
+    // the blocked task's rewind line is absent.
+    expect(body).not.toMatch(
+      new RegExp(`task ${tasks[1]!.id} \\(workflowStatus=blocked\\): rewind`),
+    );
+  });
+
+  it('routes dispatched orphans to rewind+hand, NOT plain role-queue hand (Codex P2)', async () => {
+    // handChitToRoleQueue rejects everything except {draft, queued}.
+    // A dispatched orphan whose assignee was archived would have the
+    // suggested `cc-cli hand --to <role>` command fail. Rewind first,
+    // then hand.
+    writeMembers([member({ id: 'coder', status: 'archived' as Member['status'] })]);
+    const { tasks } = castTwoStepWalk();
+
+    setTaskWorkflowStatus(tasks[0]!.id, 'completed');
+    setTaskWorkflowStatus(tasks[1]!.id, 'dispatched', { assignee: 'coder' });
+
+    const result = await runWalkStalled({ daemon: daemonStub }, { now: FAR_FUTURE_NOW() });
+    expect(result.findings).toHaveLength(1);
+    const body = result.findings[0]!.body;
+
+    // Rewind+hand chain is present for the dispatched task.
+    expect(body).toContain(`workflowStatus=dispatched): rewind to queued first`);
+    expect(body).toContain('task.workflowStatus=queued');
+
+    // No bare "Re-Hand the orphan task(s)" line listing this task
+    // directly — that's the section reserved for draft/queued.
+    expect(body).not.toMatch(
+      new RegExp(
+        `Re-Hand the orphan task\\(s\\): \`cc-cli hand --to [^\`]+ --chit ${tasks[1]!.id}`,
+      ),
+    );
+  });
+
   it('default threshold constant is 30 minutes', () => {
     // Pins the documented contract: Pulse cadence is 5min, so
     // 6 ticks of zero motion = meaningful stall threshold. If a

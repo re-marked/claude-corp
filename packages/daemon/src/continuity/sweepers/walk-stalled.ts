@@ -222,28 +222,48 @@ export async function runWalkStalled(
       })
       .join('\n');
 
-    // `cc-cli hand` only accepts tasks in {draft, queued, dispatched}.
-    // It refuses in_progress/blocked/under_review (state-machine guard
-    // in hand-core.ts:validateTransition('dispatch', ...)). For stalls
-    // that hit those states because the assignee was archived, the
-    // recovery requires rewinding workflowStatus first. Split the
-    // suggestion by reachability so Sexton's recommendation always
-    // names a command that will actually succeed.
-    const HANDABLE_STATUSES = new Set(['draft', 'queued', 'dispatched']);
-    const handableOrphans = openSteps.filter(
-      (s) => s.taskId && (!s.taskStatus || HANDABLE_STATUSES.has(s.taskStatus)),
+    // Three-bucket categorization of orphan steps. The right recovery
+    // path depends on workflowStatus + how `cc-cli hand --to <role>`
+    // behaves from that state (the default suggestion targets the
+    // blueprint step's assigneeRole, i.e. role-queue hand):
+    //
+    //   PLAIN HAND   (draft, queued) — handChitToRoleQueue accepts
+    //     these. Plain `cc-cli hand --to <role>` works.
+    //
+    //   REWIND+HAND  (dispatched, in_progress, under_review) — role-
+    //     queue refuses; the state machine only allows dispatch from
+    //     draft/queued. Force workflowStatus back to queued via
+    //     --set-field (bypassing the state machine on purpose; the
+    //     original assignee is gone, so resetting to pre-dispatch is
+    //     honest), then hand.
+    //
+    //   BLOCKED      (blocked) — chain walker owns the unblock path
+    //     (chain.ts emits unblock / unblock-to-queue deltas after
+    //     readiness + validateTransition checks). Forcing queued here
+    //     would skip those guards and dispatch work that should stay
+    //     blocked. Suggest inspect-or-escalate instead.
+    //
+    // clearance/completed/rejected/failed/cancelled are already
+    // excluded upstream (clearance gate + openSteps filter).
+    const PLAIN_HAND_STATUSES = new Set(['draft', 'queued']);
+    const REWIND_HAND_STATUSES = new Set(['dispatched', 'in_progress', 'under_review']);
+    const plainHandOrphans = openSteps.filter(
+      (s) => s.taskId && (!s.taskStatus || PLAIN_HAND_STATUSES.has(s.taskStatus)),
     );
-    const stuckOrphans = openSteps.filter(
-      (s) => s.taskId && s.taskStatus && !HANDABLE_STATUSES.has(s.taskStatus),
+    const rewindHandOrphans = openSteps.filter(
+      (s) => s.taskId && s.taskStatus && REWIND_HAND_STATUSES.has(s.taskStatus),
+    );
+    const blockedOrphans = openSteps.filter(
+      (s) => s.taskId && s.taskStatus === 'blocked',
     );
 
-    const handLines = handableOrphans
+    const handLines = plainHandOrphans
       .map((s) => {
         const target = s.step.assigneeRole ?? '<slot-or-role>';
         return `\`cc-cli hand --to ${target} --chit ${s.taskId} --from sexton\``;
       })
       .join(', ');
-    const rewindLines = stuckOrphans
+    const rewindLines = rewindHandOrphans
       .map((s) => {
         const target = s.step.assigneeRole ?? '<slot-or-role>';
         return (
@@ -253,16 +273,30 @@ export async function runWalkStalled(
         );
       })
       .join('\n  ');
+    const blockedLines = blockedOrphans
+      .map((s) => {
+        const taskRef = s.taskId ?? '?';
+        return (
+          `task ${taskRef} is blocked — inspect dependsOn via ` +
+          `\`cc-cli chit read ${taskRef}\`. If the upstream chit is genuinely complete, ` +
+          `close the stale blocker so the chain walker can emit the unblock; if the ` +
+          `dependency really is still in flight, the stall isn't recoverable until it resolves`
+        );
+      })
+      .join('\n  ');
 
     const suggestedAction =
       [
-        handableOrphans.length > 0
+        plainHandOrphans.length > 0
           ? `Re-Hand the orphan task(s): ${handLines}.`
           : '',
-        stuckOrphans.length > 0
-          ? `For tasks stuck mid-flight (state machine refuses \`cc-cli hand\` from in_progress/blocked/under_review):\n  ${rewindLines}.\n\nThe rewind preserves prior stamps (claimedAt, editorReviewRound, any in-flight .pending-handoff.json in the original assignee's workspace). Most consumers ignore those once workflowStatus=queued, but an under_review task's pending handoff is lost work the new assignee will need to redo.`
+        rewindHandOrphans.length > 0
+          ? `For tasks stuck mid-flight (role-queue \`cc-cli hand\` refuses from dispatched/in_progress/under_review):\n  ${rewindLines}.\n\nThe rewind preserves prior stamps (claimedAt, editorReviewRound, any in-flight .pending-handoff.json in the original assignee's workspace). dispatched has no work to lose; in_progress + under_review tasks lose the agent's mid-flight work the new assignee will need to redo.`
           : '',
-        handableOrphans.length === 0 && stuckOrphans.length === 0
+        blockedOrphans.length > 0
+          ? `For blocked tasks, DO NOT rewind — the chain walker owns the unblock path (readiness + state-machine guards). Either close the stale upstream chit or wait:\n  ${blockedLines}.`
+          : '',
+        plainHandOrphans.length === 0 && rewindHandOrphans.length === 0 && blockedOrphans.length === 0
           ? '(No task chits to recover; cast may need re-running.)'
           : '',
       ]
