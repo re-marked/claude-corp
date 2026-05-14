@@ -63,8 +63,9 @@ steps:
 
       **Accept.** When the stall is intentional (Contract paused on a
       long-lead external dependency, blueprint authoring in progress,
-      etc.), acknowledge the kink:
-      `cc-cli chit update <kink-id> --status closed --resolution acknowledged --from sexton`.
+      etc.), acknowledge the kink by closing it and stamping the
+      resolution field:
+      `cc-cli chit update <kink-id> --status closed --set-field kink.resolution=acknowledged --from sexton`.
       Closed kinks are history; the next patrol's recurrence (if any)
       starts at occurrenceCount=1 again — a recurrence is its own event.
   - id: summary

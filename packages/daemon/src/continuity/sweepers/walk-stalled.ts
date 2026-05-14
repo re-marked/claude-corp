@@ -217,13 +217,22 @@ export async function runWalkStalled(
           ? ` assignee=${s.taskAssignee}`
           : ' unassigned';
         const statusNote = s.taskStatus ? ` workflowStatus=${s.taskStatus}` : '';
-        return `  - step \`${s.stepId}\` — ${taskRef}${statusNote}${assigneeNote}`;
+        const roleHint = s.step.assigneeRole ? ` role=${s.step.assigneeRole}` : '';
+        return `  - step \`${s.stepId}\` — ${taskRef}${statusNote}${assigneeNote}${roleHint}`;
       })
       .join('\n');
 
+    // Suggested Hand commands embed the blueprint step's assigneeRole
+    // where present — that's the role pool the cast intended the work
+    // to land in, so the default re-route target is well-defined.
+    // Sexton can still override with a specific slot id if she has
+    // judgment about which Employee should pick this up.
     const suggestedRehand = openSteps
       .filter((s) => s.taskId)
-      .map((s) => `\`cc-cli hand --to <slot-or-role> --chit ${s.taskId}\``)
+      .map((s) => {
+        const target = s.step.assigneeRole ?? '<slot-or-role>';
+        return `\`cc-cli hand --to ${target} --chit ${s.taskId} --from sexton\``;
+      })
       .join(', ');
 
     findings.push({
