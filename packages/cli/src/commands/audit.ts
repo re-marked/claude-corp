@@ -66,7 +66,7 @@ import {
   createChit,
   extractLatestUsageFromTranscript,
   applyReviewVerdict,
-  findActiveReviewForTask,
+  findActiveReviewByReviewer,
   type Chit,
   type ContractFields,
   type HookInput,
@@ -283,68 +283,77 @@ async function runHookPath(
   const currentTask = resolveCurrentTask(corpRoot, slug);
   const openTier3Inbox = queryOpenTier3Inbox(corpRoot, slug);
 
-  // Project 2.5 Phase 2 — review-mode routing. If the agent's
-  // current task has an ACTIVE review chit, this Stop hook is firing
-  // at the end of a REVIEW session (not a task session). Apply the
-  // verdict via the shared verdict-decide helper, emit approve so
-  // Claude Code closes the session cleanly, and return — skipping
-  // the normal audit pipeline entirely.
+  // Project 2.5 Phase 2 — review-mode routing.
   //
-  // The verdict's state effects are written by applyReviewVerdict:
-  //   - accept: review chit closes; notesForNextTask stamped onto
-  //     contract; task stays in under_review. The NEXT audit-mode
-  //     Stop (when the next dispatch task-session ends? or when
-  //     audit fires again?) sees a closed accept-review +
-  //     eligibility=false and proceeds with normal promotion. In
-  //     the minimum-viable Phase 2 ship the operator runs
-  //     `cc-cli audit --agent <slug>` manually after accept to
-  //     trigger that path; Phase 3's watcher will automate it.
-  //   - redo: task reverts to in_progress + pendingRedoFeedback +
-  //     reviewRedoCount++. Next dispatch (manual or via Phase 3
-  //     watcher) picks up the task with the feedback in context.
-  //   - flag: task stays under_review; tier-3 inbox to founder.
+  // Codex P1 (round 2): the original implementation looked up the
+  // active review by `currentTask.id`. That's wrong on the manual
+  // Phase 2 flow: when `cc-cli done` fires audit, audit-approve
+  // promotes the task (closes it + clears/advances the Casket), so
+  // by the time the operator's `cc-cli review-spawn` causes the
+  // review session to end, the Casket points at the NEXT task (or
+  // is null). The task-scoped lookup never finds the chit and the
+  // verdict stays unapplied.
   //
-  // Skip on idle agents (no currentTask) and substrate gaps
-  // (resolveCurrentTask returned undefined) — no review can fire
-  // without a real task chit to anchor on.
-  if (currentTask) {
-    try {
-      const activeReview = findActiveReviewForTask(corpRoot, currentTask.id);
-      if (activeReview) {
-        const founderId = resolveFounderMemberId(corpRoot);
-        const verdictResult = applyReviewVerdict(corpRoot, {
+  // Agent-scoped lookup: "does this agent slug have an active review
+  // chit waiting for verdict-application?" maps cleanly to "we're at
+  // the end of a review session for this slot." Found chits route
+  // through applyReviewVerdict regardless of the agent's current
+  // Casket state.
+  //
+  // applied:false handling (Codex P2): when applyReviewVerdict
+  // returns applied=false (linked task in wrong state, chit shape
+  // drift), we DON'T silently emit approve — that hides the failure
+  // and leaves the review unapplied. Instead, log loudly and fall
+  // through to the normal audit pipeline. Normal audit may have
+  // useful behavior to surface (audit-block, walk-check, etc.) and
+  // the operator's next command can re-attempt the verdict against
+  // a corrected state.
+  try {
+    const activeReview = findActiveReviewByReviewer(corpRoot, slug);
+    if (activeReview) {
+      const founderId = resolveFounderMemberId(corpRoot);
+      const verdictResult = applyReviewVerdict(corpRoot, {
+        reviewChitId: activeReview.id,
+        founderMemberId: founderId ?? slug,
+      });
+      logAuditDecision(
+        corpRoot,
+        slug,
+        { decision: 'approve' },
+        {
+          event: verdictResult.applied
+            ? 'review-verdict-applied'
+            : 'review-verdict-refused',
           reviewChitId: activeReview.id,
-          founderMemberId: founderId ?? slug,
-        });
-        logAuditDecision(
-          corpRoot,
-          slug,
-          { decision: 'approve' },
-          {
-            event: 'review-verdict-applied',
-            reviewChitId: activeReview.id,
-            taskId: currentTask.id,
-            inputVerdict: verdictResult.inputVerdict,
-            outcomeVerdict: verdictResult.outcomeVerdict,
-            capDowngrade: verdictResult.capDowngrade,
-            applied: verdictResult.applied,
-            verdictErrors: verdictResult.errors,
-          },
-        );
+          reviewerSlug: slug,
+          taskId: verdictResult.taskId,
+          currentCasketTaskId: currentTask?.id ?? null,
+          inputVerdict: verdictResult.inputVerdict,
+          outcomeVerdict: verdictResult.outcomeVerdict,
+          capDowngrade: verdictResult.capDowngrade,
+          applied: verdictResult.applied,
+          verdictErrors: verdictResult.errors,
+        },
+      );
+      if (verdictResult.applied) {
         // Emit approve so Claude Code closes the review session cleanly.
-        // The decisions about chain advance live in the state changes
-        // applyReviewVerdict already made.
+        // The state effects (chit close, task transition, inbox-item)
+        // live inside applyReviewVerdict.
         emitDecision({ decision: 'approve' });
         return;
       }
-    } catch (err) {
-      // Review-mode routing failure is OPERATIONAL — log + fall
-      // through to normal audit. Failing closed (blocking the Stop
-      // hook) would trap the session; failing open (skipping the
-      // review routing) means the next manual audit invocation
-      // picks up the active review and applies it.
-      logAuditError(corpRoot, slug, err);
+      // applied=false → fall through. The active review chit stays
+      // visible (still status=active) for retry under a corrected
+      // state. The structured errors are in the audit log; an
+      // operator inspecting `.audit-log.jsonl` sees what blocked.
     }
+  } catch (err) {
+    // Review-mode routing failure is OPERATIONAL — log + fall
+    // through to normal audit. Failing closed (blocking the Stop
+    // hook) would trap the session; failing open (skipping the
+    // review routing) means the next audit invocation picks up
+    // the active review and applies it.
+    logAuditError(corpRoot, slug, err);
   }
 
   // Project 2.3 — walk-aware check. Hoisted ABOVE the transcript

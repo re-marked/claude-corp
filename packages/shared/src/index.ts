@@ -493,6 +493,7 @@ export {
   renderTeachingMessage,
   applyReviewVerdict,
   findActiveReviewForTask,
+  findActiveReviewByReviewer,
   consumePendingRedoFeedback,
   getHandoffNoteFromReview,
   shouldRunReviewSessionForTask,

@@ -62,6 +62,7 @@ export type { WalkCheckOutcome } from './walk-check.js';
 export {
   applyReviewVerdict,
   findActiveReviewForTask,
+  findActiveReviewByReviewer,
   consumePendingRedoFeedback,
   getHandoffNoteFromReview,
   shouldRunReviewSessionForTask,

@@ -10,6 +10,7 @@ import {
   queryChits,
   applyReviewVerdict,
   findActiveReviewForTask,
+  findActiveReviewByReviewer,
   consumePendingRedoFeedback,
   getHandoffNoteFromReview,
   shouldRunReviewSessionForTask,
@@ -576,9 +577,93 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
     expect(second.errors.join(' ')).toMatch(/already applied|status is closed/);
   });
 
-  it('refuses when the linked task is not in under_review', () => {
+  it('refuses when the linked task is in a state outside the review allowlist', () => {
+    // Codex P1 round 2: under_review (live-review) and completed
+    // (retrospective-review) are both allowed. Other states — like
+    // in_progress, blocked, cancelled — refuse.
     const { taskId, reviewId } = setupVerdict({ verdict: 'accept' });
-    // Force the task into a different state.
+    const taskHit = findChitById(corpRoot, taskId);
+    const scope = chitScopeFromPath(corpRoot, taskHit!.path);
+    updateChit(corpRoot, scope, 'task', taskId, {
+      updatedBy: 'test',
+      fields: {
+        task: {
+          ...(taskHit!.chit.fields.task as TaskFields),
+          workflowStatus: 'in_progress',
+        },
+      } as never,
+    });
+
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+    expect(result.applied).toBe(false);
+    expect(result.errors.join(' ')).toMatch(/workflowStatus is in_progress/);
+  });
+
+  // ── Codex P1 round 2: retrospective-review tolerance ────────────
+
+  it('accept on a completed task applies successfully (retrospective-review path)', () => {
+    // Manual Phase 2 flow: cc-cli done → audit approves + promotes
+    // (task → completed) → cc-cli review-spawn fires review session.
+    // By the time the review chit gets verdict-applied, the task is
+    // already completed. accept verdict is documentation (notes for
+    // next task on contract), so it's still meaningful.
+    const note = 'next step should re-check the cache decision';
+    const { taskId, contractId, reviewId } = setupVerdict({
+      verdict: 'accept',
+      notesForNextTask: note,
+    });
+    // Move task to completed (mirrors post-promotion state).
+    const taskHit = findChitById(corpRoot, taskId);
+    const scope = chitScopeFromPath(corpRoot, taskHit!.path);
+    updateChit(corpRoot, scope, 'task', taskId, {
+      updatedBy: 'test',
+      fields: {
+        task: {
+          ...(taskHit!.chit.fields.task as TaskFields),
+          workflowStatus: 'completed',
+        },
+      } as never,
+    });
+
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+    expect(result.applied).toBe(true);
+    expect(result.outcomeVerdict).toBe('accept');
+    // Note still stamped on the contract.
+    expect(getHandoffNoteFromReview(corpRoot, contractId, taskId)?.note).toBe(note);
+  });
+
+  it('flag on a completed task applies successfully (retrospective surfacing)', () => {
+    const { taskId, reviewId } = setupVerdict({
+      verdict: 'flag',
+      reasoning: 'in hindsight, the decision was wrong; founder needed',
+    });
+    const taskHit = findChitById(corpRoot, taskId);
+    const scope = chitScopeFromPath(corpRoot, taskHit!.path);
+    updateChit(corpRoot, scope, 'task', taskId, {
+      updatedBy: 'test',
+      fields: {
+        task: {
+          ...(taskHit!.chit.fields.task as TaskFields),
+          workflowStatus: 'completed',
+        },
+      } as never,
+    });
+
+    const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+    expect(result.applied).toBe(true);
+    expect(result.outcomeVerdict).toBe('flag');
+    expect(result.inboxItemId).not.toBeNull();
+  });
+
+  it('redo on a completed task REFUSES (state machine impossibility)', () => {
+    // Redo requires reverting the task to in_progress via the
+    // audit-block trigger. State machine permits that ONLY from
+    // under_review. A redo on a completed task is mechanically
+    // impossible; refuse with a clear error.
+    const { taskId, reviewId } = setupVerdict({
+      verdict: 'redo',
+      redoFeedback: 'rework with the cache decision baked in',
+    });
     const taskHit = findChitById(corpRoot, taskId);
     const scope = chitScopeFromPath(corpRoot, taskHit!.path);
     updateChit(corpRoot, scope, 'task', taskId, {
@@ -593,7 +678,34 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
 
     const result = applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
     expect(result.applied).toBe(false);
-    expect(result.errors.join(' ')).toMatch(/workflowStatus is completed/);
+    expect(result.errors.join(' ')).toMatch(/redo verdict requires task in under_review/);
+  });
+
+  // ── Codex P1: agent-scoped lookup (findActiveReviewByReviewer) ──
+
+  it('findActiveReviewByReviewer finds the active review by reviewer slug, regardless of casket', () => {
+    // The original task-scoped lookup failed when audit-approve had
+    // already promoted the reviewed task. Agent-scoped lookup
+    // sidesteps that — what matters is which slot wrote the review,
+    // not what the casket happens to currently point at.
+    const { reviewId } = setupVerdict({
+      verdict: 'accept',
+      notesForNextTask: 'whatever',
+    });
+    const found = findActiveReviewByReviewer(corpRoot, 'coder');
+    expect(found?.id).toBe(reviewId);
+  });
+
+  it('findActiveReviewByReviewer returns null for unknown slug', () => {
+    setupVerdict({ verdict: 'accept' });
+    expect(findActiveReviewByReviewer(corpRoot, 'someone-else')).toBeNull();
+  });
+
+  it('findActiveReviewByReviewer ignores closed reviews', () => {
+    const { reviewId } = setupVerdict({ verdict: 'accept' });
+    // Apply the verdict — closes the review chit.
+    applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+    expect(findActiveReviewByReviewer(corpRoot, 'coder')).toBeNull();
   });
 
   it('refuses when the review chit id does not resolve', () => {
