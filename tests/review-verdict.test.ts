@@ -11,6 +11,7 @@ import {
   applyReviewVerdict,
   findActiveReviewForTask,
   consumePendingRedoFeedback,
+  getHandoffNoteFromReview,
   REVIEW_REDO_CAP_DEFAULT,
   buildReviewPrompt,
   ChitValidationError,
@@ -236,6 +237,101 @@ describe('applyReviewVerdict — routing + cap + refusal modes', () => {
   }
 
   // ── accept ──────────────────────────────────────────────────────
+
+  it('accept: notesForNextTask is stamped onto the contract for Phase 2 dispatch (Codex P2)', () => {
+    // Codex P2 on PR #213: the prompt advertises notesForNextTask as
+    // carry-forward, but the review chit closes immediately on
+    // verdict-application + no consumer reads closed reviews. The
+    // note must persist somewhere the next-task dispatch can read.
+    // Fix: stamp onto contract.handoffNotesFromReview keyed by source
+    // task. Phase 2 reads via getHandoffNoteFromReview.
+    const note = 'next step: re-read the auth decision from step 2';
+    const { taskId, contractId, reviewId } = setupVerdict({
+      verdict: 'accept',
+      notesForNextTask: note,
+    });
+    applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+
+    const carried = getHandoffNoteFromReview(corpRoot, contractId, taskId);
+    expect(carried).not.toBeNull();
+    expect(carried?.note).toBe(note);
+    expect(carried?.reviewerSlug).toBe('coder');
+    expect(carried?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('accept: omitted notesForNextTask does NOT touch contract', () => {
+    const { contractId, reviewId } = setupVerdict({ verdict: 'accept' });
+    applyReviewVerdict(corpRoot, { reviewChitId: reviewId, founderMemberId: 'mark' });
+
+    // Contract still has no handoffNotesFromReview field set.
+    const contractHit = findChitById(corpRoot, contractId);
+    const fields = contractHit!.chit.fields.contract as { handoffNotesFromReview?: unknown };
+    expect(fields.handoffNotesFromReview).toBeUndefined();
+  });
+
+  it('accept: re-application on the same task replaces the prior note (one per source task)', () => {
+    const firstNote = 'first review said: cache invalidation matters';
+    const secondNote = 'second review (after redo) said: actually, batch by tenant';
+    const { taskId, contractId, reviewId: firstReviewId } = setupVerdict({
+      verdict: 'accept',
+      notesForNextTask: firstNote,
+    });
+    applyReviewVerdict(corpRoot, { reviewChitId: firstReviewId, founderMemberId: 'mark' });
+
+    // Now create a second review chit pointing at the same task +
+    // contract (simulates a re-review after a redo cycle would have
+    // resolved). Force the task back to under_review so the apply
+    // pre-check accepts.
+    const taskHit = findChitById(corpRoot, taskId);
+    const taskScope = chitScopeFromPath(corpRoot, taskHit!.path);
+    updateChit(corpRoot, taskScope, 'task', taskId, {
+      updatedBy: 'test',
+      fields: {
+        task: {
+          ...(taskHit!.chit.fields.task as TaskFields),
+          workflowStatus: 'under_review',
+        },
+      } as never,
+    });
+    const second = createChit(corpRoot, {
+      type: 'review',
+      scope: 'agent:coder',
+      createdBy: 'coder',
+      fields: {
+        review: {
+          verdict: 'accept',
+          reasoning: 'second pass',
+          taskId,
+          contractId,
+          reviewerSlug: 'coder',
+          notesForNextTask: secondNote,
+        } as ReviewFields,
+      } as never,
+    });
+    applyReviewVerdict(corpRoot, { reviewChitId: second.id, founderMemberId: 'mark' });
+
+    // Only the second note survives — replace-by-fromTaskId.
+    const carried = getHandoffNoteFromReview(corpRoot, contractId, taskId);
+    expect(carried?.note).toBe(secondNote);
+
+    // The contract array still has exactly one entry for this task.
+    const contractHit = findChitById(corpRoot, contractId);
+    const notes = (contractHit!.chit.fields.contract as {
+      handoffNotesFromReview?: ReadonlyArray<{ fromTaskId: string }>;
+    }).handoffNotesFromReview ?? [];
+    const forTask = notes.filter((n) => n.fromTaskId === taskId);
+    expect(forTask).toHaveLength(1);
+  });
+
+  it('getHandoffNoteFromReview: returns null when no note exists for the task', () => {
+    const { taskId, contractId } = setupVerdict({ verdict: 'accept' });
+    // No applyReviewVerdict call — note never stamped.
+    expect(getHandoffNoteFromReview(corpRoot, contractId, taskId)).toBeNull();
+  });
+
+  it('getHandoffNoteFromReview: returns null for missing contract', () => {
+    expect(getHandoffNoteFromReview(corpRoot, 'chit-c-deadbeef', 'chit-t-x')).toBeNull();
+  });
 
   it('accept: closes the review chit; leaves task in under_review; no inbox', () => {
     const { taskId, reviewId } = setupVerdict({ verdict: 'accept' });

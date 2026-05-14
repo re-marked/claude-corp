@@ -249,8 +249,50 @@ export function applyReviewVerdict(
         body: bodyLines.join('\n'),
       });
       inboxItemId = item.id;
+    } else if (outcomeVerdict === 'accept') {
+      // Codex P2 on PR #213: stamp notesForNextTask onto the contract
+      // so the Phase 2 next-task dispatch can surface it. The review
+      // chit closes immediately on verdict-application; without this
+      // step the prompt's advertised carry-forward note would orphan
+      // on a now-closed, soon-ephemeral record. The contract is the
+      // natural home for walk-level handoff context.
+      const note = (review.notesForNextTask ?? '').trim();
+      if (note.length > 0) {
+        const contractHit = findChitById(corpRoot, review.contractId);
+        if (contractHit && contractHit.chit.type === 'contract') {
+          const contractChit = contractHit.chit as Chit<'contract'>;
+          const contractFields = contractChit.fields.contract;
+          // Replace-by-fromTaskId — one note per source task; the
+          // latest accept verdict's view wins. Defensive: tolerate
+          // missing array (older contracts predate this field).
+          const existing = (contractFields.handoffNotesFromReview ?? [])
+            .filter((n) => n.fromTaskId !== review.taskId);
+          const updated = [
+            ...existing,
+            {
+              fromTaskId: review.taskId,
+              note,
+              reviewerSlug: review.reviewerSlug,
+              createdAt: new Date().toISOString(),
+            },
+          ];
+          const contractScope = chitScopeFromPath(corpRoot, contractHit.path);
+          updateChit(corpRoot, contractScope, 'contract', contractChit.id, {
+            updatedBy: review.reviewerSlug,
+            fields: {
+              contract: {
+                ...contractFields,
+                handoffNotesFromReview: updated,
+              },
+            } as never,
+          });
+        }
+        // Defensive: missing contract chit is unusual (review references
+        // it) but not fatal — the note simply doesn't persist. Errors
+        // array stays empty; caller still sees applied=true on the
+        // review-chit closure (the verdict's main effect).
+      }
     }
-    // accept: nothing to do on the task. Caller fires audit next.
 
     // ── Close the review chit so the verdict isn't re-applied. ──
     const reviewScope = chitScopeFromPath(corpRoot, reviewHit.path);
@@ -373,6 +415,40 @@ export function findActiveReviewForTask(
   } catch {
     return null;
   }
+}
+
+/**
+ * Read the most-recent accept-verdict handoff note FROM a given
+ * task on a given contract. Used by the Phase 2 next-task dispatch
+ * surface — when booting the next step's session, the surface looks
+ * up "what did the reviewer of the prior step want me to know?" by
+ * filtering the contract's handoffNotesFromReview by fromTaskId.
+ *
+ * Returns null when:
+ *   - contract chit not found / wrong type
+ *   - handoffNotesFromReview is absent / empty
+ *   - no entry matches fromTaskId
+ *
+ * Notes persist on the contract for the lifetime of the contract
+ * (walk-level documentation; not consumable like redoFeedback). Phase 2
+ * surfaces them as priors; they don't need clearing.
+ */
+export function getHandoffNoteFromReview(
+  corpRoot: string,
+  contractId: string,
+  fromTaskId: string,
+): { note: string; reviewerSlug: string; createdAt: string } | null {
+  const hit = findChitById(corpRoot, contractId);
+  if (!hit || hit.chit.type !== 'contract') return null;
+  const contractFields = (hit.chit as Chit<'contract'>).fields.contract;
+  const notes = contractFields.handoffNotesFromReview ?? [];
+  const match = notes.find((n) => n.fromTaskId === fromTaskId);
+  if (!match) return null;
+  return {
+    note: match.note,
+    reviewerSlug: match.reviewerSlug,
+    createdAt: match.createdAt,
+  };
 }
 
 /**

@@ -494,6 +494,7 @@ export {
   applyReviewVerdict,
   findActiveReviewForTask,
   consumePendingRedoFeedback,
+  getHandoffNoteFromReview,
   REVIEW_REDO_CAP_DEFAULT,
 } from './audit/index.js';
 export type {

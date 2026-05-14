@@ -63,6 +63,7 @@ export {
   applyReviewVerdict,
   findActiveReviewForTask,
   consumePendingRedoFeedback,
+  getHandoffNoteFromReview,
   REVIEW_REDO_CAP_DEFAULT,
 } from './review-decide.js';
 export type {

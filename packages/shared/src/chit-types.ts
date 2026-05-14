@@ -312,6 +312,34 @@ function validateContract(fields: unknown): void {
   if (f.reviewNotes !== undefined) requireStringOrNull(f.reviewNotes, 'contract.reviewNotes');
   optionalNonNegativeInteger(f.rejectionCount, 'contract.rejectionCount');
   if (f.projectId !== undefined) requireStringOrNull(f.projectId, 'contract.projectId');
+  // Project 2.5 — accept-verdict carry-forward notes. Optional;
+  // null/undefined when no review has stamped a note yet. Each entry
+  // requires fromTaskId + note + reviewerSlug + createdAt; shape
+  // validated structurally so a malformed array element fails loudly
+  // rather than corrupting the next-dispatch surface.
+  if (f.handoffNotesFromReview !== undefined && f.handoffNotesFromReview !== null) {
+    if (!Array.isArray(f.handoffNotesFromReview)) {
+      throw new ChitValidationError(
+        'contract.handoffNotesFromReview must be an array or null',
+        'contract.handoffNotesFromReview',
+      );
+    }
+    for (let i = 0; i < f.handoffNotesFromReview.length; i++) {
+      const entry = f.handoffNotesFromReview[i];
+      const path = `contract.handoffNotesFromReview[${i}]`;
+      const obj = requireObject(entry, path);
+      requireNonEmptyString((obj as { fromTaskId?: unknown }).fromTaskId, `${path}.fromTaskId`);
+      requireNonEmptyString((obj as { note?: unknown }).note, `${path}.note`);
+      requireNonEmptyString((obj as { reviewerSlug?: unknown }).reviewerSlug, `${path}.reviewerSlug`);
+      optionalIsoTimestamp((obj as { createdAt?: unknown }).createdAt, `${path}.createdAt`);
+      if ((obj as { createdAt?: unknown }).createdAt === undefined || (obj as { createdAt?: unknown }).createdAt === null) {
+        throw new ChitValidationError(
+          `${path}.createdAt is required (ISO timestamp)`,
+          `${path}.createdAt`,
+        );
+      }
+    }
+  }
 }
 
 function validateObservation(fields: unknown): void {

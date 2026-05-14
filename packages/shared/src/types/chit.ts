@@ -469,6 +469,31 @@ export interface TaskFields {
   pendingRedoFeedback?: string | null;
 }
 
+/**
+ * Project 2.5 — a single accept-verdict carry-forward note left on
+ * the contract by a self-witnessing review-session. Source task is
+ * the one the reviewer just finished; the note is what they wanted
+ * the next step (or any downstream consumer reading the contract's
+ * walk-level context) to know.
+ *
+ * Keyed by `fromTaskId` — the Phase 2 redispatch surface reads the
+ * note relevant to "what was said about MY immediate predecessor"
+ * by filtering on the prior step's task id. Multiple accept verdicts
+ * on the same task replace rather than append (one note per source
+ * task; the latest reviewer's view wins). Persists for the lifetime
+ * of the contract as walk-level documentation.
+ */
+export interface HandoffNoteFromReview {
+  /** Task id the note is FROM (the task the reviewer just completed). */
+  readonly fromTaskId: string;
+  /** The note prose itself. */
+  readonly note: string;
+  /** Member id of the reviewer who wrote it. */
+  readonly reviewerSlug: string;
+  /** ISO timestamp the note was stamped on the contract. */
+  readonly createdAt: string;
+}
+
 export interface ContractFields {
   /** Human-readable contract title. */
   title: string;
@@ -494,6 +519,19 @@ export interface ContractFields {
   rejectionCount?: number;
   /** Project.id the contract belongs to. Contracts always live under a project; this preserves the link through migration and for callers that reverse-resolve to Contract.projectId. The contract's scope (project:<name>) encodes the project name in path; this field carries the id. */
   projectId?: string | null;
+  /**
+   * Project 2.5 — carry-forward notes from self-witnessing review-
+   * sessions on accept verdicts. The review-session writes its
+   * `notesForNextTask` here so the Phase 2 next-task dispatch can
+   * surface it in the new session's prompt. Keyed by `fromTaskId`
+   * (the just-completed task the note is FROM). One note per source
+   * task — re-applied accept verdicts on the same task replace.
+   * Persists for the lifetime of the contract as walk-level
+   * documentation; review chits close immediately on verdict
+   * application so the closed-chit body wouldn't survive normal
+   * status-filtered queries.
+   */
+  handoffNotesFromReview?: HandoffNoteFromReview[] | null;
 }
 
 export interface ObservationFields {
